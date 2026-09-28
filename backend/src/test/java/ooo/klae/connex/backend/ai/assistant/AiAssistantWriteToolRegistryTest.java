@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.RecordComponent;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +22,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Inverse;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Lock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.TargetLock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreateTask;
 import ooo.klae.connex.backend.beans.User;
@@ -39,7 +41,8 @@ import tools.jackson.databind.node.ObjectNode;
  * none of the tool's dependencies, the model's view of an outcome carries no identifier and no
  * undo, approval or verification metadata, and a tool shares with a viewer who may not read its
  * details only the outcome flags {@link #SHARED_OUTCOME_FLAGS} and the request flags
- * {@link #SHARED_REQUEST_FLAGS} have reviewed.
+ * {@link #SHARED_REQUEST_FLAGS} have reviewed, and only the tools on
+ * {@link #UNSCREENED_REQUEST_SUMMARIES} decline the special-care screen of their request summary.
  */
 class AiAssistantWriteToolRegistryTest {
     private static final ObjectMapper JSON = JsonMapper.builder().build();
@@ -63,10 +66,23 @@ class AiAssistantWriteToolRegistryTest {
      * <p>A request flag passes the same gate an outcome flag does, so it may say only what kind of
      * write was asked for — {@code assign_owner}'s {@code removesOwner}, which a completed card has
      * always told every participant as "Owner removed" or "Owner assigned" — and never a value the
-     * request names. Adding a flag, or a tool with one, is a reviewed edit here.
+     * request names. The ledger pins the whole declaration, the field and the keyword as well as
+     * the name, so what a flag compares is reviewed too. Adding a flag, or a tool with one, is a
+     * reviewed edit here.
      */
-    private static final Map<String, Set<String>> SHARED_REQUEST_FLAGS =
-            Map.of("assign_owner", Set.of("removesOwner"));
+    private static final Map<String, Map<String, SharedRequestFlag>> SHARED_REQUEST_FLAGS =
+            Map.of("assign_owner",
+                    Map.of("removesOwner", new SharedRequestFlag("owner", "unassigned")));
+
+    /**
+     * The reviewed tools whose detailed request summary is not screened for special-care text.
+     *
+     * <p>{@code assign_owner}'s names only the member the owner resolves to against the
+     * workspace's own member list, which its pending card already states unscreened as the
+     * proposed owner, so screening it would withhold nothing and only rewrite what the card has
+     * always said. Adding a tool here is a reviewed edit.
+     */
+    private static final Set<String> UNSCREENED_REQUEST_SUMMARIES = Set.of("assign_owner");
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -289,15 +305,95 @@ class AiAssistantWriteToolRegistryTest {
 
     @Test
     void everyDeclaredToolSharesOnlyItsReviewedRequestFlags() throws Exception {
-        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
-            ObjectNode request = JSON.valueToTree(sampleRequest(tool.requestType()));
+        for (Discovered discovered : AiAssistantDeclaredWriteTools.discover()) {
+            AiAssistantWriteTool tool = discovered.tool();
+            Map<String, SharedRequestFlag> declared = tool.sharedRequestFlags();
 
             assertEquals(
-                    SHARED_REQUEST_FLAGS.getOrDefault(tool.name(), Set.of()),
-                    tool.sharedRequestFlags(request).keySet(),
+                    SHARED_REQUEST_FLAGS.getOrDefault(tool.name(), Map.of()),
+                    declared,
                     tool.name() + " shares request flags nobody reviewed with a viewer who may"
                             + " not read its details");
+            for (Map.Entry<String, SharedRequestFlag> flag : declared.entrySet()) {
+                String keyword = flag.getValue().literal();
+                JsonNode naming = JSON.valueToTree(sampleRequest(
+                        tool.requestType(), " " + keyword.toUpperCase() + " "));
+                JsonNode assigning = JSON.valueToTree(sampleRequest(tool.requestType()));
+                assertTrue(
+                        flag.getValue().holds(naming),
+                        tool.name() + "'s " + flag.getKey() + " misses its keyword");
+                assertFalse(
+                        flag.getValue().holds(assigning),
+                        tool.name() + "'s " + flag.getKey() + " holds for another value");
+            }
+            for (Object dependency : discovered.dependencies()) {
+                verifyNoInteractions(dependency);
+            }
         }
+    }
+
+    @Test
+    void theOwnerToolsRemovalFlagHoldsOnlyForARemoval() throws Exception {
+        SharedRequestFlag removesOwner =
+                new AiAssistantAssignOwnerWriteTool(null, null, null)
+                        .sharedRequestFlags()
+                        .get("removesOwner");
+
+        assertTrue(removesOwner.holds(JSON.readTree("{\"owner\":\" Unassigned \"}")));
+        assertFalse(removesOwner.holds(JSON.readTree("{\"owner\":\"Grace Hopper\"}")));
+        assertFalse(removesOwner.holds(JSON.readTree("{\"owner\":\"unassigned later\"}")));
+        assertFalse(removesOwner.holds(JSON.readTree("{\"owner\":true}")));
+        assertFalse(removesOwner.holds(JSON.readTree("{\"handle\":\"unassigned\"}")));
+        assertFalse(removesOwner.holds(null));
+    }
+
+    @Test
+    void onlyTheReviewedToolsDeclineTheRequestSummaryScreen() {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            assertEquals(
+                    !UNSCREENED_REQUEST_SUMMARIES.contains(tool.name()),
+                    tool.screensDetailedRequestSummary(),
+                    tool.name() + " declines the special-care screen without review");
+        }
+    }
+
+    @Test
+    void refusesAMalformedSharedRequestFlag() {
+        Map<String, SharedRequestFlag> unnamed = new HashMap<>();
+        unnamed.put(null, new SharedRequestFlag("owner", "unassigned"));
+        Map<String, SharedRequestFlag> keywordless = new HashMap<>();
+        keywordless.put("removesOwner", null);
+
+        assertRefused(
+                "assign_owner declares malformed shared request flag removes owner",
+                shippedToolsWithOwnerFlags(
+                        Map.of("removes owner", new SharedRequestFlag("owner", "unassigned"))));
+        assertRefused(
+                "assign_owner declares malformed shared request flag null",
+                shippedToolsWithOwnerFlags(unnamed));
+        assertRefused(
+                "assign_owner declares shared request flag removesOwner without a keyword",
+                shippedToolsWithOwnerFlags(keywordless));
+        assertRefused(
+                "assign_owner declares no shared request flags",
+                shippedToolsWithOwnerFlags(null));
+        assertThrows(IllegalStateException.class, () -> new SharedRequestFlag("owner", " "));
+        assertThrows(IllegalStateException.class, () -> new SharedRequestFlag(null, "unassigned"));
+    }
+
+    @Test
+    void servesTheRequestFlagsItReadAtStartup() {
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(
+                catalog,
+                shippedToolsWithOwnerFlags(
+                        Map.of("removesOwner", new SharedRequestFlag("owner", "unassigned"))));
+
+        assertEquals(
+                Map.of("removesOwner", new SharedRequestFlag("owner", "unassigned")),
+                registry.sharedRequestFlags("assign_owner"));
+        assertEquals(Map.of(), registry.sharedRequestFlags("add_tag"));
+        assertEquals(Map.of(), registry.sharedRequestFlags("search_records"));
+        assertEquals(Map.of(), registry.sharedRequestFlags(null));
     }
 
     @Test
@@ -319,6 +415,12 @@ class AiAssistantWriteToolRegistryTest {
     /** A request of the tool's declared record type, every text field filled. */
     private static AiAssistantWriteToolRequest sampleRequest(
             Class<? extends AiAssistantWriteToolRequest> type) throws Exception {
+        return sampleRequest(type, "Grace Hopper");
+    }
+
+    /** A request of the tool's declared record type, every text field holding {@code text}. */
+    private static AiAssistantWriteToolRequest sampleRequest(
+            Class<? extends AiAssistantWriteToolRequest> type, String text) throws Exception {
         RecordComponent[] components = type.getRecordComponents();
         Class<?>[] parameterTypes = new Class<?>[components.length];
         Object[] arguments = new Object[components.length];
@@ -326,7 +428,7 @@ class AiAssistantWriteToolRegistryTest {
             Class<?> componentType = components[index].getType();
             parameterTypes[index] = componentType;
             if (componentType == String.class) {
-                arguments[index] = "Grace Hopper";
+                arguments[index] = text;
             } else if (componentType == int.class || componentType == Integer.class) {
                 arguments[index] = 1;
             } else if (componentType == boolean.class || componentType == Boolean.class) {
@@ -343,6 +445,23 @@ class AiAssistantWriteToolRegistryTest {
         assertTrue(
                 refused.getMessage().contains(message),
                 () -> "expected \"" + message + "\" in \"" + refused.getMessage() + "\"");
+    }
+
+    /** The tools this phase ships, the owner tool declaring {@code flags} as its request flags. */
+    private static List<AiAssistantWriteTool> shippedToolsWithOwnerFlags(
+            Map<String, SharedRequestFlag> flags) {
+        return List.of(
+                new AiAssistantCreateTaskWriteTool(null, null, null),
+                new AiAssistantChangeDealStageWriteTool(null, null),
+                new AiAssistantCreateActivityWriteTool(null, null, null),
+                new AiAssistantCreateNoteWriteTool(null, null),
+                new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantAssignOwnerWriteTool(null, null, null) {
+                    @Override
+                    public Map<String, SharedRequestFlag> sharedRequestFlags() {
+                        return flags;
+                    }
+                });
     }
 
     private static AiAssistantWriteTool tool(String name, ToolTier tier, Set<String> kinds) {

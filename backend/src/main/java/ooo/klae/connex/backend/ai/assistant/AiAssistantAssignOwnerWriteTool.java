@@ -148,12 +148,18 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
      * details has always been told: a completed card says "Owner removed" or "Owner assigned".
      */
     @Override
-    public Map<String, Boolean> sharedRequestFlags(JsonNode request) {
-        JsonNode owner = request == null ? null : request.get(OWNER_FIELD);
-        if (owner == null || !owner.isString()) {
-            return Map.of();
-        }
-        return Map.of(REMOVES_OWNER, removesOwner(owner.asString()));
+    public Map<String, SharedRequestFlag> sharedRequestFlags() {
+        return Map.of(REMOVES_OWNER, new SharedRequestFlag(OWNER_FIELD, UNASSIGNED));
+    }
+
+    /**
+     * Declines the special-care screen: the detailed summary names only the member the owner
+     * resolves to against the workspace's own member list, which the same requester's pending card
+     * already states unscreened as the proposed owner, so the summary keeps saying which member.
+     */
+    @Override
+    public boolean screensDetailedRequestSummary() {
+        return false;
     }
 
     @Override

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -1329,6 +1330,84 @@ class AiAssistantToolCallReadServiceTest {
 
         assertEquals("Change the deal stage", card.requestSummary());
         assertEquals("Diagnosis", card.change().proposedValue());
+    }
+
+    @Test
+    void anOwnerSummaryNamesTheResolvedMemberWhateverTheSpecialCareScreenWouldSay() {
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(55, "Christian Weber", "cweber")));
+        AiChatToolCall toolCall = ownerProposal(53, 31, "christian weber");
+        Person owned = person(31, "Ada Lovelace");
+        owned.setOwnerId(USER_ID);
+        owned.setUpdatedAt("2026-08-12 11:00:00.000000");
+        stubPending(toolCall, 31, List.of(owned));
+        AiAssistantToolCallReadService screening = service(List.of(
+                activityTool(),
+                noteTool(),
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                stageTool(),
+                tagTool(),
+                new AiAssistantAssignOwnerWriteTool(
+                        mock(PersonService.class),
+                        mock(CompanyService.class),
+                        mock(DealService.class)) {
+                    @Override
+                    public boolean screensDetailedRequestSummary() {
+                        return true;
+                    }
+                }));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+        AiAssistantToolCallReadDto screened = screening.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Assign owner: Christian Weber", card.requestSummary());
+        assertEquals("Christian Weber", card.change().proposedValue());
+        assertEquals("Assign an owner", screened.requestSummary());
+        assertEquals("Christian Weber", screened.change().proposedValue());
+    }
+
+    @Test
+    void theReadPathEvaluatesOnlyTheRequestFlagsTheRegistryReadAtStartup() {
+        List<String> asked = new ArrayList<>();
+        AiAssistantToolCallReadService flagging = service(List.of(
+                activityTool(),
+                noteTool(),
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                stageTool(),
+                tagTool(),
+                new AiAssistantAssignOwnerWriteTool(
+                        mock(PersonService.class),
+                        mock(CompanyService.class),
+                        mock(DealService.class)) {
+                    @Override
+                    public Map<String, SharedRequestFlag> sharedRequestFlags() {
+                        asked.add("flags");
+                        return asked.size() == 1
+                                ? super.sharedRequestFlags()
+                                : Map.of("namesAda", new SharedRequestFlag("owner", "Ada Owner"));
+                    }
+
+                    @Override
+                    public String requestSummary(Review review) {
+                        return String.valueOf(review.request());
+                    }
+                }));
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(toolCall(
+                        80, 99, "assign_owner", "confirm", "proposed", "deal", 41, 80, null)));
+
+        List<AiAssistantToolCallReadDto> cards = flagging.list(SESSION_ID, false);
+
+        assertEquals("{\"removesOwner\":false}", cards.getFirst().requestSummary());
+        assertEquals(List.of("flags"), asked);
     }
 
     @Test

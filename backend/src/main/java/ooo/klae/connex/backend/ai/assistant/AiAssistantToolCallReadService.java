@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.DiffState;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReviewInput;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -209,7 +210,9 @@ public class AiAssistantToolCallReadService {
                     status,
                     target,
                     declared.isPresent()
-                            ? summary(review, withheld, declared.get()::requestSummary)
+                            ? summary(
+                                    review, withheld, declared.get()::requestSummary,
+                                    declared.get().screensDetailedRequestSummary())
                             : "Run a write tool",
                     outcomeSummary(status, declared, review, withheld),
                     readable
@@ -447,7 +450,7 @@ public class AiAssistantToolCallReadService {
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
             case "executed" -> declared.isPresent()
-                    ? summary(review, withheld, declared.get()::outcomeSummary)
+                    ? summary(review, withheld, declared.get()::outcomeSummary, true)
                     : "Request completed";
             default -> null;
         };
@@ -529,8 +532,9 @@ public class AiAssistantToolCallReadService {
     /**
      * The review of one card for a viewer who may not read its details.
      *
-     * <p>It holds no record value. Its request carries just the tool's boolean
-     * {@link AiAssistantWriteTool#sharedRequestFlags} and is {@code null} when there are none, and
+     * <p>It holds no record value. Its request carries just the boolean value of each
+     * {@link AiAssistantWriteTool#sharedRequestFlags()} the registry read at startup, evaluated here
+     * rather than by the tool, and is {@code null} when there are none, and
      * its outcome, for an executed call only, carries just the tool's declared
      * {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean and is {@code null}
      * when none does, so a summary can say what kind of write was asked for and whether it changed
@@ -555,10 +559,9 @@ public class AiAssistantToolCallReadService {
             return null;
         }
         ObjectNode flags = objectMapper.createObjectNode();
-        for (Map.Entry<String, Boolean> flag : tool.sharedRequestFlags(request).entrySet()) {
-            if (flag.getValue() != null) {
-                flags.put(flag.getKey(), flag.getValue().booleanValue());
-            }
+        for (Map.Entry<String, SharedRequestFlag> flag
+                : writeToolRegistry.sharedRequestFlags(tool.name()).entrySet()) {
+            flags.put(flag.getKey(), flag.getValue().holds(request));
         }
         return flags.isEmpty() ? null : flags;
     }
@@ -581,13 +584,16 @@ public class AiAssistantToolCallReadService {
      * A declared tool's summary, screened like every other member-visible value.
      *
      * <p>A detailed summary the special-care screen excludes, or one the tool declines to give, is
-     * replaced by the summary the tool gives a viewer who may not read the details.
+     * replaced by the summary the tool gives a viewer who may not read the details. The screen is
+     * skipped only for a request summary whose tool declined it under
+     * {@link AiAssistantWriteTool#screensDetailedRequestSummary()}.
      */
     private static String summary(
-            Review review, Review withheld, Function<Review, String> summarize) {
+            Review review, Review withheld, Function<Review, String> summarize, boolean screened) {
         String summary = summarize.apply(review);
         if (review.detailsReadable()
-                && (summary == null || SpecialCareTextScreen.screen(summary).excluded())) {
+                && (summary == null
+                        || screened && SpecialCareTextScreen.screen(summary).excluded())) {
             return summarize.apply(withheld);
         }
         return summary;

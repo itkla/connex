@@ -1522,6 +1522,100 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         verify(pipelineMapper, never()).getAllStages(anyInt());
     }
 
+    /**
+     * An owner whose display name trips the special-care screen keeps the card's detailed request
+     * summary: the member's name is resolved server-side against the workspace's own members and
+     * is already stated unscreened as the change's proposed value, while the stored outcome's owner
+     * value is still screened out of the completed card.
+     */
+    @Test
+    void theTranscriptCardsForAnOwnerWhoseNameTripsTheSpecialCareScreenKeepEveryByte()
+            throws Exception {
+        AiChatMapper readChatMapper = mock(AiChatMapper.class);
+        WorkspaceService readWorkspace = mock(WorkspaceService.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        PipelineMapper pipelineMapper = mock(PipelineMapper.class);
+        when(readWorkspace.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(readWorkspace.getCurrentUserId()).thenReturn(TURN.userId());
+        when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(EnumSet.allOf(Permission.class));
+        when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(List.of(
+                member(11, "Ada Owner", "ada-owner"), member(23, "Christian Weber", "cweber")));
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setStatus("active");
+        when(readChatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        String assignCompany = ownerArguments("company", 52, "christian weber");
+        String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
+                + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"company\",\"owner\":\"Christian Weber\"}}";
+        when(readChatMapper.listToolCallsBySession(
+                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                card(81, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
+                card(82, TURN.userId(), "executed", "assign_owner", assignCompany,
+                        assignedResult),
+                card(83, 99, "proposed", "assign_owner", assignCompany, null)));
+        when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                .thenReturn(List.of());
+        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+                .thenReturn(List.of(ownedCompany(52, 11)));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService),
+                        new AiAssistantAssignOwnerWriteTool(
+                                personService, companyService, dealService))),
+                readChatMapper,
+                readWorkspace,
+                mock(PersonMapper.class),
+                companyMapper,
+                mock(DealMapper.class),
+                pipelineMapper,
+                mock(ActivityMapper.class),
+                mock(TaskMapper.class),
+                mock(NoteMapper.class),
+                mock(AiAssistantSessionReadAudit.class),
+                objectMapper,
+                CLOCK);
+        String company52 =
+                "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
+        String noUndo = "\"createdRecord\":null,\"messageId\":null,\"turnId\":17,"
+                + "\"undoExpiresAt\":null,\"undoAvailable\":false,";
+
+        assertEquals(
+                "[" + String.join(",", List.of(
+                        "{\"id\":81,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Christian Weber\","
+                                + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
+                                + "\"currentValue\":\"Ada Owner\","
+                                + "\"currentValueUnresolved\":false,"
+                                + "\"proposedValue\":\"Christian Weber\",\"state\":\"ready\"},"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":82,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"executed\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Christian Weber\","
+                                + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":83,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + company52
+                                + "\"requestSummary\":\"Assign an owner\","
+                                + "\"outcomeSummary\":null,\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
+                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+    }
+
     private static final String TIMES = "\"createdAt\":\"2026-03-06 14:59:00.000000\","
             + "\"updatedAt\":\"2026-03-06 15:00:00.000000\","
             + "\"executedAt\":\"2026-03-06 15:00:00.000000\"";
