@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -149,25 +151,33 @@ class RecordCreationDtoValidationTest {
         assertTrue(paths.contains("tagIds"));
     }
 
-    @Test
-    void guidedContainersRejectNullAndInvalidElements() {
+    @ParameterizedTest
+    @CsvSource({
+        "0, false, false, customFields<K>[0].<map key>",
+        "4, true, false, customFields[4].<map value>",
+        "4, false, true, tagIds[1].<list element>"
+    })
+    void guidedContainersRejectNullAndInvalidElements(
+            int fieldId, boolean nullCustomField, boolean nullTag, String expectedPath) {
         Map<Integer, JsonNode> customFields = new LinkedHashMap<>();
-        customFields.put(0, objectMapper.valueToTree("invalid"));
-        customFields.put(4, null);
+        customFields.put(4, objectMapper.valueToTree("invalid"));
         List<Integer> tagIds = new ArrayList<>(List.of(3));
-        tagIds.add(null);
         GuidedCompanyCreateRequestDto request = new GuidedCompanyCreateRequestDto(
             new GuidedCompanyRecordDto("Connex", null, null, null, null, null),
             templateUse(RecordCreationRecordType.company),
             customFields,
             tagIds);
+        assertTrue(validator.validate(request).isEmpty());
 
-        var paths = validator.validate(request).stream()
+        customFields.clear();
+        customFields.put(fieldId, nullCustomField ? null : objectMapper.valueToTree("invalid"));
+        if (nullTag) {
+            tagIds.add(null);
+        }
+
+        assertEquals(List.of(expectedPath), validator.validate(request).stream()
             .map(violation -> violation.getPropertyPath().toString())
-            .toList();
-
-        assertTrue(paths.stream().anyMatch(path -> path.startsWith("customFields")));
-        assertTrue(paths.stream().anyMatch(path -> path.startsWith("tagIds")));
+            .toList());
     }
 
     @Test
@@ -191,6 +201,21 @@ class RecordCreationDtoValidationTest {
         assertEquals(LocalDate.parse("2026-12-31"), valid.record().expectedCloseDate());
         assertTrue(validator.validate(invalid).stream()
                 .anyMatch(violation -> violation.getPropertyPath().toString().equals("record.value")));
+
+        for (String value : List.of("1.001", "10000000000000.00")) {
+            GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
+                new GuidedDealRecordDto(
+                    "Renewal", new BigDecimal(value), "USD",
+                    2, 3, null, LocalDate.parse("2026-12-31"), null),
+                templateUse(RecordCreationRecordType.deal),
+                Map.of(),
+                List.of());
+
+            assertEquals(List.of("record.value"), validator.validate(request).stream()
+                .map(violation -> violation.getPropertyPath().toString())
+                .distinct()
+                .toList());
+        }
     }
 
     @Test
