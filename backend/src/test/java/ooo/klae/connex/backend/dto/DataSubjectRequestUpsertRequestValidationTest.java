@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,8 @@ import java.util.function.BiConsumer;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -68,14 +71,23 @@ class DataSubjectRequestUpsertRequestValidationTest {
         assertTrue(violations(null, 3, 9).isEmpty());
     }
 
-    @Test
-    void validatesRequiredNamesAndEmail() {
+    @ParameterizedTest
+    @CsvSource({
+        "' ', Subject, subject@example.com, requesterName",
+        "Requester, '', subject@example.com, subjectName",
+        "Requester, Subject, not-an-email, subjectEmail"
+    })
+    void validatesRequiredNamesAndEmail(
+            String requesterName, String subjectName, String subjectEmail, String expectedPath) {
         DataSubjectRequestUpsertRequest request = validRequest();
-        request.setRequesterName(" ");
-        request.setSubjectName("");
-        request.setSubjectEmail("not-an-email");
+        assertTrue(VALIDATOR.validate(request).isEmpty());
+        request.setRequesterName(requesterName);
+        request.setSubjectName(subjectName);
+        request.setSubjectEmail(subjectEmail);
 
-        assertFalse(VALIDATOR.validate(request).isEmpty());
+        assertEquals(List.of(expectedPath), VALIDATOR.validate(request).stream()
+            .map(violation -> violation.getPropertyPath().toString())
+            .toList());
     }
 
     private static Set<ConstraintViolation<DataSubjectRequestUpsertRequest>> violations(
