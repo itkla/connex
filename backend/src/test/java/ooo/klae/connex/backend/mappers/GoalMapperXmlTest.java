@@ -89,12 +89,7 @@ class GoalMapperXmlTest {
             assertTrue(sql.contains("values (?"), statement);
             assertEquals("workspaceId", bound.getParameterMappings().getFirst().getProperty(), statement);
         } else {
-            String predicate = "where workspace_id = ?";
-            int predicateStart = sql.indexOf(predicate);
-            assertTrue(predicateStart >= 0, statement + " must predicate on workspace_id");
-            int bindingIndex = (int) sql.substring(0, predicateStart).chars()
-                .filter(character -> character == '?').count();
-            assertEquals("workspaceId", bound.getParameterMappings().get(bindingIndex).getProperty(), statement);
+            WorkspaceSqlAssertions.assertWorkspacePredicates(bound, statement);
         }
     }
 }

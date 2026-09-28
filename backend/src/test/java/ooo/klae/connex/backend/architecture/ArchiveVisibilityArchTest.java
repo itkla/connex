@@ -3,6 +3,10 @@ package ooo.klae.connex.backend.architecture;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static ooo.klae.connex.backend.support.SqlQueryScopes.filteringClauses;
+import static ooo.klae.connex.backend.support.SqlQueryScopes.selectScope;
+import static ooo.klae.connex.backend.support.SqlQueryScopes.selectScopes;
+import static ooo.klae.connex.backend.support.SqlQueryScopes.withoutComments;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -318,6 +322,78 @@ class ArchiveVisibilityArchTest {
     }
 
     @ParameterizedTest
+    @MethodSource("archiveFilteringClauses")
+    void archivePredicatesMustFilterTheScope(String sql, Set<String> expectedAliases) {
+        assertEquals(expectedAliases, unguardedProjections(new Statement("fixture", "filters", sql)));
+    }
+
+    private static Stream<Arguments> archiveFilteringClauses() {
+        return Stream.of(
+            Arguments.of("SELECT p.*, p.archived_at IS NULL AS active FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT p.*, p.archived_at IS NULL AS active FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}"
+                + " ORDER BY p.archived_at IS NULL", Set.of("p")),
+            Arguments.of("SELECT p.* FROM person p WHERE p.archived_at IS NULL"
+                + " ORDER BY p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT p.*, ROW_NUMBER() OVER w AS rn FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}"
+                + " WINDOW w AS (ORDER BY p.archived_at IS NULL)", Set.of("p")),
+            Arguments.of("SELECT p.*, ROW_NUMBER() OVER w AS rn FROM person p"
+                + " WHERE p.archived_at IS NULL WINDOW w AS (ORDER BY p.archived_at IS NULL)", Set.of()),
+            Arguments.of("SELECT p.* FROM person p GROUP BY p.archived_at IS NULL", Set.of("p")),
+            Arguments.of("SELECT p.* FROM person p HAVING p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT p.* FROM deal d JOIN person p"
+                + " ON p.id = d.person_id AND (p.archived_at IS NULL)", Set.of()),
+            Arguments.of("SELECT p.*, p.archived_at IS NULL AS active FROM deal d JOIN person p"
+                + " ON p.id = d.person_id", Set.of("p")),
+            Arguments.of("SELECT *, archived_at IS NULL AS active FROM person"
+                + " WHERE workspace_id = #{workspaceId}", Set.of("person")),
+            Arguments.of("SELECT *, archived_at IS NULL AS active FROM person"
+                + " WHERE workspace_id = #{workspaceId} AND (archived_at IS NULL)", Set.of()),
+            Arguments.of("SELECT matched.name FROM (SELECT p.name FROM person p"
+                + " WHERE p.archived_at IS NULL UNION ALL SELECT c.name FROM company c"
+                + " WHERE c.archived_at IS NULL) matched", Set.of()),
+            Arguments.of("SELECT matched.name FROM (SELECT p.name, p.archived_at IS NULL AS active"
+                + " FROM person p WHERE p.workspace_id = #{workspaceId}) matched", Set.of("p")),
+            Arguments.of("WITH visible AS (SELECT p.name FROM person p WHERE p.archived_at IS NULL)"
+                + " SELECT name FROM visible", Set.of()),
+            Arguments.of("WITH visible AS (SELECT p.name, p.archived_at IS NULL AS active FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}) SELECT name FROM visible", Set.of("p")),
+            Arguments.of("SELECT matched.* FROM (SELECT p.* FROM person p"
+                + " WHERE p.archived_at IS NULL) matched", Set.of()),
+            Arguments.of("SELECT matched.* FROM (SELECT p.* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}) matched", Set.of("p")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("commentedWildcardProjections")
+    void commentsCannotHideWildcardProjections(String sql, Set<String> expectedAliases) {
+        assertEquals(expectedAliases, unguardedProjections(new Statement("fixture", "comments", sql)));
+    }
+
+    private static Stream<Arguments> commentedWildcardProjections() {
+        return Stream.of(
+            Arguments.of("SELECT /*+ MAX_EXECUTION_TIME(3000) */ p.* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT /*+ MAX_EXECUTION_TIME(3000) */ p.* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT /*+ MAX_EXECUTION_TIME(3000) */ DISTINCT * FROM person"
+                + " WHERE workspace_id = #{workspaceId}", Set.of("person")),
+            Arguments.of("SELECT /*+ MAX_EXECUTION_TIME(3000) */ DISTINCT * FROM person"
+                + " WHERE workspace_id = #{workspaceId} AND archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT /* read FROM person */ p./* identifying columns */* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT /* read FROM person */ p./* identifying columns */* FROM person p"
+                + " WHERE p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}"
+                + " /* AND p.archived_at IS NULL */", Set.of("p")),
+            Arguments.of("SELECT /*+ MAX_EXECUTION_TIME(3000) */ COUNT(*) FROM person p", Set.of()),
+            Arguments.of("SELECT /* ordinary comment */ p.id * 2 FROM person p", Set.of()));
+    }
+
+    @ParameterizedTest
     @MethodSource("wildcardProjectionScopes")
     void wildcardPredicatesCannotCoverAnotherSelectScope(String sql, Set<String> expectedAliases) {
         assertEquals(expectedAliases, unguardedProjections(new Statement("fixture", "scopes", sql)));
@@ -479,14 +555,18 @@ class ArchiveVisibilityArchTest {
     }
 
     private boolean hasArchivePredicate(String sql, String alias, String table) {
+        StringBuilder filters = new StringBuilder(filteringClauses(selectScope(withoutComments(sql))));
+        for (String scope : selectScopes(sql)) {
+            filters.append(' ').append(filteringClauses(scope));
+        }
         if (Pattern.compile("(?<![\\w`\"])[`\"]?" + Pattern.quote(alias)
                 + "[`\"]?\\s*\\.\\s*[`\"]?archived_at[`\"]?\\s+IS\\s+(?:NOT\\s+)?NULL",
-                Pattern.CASE_INSENSITIVE).matcher(sql).find()) {
+                Pattern.CASE_INSENSITIVE).matcher(filters).find()) {
             return true;
         }
         return alias.equals(table)
             && Pattern.compile("(?<![\\w.`\"])[`\"]?archived_at[`\"]?\\s+IS\\s+(?:NOT\\s+)?NULL",
-                Pattern.CASE_INSENSITIVE).matcher(sql).find();
+                Pattern.CASE_INSENSITIVE).matcher(filters).find();
     }
 
     /** Identifying columns of the aliased record table that the statement projects or filters on. */
@@ -518,12 +598,7 @@ class ArchiveVisibilityArchTest {
 
     private List<WildcardRead> wildcardReads(String sql) {
         List<WildcardRead> reads = new ArrayList<>();
-        Matcher selects = Pattern.compile("'(?:''|[^'])*'|\\bSELECT\\b", Pattern.CASE_INSENSITIVE).matcher(sql);
-        while (selects.find()) {
-            if (!selects.group().equalsIgnoreCase("SELECT")) {
-                continue;
-            }
-            String scope = selectScope(sql.substring(selects.end()));
+        for (String scope : selectScopes(sql)) {
             int from = projectionEnd(scope);
             if (from < 0) {
                 continue;
@@ -561,50 +636,6 @@ class ArchiveVisibilityArchTest {
             }
         }
         return -1;
-    }
-
-    /** Keeps a SELECT's projection, tables and predicates, excluding nested queries and UNION arms. */
-    private String selectScope(String sql) {
-        Matcher tokens = Pattern.compile("'(?:''|[^'])*'|[()]|\\b(?:SELECT|UNION)\\b", Pattern.CASE_INSENSITIVE)
-            .matcher(sql);
-        StringBuilder scope = new StringBuilder();
-        int depth = 0;
-        int subqueryDepth = -1;
-        int cursor = 0;
-        while (tokens.find()) {
-            if (subqueryDepth < 0) {
-                scope.append(sql, cursor, tokens.start());
-            }
-            String token = tokens.group();
-            if (token.equals("(")) {
-                if (subqueryDepth < 0) {
-                    scope.append('(');
-                }
-                depth++;
-            } else if (token.equals(")")) {
-                if (depth == 0) {
-                    return scope.toString();
-                }
-                if (depth == subqueryDepth) {
-                    subqueryDepth = -1;
-                }
-                depth--;
-                if (subqueryDepth < 0) {
-                    scope.append(')');
-                }
-            } else if (token.equalsIgnoreCase("SELECT") && depth > 0 && subqueryDepth < 0) {
-                subqueryDepth = depth;
-            } else if (token.equalsIgnoreCase("UNION") && depth == 0) {
-                return scope.toString();
-            } else if (subqueryDepth < 0) {
-                scope.append("''");
-            }
-            cursor = tokens.end();
-        }
-        if (subqueryDepth < 0) {
-            scope.append(sql, cursor, sql.length());
-        }
-        return scope.toString();
     }
 
     /** Maps each alias bound in a FROM/JOIN position to the record table it stands for. */

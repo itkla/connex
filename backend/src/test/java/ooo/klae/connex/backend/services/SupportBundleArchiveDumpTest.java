@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -126,6 +127,31 @@ class SupportBundleArchiveDumpTest {
         assertEquals(3, manifest.path("schemaVersion").intValue());
         assertEquals("test", manifest.path("productVersion").asString());
         assertEquals("job_run_not_available", manifest.path("omissions").path("job-runs.json").asString());
+        assertInventory(manifest, entries);
+    }
+
+    @Test
+    void inventoryMustBeAnArrayRatherThanAnObjectOfValidEntries() throws Exception {
+        Map<String, byte[]> entries = Map.of(
+            "readiness.json", new byte[0], "config.json", new byte[0], "migrations.json", new byte[0],
+            "audit-slice.csv", new byte[0], "client-errors.json", new byte[0]);
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(new byte[0]));
+        List<Map<String, Object>> inventory = entries.keySet().stream()
+            .map(path -> Map.<String, Object>of("path", path, "byteLength", 0, "sha256", digest))
+            .toList();
+        ObjectMapper mapper = new ObjectMapper();
+        assertInventory(mapper.valueToTree(Map.of("files", inventory)), entries);
+
+        Map<String, Map<String, Object>> objectInventory = new LinkedHashMap<>();
+        for (int i = 0; i < inventory.size(); i++) {
+            objectInventory.put(Integer.toString(i), inventory.get(i));
+        }
+        JsonNode manifest = mapper.valueToTree(Map.of("files", objectInventory));
+        assertThrows(AssertionError.class, () -> assertInventory(manifest, entries));
+    }
+
+    private static void assertInventory(JsonNode manifest, Map<String, byte[]> entries) throws Exception {
+        assertTrue(manifest.path("files").isArray(), "files must be an array");
         assertEquals(5, manifest.path("files").size());
         Set<String> inventoried = new HashSet<>();
         for (JsonNode file : manifest.path("files")) {
