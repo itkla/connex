@@ -566,10 +566,13 @@ public class AiChatTurnPersistenceService {
      * Renders the durable idempotency key one tool call owns.
      *
      * <p>A call that was the only one its step made keeps the exact key this service has always
-     * written — no suffix at all — so every write, every {@code find_tools}, every unbatched read
-     * and every server-side skill plan step stays byte-identical, along with the {@code
-     * turn-N-step-} prefix scan that reads them back. Only a call that shared its step renders the
-     * {@code -call-k} suffix, which fits the existing column and its uniqueness constraint.
+     * written — no suffix at all — so every executed or proposed write, every executed
+     * {@code find_tools}, every unbatched read and every server-side skill plan step stays
+     * byte-identical, along with the {@code turn-N-step-} prefix scan that reads them back. Only a
+     * call that shared its step renders the {@code -call-k} suffix, which fits the existing column
+     * and its uniqueness constraint. That includes the failed row of every call of a batch refused
+     * whole before anything ran, a write or {@code find_tools} among them; such a row is never
+     * executed, never a pending proposal and never the loaded toolset's source.
      *
      * @param turnId the durable turn id
      * @param stepNumber the durable model-step number

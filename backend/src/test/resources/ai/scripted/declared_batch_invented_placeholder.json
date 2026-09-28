@@ -1,7 +1,7 @@
 {
-  "id": "parallel_calls_invented_placeholder",
-  "selector": "connex_script_parallel_calls_invented_placeholder",
-  "capabilityClass": "scripted-native",
+  "id": "declared_batch_invented_placeholder",
+  "selector": "connex_script_declared_batch_invented_placeholder",
+  "capabilityClass": "scripted-native-parallel",
   "steps": [
     {
       "afterToolCalls": 0,
@@ -24,6 +24,15 @@
     {
       "afterToolCalls": 0,
       "onRepair": true,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"Nothing about this contact needs attention.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "closing": false,
       "protocol": "native",
       "emit": {
         "kind": "final",

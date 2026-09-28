@@ -1279,6 +1279,37 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(withRepair.repairMessage().contains("MODEL_OUTPUT_BEGIN"));
     }
 
+    /**
+     * A native tool-call repair offers exactly the calls its request permits.
+     *
+     * <p>A request bounded to one call keeps its repair byte for byte, so every undeclared
+     * endpoint's wire is unchanged; a request that invites a batch says it may return up to that
+     * many, rather than steering a batching model back to one call per step.
+     */
+    @Test
+    void nativeToolRepairOffersTheCallsItsRequestPermits() {
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
+        AiStructuredRepair repair = AiStructuredRepair.from("native_duplicate_call_id", "");
+
+        String single = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair).repairMessage();
+        String bounded = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair, 1).repairMessage();
+        String batched = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair, 4).repairMessage();
+
+        assertEquals(
+                "Your previous native tool call violated the duplicate-call-id rule. Return exactly "
+                        + "one valid native tool call or one valid JSON final answer.",
+                single);
+        assertEquals(single, bounded);
+        assertEquals(
+                "Your previous native tool call violated the duplicate-call-id rule. Return up to 4 "
+                        + "valid native tool calls or one valid JSON final answer.",
+                batched);
+    }
+
     @Test
     void oversizedRepairFailsAgainstItsIndependentEnvelope() {
         AiChatMessage request = new AiChatMessage();

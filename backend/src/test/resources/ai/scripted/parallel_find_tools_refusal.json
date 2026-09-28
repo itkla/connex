@@ -1,0 +1,41 @@
+{
+  "id": "parallel_find_tools_refusal",
+  "selector": "connex_script_parallel_find_tools_refusal",
+  "capabilityClass": "scripted-native-parallel",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "toolName": "find_tools",
+            "arguments": "{\"toolset\":\"analytics\"}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Quenby\",\"kinds\":[\"person\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"analytics\"}"
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"The analytics tools are loaded, and I have not needed them yet.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -1197,42 +1197,6 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
     }
 
-    /**
-     * A declared endpoint is still asked for one call per step while the loop cannot execute more.
-     *
-     * <p>The turn's declared bound is an upper limit on what the endpoint may send, not what the
-     * loop asks for. Asking a declared endpoint for a batch the loop would only refuse would make
-     * every batching turn repair, batch again and close without evidence, and would audit as parsed
-     * a response the server discarded — so the request stays at the single-call bound, and the wire
-     * keeps the literal {@code parallel_tool_calls: false}.
-     */
-    @Test
-    void aDeclaredCallBoundIsNotRequestedUntilTheLoopCanExecuteABatch() throws Exception {
-        useNativeMemory(
-                new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
-        when(invocationService.completeNativeToolsRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
-                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
-                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
-                eq(directAdmission), any(Runnable.class)))
-                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
-                        "Nothing needs attention.", List.of())));
-
-        service.run(TURN);
-
-        ArgumentCaptor<AiNativeToolRequest> requests =
-                ArgumentCaptor.forClass(AiNativeToolRequest.class);
-        verify(invocationService).completeNativeToolsRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
-                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
-                any(AiResponseSchema.class), requests.capture(),
-                eq(directAdmission), any(Runnable.class));
-        assertEquals(
-                AiChatAgentLoopService.MAX_EXECUTABLE_CALLS_PER_STEP,
-                requests.getValue().maxParallelCalls());
-        assertEquals(1, AiChatAgentLoopService.MAX_EXECUTABLE_CALLS_PER_STEP);
-    }
-
     /** An undeclared endpoint's turn keeps sending the single-call bound it always has. */
     @Test
     void anUndeclaredEndpointsTurnStillBoundsEveryStepToOneCall() throws Exception {
@@ -1259,72 +1223,18 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
-     * A batch that reaches the loop is refused, because the loop cannot yet execute one.
-     *
-     * <p>The loop's own request bound makes the parse boundary refuse a batch first; this pins the
-     * defence behind it. Executing a batch's first call would run one quarter of a decision the
-     * model made as a whole, under an ownership, deadline, authorization and budget admission that
-     * were polled once for the step. Until the loop executes a batch under those checks per call,
-     * it refuses the response under the same {@code multiple-calls} repair rule an over-delivering
-     * provider has always produced — and nothing is proposed, executed or recorded, whichever
-     * proposal overload a signed or unsigned call would have reached.
-     */
-    @Test
-    void aBatchedNativeResponseIsStillRefusedAsMultipleCallsWithoutExecutingAnything()
-            throws Exception {
-        useNativeMemory(
-                new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
-        when(invocationService.completeNativeToolsRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
-                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
-                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
-                eq(directAdmission), any(Runnable.class)))
-                .thenReturn(nativeToolBatch(List.of(
-                        new AiToolCall(
-                                "call_1", "search_records",
-                                "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"),
-                        new AiToolCall(
-                                "call_2", "search_records",
-                                "{\"query\":\"cooling\",\"kinds\":[\"person\"]}"))));
-
-        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
-
-        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("malformed_output", result.reason());
-        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
-        verify(persistenceService, never()).proposeTool(
-                any(), anyInt(), anyInt(), anyString(), anyString(), any());
-        verify(persistenceService, never()).proposeTool(
-                any(), anyInt(), anyInt(), any(), any());
-        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
-        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
-        ArgumentCaptor<AiNativeToolRequest> requests =
-                ArgumentCaptor.forClass(AiNativeToolRequest.class);
-        verify(invocationService, atLeastOnce()).completeNativeToolsRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
-                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
-                any(AiResponseSchema.class), requests.capture(),
-                eq(directAdmission), any(Runnable.class));
-        assertTrue(
-                requests.getAllValues().stream()
-                        .map(AiNativeToolRequest::repairMessage)
-                        .filter(java.util.Objects::nonNull)
-                        .anyMatch(message -> message.contains("multiple-calls rule")),
-                "the loop must tell the model which rule its batch broke");
-    }
-
-    /**
      * A batch carrying an invented placeholder fails the turn exactly as one call carrying it does.
      *
      * <p>The cardinality refusal is repairable and the demask rule is not. Checking cardinality
      * first would launder a response that invented a placeholder into a repair merely because it
-     * carried a sibling call; the turn must end as malformed output after one provider call, with
-     * no repair request and nothing executed.
+     * carried a sibling call, and executing the sibling would act on a decision the server cannot
+     * trust; the turn must end as malformed output after one provider call, with no repair request
+     * and nothing executed, even though the endpoint declared the batch.
      */
     @Test
     void aBatchCarryingADemaskWarningFailsTheTurnWithoutARepair() throws Exception {
         useNativeMemory(new AiAssistantPromptBudget(
-                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+                64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
         when(invocationService.completeNativeToolsRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
@@ -1357,11 +1267,11 @@ class AiChatAgentLoopServiceTest {
     /**
      * An over-delivered batch that invented a placeholder ends the turn after one provider call.
      *
-     * <p>The loop bounds every request to one call, so a batch an endpoint sends anyway never
-     * reaches the loop as a batch: the parse boundary refuses it for its size, after demasking it,
-     * and carries the warning count on the refusal. The loop must settle that refusal as malformed
-     * output with no repair — the outcome one call inventing the placeholder gets — rather than
-     * read the refusal's cardinality rule and ask the model again.
+     * <p>An undeclared endpoint's turn bounds every request to one call, so a batch it sends
+     * anyway never reaches the loop as a batch: the parse boundary refuses it for its size, after
+     * demasking it, and carries the warning count on the refusal. The loop must settle that refusal
+     * as malformed output with no repair — the outcome one call inventing the placeholder gets —
+     * rather than read the refusal's cardinality rule and ask the model again.
      */
     @Test
     void anOverBoundRefusalCarryingADemaskWarningFailsTheTurnWithoutARepair() {
@@ -3146,11 +3056,6 @@ class AiChatAgentLoopServiceTest {
                         0,
                         true,
                         parallelToolCalls));
-    }
-
-    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeToolBatch(
-            List<AiToolCall> calls) throws JacksonException {
-        return nativeToolBatch(calls, 0);
     }
 
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeToolBatch(

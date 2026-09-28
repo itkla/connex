@@ -1,0 +1,41 @@
+{
+  "id": "parallel_reads_streamed",
+  "selector": "connex_script_streamed_parallel_reads",
+  "capabilityClass": "scripted-native-parallel-stream",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Brackenridge\",\"kinds\":[\"person\"]}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Brackenridge\",\"kinds\":[\"company\"]}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Brackenridge\",\"kinds\":[\"deal\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I read [the contact](record:r1), [the company](record:r2) and [the deal](record:r3) together, and nothing needs attention.\",\"citations\":[\"r1\",\"r2\",\"r3\"],\"suggestions\":[],\"title\":null}",
+        "deltas": [
+          "{\"text\":\"I read [the contact](record:r1)",
+          ", [the company](record:r2) and [the deal](record:r3) together, and nothing needs",
+          " attention.\",\"citations\":[\"r1\",\"r2\",\"r3\"],\"suggestions\":[],\"title\":null}"
+        ]
+      }
+    }
+  ]
+}

@@ -560,12 +560,13 @@ public class AiInvocationService {
         if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_multiple_calls",
-                    overBoundDemaskWarnings(calls, invocation.context()));
+                    refusedBatchDemaskWarnings(calls, invocation.context()));
         }
         if (captured.ambiguous()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
             return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_call_content");
+                    raw, invocation, result, reasoning, "native_call_content",
+                    refusedBatchDemaskWarnings(calls, invocation.context()));
         }
         ReasoningNormalization narration = normalizeNarration(captured.answer(), invocation);
         Set<String> seenIds = new HashSet<>();
@@ -574,7 +575,8 @@ public class AiInvocationService {
                     || nativeTools.exchanges().stream()
                             .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
                 return malformedNativeTool(
-                        raw, invocation, result, reasoning, "native_duplicate_call_id");
+                        raw, invocation, result, reasoning, "native_duplicate_call_id",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
             }
         }
         List<JsonNode> callArguments = new ArrayList<>(calls.size());
@@ -585,11 +587,13 @@ public class AiInvocationService {
                 arguments = objectMapper.readTree(call.arguments());
             } catch (JacksonException | IllegalArgumentException exception) {
                 return malformedNativeTool(
-                        raw, invocation, result, reasoning, "native_arguments_not_object");
+                        raw, invocation, result, reasoning, "native_arguments_not_object",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
             }
             if (arguments == null || !arguments.isObject()) {
                 return malformedNativeTool(
-                        raw, invocation, result, reasoning, "native_arguments_not_object");
+                        raw, invocation, result, reasoning, "native_arguments_not_object",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
             }
             ObjectNode step = objectMapper.createObjectNode();
             ObjectNode tool = step.putObject("tool");
@@ -605,7 +609,8 @@ public class AiInvocationService {
                         reasoning,
                         "tool_name".equals(rejectionReason)
                                 ? "native_unknown_tool"
-                                : "native_invalid_arguments");
+                                : "native_invalid_arguments",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
             }
             warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
             callArguments.add(arguments);
@@ -640,20 +645,31 @@ public class AiInvocationService {
     }
 
     /**
-     * Counts the demask warnings of a response about to be refused for carrying too many calls.
+     * Counts the demask warnings of a batched response the boundary is about to refuse.
      *
-     * <p>The cardinality refusal is repairable and an invented placeholder is not, so the count is
-     * taken before the refusal is decided rather than skipped because of it. Every call whose
-     * arguments parse as a JSON object is demasked exactly as an admitted call is; a call whose
-     * arguments do not is left uncounted, as the admitted path refuses it before demasking. The raw
-     * step guard is deliberately not consulted: the response is refused for its size whatever it
-     * says, and a guard rejection must not decide which refusal it gets.
+     * <p>Every envelope refusal is repairable and an invented placeholder is not, so for a response
+     * carrying several calls the count is taken before the refusal is decided rather than skipped
+     * because of it — whether the response is refused for its size, for its content, for a shared
+     * identifier, or because one sibling's arguments failed to parse or failed the raw step guard.
+     * Otherwise a guard-rejected sibling would earn the whole batch a repair while another call in
+     * it had invented a placeholder, which that call alone would never have earned. Every call whose
+     * arguments parse as a JSON object is demasked exactly as an admitted call is, on a fresh parse
+     * so the admitted path's own arguments are untouched; a call whose arguments do not parse is
+     * left uncounted, as the admitted path refuses such arguments before demasking them. The raw
+     * step guard is deliberately not consulted: a guard rejection must not decide which refusal the
+     * response gets.
      *
-     * @param calls every call the over-bound response carried
+     * <p>A response carrying one call keeps the order it has always had: its own guard rejection is
+     * the refusal, and it has no sibling whose placeholder that rejection could hide.
+     *
+     * @param calls every call the refused response carried
      * @param context the invocation's request-local masking context
-     * @return the saturated sum of every object-shaped call's demask warnings
+     * @return the saturated sum of every object-shaped call's demask warnings, or 0 for one call
      */
-    private int overBoundDemaskWarnings(List<AiToolCall> calls, MaskingContext context) {
+    private int refusedBatchDemaskWarnings(List<AiToolCall> calls, MaskingContext context) {
+        if (calls.size() <= 1) {
+            return 0;
+        }
         int warnings = 0;
         for (AiToolCall call : calls) {
             JsonNode arguments;

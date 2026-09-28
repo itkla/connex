@@ -536,31 +536,19 @@ case_read_rejects_bad_arguments() (
 # Ubuntu) silently ignores, so a case-sensitive match against Content-Type rejected every real
 # Spring Boot response as unexpected_content_type.
 case_download_accepts_real_content_type_headers() (
-    # shellcheck source=deploy/support-bundle/collect.sh
-    source "$SANDBOX/collect-lib.sh" 2>/dev/null
-    WORK_DIR="$SANDBOX/ct"
-    mkdir -p "$WORK_DIR"
     local header
     for header in 'Content-Type: application/zip' \
                   'content-type: application/zip' \
                   'Content-Type:application/zip' \
-                  'Content-Type: application/zip;charset=UTF-8'; do
-        printf 'HTTP/1.1 200 OK\r\n%s\r\n\r\n' "$header" > "$WORK_DIR/response-headers"
-        local parsed
-        parsed="$(tr '[:upper:]' '[:lower:]' < "$WORK_DIR/response-headers" | tr -d '\r' \
-            | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
-        case "$parsed" in
-            application/zip*) ;;
-            *) printf 'content-type not parsed from [%s]: got [%s]\n' "$header" "$parsed"; return 1 ;;
-        esac
+                  'Content-Type: application/zip;charset=UTF-8' \
+                  'Content-Type: text/html'; do
+        if [ "$header" = 'Content-Type: text/html' ]; then
+            case_download_rejects_a_non_zip_response "$header" || return 1
+        else
+            case_download_accepts_a_real_zip_response "$header" || {
+                printf 'download failed for header [%s]\n' "$header"; return 1; }
+        fi
     done
-    printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$WORK_DIR/response-headers"
-    local parsed
-    parsed="$(tr '[:upper:]' '[:lower:]' < "$WORK_DIR/response-headers" | tr -d '\r' \
-        | sed -n 's/^content-type:[[:space:]]*//p' | head -n 1)"
-    case "$parsed" in
-        application/zip*) printf 'html was accepted as zip\n'; return 1 ;;
-    esac
 )
 
 # Regression: a ZIP may store a symlink. `find -type f` excludes symlinks, so a symlinked entry
@@ -803,20 +791,61 @@ stub_csrf_request() {
     return 1
 }
 
-# The bundle request must be a POST carrying the token from the preflight. Recording the observed
-# method and header lets the download cases assert it; without this the stubs would still pass if
-# collect.sh reverted to GET or stopped sending the header, which is the whole property under test.
+# curl runs in command substitutions, so request observations must survive in fixture files.
+reset_download_observations() {
+    local observation_dir="$1"
+    : > "$observation_dir/observed-urls"
+    : > "$observation_dir/observed-cookies"
+    rm -f "$observation_dir/observed-method" "$observation_dir/observed-csrf-header"
+}
+
+stub_record_request() {
+    local observation_dir="$1" url="$2" cookie="$3"
+    printf '%s\n' "$url" >> "$observation_dir/observed-urls"
+    printf '%s\n' "$cookie" >> "$observation_dir/observed-cookies"
+}
+
 stub_record_bundle_request() {
-    local method="$1" csrf_header="$2"
-    printf '%s\n' "$method" > "$SANDBOX/observed-method"
-    printf '%s\n' "$csrf_header" > "$SANDBOX/observed-csrf-header"
+    local observation_dir="$1" method="$2" csrf_header="$3"
+    printf '%s\n' "$method" > "$observation_dir/observed-method"
+    printf '%s\n' "$csrf_header" > "$observation_dir/observed-csrf-header"
+}
+
+stub_download_response() {
+    local observation_dir="$1" response_header="$2" response_body="$3"
+    shift 3
+    local out="" headers="" url="" method=GET csrf_header="" cookie=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --output) out="$2"; shift 2 ;;
+            --dump-header) headers="$2"; shift 2 ;;
+            --request) method="$2"; shift 2 ;;
+            --cookie) cookie="$2"; shift 2 ;;
+            --header)
+                case "$2" in X-CSRF-TOKEN:*) csrf_header="$2" ;; esac
+                shift 2 ;;
+            -*) shift ;;
+            *) url="$1"; shift ;;
+        esac
+    done
+    stub_record_request "$observation_dir" "$url" "$cookie"
+    if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
+    stub_record_bundle_request "$observation_dir" "$method" "$csrf_header"
+    printf '%s' "$response_body" > "$out"
+    printf 'HTTP/1.1 200 OK\r\n%s\r\n\r\n' "$response_header" > "$headers"
+    printf '200'
 }
 
 assert_bundle_request_was_authenticated_post() {
-    local name="$1"
-    assert_equals "${name}_method" POST "$(cat "$SANDBOX/observed-method" 2>/dev/null)" || return 1
+    local name="$1" observation_dir="$2" base_url="$3" org_id="$4" cookie_file="$5"
+    assert_equals "${name}_urls" \
+        "$(printf '%s\n' "$base_url/api/auth/csrf" "$base_url/api/orgs/$org_id/support-bundle")" \
+        "$(cat "$observation_dir/observed-urls")" || return 1
+    assert_equals "${name}_cookies" "$(printf '%s\n' "$cookie_file" "$cookie_file")" \
+        "$(cat "$observation_dir/observed-cookies")" || return 1
+    assert_equals "${name}_method" POST "$(cat "$observation_dir/observed-method" 2>/dev/null)" || return 1
     assert_equals "${name}_csrf_header" "X-CSRF-TOKEN: test-csrf-token" \
-        "$(cat "$SANDBOX/observed-csrf-header" 2>/dev/null)" || return 1
+        "$(cat "$observation_dir/observed-csrf-header" 2>/dev/null)" || return 1
 }
 
 # (g) support_bundle_download had no coverage at all, which is how the mawk content-type defect
@@ -832,30 +861,17 @@ case_download_accepts_a_real_zip_response() (
     printf 'x\n' > "$COOKIE_FILE"; chmod 0600 "$COOKIE_FILE"
     WORKSPACE_ID=
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
+    local stub_header="${1:-Content-Type: application/zip}" stub_body=$'PK\003\004stub-zip-bytes'
+    reset_download_observations "$WORK_DIR"
+    rm -f "$WORK_DIR/bundle.partial" "$WORK_DIR/response-headers" "$WORK_DIR/csrf.json"
     curl() {
-        local out="" headers="" url="" method=GET csrf_header=""
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --output) out="$2"; shift 2 ;;
-                --dump-header) headers="$2"; shift 2 ;;
-                --request) method="$2"; shift 2 ;;
-                --header)
-                    case "$2" in X-CSRF-TOKEN:*) csrf_header="$2" ;; esac
-                    shift 2 ;;
-                -*) shift ;;
-                *) url="$1"; shift ;;
-            esac
-        done
-        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
-        stub_record_bundle_request "$method" "$csrf_header"
-        printf 'PK\003\004stub-zip-bytes' > "$out"
-        printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
-        printf '200'
+        stub_download_response "$WORK_DIR" "$stub_header" "$stub_body" "$@"
     }
     support_bundle_download "$WORK_DIR/bundle.partial" >/dev/null 2>&1
     assert_status download_ok 0 "$?" || return 1
-    [ -s "$WORK_DIR/bundle.partial" ] || { printf 'no body written\n'; return 1; }
-    assert_bundle_request_was_authenticated_post download_ok || return 1
+    assert_equals download_body "$stub_body" "$(cat "$WORK_DIR/bundle.partial")" || return 1
+    assert_bundle_request_was_authenticated_post download_ok \
+        "$WORK_DIR" "$BASE_URL" "$ORG_ID" "$COOKIE_FILE" || return 1
 )
 
 # The bundle endpoint is CSRF-protected, so a failed token preflight must abort before any bundle
@@ -869,39 +885,48 @@ case_csrf_preflight_failures_are_classified_and_abort_the_download() (
     BASE_URL='https://connex.example.com'; ORG_ID=3; WORKSPACE_ID=
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     COOKIE_FILE="$SANDBOX/dl-cookies"
-    rm -f "$SANDBOX/observed-method"
-    local stub_status="" stub_body=""
+    printf 'x\n' > "$COOKIE_FILE"; chmod 0600 "$COOKIE_FILE"
+    local name stub_status="" stub_body="" expected_status
     curl() {
-        local out=""
+        local out="" url="" method=GET csrf_header="" cookie=""
         while [ "$#" -gt 0 ]; do
-            case "$1" in --output) out="$2"; shift 2 ;; *) shift ;; esac
+            case "$1" in
+                --output) out="$2"; shift 2 ;;
+                --request) method="$2"; shift 2 ;;
+                --cookie) cookie="$2"; shift 2 ;;
+                --header)
+                    case "$2" in X-CSRF-TOKEN:*) csrf_header="$2" ;; esac
+                    shift 2 ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
+            esac
         done
+        stub_record_request "$WORK_DIR" "$url" "$cookie"
+        case "$url" in
+            */support-bundle*) stub_record_bundle_request "$WORK_DIR" "$method" "$csrf_header" ;;
+        esac
         printf '%s' "$stub_body" > "$out"
         printf '%s' "$stub_status"
     }
 
-    stub_status=403; stub_body=''
-    support_bundle_download "$WORK_DIR/b1" >/dev/null 2>&1
-    assert_status csrf_403_is_auth 65 "$?" || return 1
-
-    stub_status=500; stub_body=''
-    support_bundle_download "$WORK_DIR/b2" >/dev/null 2>&1
-    assert_status csrf_500_is_api 66 "$?" || return 1
-
-    stub_status=000; stub_body=''
-    support_bundle_download "$WORK_DIR/b3" >/dev/null 2>&1
-    assert_status csrf_transport_is_api 66 "$?" || return 1
-
-    stub_status=200; stub_body='{"headerName":123,"token":true}'
-    support_bundle_download "$WORK_DIR/b4" >/dev/null 2>&1
-    assert_status csrf_non_string_shape_is_api 66 "$?" || return 1
-
-    stub_status=200; stub_body='{"parameterName":"_csrf"}'
-    support_bundle_download "$WORK_DIR/b5" >/dev/null 2>&1
-    assert_status csrf_missing_fields_is_api 66 "$?" || return 1
-
-    [ ! -f "$SANDBOX/observed-method" ] || {
-        printf 'a bundle request was made despite a failed CSRF preflight\n'; return 1; }
+    while IFS='|' read -r name stub_status stub_body expected_status; do
+        reset_download_observations "$WORK_DIR"
+        rm -f "$WORK_DIR/$name" "$WORK_DIR/csrf.json"
+        support_bundle_download "$WORK_DIR/$name" >/dev/null 2>&1
+        assert_status "$name" "$expected_status" "$?" || return 1
+        assert_equals "${name}_urls" "$BASE_URL/api/auth/csrf" \
+            "$(cat "$WORK_DIR/observed-urls")" || return 1
+        assert_equals "${name}_cookie" "$COOKIE_FILE" \
+            "$(cat "$WORK_DIR/observed-cookies")" || return 1
+        [ ! -f "$WORK_DIR/observed-method" ] || {
+            printf 'a bundle request was made despite a failed CSRF preflight\n'; return 1; }
+    done <<'CASES'
+csrf_403_is_auth|403||65
+csrf_500_is_api|500||66
+csrf_transport_is_api|000||66
+csrf_non_string_shape_is_api|200|{"headerName":123,"token":true}|66
+csrf_missing_fields_is_api|200|{"parameterName":"_csrf"}|66
+CASES
 )
 
 case_download_rejects_a_non_zip_response() (
@@ -912,25 +937,19 @@ case_download_rejects_a_non_zip_response() (
     BASE_URL='https://connex.example.com'; ORG_ID=3; WORKSPACE_ID=
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     COOKIE_FILE="$SANDBOX/dl-cookies"
+    printf 'x\n' > "$COOKIE_FILE"; chmod 0600 "$COOKIE_FILE"
+    local stub_header="${1:-Content-Type: text/html}" stub_body='<html>login</html>'
+    reset_download_observations "$WORK_DIR"
+    rm -f "$WORK_DIR/bundle.partial" "$WORK_DIR/response-headers" "$WORK_DIR/csrf.json"
     curl() {
-        local out="" headers="" url=""
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --output) out="$2"; shift 2 ;;
-                --dump-header) headers="$2"; shift 2 ;;
-                -*) shift ;;
-                *) url="$1"; shift ;;
-            esac
-        done
-        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
-        printf '<html>login</html>' > "$out"
-        printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$headers"
-        printf '200'
+        stub_download_response "$WORK_DIR" "$stub_header" "$stub_body" "$@"
     }
     local output
     output="$(support_bundle_download "$WORK_DIR/bundle.partial" 2>&1)"
     assert_status download_html_rejected 66 "$?" || return 1
     assert_contains download_html_reason 'reason=unexpected_content_type' <(printf '%s\n' "$output") || return 1
+    assert_bundle_request_was_authenticated_post download_html \
+        "$WORK_DIR" "$BASE_URL" "$ORG_ID" "$COOKIE_FILE" || return 1
 )
 
 case_download_maps_auth_failures() (
