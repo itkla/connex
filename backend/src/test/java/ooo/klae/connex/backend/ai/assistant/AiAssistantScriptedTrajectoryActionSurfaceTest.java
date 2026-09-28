@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
-import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiRequestJournal;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Person;
@@ -65,7 +64,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         assertFalse(trajectory.toolNames().contains("change_deal_stage"),
                 "no write tool of the refused family may be proposed: " + trajectory.toolNames());
 
-        List<ScriptedAiRequestJournal.Entry> requests = journal().recorded();
+        var requests = journal().recorded();
         assertEquals(2, requests.size());
         String directory = requests.getFirst().request().systemPrompt();
         for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
