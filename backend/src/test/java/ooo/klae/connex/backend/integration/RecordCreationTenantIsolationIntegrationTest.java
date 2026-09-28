@@ -11,6 +11,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -81,6 +83,8 @@ class RecordCreationTenantIsolationIntegrationTest {
     private Workspace workspace;
     private Workspace other;
     private User actor;
+    private Pipeline currentPipeline;
+    private Stage currentStage;
     private Company otherCompany;
     private Person otherPerson;
     private Pipeline otherPipeline;
@@ -114,8 +118,8 @@ class RecordCreationTenantIsolationIntegrationTest {
         workspaceMapper.setMemberCustomRole(workspace.getId(), actor.getId(), role.getId());
         authenticate();
 
-        Pipeline currentPipeline = pipeline(workspace, "Current pipeline");
-        stage(workspace, currentPipeline, "Current stage");
+        currentPipeline = pipeline(workspace, "Current pipeline");
+        currentStage = stage(workspace, currentPipeline, "Current stage");
         otherCompany = company(other, "Secret company label");
         otherPerson = person(other, "Secret person label");
         otherPipeline = pipeline(other, "Secret pipeline label");
@@ -246,13 +250,22 @@ class RecordCreationTenantIsolationIntegrationTest {
         assertEquals(0, personCount());
     }
 
-    @Test
-    void anotherWorkspacePipelineAndStageMatchMissingShapeAndLeaveNoRows() {
-        RecordCreationErrorDto missing = dealFailure(Integer.MAX_VALUE, Integer.MAX_VALUE);
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+        "both references outside the workspace, false, false",
+        "owned pipeline with missing or foreign stage, true, false",
+        "missing or foreign pipeline with owned stage, false, true"
+    })
+    void anotherWorkspacePipelineAndStageMatchMissingShapeAndLeaveNoRows(
+            String scenario, boolean ownedPipeline, boolean ownedStage) {
+        RecordCreationErrorDto missing = dealFailure(
+            ownedPipeline ? currentPipeline.getId() : Integer.MAX_VALUE,
+            ownedStage ? currentStage.getId() : Integer.MAX_VALUE);
         RecordCreationErrorDto otherWorkspace = dealFailure(
-            otherPipeline.getId(), otherStage.getId());
+            ownedPipeline ? currentPipeline.getId() : otherPipeline.getId(),
+            ownedStage ? currentStage.getId() : otherStage.getId());
 
-        assertEquals(missing, otherWorkspace);
+        assertEquals(missing, otherWorkspace, scenario);
         assertEquals("RELATED_RECORD_NOT_FOUND", otherWorkspace.code());
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM deal WHERE workspace_id = ?",
