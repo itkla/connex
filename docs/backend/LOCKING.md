@@ -396,10 +396,14 @@ Every mutating assistant tool decision — immediate execution, approval, reject
 arms, listed in `AiAssistantWriteToolRegistry.LEGACY_TOOLS`, through the same order). The tool
 declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
 tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
-`AiAssistantWriteToolSpiArchTest` enforces all three. Before any lock, an approval resolves the
-principals the write will name (`AiAssistantWriteTool.principals`, or the legacy `assign_owner`
-owner), and those same objects reach the write. The framework acquires its locks in exactly this
-order:
+`AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
+dependencies to an explicit allowlist of domain services and helpers — no mapper, no
+`WorkspaceService`, no member or permission source — and lexically by refusing locking-method,
+permission-read and lifecycle-mutator names in tool source; a new dependency is a reviewed edit to
+that allowlist. Before any lock, an approval resolves the principals the write will name
+(`AiAssistantWriteTool.principals`, against the member directory the framework hands it, or the
+legacy `assign_owner` owner), and those same objects reach the write. The framework acquires its
+locks in exactly this order:
 
 1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
    covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals
@@ -429,6 +433,15 @@ target the actor cannot see before the tool runs; calls the tool's `apply`; comp
 the write returned with the one resolved before the lock, recording any divergence as a
 `verification` sibling of the stored outcome; and writes the tool-call status fail-closed.
 
+The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
+stage tool reads its deal through the same scoped getter before step 6 to resolve the stage, and
+inside one transaction MyBatis answers an identical select from its first-level cache. Every target
+lock statement the framework takes at step 6 — `getVisiblePersonByIdForShare`,
+`getVisiblePersonByIdForUpdate`, `getOwnedCompanyByIdForUpdate` and `getDealByIdForUpdate` —
+therefore declares `flushCache="true"`, so the gate's getter goes to the database after the lock.
+`AiAssistantWriteTargetGateCacheIntegrationTest` pins this against MySQL for each of them. Do not
+remove the flag, and give any new target lock statement the same flag.
+
 Rejection takes no lock after step 3. Undo takes none of its own after step 3; the domain `deleteIf`
 it calls takes what that service documents — for a task the board root and then the exact task rows
 (see Tasks above), for a note or an activity the exact row `FOR UPDATE`. Domain services on this
@@ -453,7 +466,11 @@ Rules that keep this sound:
   populates the MyBatis first-level cache, and every later identical read in that transaction —
   including a domain service's own `@RequirePermission` check — is then answered with the pre-lock
   result. `preliminaryPrincipals` resolves which principal rows to lock and deliberately takes no
-  permission read; an `AiAssistantWriteTool.principals` implementation must not take one either. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
+  permission read. An `AiAssistantWriteTool.principals` implementation is handed only the request
+  and a member directory — a plain `WorkspaceService.getMembers` read — and may not reach anything
+  else: `AiAssistantWriteToolRegistryTest` proves, for every declared tool, that principal
+  resolution touches none of its injected dependencies, so it cannot call a domain getter whose
+  `@RequirePermission` check would be the pre-lock read. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
   unknown tool call, an unparseable proposal, an owner that no longer resolves) and the locked 403
   after them.
 - **After step 1, only non-locking permission reads, and only in the domain layer.** The service's
