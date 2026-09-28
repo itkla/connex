@@ -103,8 +103,8 @@ class FoundationServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(other);
         workspaceMapper.addMember(other.getId(), currentUser.getId(), "member");
 
-        // Multi-membership is now supported. Off the request thread the resolver falls back
-        // to the user's first/default workspace instead of failing closed.
+        clearRequestContext();
+
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
         assertDoesNotThrow(() -> dealService.getAllDeals());
     }
