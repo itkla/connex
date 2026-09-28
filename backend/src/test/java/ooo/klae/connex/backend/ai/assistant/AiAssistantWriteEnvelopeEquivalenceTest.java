@@ -76,10 +76,9 @@ import tools.jackson.databind.json.JsonMapper;
  * meeting schedule-conflict enrichment, and {@code create_note} — so
  * a green run after the move is evidence that the move changed none of them: the stored proposal,
  * the stored result envelope with its outcome and inverse key order, the approval, rejection and
- * undo responses, the pending-proposal review, the model's own view of the outcome, and the
- * transcript cards. A key that drifts, a value that is re-derived differently, or a new sibling such
- * as a divergence record appearing on an ordinary write turns this red where no behavioural test
- * would notice.
+ * undo responses, the model's own view of the outcome, and the transcript cards. A key that
+ * drifts, a value that is re-derived differently, or a new sibling such as a divergence record
+ * appearing on an ordinary write turns this red where no behavioural test would notice.
  */
 class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final ValidatorFactory VALIDATORS =
@@ -356,12 +355,6 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         + "\"status\":\"approval_required\",\"outcome\":{}}",
                 objectMapper.writeValueAsString(service.proposalResult(
                         write, new AiAssistantToolProposal(29, "proposed", null, true)).data()));
-        assertEquals(
-                "{\"id\":29,\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
-                        + "\"status\":\"proposed\",\"target\":{\"kind\":\"deal\",\"id\":44,"
-                        + "\"name\":\"Acme renewal\"},\"arguments\":{\"stage\":\"Proposal\"}}",
-                objectMapper.writeValueAsString(
-                        service.getPendingProposal(TURN.sessionId(), 29)));
 
         String approved = objectMapper.writeValueAsString(
                 service.approve(TURN.sessionId(), 29));

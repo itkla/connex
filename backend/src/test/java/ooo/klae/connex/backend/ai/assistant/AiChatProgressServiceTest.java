@@ -198,6 +198,37 @@ class AiChatProgressServiceTest {
                 service.project(3, 5, 7, "resolved"));
     }
 
+    /**
+     * Every key the grammar refuses, or one naming another turn, sorts with the malformed keys.
+     *
+     * <p>The projection reads its step through the one key parser, so a key it cannot trust for
+     * its position — past the step ceiling, zero-padded, carrying a zero ordinal or a segment the
+     * grammar does not have — sorts after every real milestone instead of among them.
+     */
+    @Test
+    void everyKeyTheGrammarRefusesSortsWithTheMalformedKeys() {
+        for (String key : List.of(
+                "turn-8-step-2",
+                "turn-7-step-" + (AiChatAgentLoopService.HARD_MAX_STEPS + 1),
+                "turn-7-step-02",
+                "turn-7-step-2-call-0",
+                "turn-7-step-2-row-1",
+                "turn-7-step-2147483648")) {
+            AiChatToolCall refused =
+                    toolCall(2, "list_activities", "executed", "{\"activities\":[]}");
+            refused.setIdempotencyKey(key);
+            when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+                    .thenReturn(List.of(refused));
+
+            assertEquals(
+                    new AiChatProgressItemDto(
+                            AiChatAgentLoopService.HARD_MAX_STEPS,
+                            "activities", "complete", 0, false),
+                    service.project(3, 5, 7, "resolved").get(1),
+                    key);
+        }
+    }
+
     private static AiChatToolCall toolCall(
             int step, String name, String status, String resultJson) {
         AiChatToolCall toolCall = new AiChatToolCall();

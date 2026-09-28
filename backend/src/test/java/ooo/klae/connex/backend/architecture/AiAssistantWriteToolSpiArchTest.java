@@ -312,20 +312,9 @@ class AiAssistantWriteToolSpiArchTest {
         assertTrue(
                 !framework.contains("permissionsFor("),
                 "the write framework asserts permissions from its locked snapshot only");
-        Matcher requirePermission = Pattern.compile("\\.requirePermission\\(").matcher(framework);
-        int calls = 0;
-        while (requirePermission.find()) {
-            calls++;
-            String enclosing = framework.substring(0, requirePermission.start());
-            int method = enclosing.lastIndexOf("\n    private ");
-            int publicMethod = enclosing.lastIndexOf("\n    public ");
-            String header = framework.substring(
-                    Math.max(method, publicMethod), requirePermission.start());
-            assertTrue(
-                    header.contains("requireReadableSession("),
-                    "requirePermission may only run on the read-only session gate");
-        }
-        assertEquals(1, calls, "the read-only session gate is the one unlocked permission read");
+        assertFalse(
+                Pattern.compile("\\.requirePermission\\(").matcher(framework).find(),
+                "the write framework reads no permission outside its locked snapshot");
     }
 
     @Test

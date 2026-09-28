@@ -2418,15 +2418,42 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void personImport_matchUpdateRequiresUpdatePermission() {
-        List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"));
+        List<ColumnMapping> mapping = List.of(
+            map("Name", "name"), map("Email", "email"), map("Phone", "phone"));
         reviewAndCommitPersons(req(mapping, List.of(Map.of("Name", "Fred", "Email", "fred@x.test")), "fill_empty"));
 
-        memberWithPermissions("PERSON_CREATE");
+        WorkspaceRole role = roleService.createRole(
+            workspace.getId(), currentUser.getId(), "Revoked update " + unique(),
+            List.of("PERSON_CREATE", "PERSON_UPDATE"));
+        User importer = newUser();
+        workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), importer.getId(), role.getId());
+        authenticateAs(importer, workspace.getId());
         ImportRequest duplicate = req(
-            mapping, List.of(Map.of("Name", "Fred Updated", "Email", "fred@x.test")), "fill_empty");
+            mapping, List.of(Map.of(
+                "Name", "Fred Updated", "Email", "fred@x.test", "Phone", "+819012345679")), "fill_empty");
+        ImportPreviewResult preview = importService.previewPersons(duplicate);
+        assertEquals(1, preview.getToUpdate());
+        assertNotNull(preview.getDuplicateReviewProof());
+        duplicate.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+
+        authenticateAs(currentUser, workspace.getId());
+        roleService.updateRole(
+            workspace.getId(), currentUser.getId(), role.getId(), role.getName(),
+            List.of("PERSON_CREATE"));
+        authenticateAs(importer, workspace.getId());
+        int personId = personMapper.findByEmails(
+            workspace.getId(), List.of("fred@x.test")).getFirst().getId();
+        Map<String, Object> before = personSnapshot(workspace.getId(), personId);
+        ImportState stateBefore = importState();
 
         assertThrows(ForbiddenException.class, () -> importService.previewPersons(duplicate));
-        assertThrows(ForbiddenException.class, () -> reviewAndCommitPersons(duplicate));
+        ForbiddenException denied = assertThrows(
+            ForbiddenException.class, () -> importService.commitPersons(duplicate));
+
+        assertEquals("Requires the PERSON_UPDATE permission in this workspace", denied.getMessage());
+        assertEquals(before, personSnapshot(workspace.getId(), personId));
+        assertEquals(stateBefore, importState());
     }
 
     @Test

@@ -1,6 +1,6 @@
 # Generated perimeter and authorization source SHA-256 ledger
 ../frontend/next.config.ts	ce3ed2cdd54bd5dc01fe3d1207b5ba1aad5c14ba373c63d5dffe2de05ee9d4b9
-build.gradle	07bff1d559b2bccfeb89050710c80c0557170d9f41eff74c34eb151e5d828100
+build.gradle	15d72589ad2bf88593eb855d6470a9784a4eb38d8d338d29ecde66f21c726e00
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlAccess.java	502d3c6cf520fc58343ebe641f06bdb79d6cdf18695e5f7455149d7538724284
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlOperations.java	33f580c9fb3f51439d7359bf8d2f433f091ec91f72d35b79860f52347e1018f8
 src/main/java/ooo/klae/connex/backend/ai/AiFeatureGate.java	5e2602bee1b85d6f0a27b991ba3d323254f89b2d42ef21867551d7b88c57e6b9
@@ -22,7 +22,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantPromptAssembler.ja
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantScopeReadService.java	4591db5d7943e9b5d3ae8b2ef3393ade75f7470b2836e06a85ae88636f33767a
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantSessionReadAudit.java	c4309133fc2dfd0efc0775fa7f04006bf86e2c0051b1e83a4c86791cee4011ee
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantTerminalReasons.java	b0f245036bddfd8759e8c4e0657e6b60f3de1914a9d22c7fd79bf64a9ba781cb
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCallReadService.java	b8bc52891c39117c177139f833a396d720019f6a4ad4b4ff72a4415fb7768446
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCallReadService.java	466b77edae175881b4408f4f33d4d9142c12cb39c71dc2e4c540e955e466f081
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCatalog.java	ddce0a54475762ff65dbd49a0c3b236a4d7be2bdb0fb5c7aaa7b367043cd8f3f
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolExecutor.java	f051547e6cce9afd37fe7f1e6713ac188f82d51a3e4bc29ae0afd955a7f2ad32
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolsetLoader.java	dd350c63e58313552921f48fb67670eeb1960073e5b4353c08d25266468ebeb3
@@ -31,7 +31,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWorkBriefReadServi
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteFieldPolicy.java	f84f2c543597a85948fafc3f32e7977880138b7cec410ef554b1b0624e74fc9c
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteTool.java	cb12356177d5525aeb803471dcee47e76c5f173f6c33d5fe844aa0101cdf70fa
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolRegistry.java	d3db0a409f87b11346ac8eefaff647ac081243b37bd95db03f2d31d0444ab32b
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolService.java	5681c7189860d205f0b0e9236e731dbc868a03ac01892a21cb6b7b60394fd49c
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolService.java	d476722fe24988634b235c938480845e730298c88bfe6a5d8d9717493e5cb2f7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefRunService.java	b8708d8d569418ab3b7f6aa32d77aa6789bb3960de869385ed9e093315d0c8d7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefScheduleService.java	12f31731c51536385880133c98904430e4a1ea5d473553a52b48874e1a0e88c7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAgentLoopService.java	669dff502fd101d5123e0d46cb5d87a327bf7fed26eff42c6a2938637870bb9a
@@ -42,7 +42,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatRecordObservation.java	
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatScopeCalendar.java	7a98d45b2af4333f5b54cff27a38697d52158542d87c865e98664e6a302e52e0
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatScopePeriod.java	afb38e8f897f5a0c76ad5908563ac6edc278a160e825942a3a65fdb0527bd804
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnOrphanSettlementService.java	a837755c7a5b5b01b1594e20138cc2916f0664e135fec3202d90b22a2b5c1655
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java	e47f778af8a1d97be4c92e165dbbb7d49051031b2a503eaad2fdabea29c7cdd1
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java	827c09e7b8f6f3e870953098bde5e0b2d18e1252a0968b9d5e6e6ff366ef2e2f
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnTerminalCoordinator.java	5229e2fee23257a873ed5d64d3447fae4bd15ac44c33335454feef7f2c755539
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiCommandCenterService.java	9aaf418b0c899a21dd000589791ec49564370ea6f6cee08743d4e039fbbc261f
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiSkillCatalog.java	9e9f4d846f320597a9764e4109e9d47830d08092595d1e09997129bf64c8d174

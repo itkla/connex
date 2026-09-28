@@ -45,13 +45,4 @@ public record AiAssistantToolCallRef(int stepNumber, int callOrdinal) {
                             + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
         }
     }
-
-    /**
-     * Renders the durable idempotency-key suffix this call owns.
-     *
-     * @return the empty string for the sole call of a step, and {@code -call-k} otherwise
-     */
-    public String keySuffix() {
-        return callOrdinal == SOLE_CALL ? "" : "-call-" + callOrdinal;
-    }
 }

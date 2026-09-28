@@ -893,51 +893,6 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void proposalReadsReturnOnlyAuthorizedResolvedArguments() throws Exception {
-        User owner = new User();
-        owner.setId(21);
-        owner.setDisplayName("Grace Hopper");
-        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
-        Company company = new Company();
-        company.setId(52);
-        company.setName("Analytical Engines");
-        when(companyService.getCompanyById(52)).thenReturn(company);
-        AiAssistantPreparedWrite write = prepared(
-                "assign_owner",
-                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
-                "company",
-                52);
-        stored(write, 29);
-        when(chatMapper.listPendingToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of(storedToolCall));
-
-        var listed = service.listPendingProposals(TURN.sessionId());
-        var detail = service.getPendingProposal(TURN.sessionId(), 29);
-
-        assertEquals(1, listed.size());
-        assertEquals("Analytical Engines", detail.target().name());
-        assertEquals("Grace Hopper", detail.arguments().get("owner").asString());
-        assertFalse(detail.arguments().has("handle"));
-        assertFalse(detail.arguments().has("idempotency_key"));
-    }
-
-    @Test
-    void proposalReadsRefuseOtherTenantAndNonParticipantCallers() {
-        when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(null);
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> service.listPendingProposals(TURN.sessionId()));
-
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(99);
-        when(workspaceService.getCurrentUserId()).thenReturn(77);
-        when(chatMapper.getAccessibleSessionById(99, 77, TURN.sessionId())).thenReturn(null);
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> service.getPendingProposal(TURN.sessionId(), 29));
-    }
-
-    @Test
     void otherTenantAndUnauthorizedActorsFailBeforeDomainExecution() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(99);
         when(workspaceService.getCurrentUserId()).thenReturn(77);

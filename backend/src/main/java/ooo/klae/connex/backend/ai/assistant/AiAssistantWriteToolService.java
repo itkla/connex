@@ -48,7 +48,6 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
-import ooo.klae.connex.backend.dto.AiAssistantToolProposalDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -161,35 +160,6 @@ public class AiAssistantWriteToolService {
                 proposal.id(), write.toolName(), write.tier().name().toLowerCase(),
                 write.tier() == ToolTier.CONFIRM ? "approval_required" : proposal.status(),
                 null);
-    }
-
-    /** Returns every pending confirm-tier proposal visible in one authorized session. */
-    @Transactional(readOnly = true)
-    public List<AiAssistantToolProposalDto> listPendingProposals(int sessionId) {
-        Actor actor = currentActor();
-        requireReadableSession(actor, sessionId);
-        return chatMapper.listPendingToolCallsBySession(actor.workspaceId(), sessionId).stream()
-                .map(toolCall -> new ProposalRead(toolCall, readStored(toolCall)))
-                .filter(proposal -> proposal.write().tier() == ToolTier.CONFIRM)
-                .map(proposal -> proposalDto(proposal.toolCall(), proposal.write()))
-                .toList();
-    }
-
-    /** Returns one pending confirm-tier proposal from an authorized session. */
-    @Transactional(readOnly = true)
-    public AiAssistantToolProposalDto getPendingProposal(int sessionId, int toolCallId) {
-        Actor actor = currentActor();
-        requireReadableSession(actor, sessionId);
-        AiChatToolCall toolCall = chatMapper.getToolCallBySession(
-                actor.workspaceId(), sessionId, toolCallId);
-        if (toolCall == null || !PROPOSED.equals(toolCall.getStatus())) {
-            throw inaccessible();
-        }
-        StoredWrite write = readStored(toolCall);
-        if (write.tier() != ToolTier.CONFIRM) {
-            throw inaccessible();
-        }
-        return proposalDto(toolCall, write);
     }
 
     /** Executes or replays one auto-tier proposal while the originating turn remains active. */
@@ -651,15 +621,6 @@ public class AiAssistantWriteToolService {
         return () -> workspaceService.getMembers(workspaceId);
     }
 
-    private void requireReadableSession(Actor actor, int sessionId) {
-        workspaceService.requirePermission(
-                actor.workspaceId(), actor.userId(), Permission.AI_USE);
-        if (chatMapper.getAccessibleSessionById(
-                actor.workspaceId(), actor.userId(), sessionId) == null) {
-            throw inaccessible();
-        }
-    }
-
     private PreparedMutation lockMutationTarget(StoredWrite write) {
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
         if (declared.isPresent()) {
@@ -982,66 +943,6 @@ public class AiAssistantWriteToolService {
         return matches.getFirst();
     }
 
-    private AiAssistantToolProposalDto proposalDto(
-            AiChatToolCall toolCall, StoredWrite write) {
-        ObjectNode arguments = objectMapper.createObjectNode();
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            Resolution resolution = declared.get().resolve(
-                    new Target(write.targetKind(), write.targetId()), write.typedRequest());
-            if (resolution == null) {
-                throw inaccessible();
-            }
-            arguments.put(resolution.field(), resolution.label());
-        } else if ("assign_owner".equals(write.toolName())) {
-            arguments.put(
-                    "owner",
-                    resolveOwnerAssignment(request(write, AssignOwner.class).owner()).label());
-        } else {
-            throw inaccessible();
-        }
-        return new AiAssistantToolProposalDto(
-                toolCall.getId(),
-                write.toolName(),
-                write.tier().name().toLowerCase(),
-                toolCall.getStatus(),
-                proposalTarget(write),
-                arguments);
-    }
-
-    private AiAssistantToolProposalDto.Target proposalTarget(StoredWrite write) {
-        return switch (write.targetKind()) {
-            case "person" -> {
-                Person person = personService.getPersonById(write.targetId());
-                if (person.getSuspendedAt() != null
-                        || person.getProvisionCeasedAt() != null
-                        || person.getArchivedAt() != null) {
-                    throw inaccessible();
-                }
-                yield new AiAssistantToolProposalDto.Target(
-                        "person", person.getId(), requireLabel(person.getName()));
-            }
-            case "company" -> {
-                Company company = companyService.getCompanyById(write.targetId());
-                yield new AiAssistantToolProposalDto.Target(
-                        "company", company.getId(), requireLabel(company.getName()));
-            }
-            case "deal" -> {
-                Deal deal = dealService.getDealById(write.targetId());
-                yield new AiAssistantToolProposalDto.Target(
-                        "deal", deal.getId(), requireLabel(deal.getName()));
-            }
-            default -> throw inaccessible();
-        };
-    }
-
-    private static String requireLabel(String label) {
-        if (label == null || label.isBlank()) {
-            throw inaccessible();
-        }
-        return label;
-    }
-
     private OwnerAssignment resolveOwnerAssignment(String owner) {
         if ("unassigned".equalsIgnoreCase(owner.trim())) {
             return new OwnerAssignment(null, "unassigned");
@@ -1197,11 +1098,6 @@ public class AiAssistantWriteToolService {
             long restrictionEpoch,
             JsonNode request,
             AiAssistantWriteToolRequest typedRequest) {
-    }
-
-    private record ProposalRead(
-            AiChatToolCall toolCall,
-            StoredWrite write) {
     }
 
     private record OwnerAssignment(
