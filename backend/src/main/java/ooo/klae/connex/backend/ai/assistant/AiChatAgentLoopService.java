@@ -775,10 +775,12 @@ public class AiChatAgentLoopService {
      * <p>A step's replay exchanges are all or nothing. If any call ends the batch early — a lost
      * owner, a passed deadline, a closable or non-recoverable refusal, or an exception — the step's
      * replayed turns and recorded calls are discarded before the loop moves on, so no assistant
-     * message is ever replayed carrying fewer calls than the model emitted. Calls that already ran
-     * keep their committed durable rows; only their results leave the replay, as a single call's
-     * result does when it cannot be admitted. The whole batch then counts as one unit of the
-     * no-progress guard.
+     * message is ever replayed carrying fewer calls than the model emitted, and the record handles
+     * and identifier placeholders its calls issued are withdrawn to where they stood when the batch
+     * was admitted, so the closing answer cannot cite or name what those calls read. Calls that
+     * already ran keep their committed durable rows; only their results leave the replay, as a
+     * single call's result does when it cannot be admitted. The whole batch then counts as one unit
+     * of the no-progress guard.
      *
      * @param context the per-turn surfaces every tool call of the turn executes against
      * @param stepNumber the durable number of the model step the batch belongs to
@@ -793,20 +795,24 @@ public class AiChatAgentLoopService {
             boolean closingAttempted,
             AiAssistantStepCalls stepCalls,
             TurnToolState state) {
+        StepCheckpoint admitted = new StepCheckpoint(
+                stepNumber,
+                context.resources().checkpoint(),
+                context.maskingContext().checkpoint());
         try {
             for (AiAssistantStepCalls.Call call : stepCalls.calls()) {
                 String toolName = call.tool().name();
                 if (toolCatalog.isKnown(toolName)
                         && !toolCatalog.isLoaded(toolName, state.loadedToolsets)) {
                     return refuseStep(
-                            context, stepNumber, closingAttempted, stepCalls, state,
+                            context, admitted, closingAttempted, stepCalls, state,
                             TOOL_NOT_LOADED, false);
                 }
             }
             String refusal = batchRefusal(stepCalls);
             if (refusal != null) {
                 return refuseStep(
-                        context, stepNumber, closingAttempted, stepCalls, state, refusal, true);
+                        context, admitted, closingAttempted, stepCalls, state, refusal, true);
             }
             BatchProgress progress = new BatchProgress();
             AiChatResourceRegistry issuedResources = context.resources().issued();
@@ -815,13 +821,13 @@ public class AiChatAgentLoopService {
                         context, stepNumber, closingAttempted, true, call, state, progress,
                         issuedResources);
                 if (!(outcome instanceof StepCallOutcome.Continue)) {
-                    discardStep(state, stepNumber);
+                    discardStep(context, state, admitted);
                     return outcome;
                 }
             }
             return progress.settle(state) ? noProgressOutcome(closingAttempted) : CONTINUE;
         } catch (RuntimeException exception) {
-            discardStep(state, stepNumber);
+            discardStep(context, state, admitted);
             throw exception;
         }
     }
@@ -862,7 +868,7 @@ public class AiChatAgentLoopService {
      * an unreplayed one leaves the step no exchange at all. The step costs one no-progress unit.
      *
      * @param context the per-turn surfaces every tool call of the turn executes against
-     * @param stepNumber the durable number of the refused step
+     * @param admitted the refused step and the turn's state when its batch was admitted
      * @param closingAttempted whether the turn already spent its closing step
      * @param stepCalls the step's calls
      * @param state the turn's tool state
@@ -872,20 +878,21 @@ public class AiChatAgentLoopService {
      */
     private StepCallOutcome refuseStep(
             ToolExecutionContext context,
-            int stepNumber,
+            StepCheckpoint admitted,
             boolean closingAttempted,
             AiAssistantStepCalls stepCalls,
             TurnToolState state,
             String reason,
             boolean replayed) {
         AiChatQueuedTurn turn = context.turn();
+        int stepNumber = admitted.stepNumber();
         for (AiAssistantStepCalls.Call call : stepCalls.calls()) {
             if (context.ownership().isStopped()) {
-                discardStep(state, stepNumber);
+                discardStep(context, state, admitted);
                 return new StepCallOutcome.Fail(AiAssistantTerminalReasons.OWNER_LOST);
             }
             if (deadlineReached(context.deadline())) {
-                discardStep(state, stepNumber);
+                discardStep(context, state, admitted);
                 return new StepCallOutcome.TimedOut("turn_deadline_exceeded");
             }
             requireCurrentAccess(turn);
@@ -917,7 +924,7 @@ public class AiChatAgentLoopService {
                             context.maskingContext(), context.budget());
                     state.toolTurns.add(refusedTurn);
                 } catch (AiAssistantLoopException capacity) {
-                    discardStep(state, stepNumber);
+                    discardStep(context, state, admitted);
                     if (!closingAttempted
                             && CLOSABLE_REASONS.contains(capacity.terminalReason())) {
                         return new StepCallOutcome.Close(capacity.terminalReason());
@@ -933,17 +940,37 @@ public class AiChatAgentLoopService {
     }
 
     /**
-     * Removes one step's replayed turns and recorded calls, so the step replays nothing at all.
+     * Returns an abandoned batch's step to nothing: the step replays nothing at all, and nothing
+     * its calls issued can be cited or named by a later answer.
      *
-     * <p>Keyed on the step number rather than on list positions: nothing else in the turn shares
-     * that number, and removal by key cannot miss a turn some later code path inserted elsewhere.
+     * <p>The step's replayed turns and recorded calls are removed by step number rather than by
+     * list position: nothing else in the turn shares that number, and removal by key cannot miss a
+     * turn some later code path inserted elsewhere. The record handles and identifier placeholders
+     * its executed calls issued are then withdrawn to the checkpoints taken when the batch was
+     * admitted. The closing request carries none of those calls' results, so an answer citing one
+     * of those handles, or naming one of those placeholders, is refused exactly as one citing a
+     * handle or naming a placeholder the turn never issued; left issued, final validation would
+     * accept a record or a value the model was never shown.
      *
+     * <p>The rest of the turn's tool state is left on purpose. Every discard ends the turn or hands
+     * it to the closing step, which executes no tool, so the result cache and the no-progress
+     * guard's seen results are never consulted again. A batch never carries {@code find_tools}, so
+     * it cannot have widened the loaded toolsets. A plan a batch published was sent to the
+     * requester and settled executed, and is the model's own text, so it stays. Committed durable
+     * rows and published frames stay because the reads really happened; only their results leave
+     * the replay. A step's only call is never discarded this way, and keeps what it issued.
+     *
+     * @param context the per-turn surfaces the batch executed against
      * @param state the turn's tool state
-     * @param stepNumber the abandoned step
+     * @param admitted the abandoned step and the turn's state when its batch was admitted
      */
-    private static void discardStep(TurnToolState state, int stepNumber) {
+    private static void discardStep(
+            ToolExecutionContext context, TurnToolState state, StepCheckpoint admitted) {
+        int stepNumber = admitted.stepNumber();
         state.toolTurns.removeIf(turn -> turn.seq() == stepNumber);
         state.nativeCalls.keySet().removeIf(ref -> ref.stepNumber() == stepNumber);
+        context.resources().restore(admitted.handles());
+        context.maskingContext().restore(admitted.placeholders());
     }
 
     /**
@@ -1895,6 +1922,20 @@ public class AiChatAgentLoopService {
                         true);
             }
         };
+    }
+
+    /**
+     * Where a batched step stood when it was admitted, so an abandoned batch can be returned there.
+     *
+     * @param stepNumber the durable number of the batched step
+     * @param handles the turn's record handles as issued before any call of the batch ran
+     * @param placeholders the turn's identifier placeholders as bound before any call of the batch
+     *     ran
+     */
+    private record StepCheckpoint(
+            int stepNumber,
+            AiChatResourceRegistry.Checkpoint handles,
+            MaskingContext.Checkpoint placeholders) {
     }
 
     /**

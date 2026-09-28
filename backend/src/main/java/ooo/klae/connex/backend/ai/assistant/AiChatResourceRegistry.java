@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -16,6 +18,7 @@ public final class AiChatResourceRegistry {
     private final Map<String, ResourceRef> resources = new LinkedHashMap<>();
     private final Map<ResourceRef, String> handles = new LinkedHashMap<>();
     private final MaskingContext maskingContext;
+    private int lastIssued;
 
     /** Creates a registry without a shared masked request context. */
     public AiChatResourceRegistry() {
@@ -42,7 +45,8 @@ public final class AiChatResourceRegistry {
         if (existing != null) {
             return existing;
         }
-        String handle = "r" + (resources.size() + 1);
+        lastIssued++;
+        String handle = "r" + lastIssued;
         handles.put(resource, handle);
         resources.put(handle, resource);
         return handle;
@@ -98,10 +102,70 @@ public final class AiChatResourceRegistry {
         AiChatResourceRegistry copy = new AiChatResourceRegistry(maskingContext);
         copy.resources.putAll(resources);
         copy.handles.putAll(handles);
+        copy.lastIssued = lastIssued;
         return copy;
+    }
+
+    /**
+     * Marks the handles issued so far, so {@link #restore} can later withdraw every handle issued
+     * after this point.
+     *
+     * @return a checkpoint only this registry accepts
+     */
+    Checkpoint checkpoint() {
+        return new Checkpoint(this, resources.size());
+    }
+
+    /**
+     * Withdraws every handle issued after a checkpoint, so the registry resolves exactly the
+     * handles it resolved when the checkpoint was taken.
+     *
+     * <p>A batched step abandoned part-way leaves the replay with none of its results, so the
+     * handles its executed calls minted name records the model was never shown. Left issued, a
+     * closing answer could cite or link one of them — they are short and sequential, so it only
+     * has to guess — and final citation validation would accept it. Handles are issued in order and
+     * never withdrawn any other way, so the handles issued after a checkpoint are exactly the
+     * entries past its position.
+     *
+     * <p>The issue counter is deliberately not rewound. A withdrawn handle is still named by the
+     * abandoned calls' committed durable rows and can still be guessed, so it must stay unknown for
+     * the rest of the turn rather than be issued again for a different record.
+     *
+     * @param checkpoint a checkpoint this registry issued
+     * @throws IllegalArgumentException when the checkpoint belongs to another registry, or names
+     *     more handles than this registry still holds because an earlier restore withdrew them
+     */
+    void restore(Checkpoint checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        if (checkpoint.registry != this || checkpoint.issued > resources.size()) {
+            throw new IllegalArgumentException(
+                    "Assistant resource checkpoint does not belong to this registry");
+        }
+        Iterator<Map.Entry<String, ResourceRef>> issued = resources.entrySet().iterator();
+        int kept = 0;
+        while (issued.hasNext()) {
+            Map.Entry<String, ResourceRef> entry = issued.next();
+            if (kept < checkpoint.issued) {
+                kept++;
+                continue;
+            }
+            handles.remove(entry.getValue());
+            issued.remove();
+        }
     }
 
     MaskingContext maskingContext() {
         return maskingContext;
+    }
+
+    /** A position in one registry's issue order, which only that registry can restore to. */
+    static final class Checkpoint {
+        private final AiChatResourceRegistry registry;
+        private final int issued;
+
+        private Checkpoint(AiChatResourceRegistry registry, int issued) {
+            this.registry = registry;
+            this.issued = issued;
+        }
     }
 }

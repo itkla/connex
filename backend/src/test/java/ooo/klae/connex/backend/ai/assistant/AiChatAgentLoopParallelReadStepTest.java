@@ -50,6 +50,8 @@ import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
+import ooo.klae.connex.backend.ai.masking.Demasker;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -86,6 +88,10 @@ class AiChatAgentLoopParallelReadStepTest {
             1L);
     private static final AiAssistantPromptBudget BUDGET =
             new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000);
+    private static final Map<String, Integer> SEARCH_DEALS =
+            Map.of("alpha", 41, "beta", 42, "gamma", 43);
+    private static final Map<String, String> SEARCH_CONTACTS =
+            Map.of("alpha", "Mina Patel", "beta", "Jane Roe", "gamma", "Omar Haddad");
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiInvocationService invocationService;
@@ -693,6 +699,101 @@ class AiChatAgentLoopParallelReadStepTest {
     }
 
     /**
+     * A handle an abandoned batch's earlier call issued cannot be cited by the closing answer.
+     *
+     * <p>The first search mints {@code r1} and is admitted; the second cannot be admitted to the
+     * replay, which is closable, so the step leaves the replay whole and the closing request
+     * carries neither result. A closing answer citing {@code r1} therefore names a record the
+     * model was never shown, and must be refused exactly as a citation of a handle the turn never
+     * issued is, before any assistant message is committed.
+     */
+    @Test
+    void aHandleAnAbandonedBatchIssuedCannotBeCitedByTheClosingAnswer() throws Exception {
+        searchesIssueTheirOwnRecords(new ArrayList<>());
+        refuseReplayAdmission(1, 2);
+        answers(
+                batch(
+                        new AiToolCall("call_1", "search_records", search("alpha")),
+                        new AiToolCall("call_2", "search_records", search("beta"))),
+                finalAnswerCiting("r1"));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        verify(toolExecutor, times(2)).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        AiNativeToolRequest closing = requests().getLast();
+        assertTrue(closing.finalOnly(), "an abandoned batch must go to the closing step");
+        assertEquals(List.of(), closing.exchanges());
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * An abandoned batch leaves the turn's handles exactly as they stood before it was admitted.
+     *
+     * <p>A lone search issues {@code r1}. The next step's batch issues {@code r2} and {@code r3},
+     * then its second call cannot be admitted to the replay. The answer the closing step settles
+     * records, as the handles the turn resolved, only {@code r1}: the batch's handles are
+     * withdrawn with its replay, so the durable metadata a later turn re-authorizes against names
+     * no record the model was never shown.
+     */
+    @Test
+    void anAbandonedBatchLeavesTheTurnsHandlesExactlyAsTheyStoodBeforeIt() throws Exception {
+        searchesIssueTheirOwnRecords(new ArrayList<>());
+        refuseReplayAdmission(2, 2);
+        answers(
+                nativeTool("call_0", "search_records", search("alpha")),
+                batch(
+                        new AiToolCall("call_1", "search_records", search("beta")),
+                        new AiToolCall("call_2", "search_records", search("gamma"))),
+                finalAnswerCiting("r1"));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor, times(3)).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), any(), metadata.capture(), anyInt(), anyInt());
+        assertEquals(
+                objectMapper.readTree("[{\"handle\":\"r1\",\"kind\":\"deal\",\"id\":41}]"),
+                objectMapper.readTree(metadata.getValue()).get("resources"));
+    }
+
+    /**
+     * A placeholder an abandoned batch's earlier call seeded is unbound for the closing answer.
+     *
+     * <p>A lone search seeds its contact's placeholder. The next step's batch seeds a second
+     * contact's when its first call is admitted, then its second call cannot be admitted to the
+     * replay. The closing request carries neither of the batch's results, so the second contact's
+     * placeholder must demask as an invented one rather than into a name the model was never
+     * shown, while the first contact's still demasks.
+     */
+    @Test
+    void aPlaceholderAnAbandonedBatchSeededIsUnboundForTheClosingAnswer() throws Exception {
+        List<Map.Entry<String, String>> bindingsSeen = new ArrayList<>();
+        searchesIssueTheirOwnRecords(bindingsSeen);
+        refuseReplayAdmission(2, 2);
+        answers(
+                nativeTool("call_0", "search_records", search("alpha")),
+                batch(
+                        new AiToolCall("call_1", "search_records", search("beta")),
+                        new AiToolCall("call_2", "search_records", search("gamma"))),
+                finalAnswer());
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        String kept = tokenBoundTo(bindingsSeen, "Mina Patel");
+        String withdrawn = tokenBoundTo(bindingsSeen, "Jane Roe");
+        MaskingContext closing = invocations().getLast().context();
+        assertEquals(new Demasker.DemaskResult("Mina Patel", 0), Demasker.demask(kept, closing));
+        assertEquals(1, Demasker.demask(withdrawn, closing).warnings(),
+                "a placeholder only an abandoned call's result carried must count as invented");
+    }
+
+    /**
      * A plan published past the turn's allowance inside a batch refuses only that call.
      *
      * <p>Two four-plan batches spend the whole allowance. A third batch pairs one more plan with
@@ -758,6 +859,53 @@ class AiChatAgentLoopParallelReadStepTest {
                 retry.repairMessage());
     }
 
+    /**
+     * Scripts every search to mint a handle for its own deal and to name its own contact, so a
+     * test can tell which call issued which handle and which placeholder.
+     *
+     * @param bindingsSeen collects the turn's placeholder bindings as each search starts, so a
+     *     test can learn a placeholder a later restore withdraws
+     */
+    private void searchesIssueTheirOwnRecords(List<Map.Entry<String, String>> bindingsSeen) {
+        doAnswer(invocation -> {
+            JsonNode arguments = invocation.getArgument(1);
+            AiChatResourceRegistry resources = invocation.getArgument(2);
+            bindingsSeen.addAll(resources.maskingContext().tokenBindings());
+            String query = arguments.path("query").asString();
+            return new AiAssistantToolResult(
+                    Map.of("records", List.of(resources.register("deal", SEARCH_DEALS.get(query)))),
+                    List.of(new AiAssistantToolResult.Identifier(
+                            "person", SEARCH_CONTACTS.get(query))));
+        }).when(toolExecutor).execute(
+                eq("search_records"), any(), any(), any(Boolean.class), any());
+    }
+
+    /**
+     * Refuses one call's admission to the replay as the budget would, after that call ran.
+     *
+     * @param stepNumber the step of the refused call
+     * @param callOrdinal the refused call's position in its step
+     */
+    private void refuseReplayAdmission(int stepNumber, int callOrdinal) {
+        doAnswer(invocation -> {
+            AiAssistantPromptAssembler.ToolTurn prospective = invocation.getArgument(1);
+            if (prospective.seq() == stepNumber && prospective.call() == callOrdinal) {
+                throw new AiAssistantLoopException(
+                        "tool_result_budget_exhausted", "tool_result_budget_exhausted");
+            }
+            return invocation.callRealMethod();
+        }).when(promptAssembler).requireAdditionalNativeExchangeCapacity(
+                any(), any(), any(), any(), any());
+    }
+
+    private static String tokenBoundTo(List<Map.Entry<String, String>> bindings, String value) {
+        return bindings.stream()
+                .filter(binding -> binding.getValue().equals(value))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElseThrow();
+    }
+
     private void useBudget(AiAssistantPromptBudget budget) {
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(TURN.userMessageId());
@@ -818,6 +966,17 @@ class AiChatAgentLoopParallelReadStepTest {
         for (AiNativeToolCompletion<AiAssistantStep.FinalAnswer> response : responses) {
             stubbing = stubbing.thenReturn(response);
         }
+    }
+
+    private List<AiInvocation> invocations() {
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, atLeastOnce())
+                .completeNativeToolsRepairable(
+                        invocations.capture(), eq(AiAssistantStep.FinalAnswer.class),
+                        any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                        any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                        eq(directAdmission), any(Runnable.class));
+        return List.copyOf(invocations.getAllValues());
     }
 
     private List<AiNativeToolRequest> requests() {
@@ -881,10 +1040,16 @@ class AiChatAgentLoopParallelReadStepTest {
     }
 
     private static AiNativeToolCompletion<AiAssistantStep.FinalAnswer> finalAnswer() {
+        return finalAnswerCiting();
+    }
+
+    private static AiNativeToolCompletion<AiAssistantStep.FinalAnswer> finalAnswerCiting(
+            String... handles) {
         return new AiNativeToolCompletion.Content<>(
                 new AiStructuredRepairAttempt<>(
                         new AiStructuredOutcome.Parsed<>(
-                                new AiAssistantStep.FinalAnswer("Nothing needs attention.", List.of()),
+                                new AiAssistantStep.FinalAnswer(
+                                        "Nothing needs attention.", List.of(handles)),
                                 0, 3, 5, "stop"),
                         Optional.empty()),
                 3,

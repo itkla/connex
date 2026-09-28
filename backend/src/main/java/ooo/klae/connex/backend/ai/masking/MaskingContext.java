@@ -210,6 +210,63 @@ public final class MaskingContext {
                 .collect(Collectors.toUnmodifiableList());
     }
 
+    /**
+     * Marks the identifier bindings issued so far, so {@link #restore} can later withdraw every
+     * binding issued after this point.
+     *
+     * @return a checkpoint only this context accepts
+     */
+    public Checkpoint checkpoint() {
+        return new Checkpoint(
+                this,
+                tokenToOriginalValue.size(),
+                rawIdentifierEntries.size(),
+                unsafeIdentifierValues.size());
+    }
+
+    /**
+     * Withdraws every identifier binding issued after a checkpoint, so the context binds exactly
+     * the placeholders it bound when the checkpoint was taken.
+     *
+     * <p>A batched assistant step abandoned part-way leaves the replay with none of its results,
+     * so the placeholders its executed calls seeded stand for values the model was never shown.
+     * Left bound, a closing answer could name one — placeholders are short and sequential — and it
+     * would demask cleanly into a real value instead of counting as an invented placeholder.
+     * Bindings are only ever added, in order, so the ones issued after a checkpoint are exactly
+     * the entries past its position in each ordered collection.
+     *
+     * <p>A restore is sound only while no outbound request has carried a withdrawn binding, because
+     * the provider could otherwise answer with a placeholder it was legitimately shown; the
+     * assistant loop restores before it assembles its next request. The per-kind placeholder
+     * counters are deliberately not rewound: a withdrawn placeholder may still sit in the abandoned
+     * calls' committed durable rows and can still be guessed, so it must stay unbound for as long as
+     * this context lives rather than be issued again for another value.
+     *
+     * @param checkpoint a checkpoint this context issued
+     * @throws IllegalArgumentException when the checkpoint belongs to another context, or names
+     *     more bindings than this context still holds because an earlier restore withdrew them
+     */
+    public void restore(Checkpoint checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        if (checkpoint.context != this
+                || checkpoint.tokens > tokenToOriginalValue.size()
+                || checkpoint.identifiers > rawIdentifierEntries.size()
+                || checkpoint.unsafeIdentifiers > unsafeIdentifierValues.size()) {
+            throw new IllegalArgumentException(
+                    "Masking checkpoint does not belong to this context");
+        }
+        for (String token : withdrawn(tokenToOriginalValue.keySet(), checkpoint.tokens)) {
+            originalValueToToken.remove(tokenToOriginalValue.remove(token));
+            tokenToKind.remove(token);
+        }
+        for (String rawValue : withdrawn(rawIdentifierEntries.keySet(), checkpoint.identifiers)) {
+            rawIdentifierEntries.remove(rawValue);
+            identifierDictionary.remove(rawValue);
+        }
+        unsafeIdentifierValues.removeAll(
+                withdrawn(unsafeIdentifierValues, checkpoint.unsafeIdentifiers));
+    }
+
     @Override
     public String toString() {
         return "MaskingContext{redacted}";
@@ -223,9 +280,29 @@ public final class MaskingContext {
         return List.copyOf(rawIdentifierEntries.values());
     }
 
+    private static List<String> withdrawn(Set<String> ordered, int kept) {
+        return ordered.stream().skip(kept).toList();
+    }
+
     private String nextToken(EntityKind kind) {
         int next = tokenCounts.merge(kind, 1, Integer::sum);
         return "{{" + kind.tokenPrefix() + next + "}}";
+    }
+
+    /** A position in one context's binding order, which only that context can restore to. */
+    public static final class Checkpoint {
+        private final MaskingContext context;
+        private final int tokens;
+        private final int identifiers;
+        private final int unsafeIdentifiers;
+
+        private Checkpoint(
+                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers) {
+            this.context = context;
+            this.tokens = tokens;
+            this.identifiers = identifiers;
+            this.unsafeIdentifiers = unsafeIdentifiers;
+        }
     }
 
     record IdentifierEntry(
