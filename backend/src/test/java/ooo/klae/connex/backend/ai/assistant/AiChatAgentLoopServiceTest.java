@@ -3028,10 +3028,8 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
-     * The step a turn now spends before it can reach anything outside core.
-     *
-     * <p>Every turn starts from {@code CORE}, so a trajectory that ends in a non-core tool has to
-     * open with this call; that extra step is the behaviour change these tests are pinning.
+     * Builds the loop with the test's collaborators but a substitute toolset loader, so a test can
+     * observe or replace what the {@code find_tools} load step receives.
      */
     private AiChatAgentLoopService serviceWith(AiAssistantToolsetLoader toolsetLoader) {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -3063,6 +3061,12 @@ class AiChatAgentLoopServiceTest {
                 clock);
     }
 
+    /**
+     * The step a turn now spends before it can reach anything outside core.
+     *
+     * <p>Every turn starts from {@code CORE}, so a trajectory that ends in a non-core tool has to
+     * open with this call; that extra step is the behaviour change these tests are pinning.
+     */
     private AiAssistantStep loadStep(String toolset) throws JacksonException {
         return toolStep(
                 AiAssistantToolCatalog.FIND_TOOLS, "{\"toolset\":\"" + toolset + "\"}");
