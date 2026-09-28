@@ -250,29 +250,65 @@ test.describe('permission denied — real RBAC, not injected', () => {
     }
 });
 
-/** What each member-admitted route must render, proving the admission rather than a silent refusal. */
-const MEMBER_ADMISSIONS: ReadonlyMap<string, (page: Page) => Promise<void>> = new Map([
-    ['org-diagnostics', async (page: Page) => {
-        await expect(
-            page.locator('[data-app-main]'),
-            'a member with organization standing must not be shown the organization refusal',
-        ).not.toContainText(message(DESKTOP.locale, 'organization', 'Organization.noAccessTitle'));
-        await expect(page.locator('[data-app-main] [id="audit"]')).toContainText(
-            message(DESKTOP.locale, 'organization', 'OrgAudit.title'),
-        );
-        await expect(
-            page.locator('[data-app-main] [id="diagnostics"]').getByRole('button', {
-                name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
-                exact: true,
-            }),
-            'the organization diagnostics panel must load for a member with organization standing',
-        ).toBeVisible();
+/**
+ * What each member-admitted route must render, proving the admission rather than a silent refusal.
+ *
+ * `protectedReads` are the browser-visible API reads the admitted content depends on; each must be
+ * requested and answer 200, so a panel that keeps its chrome over a failed read cannot pass as
+ * admitted. A route whose protected read happens on the server has none, and proves the read through
+ * its rendered content and the absence of the segment error state instead.
+ */
+type MemberAdmission = {
+    protectedReads: readonly RegExp[];
+    expectContent: (page: Page) => Promise<void>;
+};
+
+const MEMBER_ADMISSIONS: ReadonlyMap<string, MemberAdmission> = new Map([
+    ['org-diagnostics', {
+        protectedReads: [/^\/api\/orgs\/\d+\/audit$/, /^\/api\/orgs\/\d+\/diagnostics$/],
+        expectContent: async (page: Page) => {
+            const audit = page.locator('[data-app-main] [id="audit"]');
+            const diagnostics = page.locator('[data-app-main] [id="diagnostics"]');
+            await expect(
+                page.locator('[data-app-main]'),
+                'a member with organization standing must not be shown the organization refusal',
+            ).not.toContainText(message(DESKTOP.locale, 'organization', 'Organization.noAccessTitle'));
+            await expect(audit).toContainText(message(DESKTOP.locale, 'organization', 'OrgAudit.title'));
+            await expect(audit.locator('.animate-pulse'), 'the audit log must settle, not stay loading').toHaveCount(0);
+            await expect(
+                audit,
+                'an admitted audit log must load, not fall back to its error state',
+            ).not.toContainText(message(DESKTOP.locale, 'organization', 'OrgAudit.loadError'));
+            await expect(
+                diagnostics.getByRole('button', {
+                    name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
+                    exact: true,
+                }),
+                'the organization diagnostics panel must settle for a member with organization standing',
+            ).toBeVisible();
+            await expect(
+                diagnostics.getByRole('button', {
+                    name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.retry'),
+                    exact: true,
+                }),
+                'an admitted diagnostics report must load, not offer a retry over a failure',
+            ).toHaveCount(0);
+            await expect(diagnostics).not.toContainText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.loadFailed'));
+            await expect(diagnostics).not.toContainText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'));
+        },
     }],
-    ['products', async (page: Page) => {
-        await expect(
-            page.getByRole('heading', { level: 1, name: message(DESKTOP.locale, 'products', 'ProductsBrowser.title'), exact: true }),
-            'the product catalog is readable by every workspace member',
-        ).toBeVisible();
+    ['products', {
+        protectedReads: [],
+        expectContent: async (page: Page) => {
+            await expect(
+                page.locator('[data-app-main]'),
+                'the server-side catalog read must succeed rather than fall into the segment error state',
+            ).not.toContainText(message(DESKTOP.locale, 'errors', 'ErrorState.title'));
+            await expect(
+                page.getByRole('heading', { level: 1, name: message(DESKTOP.locale, 'products', 'ProductsBrowser.title'), exact: true }),
+                'the product catalog is readable by every workspace member',
+            ).toBeVisible();
+        },
     }],
 ]);
 
@@ -286,8 +322,13 @@ test.describe('permission admitted — gated-looking routes the seeded member le
             const page = await context.newPage();
             const faults = captureFaults(page);
             const responses = captureResponseFailures(page);
+            const protectedReads = admitted.protectedReads.map((pattern) => page.waitForResponse(
+                (candidate) => candidate.request().method() === 'GET' && pattern.test(new URL(candidate.url()).pathname),
+                { timeout: 30_000 },
+            ));
 
             const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' });
+            const readStatuses = await Promise.all(protectedReads.map(async (read) => (await read).status()));
             await page.waitForLoadState('networkidle').catch(() => undefined);
             const landing = await landingOf(page, route.path, route.landsOn);
             const denied = await page.locator(DENIED_MARKER).count();
@@ -302,13 +343,18 @@ test.describe('permission admitted — gated-looking routes the seeded member le
                 responseFailures: classifyResponseFailures(responses, { role: 'member' }),
                 httpStatus: response?.status() ?? null,
                 finalPath: landing.finalPath,
-                notes: `denial-markers=${denied} not-found-markers=${notFound}`,
+                notes: `denial-markers=${denied} not-found-markers=${notFound} protected-reads=${readStatuses.join(',')}`,
             });
 
+            expect(response?.status(), `${route.path} must answer its document with 200`).toBe(200);
+            expect(
+                readStatuses,
+                `every protected read ${route.path} depends on must succeed for an admitted member`,
+            ).toEqual(admitted.protectedReads.map(() => 200));
             expect(landing.ok, `an admitted member must land on the route itself — ${describeLanding(landing)}`).toBe(true);
             expect(denied, `${route.path} must not refuse a member it admits`).toBe(0);
             expect(notFound, `${route.path} must not read as a missing page`).toBe(0);
-            await admitted(page);
+            await admitted.expectContent(page);
             await context.close();
         });
     }
