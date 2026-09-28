@@ -35,7 +35,7 @@ public class AiAssistantWriteToolRegistry {
      * construction enforces, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to
      * it.
      */
-    static final Set<String> LEGACY_TOOLS = Set.of("add_tag", "assign_owner");
+    static final Set<String> LEGACY_TOOLS = Set.of("assign_owner");
 
     private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");

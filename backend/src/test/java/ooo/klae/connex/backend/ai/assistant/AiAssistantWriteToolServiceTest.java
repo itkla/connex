@@ -160,7 +160,9 @@ class AiAssistantWriteToolServiceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,

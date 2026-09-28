@@ -45,12 +45,14 @@ class AiAssistantWriteToolRegistryTest {
     void indexesTheDeclaredToolsInCatalogOrderWhateverOrderTheyWereDiscoveredIn() {
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
+                tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
-                List.of("create_activity", "create_task", "create_note", "change_deal_stage"),
+                List.of("create_activity", "create_task", "create_note", "add_tag",
+                        "change_deal_stage"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isEmpty());
@@ -63,9 +65,10 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateTaskWriteTool(null, null, null),
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
-                new AiAssistantCreateNoteWriteTool(null, null)));
+                new AiAssistantCreateNoteWriteTool(null, null),
+                new AiAssistantAddTagWriteTool(null, null, null, null)));
 
-        assertEquals(4, registry.tools().size());
+        assertEquals(5, registry.tools().size());
     }
 
     @Test
@@ -140,13 +143,15 @@ class AiAssistantWriteToolRegistryTest {
 
     @Test
     void refusesALegacyLedgerEntryForAToolThatNowHasABean() {
-        assertRefused("add_tag has a write-tool bean and must leave the legacy ledger",
+        assertRefused("assign_owner has a write-tool bean and must leave the legacy ledger",
                 List.of(
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
-                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal"))));
+                        tool("assign_owner", ToolTier.CONFIRM,
+                                Set.of("person", "company", "deal"))));
     }
 
     @Test
@@ -156,7 +161,15 @@ class AiAssistantWriteToolRegistryTest {
                 List.of(
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
-                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal"))));
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal"))));
+        assertRefused(
+                "add_tag is declared in the catalog but has no write-tool bean",
+                List.of(
+                        tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
         assertRefused(
                 "create_note is declared in the catalog but has no write-tool bean",
                 List.of(

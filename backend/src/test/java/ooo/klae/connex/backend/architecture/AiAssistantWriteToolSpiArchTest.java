@@ -31,9 +31,12 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.NoteService;
+import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import tools.jackson.databind.ObjectMapper;
 
@@ -73,7 +76,7 @@ class AiAssistantWriteToolSpiArchTest {
      * The legacy ledger's current ceiling. It shrinks with the ledger in every slice, so a tool
      * that moved onto the SPI can never rejoin it.
      */
-    private static final Set<String> LEGACY_LEDGER_CEILING = Set.of("add_tag", "assign_owner");
+    private static final Set<String> LEGACY_LEDGER_CEILING = Set.of("assign_owner");
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
@@ -104,6 +107,12 @@ class AiAssistantWriteToolSpiArchTest {
      * permissions. The activity tool's calendar read is not a dependency: the read-tool executor
      * holds a mapper and {@code WorkspaceService}, so the framework performs that read and hands
      * the tool only its answer, through {@code Execution.scheduleConflicts()}.
+     *
+     * <p>{@code TagService}, {@code PersonService} and {@code CompanyService} joined when
+     * {@code add_tag} moved onto the SPI: the tag service holds the workspace's tag vocabulary the
+     * tool resolves the requested name against, and the person, company and deal services are the
+     * record services {@code add_tag} already associated the tag through, each of which records its
+     * own audit row and asserts its own update permission.
      */
     private static final Set<Class<?>> ALLOWED_DEPENDENCIES = Set.of(
             ActivityService.class,
@@ -111,6 +120,9 @@ class AiAssistantWriteToolSpiArchTest {
             TaskService.class,
             DealService.class,
             PipelineService.class,
+            TagService.class,
+            PersonService.class,
+            CompanyService.class,
             AiAssistantDateResolver.class,
             ObjectMapper.class);
 
@@ -121,13 +133,23 @@ class AiAssistantWriteToolSpiArchTest {
      * restriction-filtered, target-bound schedule read. A tool must name the service field only as
      * the receiver of one of these methods, so it cannot hand the service to anything else.
      * Widening an entry is a reviewed decision.
+     *
+     * <p>{@code add_tag} is granted exactly the calls its legacy arm made: {@code getAllTags}, to
+     * resolve the requested name against the workspace's tag vocabulary, which is workspace
+     * configuration rather than record data, and each record service's {@code addTag}, which
+     * refuses a record the workspace does not hold and a tag it does not hold. Neither
+     * {@code removeTag} nor any record update or read is granted: the tool has no inverse, and the
+     * framework reads the target through its own scoped gate.
      */
     private static final Map<Class<?>, Set<String>> PERMITTED_SERVICE_METHODS = Map.of(
             ActivityService.class, Set.of("create", "deleteIf"),
             NoteService.class, Set.of("create", "deleteIf"),
             TaskService.class, Set.of("create", "deleteIf"),
-            DealService.class, Set.of("changeStage", "getDealById"),
-            PipelineService.class, Set.of("getAllStages"));
+            DealService.class, Set.of("changeStage", "getDealById", "addTag"),
+            PipelineService.class, Set.of("getAllStages"),
+            TagService.class, Set.of("getAllTags"),
+            PersonService.class, Set.of("addTag"),
+            CompanyService.class, Set.of("addTag"));
 
     private static final List<String> FORBIDDEN_MUTATORS = List.of(
             "updateLifecycleStage",

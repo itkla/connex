@@ -135,6 +135,26 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
+    void anImmediateTagOnACompanyOutsideTheActorsScopeIsNeverResolvedOrAdded() throws Exception {
+        when(companyService.getCompanyById(52))
+                .thenThrow(new ResourceNotFoundException("Company not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "add_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "company", 52);
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
+
+        assertEquals("Company not found", refused.getMessage());
+        verify(companyService).lockOwnedCompanyForUpdate(52);
+        verify(tagService, never()).getAllTags();
+        verify(companyService, never()).addTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
     void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
             throws Exception {
         AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
@@ -147,8 +167,8 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
                 return super.apply(execution);
             }
         };
-        AiAssistantWriteToolService service = framework(
-                List.of(createTaskTool(), stageTool(), probing, createNoteTool()));
+        AiAssistantWriteToolService service = framework(List.of(
+                createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool()));
         propose(service, "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
                         + "\"start\":\"9:00am next Thursday\"}",

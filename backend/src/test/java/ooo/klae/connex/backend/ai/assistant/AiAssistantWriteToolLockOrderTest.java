@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalReques
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -238,6 +239,39 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(activityService).create(any(Activity.class));
         verify(taskService, never()).lockBoardForCreation();
         verify(personService, never()).lockProcessablePersonForShare(anyInt());
+    }
+
+    @Test
+    void anImmediateTagOnACompanyLocksItForUpdateAndResolvesTheTagOnlyAfterTheScopeGate()
+            throws Exception {
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
+        when(companyService.addTag(52, 9)).thenReturn(true);
+        AiAssistantWriteToolService service = service();
+        propose(service, "add_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "company", 52);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        InOrder order = inOrder(
+                workspaceService, chatMapper, companyService, restrictionEpoch, tagService);
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
+        order.verify(chatMapper).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(companyService).lockOwnedCompanyForUpdate(52);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(companyService).getCompanyById(52);
+        order.verify(tagService).getAllTags();
+        order.verify(companyService).addTag(52, 9);
+        verify(taskService, never()).lockBoardForCreation();
     }
 
     @Test

@@ -207,7 +207,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -480,7 +482,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readChatMapper,
                 readWorkspace,
                 personMapper,
@@ -893,7 +897,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
@@ -1128,7 +1134,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,

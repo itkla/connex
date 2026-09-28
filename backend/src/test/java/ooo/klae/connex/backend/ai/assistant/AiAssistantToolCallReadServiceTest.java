@@ -43,9 +43,12 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.NoteService;
+import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -110,7 +113,8 @@ class AiAssistantToolCallReadServiceTest {
                         mock(TaskService.class),
                         mock(AiAssistantDateResolver.class),
                         JsonMapper.builder().build()),
-                stageTool()));
+                stageTool(),
+                tagTool()));
     }
 
     private AiAssistantToolCallReadService service(List<AiAssistantWriteTool> tools) {
@@ -142,6 +146,14 @@ class AiAssistantToolCallReadServiceTest {
     private static AiAssistantCreateNoteWriteTool noteTool() {
         return new AiAssistantCreateNoteWriteTool(
                 mock(NoteService.class), JsonMapper.builder().build());
+    }
+
+    private static AiAssistantAddTagWriteTool tagTool() {
+        return new AiAssistantAddTagWriteTool(
+                mock(TagService.class),
+                mock(PersonService.class),
+                mock(CompanyService.class),
+                mock(DealService.class));
     }
 
     private static AiAssistantChangeDealStageWriteTool stageTool() {
@@ -1158,6 +1170,53 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
+    void aViewerWhoMayNotReadTheDetailsIsHandedOnlyTheBooleanFlagsTheToolShares() {
+        AiAssistantToolCallReadService flagging = service(List.of(
+                activityTool(),
+                noteTool(),
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                stageTool(),
+                new AiAssistantAddTagWriteTool(
+                        mock(TagService.class),
+                        mock(PersonService.class),
+                        mock(CompanyService.class),
+                        mock(DealService.class)) {
+                    @Override
+                    public Set<String> sharedOutcomeFlags() {
+                        return Set.of("changed", "tag", "recordType", "missing");
+                    }
+
+                    @Override
+                    public String outcomeSummary(Review review) {
+                        return String.valueOf(review.outcome());
+                    }
+                }));
+        stubVisibleDeal();
+        String flagged = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"deal\",\"tag\":\"Secret\",\"changed\":false,"
+                + "\"archived\":true}}";
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        toolCall(71, 99, "add_tag", "auto", "executed", "deal", 41, 71, flagged),
+                        toolCall(72, 99, "add_tag", "auto", "executed", "deal", 41, 72,
+                                flagged.replace("\"changed\":false", "\"changed\":\"no\"")),
+                        toolCall(73, USER_ID, "add_tag", "auto", "executed", "deal", 41, 73,
+                                flagged)));
+
+        List<AiAssistantToolCallReadDto> cards = flagging.list(SESSION_ID, false);
+
+        assertEquals("{\"changed\":false}", cards.get(0).outcomeSummary());
+        assertEquals("null", cards.get(1).outcomeSummary());
+        assertEquals(
+                "{\"status\":\"executed\",\"recordType\":\"deal\",\"tag\":\"Secret\","
+                        + "\"changed\":false,\"archived\":true}",
+                cards.get(2).outcomeSummary());
+    }
+
+    @Test
     void theRequesterIsGivenTheDetailedSummaryTheSameToolWithholdsFromOthers() {
         List<Review> seen = new ArrayList<>();
         AiAssistantToolCallReadService echoing = service(AiAssistantDeclaredWriteTools.tools()
@@ -1206,7 +1265,8 @@ class AiAssistantToolCallReadServiceTest {
                     public Set<Permission> requiredPermissions(String targetKind) {
                         return Set.of(Permission.DEAL_UPDATE, Permission.DEAL_DELETE);
                     }
-                }));
+                },
+                tagTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
@@ -1236,7 +1296,8 @@ class AiAssistantToolCallReadServiceTest {
                     public Set<ReviewInput> reviewInputs() {
                         return Set.of();
                     }
-                }));
+                },
+                tagTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));

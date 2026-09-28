@@ -50,6 +50,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Projects durable assistant write-tool state through the current viewer's live authority. */
 @Service
@@ -196,9 +197,12 @@ public class AiAssistantToolCallReadService {
             boolean readable = detailsReadable(call, viewer.userId(), visibleTargets);
             Optional<AiAssistantWriteTool> declared =
                     writeToolRegistry.find(call.toolCall().getToolName());
+            Review withheld = declared.isPresent()
+                    ? withheld(declared.get(), call, status, viewerPermissions)
+                    : null;
             Review review = declared.isPresent()
                     ? review(declared.get(), call, status, readable, visibleTarget,
-                            assignableOwners, stages, viewerPermissions)
+                            assignableOwners, stages, withheld)
                     : null;
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
@@ -207,9 +211,9 @@ public class AiAssistantToolCallReadService {
                     status,
                     target,
                     declared.isPresent()
-                            ? summary(review, declared.get()::requestSummary)
+                            ? summary(review, withheld, declared.get()::requestSummary)
                             : requestSummary(call, readable, assignableOwners),
-                    outcomeSummary(call, status, declared, review),
+                    outcomeSummary(call, status, declared, review, withheld),
                     readable
                             ? change(
                                     call, status, visibleTarget, assignableOwners,
@@ -449,7 +453,6 @@ public class AiAssistantToolCallReadService {
             }
         }
         return switch (toolName) {
-            case "add_tag" -> "Add an existing tag";
             case "assign_owner" -> "Assign an owner";
             default -> "Run a write tool";
         };
@@ -484,7 +487,8 @@ public class AiAssistantToolCallReadService {
             StoredToolCall call,
             String status,
             Optional<AiAssistantWriteTool> declared,
-            Review review) {
+            Review review,
+            Review withheld) {
         AiChatToolCall toolCall = call.toolCall();
         return switch (status) {
             case "proposed" -> null;
@@ -492,9 +496,8 @@ public class AiAssistantToolCallReadService {
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
             case "executed" -> declared.isPresent()
-                    ? summary(review, declared.get()::outcomeSummary)
+                    ? summary(review, withheld, declared.get()::outcomeSummary)
                     : switch (toolCall.getToolName()) {
-                case "add_tag" -> addTagOutcomeSummary(toolCall.getResultJson());
                 case "assign_owner" -> "unassigned".equalsIgnoreCase(call.requestValue().trim())
                         ? "Owner removed"
                         : "Owner assigned";
@@ -553,8 +556,9 @@ public class AiAssistantToolCallReadService {
      * The batched, viewer-authorized read state a declared tool projects one card from.
      *
      * <p>{@link #detailsReadable} is applied here, for every declared tool, rather than trusted to
-     * each tool: a viewer who may not read the details gets a review holding no target, request,
-     * outcome, members or stages, so no summary a tool writes can carry a record value to them.
+     * each tool: a viewer who may not read the details gets the withheld review, holding no target,
+     * request, members or stages and no outcome value beyond the tool's boolean shared flags, so no
+     * summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
      * outcome only for an executed call, and the members and stages only when the tool declared
      * them; the tool never reads anything this service did not already load for the page of cards.
@@ -567,9 +571,9 @@ public class AiAssistantToolCallReadService {
             RecordSnapshot target,
             List<User> assignableOwners,
             List<Stage> stages,
-            Set<Permission> viewerPermissions) {
+            Review withheld) {
         if (!readable) {
-            return withheld(call.targetKind(), call.targetId(), viewerPermissions);
+            return withheld;
         }
         Set<ReviewInput> inputs = tool.reviewInputs();
         return new Review(
@@ -581,14 +585,42 @@ public class AiAssistantToolCallReadService {
                 EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
                 inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),
                 inputs.contains(ReviewInput.STAGES) ? stages : List.of(),
-                viewerPermissions);
+                withheld.viewerPermissions());
     }
 
-    private static Review withheld(
-            String targetKind, int targetId, Set<Permission> viewerPermissions) {
+    /**
+     * The review of one card for a viewer who may not read its details.
+     *
+     * <p>It holds no record value. Its outcome, for an executed call only, carries just the tool's
+     * declared {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean, and is
+     * {@code null} when none does, so a summary can say whether the write changed anything but
+     * never a workspace string or an identifier.
+     */
+    private Review withheld(
+            AiAssistantWriteTool tool,
+            StoredToolCall call,
+            String status,
+            Set<Permission> viewerPermissions) {
         return new Review(
-                targetKind, targetId, false, null, null, null, List.of(), List.of(),
-                viewerPermissions);
+                call.targetKind(), call.targetId(), false, null, null,
+                EXECUTED.equals(status)
+                        ? sharedFlags(tool, storedOutcome(call.toolCall()))
+                        : null,
+                List.of(), List.of(), viewerPermissions);
+    }
+
+    private JsonNode sharedFlags(AiAssistantWriteTool tool, JsonNode outcome) {
+        if (outcome == null) {
+            return null;
+        }
+        ObjectNode flags = objectMapper.createObjectNode();
+        for (String field : tool.sharedOutcomeFlags()) {
+            JsonNode value = outcome.get(field);
+            if (value != null && value.isBoolean()) {
+                flags.put(field, value.booleanValue());
+            }
+        }
+        return flags.isEmpty() ? null : flags;
     }
 
     /**
@@ -597,12 +629,12 @@ public class AiAssistantToolCallReadService {
      * <p>A detailed summary the special-care screen excludes, or one the tool declines to give, is
      * replaced by the summary the tool gives a viewer who may not read the details.
      */
-    private static String summary(Review review, Function<Review, String> summarize) {
+    private static String summary(
+            Review review, Review withheld, Function<Review, String> summarize) {
         String summary = summarize.apply(review);
         if (review.detailsReadable()
                 && (summary == null || SpecialCareTextScreen.screen(summary).excluded())) {
-            return summarize.apply(withheld(
-                    review.targetKind(), review.targetId(), review.viewerPermissions()));
+            return summarize.apply(withheld);
         }
         return summary;
     }
@@ -897,27 +929,9 @@ public class AiAssistantToolCallReadService {
             return declared.get().memberOutcomeFields();
         }
         return switch (toolName) {
-            case "add_tag" -> List.of("tag");
             case "assign_owner" -> List.of(OWNER_FIELD);
             default -> List.of();
         };
-    }
-
-    private String addTagOutcomeSummary(String resultJson) {
-        if (resultJson == null) {
-            return "Request completed";
-        }
-        try {
-            JsonNode result = objectMapper.readTree(resultJson);
-            JsonNode outcome = result == null ? null : result.get("outcome");
-            JsonNode changed = outcome == null ? null : outcome.get("changed");
-            if (changed == null || !changed.isBoolean()) {
-                return "Request completed";
-            }
-            return changed.asBoolean() ? "Tag added" : "Tag was already present";
-        } catch (JacksonException exception) {
-            return "Request completed";
-        }
     }
 
     private boolean acceptsTarget(String toolName, String kind) {
@@ -926,7 +940,7 @@ public class AiAssistantToolCallReadService {
             return declared.get().acceptedTargetKinds().contains(kind);
         }
         return switch (toolName) {
-            case "add_tag", "assign_owner" ->
+            case "assign_owner" ->
                     "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
             default -> false;
         };
