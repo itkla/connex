@@ -937,6 +937,45 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * A write whose name resolves to no single row when it is prepared is refused recoverably:
+     * no proposal is stored, the call is recorded as failed with the fixed reason, the model is
+     * answered with that reason, and the turn goes on to answer.
+     */
+    @Test
+    void aWriteWhoseNameDoesNotResolveAtProposalIsRefusedWithoutAProposal() throws Exception {
+        JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("I could not find that member.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(
+                        parsed(loadStep("write_pipeline")),
+                        parsed(new AiAssistantStep(
+                                new AiAssistantStep.Tool("assign_owner", args), null)),
+                        parsed(finalStep));
+        when(writeToolService.prepare(
+                eq("assign_owner"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                .thenThrow(AiAssistantLoopException.refusedArguments("unresolved_reference"));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService).proposeTool(
+                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), anyInt(), contains("unresolved_reference"));
+        verify(writeToolService, never()).proposalResult(any(), any());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("I could not find that member."), any(), anyInt(), anyInt());
+    }
+
+    /**
      * An argument shape refused before the durable proposal still recovers: the refusal is
      * persisted as a failed call so the transcript stays honest, and the corrected retry runs.
      */

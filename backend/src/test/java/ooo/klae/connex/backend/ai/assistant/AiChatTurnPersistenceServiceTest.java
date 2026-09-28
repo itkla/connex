@@ -23,6 +23,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,7 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiChatTurnPersistenceServiceTest {
@@ -766,6 +769,33 @@ class AiChatTurnPersistenceServiceTest {
         assertTrue(second.created());
         verify(chatMapper).insertToolCall(argThat(toolCall ->
                 "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
+    }
+
+    /**
+     * The loop reads what already holds a write step's key before it prepares that step: the
+     * step's sole-call key only, after the caller's current access is revalidated, and without
+     * taking any lock.
+     */
+    @Test
+    void storedWriteArgumentsReadTheStepsSoleCallKeyWithoutLocking() {
+        when(workspaceService.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(Set.of(Permission.AI_USE));
+        AiChatToolCall existing = new AiChatToolCall();
+        existing.setArgumentsJson("{\"tool\":\"assign_owner\",\"principals\":[21]}");
+        when(chatMapper.getToolCallByIdempotencyKey(TURN.workspaceId(), "turn-17-step-3"))
+                .thenReturn(existing);
+
+        assertEquals(
+                Optional.of(existing.getArgumentsJson()), service.storedWriteArguments(TURN, 3));
+        assertEquals(Optional.empty(), service.storedWriteArguments(TURN, 4));
+        verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).getTurnByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(workspaceService, never()).lockAndRequireMember(anyInt(), anyInt());
+
+        when(workspaceService.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(Set.of());
+        assertThrows(
+                ResourceNotFoundException.class, () -> service.storedWriteArguments(TURN, 3));
     }
 
     /**

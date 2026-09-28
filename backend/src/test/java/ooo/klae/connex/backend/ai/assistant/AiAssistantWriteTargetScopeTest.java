@@ -77,6 +77,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         DealService.LockedStageChange locked = stubStageChange();
         when(dealService.getDealById(44))
                 .thenReturn(deal(5))
+                .thenReturn(deal(5))
                 .thenThrow(new ResourceNotFoundException("Deal not found"));
         AiAssistantWriteToolService service = service();
         propose(service, "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
