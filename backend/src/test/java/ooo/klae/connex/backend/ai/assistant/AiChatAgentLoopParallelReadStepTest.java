@@ -13,6 +13,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -99,6 +100,7 @@ class AiChatAgentLoopParallelReadStepTest {
     private AiSkillRouter skillRouter;
     private AiSkillPlanRunner skillPlanRunner;
     private Clock clock;
+    private AiAssistantPromptAssembler promptAssembler;
     private AiChatAgentLoopService service;
 
     @BeforeEach
@@ -131,6 +133,7 @@ class AiChatAgentLoopParallelReadStepTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        promptAssembler = spy(new AiAssistantPromptAssembler(objectMapper, catalog));
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
@@ -141,7 +144,7 @@ class AiChatAgentLoopParallelReadStepTest {
                 toolExecutor,
                 new AiAssistantToolsetLoader(catalog),
                 writeToolService,
-                new AiAssistantPromptAssembler(objectMapper, catalog),
+                promptAssembler,
                 skillRouter,
                 skillPlanRunner,
                 memoryService,
@@ -605,6 +608,156 @@ class AiChatAgentLoopParallelReadStepTest {
                 requests().stream().map(AiNativeToolRequest::finalOnly).toList());
     }
 
+    /**
+     * A later call of a batch cannot name a handle an earlier call of the same batch minted.
+     *
+     * <p>The model emitted both calls as one decision against an empty registry, so {@code r1}
+     * was never shown to it: the search mints it while the batch runs, and the read naming it
+     * guessed it. Resolved against the live registry, the guess would execute a read of a record
+     * the model had never seen; emitted alone it would settle as {@code unknown_handle}. Resolved
+     * against the handles issued when the batch was admitted, the read settles as that refusal,
+     * is never executed, and the search beside it still runs and is replayed.
+     */
+    @Test
+    void aHandleAnEarlierCallOfTheBatchMintedIsUnknownToALaterCall() throws Exception {
+        doAnswer(invocation -> {
+            JsonNode arguments = invocation.getArgument(1);
+            AiChatResourceRegistry resources = invocation.getArgument(2);
+            if (arguments.has("handle")) {
+                resources.resolve(arguments.get("handle").asString());
+            }
+            return null;
+        }).when(toolExecutor).validateReferences(any(), any(), any());
+        doAnswer(invocation -> {
+            AiChatResourceRegistry resources = invocation.getArgument(2);
+            return new AiAssistantToolResult(
+                    Map.of("records", List.of(resources.register("deal", 41))), List.of());
+        }).when(toolExecutor).execute(
+                eq("search_records"), any(), any(), any(Boolean.class), any());
+        answers(
+                batch(
+                        new AiToolCall("call_1", "search_records", search("Acme")),
+                        new AiToolCall("call_2", "get_record", "{\"handle\":\"r1\"}")),
+                finalAnswer());
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        verify(toolExecutor, never()).execute(
+                eq("get_record"), any(), any(), any(Boolean.class), any());
+        verify(persistenceService).proposeTool(TURN, 1, 2, "get_record", "{\"handle\":\"r1\"}");
+        verify(persistenceService).failTool(TURN, 29, "{\"reason\":\"unknown_handle\"}");
+        List<AiToolExchange> replayed = requests().getLast().exchanges();
+        assertEquals(
+                List.of(1, 2), replayed.stream().map(AiToolExchange::callOrdinal).toList());
+        assertTrue(replayed.get(1).maskedResult().contains("unknown_handle"),
+                "the guessed handle is answered with the refusal a lone call would get");
+    }
+
+    /**
+     * A cache hit inside a batch that the replay cannot admit closes the turn, as a fresh read's
+     * would.
+     *
+     * <p>The step's second call repeats a read the turn already made, so it is answered from the
+     * cache; admitting that answer to the replay is refused as {@code tool_result_budget_exhausted},
+     * which is closable. The batch is abandoned, its exchanges leave the replay whole, and the
+     * turn goes to its closing step rather than failing.
+     */
+    @Test
+    void aCacheHitTheReplayCannotAdmitInsideABatchGoesToTheClosingStep() throws Exception {
+        doAnswer(invocation -> {
+            AiAssistantPromptAssembler.ToolTurn prospective = invocation.getArgument(1);
+            if (prospective.seq() == 2 && prospective.call() == 2) {
+                throw new AiAssistantLoopException(
+                        "tool_result_budget_exhausted", "tool_result_budget_exhausted");
+            }
+            return invocation.callRealMethod();
+        }).when(promptAssembler).requireAdditionalNativeExchangeCapacity(
+                any(), any(), any(), any(), any());
+        answers(
+                nativeTool("call_0", "search_records", search("alpha")),
+                batch(
+                        new AiToolCall("call_1", "search_records", search("beta")),
+                        new AiToolCall("call_2", "search_records", search("alpha"))),
+                finalAnswer());
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        AiNativeToolRequest closing = requests().getLast();
+        assertTrue(closing.finalOnly(), "an abandoned batch must go to the closing step");
+        assertEquals(List.of(1), closing.exchanges().stream().map(AiToolExchange::step).toList(),
+                "no call of the abandoned step may be replayed");
+    }
+
+    /**
+     * A plan published past the turn's allowance inside a batch refuses only that call.
+     *
+     * <p>Two four-plan batches spend the whole allowance. A third batch pairs one more plan with
+     * a read: the plan settles as its own replayed {@code plan_updates_exhausted} refusal with a
+     * failed row, and the read beside it still runs, rather than the whole turn failing.
+     */
+    @Test
+    void aPlanPastTheAllowanceInsideABatchRefusesOnlyThatCall() throws Exception {
+        answers(
+                batch(
+                        new AiToolCall("call_1", "set_todos", todos("one")),
+                        new AiToolCall("call_2", "set_todos", todos("two")),
+                        new AiToolCall("call_3", "set_todos", todos("three")),
+                        new AiToolCall("call_4", "set_todos", todos("four"))),
+                batch(
+                        new AiToolCall("call_5", "set_todos", todos("five")),
+                        new AiToolCall("call_6", "set_todos", todos("six")),
+                        new AiToolCall("call_7", "set_todos", todos("seven")),
+                        new AiToolCall("call_8", "set_todos", todos("eight"))),
+                batch(
+                        new AiToolCall("call_9", "set_todos", todos("nine")),
+                        new AiToolCall("call_10", "search_records", search("alpha"))),
+                finalAnswer());
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).proposeTool(TURN, 3, 1, "set_todos", todos("nine"));
+        verify(persistenceService).failTool(
+                TURN, 29, "{\"reason\":\"plan_updates_exhausted\"}");
+        verify(persistenceService).proposeTool(TURN, 3, 2, "search_records", search("alpha"));
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        List<AiToolExchange> stepThree = requests().getLast().exchanges().stream()
+                .filter(exchange -> exchange.step() == 3)
+                .toList();
+        assertEquals(
+                List.of(1, 2), stepThree.stream().map(AiToolExchange::callOrdinal).toList());
+        assertTrue(stepThree.getFirst().maskedResult().contains("plan_updates_exhausted"));
+    }
+
+    /**
+     * A repaired batch envelope is told it may batch again, up to the request's bound.
+     *
+     * <p>The retry request still invites a batch, so its repair must not tell the model to return
+     * exactly one call and so steer it back to one read per step.
+     */
+    @Test
+    void aBatchEnvelopeRepairOffersTheRequestsWholeBound() throws Exception {
+        answers(
+                new AiNativeToolCompletion.Malformed<>(
+                        3, 5, "tool_calls", Optional.empty(), "native_duplicate_call_id"),
+                finalAnswer());
+
+        service.run(TURN);
+
+        AiNativeToolRequest retry = requests().getLast();
+        assertEquals(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS, retry.maxParallelCalls());
+        assertEquals(
+                "Your previous native tool call violated the duplicate-call-id rule. Return up to "
+                        + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS
+                        + " valid native tool calls or one valid JSON final answer.",
+                retry.repairMessage());
+    }
+
     private void useBudget(AiAssistantPromptBudget budget) {
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(TURN.userMessageId());
@@ -644,6 +797,10 @@ class AiChatAgentLoopParallelReadStepTest {
                 ? query.substring(0, query.length() - "-again".length())
                 : query;
         return new AiAssistantToolResult(Map.of("records", List.of(evidence)), List.of());
+    }
+
+    private static String todos(String item) {
+        return "{\"items\":[\"" + item + "\"]}";
     }
 
     private static String search(String query) {

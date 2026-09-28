@@ -83,6 +83,24 @@ public final class AiChatResourceRegistry {
         return Collections.unmodifiableMap(new LinkedHashMap<>(resources));
     }
 
+    /**
+     * Copies the handles issued so far into a registry later registrations do not reach.
+     *
+     * <p>A batched step's calls were all emitted against the handles the model had been shown
+     * when it made the step's one decision. Resolving a later call's references against this copy
+     * rather than against the live registry keeps a handle an earlier call of the same batch has
+     * just minted — one the model never saw and could only have guessed — as unknown as it would be
+     * for that call emitted alone.
+     *
+     * @return an independent copy resolving exactly the handles issued before this call
+     */
+    AiChatResourceRegistry issued() {
+        AiChatResourceRegistry copy = new AiChatResourceRegistry(maskingContext);
+        copy.resources.putAll(resources);
+        copy.handles.putAll(handles);
+        return copy;
+    }
+
     MaskingContext maskingContext() {
         return maskingContext;
     }

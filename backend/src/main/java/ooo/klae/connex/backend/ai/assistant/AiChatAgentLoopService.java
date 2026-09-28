@@ -116,6 +116,7 @@ public class AiChatAgentLoopService {
     static final String DUPLICATE_PARALLEL_CALL = "duplicate_parallel_call";
 
     private static final String TOOL_NOT_LOADED = "tool_not_loaded";
+    private static final String PLAN_UPDATES_EXHAUSTED = "plan_updates_exhausted";
 
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     /**
@@ -250,6 +251,8 @@ public class AiChatAgentLoopService {
             Runnable ownershipGuard = () -> requireOwnership(ownership);
             AiChatMemory memory = memoryService.prepare(
                     turn, maskingContext, deadline, ownershipGuard);
+            int stepCallBound = Math.min(
+                    memory.parallelToolCalls(), MAX_EXECUTABLE_CALLS_PER_STEP);
             List<AiChatMessage> history = memory.history();
             AiChatMessage initiatingMessage = history.stream()
                     .filter(message -> message.getId() == turn.userMessageId())
@@ -416,7 +419,8 @@ public class AiChatAgentLoopService {
                                     state.nativeCalls,
                                     maskingContext,
                                     memory.budget(),
-                                    stepRepair)
+                                    stepRepair,
+                                    stepCallBound)
                             : new AiAssistantPromptAssembler.NativeReplay(
                                     List.of(), null, ToolBudgetAudit.NONE);
                     if (nativeTools) {
@@ -464,9 +468,7 @@ public class AiChatAgentLoopService {
                                     nativeReplay.exchanges(),
                                     nativeReplay.repairMessage(),
                                     closing,
-                                    Math.min(
-                                            memory.parallelToolCalls(),
-                                            MAX_EXECUTABLE_CALLS_PER_STEP));
+                                    stepCallBound);
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(
@@ -614,7 +616,8 @@ public class AiChatAgentLoopService {
                                     toolContext, stepNumber, closingAttempted, stepCalls, state)
                             : executeStepCall(
                                     toolContext, stepNumber, closingAttempted, nativeTools,
-                                    stepCalls.calls().getFirst(), state, SOLE_CALL_PROGRESS);
+                                    stepCalls.calls().getFirst(), state, SOLE_CALL_PROGRESS,
+                                    toolContext.resources());
                     switch (callOutcome) {
                         case StepCallOutcome.Continue settled -> { }
                         case StepCallOutcome.Close close -> {
@@ -760,6 +763,15 @@ public class AiChatAgentLoopService {
      * transaction binding are thread-bound, and the turn's handle and placeholder minting must stay
      * deterministic for the replay to be byte-exact.
      *
+     * <p>Every call's references resolve against the handles issued when the batch was admitted,
+     * not against the live registry. The model emitted the whole batch as one decision against the
+     * handles it had been shown, so a handle an earlier call of the batch mints was never visible to
+     * it: a later call naming one guessed it, and settles as {@code unknown_handle} exactly as it
+     * would emitted alone, while its siblings still run. Placeholders obey the same rule at the
+     * parse boundary. A per-call refusal a single call raises outside the recoverable path — a plan
+     * published past the turn's allowance — is settled as that call's own replayed refusal inside a
+     * batch, so its siblings still run.
+     *
      * <p>A step's replay exchanges are all or nothing. If any call ends the batch early — a lost
      * owner, a passed deadline, a closable or non-recoverable refusal, or an exception — the step's
      * replayed turns and recorded calls are discarded before the loop moves on, so no assistant
@@ -797,9 +809,11 @@ public class AiChatAgentLoopService {
                         context, stepNumber, closingAttempted, stepCalls, state, refusal, true);
             }
             BatchProgress progress = new BatchProgress();
+            AiChatResourceRegistry issuedResources = context.resources().issued();
             for (AiAssistantStepCalls.Call call : stepCalls.calls()) {
                 StepCallOutcome outcome = executeStepCall(
-                        context, stepNumber, closingAttempted, true, call, state, progress);
+                        context, stepNumber, closingAttempted, true, call, state, progress,
+                        issuedResources);
                 if (!(outcome instanceof StepCallOutcome.Continue)) {
                     discardStep(state, stepNumber);
                     return outcome;
@@ -954,6 +968,8 @@ public class AiChatAgentLoopService {
      * @param state the turn's tool state, which this call advances
      * @param progress how this call's evidence moves the no-progress guard: at once for a step's
      *     only call, and once for the whole step for a call of a batch
+     * @param references the handles this call's arguments may name: the live registry for a
+     *     step's only call, and the handles issued when its batch was admitted for a call of a batch
      * @return what the step loop must do next
      */
     private StepCallOutcome executeStepCall(
@@ -963,7 +979,8 @@ public class AiChatAgentLoopService {
             boolean nativeTools,
             AiAssistantStepCalls.Call call,
             TurnToolState state,
-            ProgressLedger progress) {
+            ProgressLedger progress,
+            AiChatResourceRegistry references) {
         AiChatQueuedTurn turn = context.turn();
         if (context.ownership().isStopped()) {
             return new StepCallOutcome.Fail(AiAssistantTerminalReasons.OWNER_LOST);
@@ -980,46 +997,17 @@ public class AiChatAgentLoopService {
         try {
             requireToolsetLoaded(state.loadedToolsets, toolName);
             recordNativeCall(nativeTools, state.nativeCalls, callRef, call.providerCall());
-            toolExecutor.validateReferences(toolName, call.tool().args(), context.resources());
+            toolExecutor.validateReferences(toolName, call.tool().args(), references);
         } catch (AiAssistantLoopException exception) {
             if (!exception.recoverable()) {
                 throw exception;
             }
-            boolean replayable = !nativeTools || state.nativeCalls.containsKey(callRef);
-            int refusedCallId = thoughtSignature == null
-                    ? persistenceService.proposeTool(
-                            turn, stepNumber, call.ordinal(), toolName, argumentsJson)
-                    : persistenceService.proposeTool(
-                            turn, stepNumber, call.ordinal(), toolName, argumentsJson,
-                            thoughtSignature);
-            failTool(turn, refusedCallId, exception.detailReason());
-            publishToolStep(turn, new AiChatStepFrameDto(
-                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    stepNumber, "step", toolName,
-                    "failed", exception.detailReason()));
-            boolean stalled = progress.stale(state);
-            if (replayable) {
-                ToolTurn refusedTurn = new ToolTurn(
-                        stepNumber, call.ordinal(), toolName,
-                        refusedToolResult(exception.detailReason()));
-                try {
-                    state.toolBudgetAudit = requireAdditionalToolCapacity(
-                            nativeTools, state.toolTurns, refusedTurn, state.nativeCalls,
-                            context.maskingContext(), context.budget());
-                    state.toolTurns.add(refusedTurn);
-                } catch (AiAssistantLoopException capacity) {
-                    if (!closingAttempted
-                            && CLOSABLE_REASONS.contains(capacity.terminalReason())) {
-                        return new StepCallOutcome.Close(capacity.terminalReason());
-                    }
-                    throw capacity;
-                }
-            }
-            if (stalled) {
-                return noProgressOutcome(closingAttempted);
-            }
-            return CONTINUE;
+            return refuseCall(
+                    context, stepNumber, closingAttempted, nativeTools, call, state, progress,
+                    exception.detailReason(),
+                    !nativeTools || state.nativeCalls.containsKey(callRef));
         }
+        boolean batched = call.ordinal() != AiAssistantToolCallRef.SOLE_CALL;
         boolean findTools = AiAssistantToolCatalog.FIND_TOOLS.equals(toolName);
         AiAssistantToolResult cachedResult = findTools
                 ? null
@@ -1030,19 +1018,33 @@ public class AiChatAgentLoopService {
             }
             ToolTurn cachedTurn = new ToolTurn(
                     stepNumber, call.ordinal(), toolName, cachedResult);
-            state.toolBudgetAudit = requireAdditionalToolCapacity(
-                    nativeTools,
-                    state.toolTurns,
-                    cachedTurn,
-                    state.nativeCalls,
-                    context.maskingContext(),
-                    context.budget());
+            try {
+                state.toolBudgetAudit = requireAdditionalToolCapacity(
+                        nativeTools,
+                        state.toolTurns,
+                        cachedTurn,
+                        state.nativeCalls,
+                        context.maskingContext(),
+                        context.budget());
+            } catch (AiAssistantLoopException capacity) {
+                if (batched
+                        && !closingAttempted
+                        && CLOSABLE_REASONS.contains(capacity.terminalReason())) {
+                    return new StepCallOutcome.Close(capacity.terminalReason());
+                }
+                throw capacity;
+            }
             state.toolTurns.add(cachedTurn);
             return CONTINUE;
         }
         if ("set_todos".equals(toolName)
                 && state.planPublications >= MAX_TURN_PLAN_PUBLICATIONS) {
-            throw AiAssistantLoopException.refusedArguments("plan_updates_exhausted");
+            if (batched) {
+                return refuseCall(
+                        context, stepNumber, closingAttempted, nativeTools, call, state,
+                        progress, PLAN_UPDATES_EXHAUSTED, true);
+            }
+            throw AiAssistantLoopException.refusedArguments(PLAN_UPDATES_EXHAUSTED);
         }
         if ("set_todos".equals(toolName)) {
             state.planPublications++;
@@ -1289,6 +1291,72 @@ public class AiChatAgentLoopService {
                     stepNumber, "step", toolName,
                     "failed", reason));
             return new StepCallOutcome.Fail(reason);
+        }
+        return CONTINUE;
+    }
+
+    /**
+     * Settles one call as its own recoverable refusal and names the loop's next move.
+     *
+     * <p>The call gets its proposed-and-failed durable row under its own key and its failed step
+     * frame; when it is replayable it is also answered, in the replay, with the stable reason, so
+     * the model reads why exactly that call was refused. Its siblings in a batch are untouched.
+     *
+     * @param context the per-turn surfaces every tool call of the turn executes against
+     * @param stepNumber the durable number of the model step this call belongs to
+     * @param closingAttempted whether the turn already spent its closing step
+     * @param nativeTools whether this step ran on the native tool protocol
+     * @param call the refused call
+     * @param state the turn's tool state
+     * @param progress how this refusal moves the no-progress guard
+     * @param reason the stable, model-visible refusal
+     * @param replayable whether the call was recorded and can be answered in the replay
+     * @return what the step loop must do next
+     */
+    private StepCallOutcome refuseCall(
+            ToolExecutionContext context,
+            int stepNumber,
+            boolean closingAttempted,
+            boolean nativeTools,
+            AiAssistantStepCalls.Call call,
+            TurnToolState state,
+            ProgressLedger progress,
+            String reason,
+            boolean replayable) {
+        AiChatQueuedTurn turn = context.turn();
+        String toolName = call.tool().name();
+        String argumentsJson = serialize(call.tool().args());
+        String thoughtSignature = call.thoughtSignature();
+        int refusedCallId = thoughtSignature == null
+                ? persistenceService.proposeTool(
+                        turn, stepNumber, call.ordinal(), toolName, argumentsJson)
+                : persistenceService.proposeTool(
+                        turn, stepNumber, call.ordinal(), toolName, argumentsJson,
+                        thoughtSignature);
+        failTool(turn, refusedCallId, reason);
+        publishToolStep(turn, new AiChatStepFrameDto(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                stepNumber, "step", toolName,
+                "failed", reason));
+        boolean stalled = progress.stale(state);
+        if (replayable) {
+            ToolTurn refusedTurn = new ToolTurn(
+                    stepNumber, call.ordinal(), toolName, refusedToolResult(reason));
+            try {
+                state.toolBudgetAudit = requireAdditionalToolCapacity(
+                        nativeTools, state.toolTurns, refusedTurn, state.nativeCalls,
+                        context.maskingContext(), context.budget());
+                state.toolTurns.add(refusedTurn);
+            } catch (AiAssistantLoopException capacity) {
+                if (!closingAttempted
+                        && CLOSABLE_REASONS.contains(capacity.terminalReason())) {
+                    return new StepCallOutcome.Close(capacity.terminalReason());
+                }
+                throw capacity;
+            }
+        }
+        if (stalled) {
+            return noProgressOutcome(closingAttempted);
         }
         return CONTINUE;
     }
