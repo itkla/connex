@@ -195,7 +195,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, dateResolver, objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -471,7 +474,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readChatMapper,
                 readWorkspace,
                 personMapper,
@@ -881,7 +887,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,

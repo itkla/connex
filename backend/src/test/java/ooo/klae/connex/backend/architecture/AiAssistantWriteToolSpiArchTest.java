@@ -28,7 +28,9 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
+import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.TaskService;
 import tools.jackson.databind.ObjectMapper;
@@ -88,8 +90,17 @@ class AiAssistantWriteToolSpiArchTest {
      * audit row and run their own permission checks, and pure helpers. A new entry is a reviewed
      * decision — never a mapper, {@code WorkspaceService}, a user or member service, or an
      * assistant helper that injects any of them.
+     *
+     * <p>{@code ActivityService} and {@code NoteService} joined when {@code create_activity} and
+     * {@code create_note} moved onto the SPI: each is the domain service those tools already wrote
+     * through, and each records its own audit row and asserts its own create and delete
+     * permissions. The activity tool's calendar read is not a dependency: the read-tool executor
+     * holds a mapper and {@code WorkspaceService}, so the framework performs that read and hands
+     * the tool only its answer, through {@code Execution.scheduleConflicts()}.
      */
     private static final Set<Class<?>> ALLOWED_DEPENDENCIES = Set.of(
+            ActivityService.class,
+            NoteService.class,
             TaskService.class,
             DealService.class,
             PipelineService.class,

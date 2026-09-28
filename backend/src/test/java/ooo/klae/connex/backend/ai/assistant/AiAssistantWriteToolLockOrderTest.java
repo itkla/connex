@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -25,13 +26,15 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Outcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalRequest;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
- * Pins the order the write framework acquires its locks in, for both tiers.
+ * Pins the order the write framework acquires its locks in, for both tiers and every declared tool.
  *
  * <p>The documented order in {@code docs/backend/LOCKING.md} is this one: the locked authorization
  * roots, the session root, the tool-call row, then — immediate tier only — the turn row, then the
@@ -201,5 +204,62 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(dealService).getDealById(44);
         order.verify(taskService).create(any(Task.class));
         verify(personService, never()).lockProcessablePersonForShare(anyInt());
+    }
+
+    @Test
+    void anImmediateMeetingLocksItsPersonForUpdateAndReadsTheCalendarBeforeWriting()
+            throws Exception {
+        person31IsProcessable();
+        createdActivitiesGetId73();
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"meeting\",\"subject\":\"Planning\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "person", 31);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        InOrder order = inOrder(
+                workspaceService, chatMapper, personService, restrictionEpoch, activityService);
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
+        order.verify(chatMapper).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(personService).getPersonById(31);
+        order.verify(activityService).getActivitiesByPersonIdInWindow(
+                eq(31), any(), any(), eq(101));
+        order.verify(activityService).create(any(Activity.class));
+        verify(taskService, never()).lockBoardForCreation();
+        verify(personService, never()).lockProcessablePersonForShare(anyInt());
+    }
+
+    @Test
+    void anImmediateNoteOnADealLocksTheDealForUpdateWithNoBoardAndNoCalendarRead()
+            throws Exception {
+        createdNotesGetId75();
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_note", "{\"handle\":\"r1\",\"content\":\"Shared follow-up\"}",
+                "deal", 44);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        InOrder order = inOrder(chatMapper, dealService, restrictionEpoch, noteService);
+        order.verify(chatMapper).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(dealService).lockDealForUpdate(44);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(dealService).getDealById(44);
+        order.verify(noteService).create(any(Note.class));
+        verify(taskService, never()).lockBoardForCreation();
+        verify(activityService, never()).getActivitiesByPersonIdInWindow(
+                anyInt(), any(), any(), anyInt());
     }
 }

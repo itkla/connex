@@ -431,7 +431,11 @@ and no tool can opt out of it; re-asserts the tool's permissions from the step-1
 owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
 target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier
 the write returned with the one resolved before the lock, recording any divergence as a
-`verification` sibling of the stored outcome; and writes the tool-call status fail-closed.
+`verification` sibling of the stored outcome; and writes the tool-call status fail-closed. The one
+read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
+`Execution.scheduleConflicts`, which the activity tool makes inside `apply` for a meeting on a
+person, after the owner-scope gate and before it writes, so the new meeting is never its own
+conflict.
 
 The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
 stage tool reads its deal through the same scoped getter before step 6 to resolve the stage, and

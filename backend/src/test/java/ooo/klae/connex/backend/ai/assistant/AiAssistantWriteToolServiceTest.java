@@ -157,7 +157,10 @@ class AiAssistantWriteToolServiceTest {
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, dateResolver, objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readExecutor,
                 dateResolver,
                 chatMapper,

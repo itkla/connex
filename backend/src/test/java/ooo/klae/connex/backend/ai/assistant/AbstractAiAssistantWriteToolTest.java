@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -21,10 +22,13 @@ import org.mockito.ArgumentCaptor;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -65,11 +69,13 @@ abstract class AbstractAiAssistantWriteToolTest {
     AiChatMapper chatMapper;
     WorkspaceService workspaceService;
     ActivityService activityService;
+    NoteService noteService;
     PersonService personService;
     CompanyService companyService;
     DealService dealService;
     TaskService taskService;
     PipelineService pipelineService;
+    PersonMapper executorPersonMapper;
     AiRestrictionEpoch restrictionEpoch;
     AiWorkspaceGovernanceService governanceService;
     WorkspaceService.LockedPermissionSnapshot authority;
@@ -88,11 +94,13 @@ abstract class AbstractAiAssistantWriteToolTest {
         chatMapper = mock(AiChatMapper.class);
         workspaceService = mock(WorkspaceService.class);
         activityService = mock(ActivityService.class);
+        noteService = mock(NoteService.class);
         personService = mock(PersonService.class);
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
         pipelineService = mock(PipelineService.class);
+        executorPersonMapper = mock(PersonMapper.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
@@ -123,7 +131,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 mock(AiAssistantHistoryService.class),
                 mock(ScoringService.class),
                 workspaceService,
-                mock(PersonMapper.class),
+                executorPersonMapper,
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
@@ -164,12 +172,23 @@ abstract class AbstractAiAssistantWriteToolTest {
                 .thenReturn(1);
     }
 
-    /** @return the framework over the two declared tools this phase ships */
+    /** @return the framework over every declared tool this phase ships */
     AiAssistantWriteToolService service() {
         return service(List.of(createTaskTool(), stageTool()));
     }
 
+    /**
+     * @param tools the task and stage tools under test, possibly overridden
+     * @return the framework over those tools plus the activity and note tools
+     */
     AiAssistantWriteToolService service(List<AiAssistantWriteTool> tools) {
+        List<AiAssistantWriteTool> declared = new ArrayList<>(tools);
+        declared.add(createActivityTool());
+        declared.add(createNoteTool());
+        return framework(declared);
+    }
+
+    private AiAssistantWriteToolService framework(List<AiAssistantWriteTool> tools) {
         return new AiAssistantWriteToolService(
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, tools),
@@ -179,7 +198,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 workspaceService,
                 activityService,
                 taskService,
-                mock(NoteService.class),
+                noteService,
                 mock(TagService.class),
                 personService,
                 companyService,
@@ -197,6 +216,14 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     AiAssistantChangeDealStageWriteTool stageTool() {
         return new AiAssistantChangeDealStageWriteTool(dealService, pipelineService);
+    }
+
+    AiAssistantCreateActivityWriteTool createActivityTool() {
+        return new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper);
+    }
+
+    AiAssistantCreateNoteWriteTool createNoteTool() {
+        return new AiAssistantCreateNoteWriteTool(noteService, objectMapper);
     }
 
     /** Prepares and stores one proposal as tool call 29. */
@@ -223,6 +250,32 @@ abstract class AbstractAiAssistantWriteToolTest {
             created.setStatus("todo");
             return created;
         }).when(taskService).create(any(Task.class));
+    }
+
+    /** The activity service returns the activity it was given with id 73, as the real one does. */
+    void createdActivitiesGetId73() {
+        doAnswer(invocation -> {
+            Activity created = invocation.getArgument(0);
+            created.setId(73);
+            return created;
+        }).when(activityService).create(any(Activity.class));
+    }
+
+    /** The note service returns the note it was given with id 75, as the real one does. */
+    void createdNotesGetId75() {
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            return created;
+        }).when(noteService).create(any(Note.class));
+    }
+
+    /** Person 31 is processable, so the executor's schedule read reaches its calendar. */
+    void person31IsProcessable() {
+        Person person = new Person();
+        person.setId(31);
+        person.setName("Ada Lovelace");
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person);
     }
 
     /**

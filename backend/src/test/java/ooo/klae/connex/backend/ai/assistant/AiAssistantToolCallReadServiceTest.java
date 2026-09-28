@@ -42,7 +42,9 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -102,6 +104,8 @@ class AiAssistantToolCallReadServiceTest {
         when(chatMapper.getAccessibleSessionById(
                 WORKSPACE_ID, USER_ID, SESSION_ID)).thenReturn(accessibleSession);
         service = service(List.of(
+                activityTool(),
+                noteTool(),
                 new AiAssistantCreateTaskWriteTool(
                         mock(TaskService.class),
                         mock(AiAssistantDateResolver.class),
@@ -126,6 +130,18 @@ class AiAssistantToolCallReadServiceTest {
                 sessionReadAudit,
                 JsonMapper.builder().build(),
                 CLOCK);
+    }
+
+    private static AiAssistantCreateActivityWriteTool activityTool() {
+        return new AiAssistantCreateActivityWriteTool(
+                mock(ActivityService.class),
+                mock(AiAssistantDateResolver.class),
+                JsonMapper.builder().build());
+    }
+
+    private static AiAssistantCreateNoteWriteTool noteTool() {
+        return new AiAssistantCreateNoteWriteTool(
+                mock(NoteService.class), JsonMapper.builder().build());
     }
 
     private static AiAssistantChangeDealStageWriteTool stageTool() {
@@ -1078,6 +1094,8 @@ class AiAssistantToolCallReadServiceTest {
     @Test
     void aProposalIsShownApplicableOnlyWhenTheViewerHoldsEveryPermissionTheToolDeclares() {
         AiAssistantToolCallReadService declaringMore = service(List.of(
+                activityTool(),
+                noteTool(),
                 new AiAssistantCreateTaskWriteTool(
                         mock(TaskService.class),
                         mock(AiAssistantDateResolver.class),
@@ -1106,6 +1124,8 @@ class AiAssistantToolCallReadServiceTest {
     @Test
     void aToolIsHandedOnlyTheBatchedInputsItDeclares() {
         AiAssistantToolCallReadService undeclared = service(List.of(
+                activityTool(),
+                noteTool(),
                 new AiAssistantCreateTaskWriteTool(
                         mock(TaskService.class),
                         mock(AiAssistantDateResolver.class),
