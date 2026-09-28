@@ -1,10 +1,15 @@
 package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,20 +25,35 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
+import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.TaskService;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Keeps the assistant write-tool SPI the only way a write tool is added, and keeps each tool
  * unable to bypass what the framework guarantees.
  *
- * <p>A write tool may not reach a mapper, so it cannot write without the audit row its domain
- * service records; may not take a lock, so the framework's single order is the only order; may not
- * call a lifecycle, consent, restriction or authorization mutator, which is the partial behavioural
- * guard behind the declarative never-writable field policy; may not branch on why a write was
- * authorized; and may not re-resolve a member. Only the framework constructs the unit of work a
- * tool applies, the framework asserts permissions from its locked snapshot and nowhere else on the
- * mutating path, and the lock-order document states the framework's order where the assistant
- * chat section ends.
+ * <p>The strongest guards are structural. A tool's injected dependencies — constructor parameters
+ * and instance fields, found by reflection — must come from an explicit allowlist of domain
+ * services and pure helpers, so a tool cannot hold a mapper (and so cannot write without the audit
+ * row its domain service records), cannot hold {@code WorkspaceService} or any other member or
+ * permission source (and so cannot re-resolve a member or read a permission), and cannot reach
+ * either through an assistant helper that does; adding a dependency is a reviewed edit here. The
+ * {@code Authority} a tool receives has no field saying why the write was authorized, so a tool
+ * cannot branch on it, and the only member lookup a tool is handed is the directory passed to
+ * {@code principals}, which {@code Execution} does not carry.
+ *
+ * <p>Behind those, a source scan refuses a tool that names a locking method, a permission read, or
+ * a lifecycle, consent, restriction or authorization mutator — as a call or a method reference.
+ * The source scan is lexical and a determined author can evade it through an allowlisted
+ * dependency; the allowlist is what makes that a reviewed change. Only the framework constructs
+ * the unit of work a tool applies, the framework asserts permissions from its locked snapshot and
+ * nowhere else on the mutating path, and the lock-order document states the framework's order
+ * where the assistant chat section ends.
  */
 class AiAssistantWriteToolSpiArchTest {
     private static final Path ASSISTANT_SOURCES =
@@ -56,6 +76,25 @@ class AiAssistantWriteToolSpiArchTest {
             "lockAndRequireMember",
             "lockAndRequirePermissions",
             "lockedPermissionsFor");
+
+    private static final List<String> PERMISSION_READS = List.of(
+            "permissionsFor",
+            "requirePermission",
+            "hasPermission",
+            "lockedMemberPermissionsFor");
+
+    /**
+     * Every type a write tool may be injected with: domain services, whose writes record their own
+     * audit row and run their own permission checks, and pure helpers. A new entry is a reviewed
+     * decision — never a mapper, {@code WorkspaceService}, a user or member service, or an
+     * assistant helper that injects any of them.
+     */
+    private static final Set<Class<?>> ALLOWED_DEPENDENCIES = Set.of(
+            TaskService.class,
+            DealService.class,
+            PipelineService.class,
+            AiAssistantDateResolver.class,
+            ObjectMapper.class);
 
     private static final List<String> FORBIDDEN_MUTATORS = List.of(
             "updateLifecycleStage",
@@ -104,7 +143,7 @@ class AiAssistantWriteToolSpiArchTest {
     }
 
     @Test
-    void noWriteToolReachesAMapperTakesALockOrCallsAForbiddenMutator() throws IOException {
+    void noWriteToolNamesAMapperALockAPermissionReadOrAForbiddenMutator() throws IOException {
         List<Path> tools = toolImplementations();
         assertTrue(!tools.isEmpty(), "no AiAssistantWriteTool implementation was found");
         List<String> violations = new ArrayList<>();
@@ -114,23 +153,65 @@ class AiAssistantWriteToolSpiArchTest {
                 violations.add(tool.getFileName() + " reaches a mapper");
             }
             for (String method : LOCKING_METHODS) {
-                if (Pattern.compile("\\." + method + "\\w*\\(").matcher(source).find()) {
+                if (names(source, method)) {
                     violations.add(tool.getFileName() + " takes a lock through " + method);
                 }
             }
+            for (String method : PERMISSION_READS) {
+                if (names(source, method)) {
+                    violations.add(tool.getFileName() + " reads a permission through " + method);
+                }
+            }
             for (String method : FORBIDDEN_MUTATORS) {
-                if (Pattern.compile("\\." + method + "\\w*\\(").matcher(source).find()) {
+                if (names(source, method)) {
                     violations.add(tool.getFileName() + " calls forbidden mutator " + method);
                 }
             }
-            if (source.contains("Authority.Kind") || source.contains("authority().kind()")) {
-                violations.add(tool.getFileName() + " branches on why the write was authorized");
+        }
+        assertEquals(List.of(), violations);
+    }
+
+    @Test
+    void everyWriteToolDependencyIsAnAllowlistedDomainServiceOrHelper() throws Exception {
+        List<String> violations = new ArrayList<>();
+        for (Path tool : toolImplementations()) {
+            Class<?> type = toolClass(tool);
+            List<Class<?>> dependencies = new ArrayList<>();
+            for (Constructor<?> constructor : type.getDeclaredConstructors()) {
+                dependencies.addAll(List.of(constructor.getParameterTypes()));
             }
-            if (source.contains("getMembers(")) {
-                violations.add(tool.getFileName() + " can re-resolve a member");
+            for (Field field : type.getDeclaredFields()) {
+                if (!Modifier.isStatic(field.getModifiers())) {
+                    dependencies.add(field.getType());
+                }
+            }
+            for (Class<?> dependency : dependencies) {
+                if (!ALLOWED_DEPENDENCIES.contains(dependency)) {
+                    violations.add(type.getSimpleName() + " depends on " + dependency.getName());
+                }
             }
         }
         assertEquals(List.of(), violations);
+    }
+
+    @Test
+    void aToolIsToldWhoActsButNeverWhyAndIsHandedNoMemberLookupToWrite() {
+        assertEquals(
+                List.of("workspaceId", "userId", "toolCallId", "at"),
+                Stream.of(AiAssistantWriteTool.Authority.class.getRecordComponents())
+                        .map(RecordComponent::getName)
+                        .toList());
+        List<String> nestedTypes = Stream.of(AiAssistantWriteTool.class.getDeclaredClasses())
+                .map(Class::getSimpleName)
+                .toList();
+        assertFalse(nestedTypes.contains("Kind"), "the SPI declares an authority kind");
+        for (RecordComponent component
+                : AiAssistantWriteTool.Execution.class.getRecordComponents()) {
+            assertNotEquals(
+                    AiAssistantWriteTool.MemberDirectory.class,
+                    component.getType(),
+                    "apply may not be handed a member lookup");
+        }
     }
 
     @Test
@@ -194,6 +275,17 @@ class AiAssistantWriteToolSpiArchTest {
             assertTrue(section.contains(statement),
                     "LOCKING.md's assistant write-tool section must state: " + statement);
         }
+    }
+
+    private static boolean names(String source, String method) {
+        return Pattern.compile("(?:\\." + method + "\\w*\\(|::" + method + "\\w*\\b)")
+                .matcher(source)
+                .find();
+    }
+
+    private static Class<?> toolClass(Path source) throws ClassNotFoundException {
+        String simpleName = source.getFileName().toString().replace(".java", "");
+        return Class.forName(AiAssistantWriteTool.class.getPackageName() + "." + simpleName);
     }
 
     private static Set<String> legacyTools() {

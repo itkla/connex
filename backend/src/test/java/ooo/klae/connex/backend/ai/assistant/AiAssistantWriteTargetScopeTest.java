@@ -22,6 +22,12 @@ import ooo.klae.connex.backend.services.DealService;
  * member-scoped domain getters. A target the actor's scope cannot see refuses there, with the
  * tool's own write never invoked and no result recorded. Dropping the gate from the ordered driver
  * turns every case here red, while every lock-order and permission test stays green.
+ *
+ * <p>These mocks have no {@code SqlSession}, so they pin that the gate step exists and where it
+ * sits, not that its read reaches committed state. The stage case's visible-then-refused stubbing
+ * stands for a deal that left the actor's scope between the tool's pre-lock read and the gate;
+ * {@code AiAssistantWriteTargetGateCacheIntegrationTest} proves against MySQL that the target lock
+ * flushes the first-level cache, so the gate's re-read is not answered with the pre-lock row.
  */
 class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
 

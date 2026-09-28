@@ -527,14 +527,17 @@
       <include refid="memberScopePredicate"/>
   </select>
 
-  <select id="getVisiblePersonByIdForUpdate" resultMap="PersonResult">
+  <!-- flushCache is required: a caller may read this person through getPersonById before the
+       lock and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+  <select id="getVisiblePersonByIdForUpdate" resultMap="PersonResult" flushCache="true">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
     WHERE <include refid="visible"/> AND p.id = #{id}
     FOR UPDATE
   </select>
 
-  <select id="getVisiblePersonByIdForShare" resultMap="PersonResult">
+  <!-- flushCache is required for the same post-lock recheck as getVisiblePersonByIdForUpdate. -->
+  <select id="getVisiblePersonByIdForShare" resultMap="PersonResult" flushCache="true">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
     WHERE <include refid="visible"/> AND p.id = #{id}

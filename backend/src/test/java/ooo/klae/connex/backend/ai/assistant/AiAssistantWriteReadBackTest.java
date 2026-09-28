@@ -2,13 +2,19 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Outcome;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReadBack;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.services.DealService;
 import tools.jackson.databind.JsonNode;
@@ -20,8 +26,9 @@ import tools.jackson.databind.JsonNode;
  * and compared by id with the stage resolved before the lock, while the stored {@code stage} label
  * stays the name resolved before the lock. A divergence is recorded as a {@code verification}
  * sibling of {@code outcome}, never inside it, so the API response, the card and the model's view
- * keep their exact keys. The mocks here have no {@code SqlSession}, so nothing is claimed about the
- * MyBatis first-level cache.
+ * keep their exact keys. Every write declares a comparison and a {@code null} on either side is
+ * compared like any other value, so no tool can opt out of the check. The mocks here have no
+ * {@code SqlSession}, so nothing is claimed about the MyBatis first-level cache.
  */
 class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
 
@@ -94,7 +101,7 @@ class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
-    void aCreatedTaskHasNoRequestedIdentifierAndNeverRecordsADivergence() throws Exception {
+    void aCreatedTaskLinkedToItsTargetRecordsNoVerification() throws Exception {
         createdTasksGetId74();
         AiAssistantWriteToolService service = service();
         propose(service, "create_task", "{\"handle\":\"r1\",\"description\":\"Agenda\"}",
@@ -105,5 +112,55 @@ class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
         JsonNode stored = objectMapper.readTree(capturedExecutedResult());
         assertEquals(List.of("tier", "outcome", "undo"), List.copyOf(stored.propertyNames()));
         assertEquals(74, stored.path("undo").path("entityId").asInt());
+    }
+
+    @Test
+    void aCreatedTaskTheServiceReturnedUnlinkedRecordsTheDivergence() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setPerson(null);
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_task", "{\"handle\":\"r1\",\"description\":\"Agenda\"}",
+                "person", 31);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        JsonNode stored = objectMapper.readTree(capturedExecutedResult());
+        assertEquals(
+                List.of("tier", "outcome", "undo", "verification"),
+                List.copyOf(stored.propertyNames()));
+        assertEquals(
+                "{\"field\":\"personId\",\"requested\":31,\"applied\":null}",
+                objectMapper.writeValueAsString(stored.get("verification")));
+    }
+
+    @Test
+    void aWriteThatRequestedNoValueButAppliedOneRecordsTheDivergence() throws Exception {
+        DealService.LockedStageChange locked = stubStageChange();
+        when(dealService.changeStage(locked)).thenReturn(deal(9));
+        AiAssistantChangeDealStageWriteTool requestsNothing =
+                new AiAssistantChangeDealStageWriteTool(dealService, pipelineService) {
+                    @Override
+                    public Outcome apply(Execution execution) {
+                        Outcome applied = super.apply(execution);
+                        return new Outcome(
+                                applied.data(),
+                                applied.inverse(),
+                                new ReadBack("stageId", null, applied.readBack().applied()));
+                    }
+                };
+        AiAssistantWriteToolService service = service(List.of(createTaskTool(), requestsNothing));
+        propose(service, "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal", 44);
+
+        service.approve(TURN.sessionId(), TOOL_CALL_ID);
+
+        assertEquals(
+                "{\"field\":\"stageId\",\"requested\":null,\"applied\":9}",
+                objectMapper.writeValueAsString(
+                        objectMapper.readTree(capturedExecutedResult()).get("verification")));
     }
 }

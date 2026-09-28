@@ -3,13 +3,16 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Outcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalRequest;
 import ooo.klae.connex.backend.beans.Deal;
@@ -38,6 +42,14 @@ import ooo.klae.connex.backend.tenant.Permission;
  * this red.
  */
 class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest {
+    private static final Set<String> PERMISSION_READS = Set.of(
+            "permissionsFor",
+            "requirePermission",
+            "hasPermission",
+            "lockedPermissionsFor",
+            "lockedMemberPermissionsFor",
+            "lockAndRequirePermissions",
+            "lockAndRequireMember");
 
     @Test
     void anImmediateTaskTakesEveryLockInTheFrameworkOrder() throws Exception {
@@ -104,7 +116,8 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 new AiAssistantChangeDealStageWriteTool(dealService, pipelineService) {
                     @Override
                     public List<PrincipalRequest> principals(
-                            AiAssistantWriteToolRequest request) {
+                            AiAssistantWriteToolRequest request, MemberDirectory directory) {
+                        directory.members();
                         return List.of(owner);
                     }
 
@@ -116,6 +129,14 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 };
         DealService.LockedStageChange locked = stubStageChange();
         when(dealService.changeStage(locked)).thenReturn(deal(6));
+        List<String> workspaceReadsBeforeTheSnapshot = new ArrayList<>();
+        when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    mockingDetails(workspaceService).getInvocations().stream()
+                            .map(call -> call.getMethod().getName())
+                            .forEach(workspaceReadsBeforeTheSnapshot::add);
+                    return authority;
+                });
         AiAssistantWriteToolService service = service(List.of(createTaskTool(), namingTool));
         propose(service, "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
                 "deal", 44);
@@ -123,6 +144,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         service.approve(TURN.sessionId(), TOOL_CALL_ID);
 
         InOrder order = inOrder(workspaceService, chatMapper);
+        order.verify(workspaceService).getMembers(TURN.workspaceId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),
                 Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
@@ -130,6 +152,13 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         assertEquals(1, applied.get().principals().size());
         assertSame(owner, applied.get().principals().getFirst());
+        assertTrue(workspaceReadsBeforeTheSnapshot.contains("getMembers"));
+        assertEquals(
+                List.of(),
+                workspaceReadsBeforeTheSnapshot.stream()
+                        .filter(PERMISSION_READS::contains)
+                        .toList(),
+                "principal resolution took a permission read before the locked snapshot");
     }
 
     @Test
@@ -138,7 +167,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper) {
                     @Override
                     public List<PrincipalRequest> principals(
-                            AiAssistantWriteToolRequest request) {
+                            AiAssistantWriteToolRequest request, MemberDirectory directory) {
                         return List.of(new PrincipalRequest(21, "Grace Hopper"));
                     }
                 };

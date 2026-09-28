@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +26,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Diff;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.DiffState;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReviewInput;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
@@ -175,12 +177,12 @@ public class AiAssistantToolCallReadService {
         Map<RecordKey, RecordSnapshot> visibleTargets = visibleTargets(
                 viewer.workspaceId(), stored);
         List<User> assignableOwners = stored.stream().anyMatch(call ->
-                "assign_owner".equals(call.toolCall().getToolName())
+                readsInput(call, ReviewInput.MEMBERS)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? workspaceService.getMembers(viewer.workspaceId())
                 : List.of();
         List<Stage> stages = stored.stream().anyMatch(call ->
-                "change_deal_stage".equals(call.toolCall().getToolName())
+                readsInput(call, ReviewInput.STAGES)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? pipelineMapper.getAllStages(viewer.workspaceId())
                 : List.of();
@@ -211,8 +213,8 @@ public class AiAssistantToolCallReadService {
             Optional<AiAssistantWriteTool> declared =
                     writeToolRegistry.find(call.toolCall().getToolName());
             Review review = declared.isPresent()
-                    ? review(call, status, readable, visibleTarget, assignableOwners, stages,
-                            viewerPermissions)
+                    ? review(declared.get(), call, status, readable, visibleTarget,
+                            assignableOwners, stages, viewerPermissions)
                     : null;
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
@@ -221,7 +223,7 @@ public class AiAssistantToolCallReadService {
                     status,
                     target,
                     declared.isPresent()
-                            ? declared.get().requestSummary(review)
+                            ? summary(review, declared.get()::requestSummary)
                             : requestSummary(call, readable, assignableOwners),
                     outcomeSummary(call, status, declared, review),
                     readable
@@ -516,7 +518,7 @@ public class AiAssistantToolCallReadService {
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
             case "executed" -> declared.isPresent()
-                    ? declared.get().outcomeSummary(review)
+                    ? summary(review, declared.get()::outcomeSummary)
                     : switch (toolCall.getToolName()) {
                 case "create_activity" -> "Activity created";
                 case "create_note" -> "Note created";
@@ -565,7 +567,8 @@ public class AiAssistantToolCallReadService {
                             ? "unresolved"
                             : changeState(
                                     call, target, diff.state() == DiffState.UNCHANGED,
-                                    viewerPermissions));
+                                    viewerPermissions,
+                                    declared.get().requiredPermissions(call.targetKind())));
         }
         return switch (call.toolCall().getToolName()) {
             case "assign_owner" -> ownerChange(
@@ -577,11 +580,15 @@ public class AiAssistantToolCallReadService {
     /**
      * The batched, viewer-authorized read state a declared tool projects one card from.
      *
-     * <p>The target snapshot is present only while the viewer can currently see the target, and the
-     * stored outcome only for an executed call; the tool never reads anything this service did not
-     * already load for the page of cards.
+     * <p>{@link #detailsReadable} is applied here, for every declared tool, rather than trusted to
+     * each tool: a viewer who may not read the details gets a review holding no target, request,
+     * outcome, members or stages, so no summary a tool writes can carry a record value to them.
+     * Otherwise the target snapshot is present while the viewer can currently see it, the stored
+     * outcome only for an executed call, and the members and stages only when the tool declared
+     * them; the tool never reads anything this service did not already load for the page of cards.
      */
     private Review review(
+            AiAssistantWriteTool tool,
             StoredToolCall call,
             String status,
             boolean readable,
@@ -589,16 +596,56 @@ public class AiAssistantToolCallReadService {
             List<User> assignableOwners,
             List<Stage> stages,
             Set<Permission> viewerPermissions) {
+        if (!readable) {
+            return withheld(call.targetKind(), call.targetId(), viewerPermissions);
+        }
+        Set<ReviewInput> inputs = tool.reviewInputs();
         return new Review(
                 call.targetKind(),
                 call.targetId(),
-                readable,
+                true,
                 target,
                 call.request(),
                 EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
-                assignableOwners,
-                stages,
+                inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),
+                inputs.contains(ReviewInput.STAGES) ? stages : List.of(),
                 viewerPermissions);
+    }
+
+    private static Review withheld(
+            String targetKind, int targetId, Set<Permission> viewerPermissions) {
+        return new Review(
+                targetKind, targetId, false, null, null, null, List.of(), List.of(),
+                viewerPermissions);
+    }
+
+    /**
+     * A declared tool's summary, screened like every other member-visible value.
+     *
+     * <p>A detailed summary the special-care screen excludes, or one the tool declines to give, is
+     * replaced by the summary the tool gives a viewer who may not read the details.
+     */
+    private static String summary(Review review, Function<Review, String> summarize) {
+        String summary = summarize.apply(review);
+        if (review.detailsReadable()
+                && (summary == null || SpecialCareTextScreen.screen(summary).excluded())) {
+            return summarize.apply(withheld(
+                    review.targetKind(), review.targetId(), review.viewerPermissions()));
+        }
+        return summary;
+    }
+
+    /**
+     * Whether one card's projection reads a batched input: a declared tool that asked for it, or
+     * the legacy owner arm, which reads the member list.
+     */
+    private boolean readsInput(StoredToolCall call, ReviewInput input) {
+        String toolName = call.toolCall().getToolName();
+        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
+        if (declared.isPresent()) {
+            return declared.get().reviewInputs().contains(input);
+        }
+        return input == ReviewInput.MEMBERS && "assign_owner".equals(toolName);
     }
 
     private JsonNode storedOutcome(AiChatToolCall toolCall) {
@@ -635,7 +682,8 @@ public class AiAssistantToolCallReadService {
             return new AiAssistantToolCallReadDto.Change(
                     OWNER_FIELD, current, currentUnresolved, null,
                     changeState(
-                            call, target, target.ownerId() == null, viewerPermissions));
+                            call, target, target.ownerId() == null, viewerPermissions,
+                            updatePermissions(call.targetKind())));
         }
         User proposed = requestedOwner(requested, assignableOwners);
         String proposedName = proposed == null ? null : memberName(proposed);
@@ -649,7 +697,8 @@ public class AiAssistantToolCallReadService {
                         call,
                         target,
                         target.ownerId() != null && target.ownerId() == proposed.getId(),
-                        viewerPermissions));
+                        viewerPermissions,
+                        updatePermissions(call.targetKind())));
     }
 
     /**
@@ -666,14 +715,16 @@ public class AiAssistantToolCallReadService {
      *
      * @param unchanged whether the record already holds the proposed value, decided by the callers
      *     on the ids the record stores rather than on the names this workspace can print for them
+     * @param required the permissions the approval itself asserts: a declared tool's
+     *     {@code requiredPermissions} for the target kind, or the target's update permission
      */
     private String changeState(
             StoredToolCall call,
             RecordSnapshot target,
             boolean unchanged,
-            Set<Permission> viewerPermissions) {
-        Permission required = updatePermission(call.targetKind());
-        if (required == null || !viewerPermissions.contains(required)) {
+            Set<Permission> viewerPermissions,
+            Set<Permission> required) {
+        if (required.isEmpty() || !viewerPermissions.containsAll(required)) {
             return "permissionLost";
         }
         if (unchanged) {
@@ -685,12 +736,12 @@ public class AiAssistantToolCallReadService {
                 : "ready";
     }
 
-    private static Permission updatePermission(String kind) {
+    private static Set<Permission> updatePermissions(String kind) {
         return switch (kind) {
-            case "person" -> Permission.PERSON_UPDATE;
-            case "company" -> Permission.COMPANY_UPDATE;
-            case "deal" -> Permission.DEAL_UPDATE;
-            default -> null;
+            case "person" -> Set.of(Permission.PERSON_UPDATE);
+            case "company" -> Set.of(Permission.COMPANY_UPDATE);
+            case "deal" -> Set.of(Permission.DEAL_UPDATE);
+            default -> Set.of();
         };
     }
 

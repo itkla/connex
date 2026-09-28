@@ -1030,7 +1030,9 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="getDealByIdForUpdate" resultMap="DealResult">
+  <!-- flushCache is required: a caller may read this deal through getDealById before the lock
+       and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+  <select id="getDealByIdForUpdate" resultMap="DealResult" flushCache="true">
     SELECT <include refid="dealColumns"/>
     FROM deal FORCE INDEX (uq_deal_workspace_id)
     WHERE workspace_id = #{workspaceId} AND id = #{id}

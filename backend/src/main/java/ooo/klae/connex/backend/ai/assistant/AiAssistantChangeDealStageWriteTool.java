@@ -73,7 +73,8 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
     }
 
     @Override
-    public List<PrincipalRequest> principals(AiAssistantWriteToolRequest request) {
+    public List<PrincipalRequest> principals(
+            AiAssistantWriteToolRequest request, MemberDirectory directory) {
         return List.of();
     }
 
@@ -121,6 +122,11 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
     @Override
     public boolean inverseAvailable() {
         return false;
+    }
+
+    @Override
+    public Set<ReviewInput> reviewInputs() {
+        return Set.of(ReviewInput.STAGES);
     }
 
     /**

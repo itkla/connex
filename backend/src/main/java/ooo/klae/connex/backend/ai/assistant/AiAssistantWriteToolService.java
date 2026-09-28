@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Inverse;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Lock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.LockedTarget;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Outcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalRequest;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReadBack;
@@ -225,7 +226,7 @@ public class AiAssistantWriteToolService {
         if (write.tier() != ToolTier.AUTO) {
             throw new ConflictException("Assistant tool requires approval");
         }
-        requireNoPrincipals(write);
+        requireNoPrincipals(write, turn.workspaceId());
         requirePermissions(authorized.authority(), turn.userId(), write);
         PreparedMutation mutation;
         try {
@@ -245,8 +246,7 @@ public class AiAssistantWriteToolService {
         ExecutionOutcome outcome = execute(
                 write,
                 new Authority(
-                        turn.workspaceId(), turn.userId(), Authority.Kind.TURN_IMMEDIATE,
-                        toolCall.getId(), clock.instant()),
+                        turn.workspaceId(), turn.userId(), toolCall.getId(), clock.instant()),
                 PreliminaryPrincipals.NONE,
                 mutation);
         String resultJson = resultEnvelope(write, outcome, null);
@@ -291,8 +291,7 @@ public class AiAssistantWriteToolService {
         ExecutionOutcome outcome = execute(
                 write,
                 new Authority(
-                        actor.workspaceId(), actor.userId(), Authority.Kind.MEMBER_APPROVAL,
-                        toolCall.getId(), clock.instant()),
+                        actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
                 principals,
                 mutation);
         Map<String, Object> approval = new LinkedHashMap<>();
@@ -375,8 +374,7 @@ public class AiAssistantWriteToolService {
             }
             declared.get().undo(
                     new Authority(
-                            actor.workspaceId(), actor.userId(), Authority.Kind.MEMBER_UNDO,
-                            toolCall.getId(), clock.instant()),
+                            actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
                     new Inverse(
                             text(undo, "entityKind"),
                             integer(undo, "entityId"),
@@ -401,7 +399,10 @@ public class AiAssistantWriteToolService {
      * Runs the owner-scope target gate, then the write itself.
      *
      * <p>The gate reads the target through the scoped domain getters after every lock is held, so a
-     * target the actor's member scope cannot see refuses before any tool runs.
+     * target the actor's member scope cannot see refuses before any tool runs. It is a read of
+     * committed state, not a replay: every target lock statement the framework takes declares
+     * {@code flushCache="true"}, so a getter a tool already called before the lock — the stage
+     * tool reads its deal to resolve the stage — is not answered from the first-level cache.
      */
     private ExecutionOutcome execute(
             StoredWrite write,
@@ -454,8 +455,7 @@ public class AiAssistantWriteToolService {
     }
 
     private static Map<String, Object> verification(ReadBack readBack) {
-        if (readBack.requested() == null
-                || Objects.equals(readBack.requested(), readBack.applied())) {
+        if (Objects.equals(readBack.requested(), readBack.applied())) {
             return null;
         }
         Map<String, Object> verification = new LinkedHashMap<>();
@@ -642,7 +642,8 @@ public class AiAssistantWriteToolService {
      * Resolves, before any lock, which principal rows the approval will have to lock.
      *
      * <p>A declared tool resolves its principals through {@link AiAssistantWriteTool#principals},
-     * once; the framework locks exactly those rows and hands the same objects to the write. A tool
+     * once, against the framework's member directory; the framework locks exactly those rows and
+     * hands the same objects to the write. A tool
      * still on the legacy ledger resolves its owner here as before.
      *
      * <p>It is deliberately not an authorization step and takes no permission read of its own. One
@@ -673,7 +674,9 @@ public class AiAssistantWriteToolService {
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
         if (declared.isPresent()) {
             return new PreliminaryPrincipals(
-                    null, declared.get().principals(write.typedRequest()));
+                    null,
+                    declared.get().principals(
+                            write.typedRequest(), memberDirectory(actor.workspaceId())));
         }
         if (!"assign_owner".equals(write.toolName())) {
             return PreliminaryPrincipals.NONE;
@@ -683,11 +686,24 @@ public class AiAssistantWriteToolService {
     }
 
     /** Refuses an immediate-tier declared tool that names a principal no approval resolved. */
-    private void requireNoPrincipals(StoredWrite write) {
+    private void requireNoPrincipals(StoredWrite write, int workspaceId) {
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent() && !declared.get().principals(write.typedRequest()).isEmpty()) {
+        if (declared.isPresent()
+                && !declared.get().principals(
+                        write.typedRequest(), memberDirectory(workspaceId)).isEmpty()) {
             throw new IllegalStateException("An immediate assistant tool cannot name a principal");
         }
+    }
+
+    /**
+     * The only member lookup a tool is handed: the workspace's member list, read on demand.
+     *
+     * <p>It is a plain membership read, not a permission read, so resolving principals through it
+     * before any lock leaves nothing in the first-level cache that a later permission check could
+     * be answered with.
+     */
+    private MemberDirectory memberDirectory(int workspaceId) {
+        return () -> workspaceService.getMembers(workspaceId);
     }
 
     private void requireReadableSession(Actor actor, int sessionId) {

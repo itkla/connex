@@ -82,14 +82,20 @@ public interface AiAssistantWriteTool {
      *
      * <p>The framework locks each returned user's authorization rows with the actor's, ascending by
      * user id, and passes these same objects to {@link #apply} through {@link Execution}. Only an
-     * approval resolves principals; an immediate-tier tool that names one is refused. Resolution
-     * runs before any lock, so it must take no permission read: one would fill the transaction's
-     * first-level cache with a pre-lock answer every later permission check would be served.
+     * approval resolves principals; an immediate-tier tool that names one is refused.
+     *
+     * <p>Resolution runs before any lock, so it must be a pure function of the request and the
+     * directory the framework supplies: a permission read here would fill the transaction's
+     * first-level cache with a pre-lock answer every later permission check would be served, and a
+     * domain getter guarded by {@code @RequirePermission} performs exactly such a read. The
+     * directory's own read is a plain member list, not a permission read.
      *
      * @param request the validated typed request
+     * @param directory the workspace's members, read by the framework only when asked for
      * @return the principals, empty for a tool that names none
      */
-    List<PrincipalRequest> principals(AiAssistantWriteToolRequest request);
+    List<PrincipalRequest> principals(
+            AiAssistantWriteToolRequest request, MemberDirectory directory);
 
     /**
      * Resolves, once and before any record lock, the server-side value this write moves its target
@@ -121,7 +127,7 @@ public interface AiAssistantWriteTool {
      * <p>An implementation guards on the fingerprint and lets the domain service's
      * {@code ConflictException} roll the transaction back.
      *
-     * @param authority who is undoing the write
+     * @param authority who is undoing the write, never why they may
      * @param inverse the durable inverse {@link #apply} recorded
      */
     default void undo(Authority authority, Inverse inverse) {
@@ -132,7 +138,19 @@ public interface AiAssistantWriteTool {
     boolean inverseAvailable();
 
     /**
+     * The workspace data this tool's card projection reads besides its own target and request.
+     *
+     * <p>The read service batches each input once per page of cards, only for cards whose viewer
+     * may read their details; a tool that reads an input it did not declare finds it empty.
+     *
+     * @return the batched inputs {@link #diff} and the summaries read from a {@link Review}
+     */
+    Set<ReviewInput> reviewInputs();
+
+    /**
      * The before and after values one pending proposal would write, never shown to the model.
+     *
+     * <p>Called only for a viewer who may read the proposal's details.
      *
      * @param review the card's batched, viewer-authorized read state
      * @return the change, or {@code null} when the tool has no reviewable before and after
@@ -140,12 +158,22 @@ public interface AiAssistantWriteTool {
     Diff diff(Review review);
 
     /**
+     * The member-visible request summary.
+     *
+     * <p>For a viewer who may not read the proposal's details the framework passes a review with
+     * no target, request, outcome, members or stages, so the summary can only be generic. A
+     * detailed summary is screened for special-care text and replaced by the generic one when the
+     * screen excludes it.
+     *
      * @param review the card's batched, viewer-authorized read state
      * @return the member-visible request summary
      */
     String requestSummary(Review review);
 
     /**
+     * The member-visible summary of an executed write, projected under the same rule as
+     * {@link #requestSummary}.
+     *
      * @param review the card's batched read state for an executed call
      * @return the member-visible summary of the completed write
      */
@@ -154,8 +182,11 @@ public interface AiAssistantWriteTool {
     /**
      * Projects a stored outcome into the model's view of it.
      *
-     * <p>Server-resolved scalars and workspace-authored labels only — no identifier and no free
-     * model text.
+     * <p>No identifier, no undo or verification metadata, and no string class beyond what the tool
+     * already reports: server-resolved scalars, workspace-authored labels such as a stage name, and
+     * echoes of the model's own arguments such as a task description or a note title. A tool may
+     * copy a field only by naming it, so a key the stored outcome gains later never reaches the
+     * provider by accident.
      *
      * @param storedOutcome the stored outcome object
      * @return the model-visible outcome in stable key order
@@ -216,6 +247,18 @@ public interface AiAssistantWriteTool {
     }
 
     /**
+     * The workspace's members as the framework reads them for principal resolution.
+     *
+     * <p>It is the only member lookup a tool is handed, and only {@link #principals} receives it.
+     */
+    @FunctionalInterface
+    interface MemberDirectory {
+
+        /** @return the workspace's active members */
+        List<User> members();
+    }
+
+    /**
      * A server-side value resolved once before the lock.
      *
      * @param field the pending-proposal argument key the label is reviewed under
@@ -246,15 +289,13 @@ public interface AiAssistantWriteTool {
     }
 
     /**
-     * Why a write is allowed to happen.
+     * Who a write is performed for, where and when.
      *
-     * <p>A tool reads only {@link #workspaceId()} and {@link #userId()}; the kind is the
-     * framework's to evaluate.
+     * <p>Why the write is allowed — a running turn, a member's approval, a member's undo — is the
+     * framework's decision alone and is deliberately absent, so no tool can branch on it and a new
+     * kind of authority is added inside the framework without editing a tool.
      */
-    record Authority(int workspaceId, int userId, Kind kind, int toolCallId, Instant at) {
-
-        /** The decision that authorized the write. */
-        public enum Kind { TURN_IMMEDIATE, MEMBER_APPROVAL, MEMBER_UNDO }
+    record Authority(int workspaceId, int userId, int toolCallId, Instant at) {
     }
 
     /** What the framework holds locked for the target when it calls {@link #apply}. */
@@ -281,12 +322,18 @@ public interface AiAssistantWriteTool {
     /**
      * The identifier a write produced, compared by the framework with the one it resolved.
      *
+     * <p>Every write declares one comparison. A {@code null} is a value like any other: a write
+     * that requested no value and applied one diverges, as does one that requested a value and
+     * applied none.
+     *
      * @param field the identifier's name in a divergence record
-     * @param requested the identifier resolved before the lock, or {@code null} when a create has
-     *     none to compare
-     * @param applied the identifier the write call itself returned
+     * @param requested the identifier resolved before the write, possibly {@code null}
+     * @param applied the identifier the write call itself returned, possibly {@code null}
      */
     record ReadBack(String field, Integer requested, Integer applied) {
+        public ReadBack {
+            Objects.requireNonNull(field, "An assistant read-back names the identifier it compares");
+        }
     }
 
     /**
@@ -308,6 +355,8 @@ public interface AiAssistantWriteTool {
      *
      * <p>The framework serializes it after its own {@code status} and {@code expiresAt}, then
      * {@code entityKind}, {@code entityId}, {@code fingerprint} and any {@code extra} keys in order.
+     * An {@code extra} key may not name one of those framework keys, nor {@code undoneAt}, so a
+     * tool can neither move the undo window nor retarget the inverse.
      */
     record Inverse(
             String entityKind,
@@ -315,8 +364,19 @@ public interface AiAssistantWriteTool {
             String fingerprint,
             boolean available,
             Map<String, Object> extra) {
+
+        /** The undo keys the framework owns. */
+        public static final Set<String> FRAMEWORK_KEYS = Set.of(
+                "status", "expiresAt", "entityKind", "entityId", "fingerprint", "undoneAt");
+
         public Inverse {
             extra = Collections.unmodifiableMap(new LinkedHashMap<>(extra));
+            for (String key : extra.keySet()) {
+                if (FRAMEWORK_KEYS.contains(key)) {
+                    throw new IllegalStateException(
+                            "An assistant inverse may not set the framework's undo key " + key);
+                }
+            }
         }
     }
 
@@ -332,10 +392,16 @@ public interface AiAssistantWriteTool {
     /**
      * The batched, viewer-authorized read state one card is projected from.
      *
+     * <p>When the viewer may not read the details, the framework withholds every record value:
+     * {@code target}, {@code request} and {@code outcome} are {@code null} and {@code members} and
+     * {@code stages} are empty.
+     *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
-     * @param target the visible target, or {@code null} when the viewer cannot currently see it
-     * @param request the stored request object
+     * @param target the visible target, or {@code null} when the viewer may not read it
+     * @param request the stored request object, or {@code null} when the viewer may not read it
      * @param outcome the stored outcome of an executed call, or {@code null}
+     * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}
+     * @param stages the workspace's pipeline stages when the tool declared {@link ReviewInput#STAGES}
      */
     record Review(
             String targetKind,
@@ -356,6 +422,14 @@ public interface AiAssistantWriteTool {
             JsonNode value = request == null ? null : request.get(field);
             return value != null && value.isString() ? value.asString() : null;
         }
+    }
+
+    /** Workspace data a card projection may batch-read for a tool. */
+    enum ReviewInput {
+        /** The workspace's members, for a tool that reviews an owner. */
+        MEMBERS,
+        /** The workspace's pipeline stages, for a tool that reviews a deal stage. */
+        STAGES
     }
 
     /** Whether a reviewed value resolved and whether the record already holds it. */

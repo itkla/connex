@@ -13,12 +13,16 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -43,6 +47,7 @@ import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -96,16 +101,19 @@ class AiAssistantToolCallReadServiceTest {
         accessibleSession.setStatus("active");
         when(chatMapper.getAccessibleSessionById(
                 WORKSPACE_ID, USER_ID, SESSION_ID)).thenReturn(accessibleSession);
+        service = service(List.of(
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                stageTool()));
+    }
+
+    private AiAssistantToolCallReadService service(List<AiAssistantWriteTool> tools) {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
-        service = new AiAssistantToolCallReadService(
+        return new AiAssistantToolCallReadService(
                 catalog,
-                new AiAssistantWriteToolRegistry(catalog, List.of(
-                        new AiAssistantCreateTaskWriteTool(
-                                mock(TaskService.class),
-                                mock(AiAssistantDateResolver.class),
-                                JsonMapper.builder().build()),
-                        new AiAssistantChangeDealStageWriteTool(
-                                mock(DealService.class), mock(PipelineService.class)))),
+                new AiAssistantWriteToolRegistry(catalog, tools),
                 chatMapper,
                 workspaceService,
                 personMapper,
@@ -118,6 +126,11 @@ class AiAssistantToolCallReadServiceTest {
                 sessionReadAudit,
                 JsonMapper.builder().build(),
                 CLOCK);
+    }
+
+    private static AiAssistantChangeDealStageWriteTool stageTool() {
+        return new AiAssistantChangeDealStageWriteTool(
+                mock(DealService.class), mock(PipelineService.class));
     }
 
     @Test
@@ -953,6 +966,285 @@ class AiAssistantToolCallReadServiceTest {
                         + "\"entityId\":" + activityId + ","
                         + "\"expiresAt\":\"2026-08-12T12:10:00Z\","
                         + "\"fingerprint\":\"private fingerprint\"}}");
+    }
+
+    @Test
+    void everyDeclaredToolGivesAParticipantAndARetainedAdminOnlyItsGenericSummaries() {
+        List<Review> seen = new ArrayList<>();
+        AiAssistantToolCallReadService echoing = service(AiAssistantDeclaredWriteTools.tools()
+                .stream()
+                .map(tool -> (AiAssistantWriteTool) new EchoingTool(tool, seen))
+                .toList());
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(declaredToolCards(99));
+        List<AiAssistantToolCallReadDto> participant = echoing.list(SESSION_ID, false);
+        when(chatMapper.getRetainedSessionById(
+                WORKSPACE_ID, USER_ID, SESSION_ID, List.of(USER_ID)))
+                .thenReturn(retainedSession(44, "active"));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(declaredToolCards(44));
+        List<AiAssistantToolCallReadDto> retained = echoing.listRetained(SESSION_ID, false);
+
+        assertEquals(4 * AiAssistantDeclaredWriteTools.tools().size(),
+                participant.size() + retained.size());
+        for (AiAssistantToolCallReadDto card : concat(participant, retained)) {
+            assertEquals(WITHHELD_ECHO, card.requestSummary(), card.toolName());
+            if ("executed".equals(card.status())) {
+                assertEquals(WITHHELD_ECHO, card.outcomeSummary(), card.toolName());
+            }
+            assertNull(card.change());
+        }
+        assertFalse(seen.isEmpty());
+        for (Review review : seen) {
+            assertFalse(review.detailsReadable());
+            assertNull(review.target());
+            assertNull(review.request());
+            assertNull(review.outcome());
+            assertTrue(review.members().isEmpty());
+            assertTrue(review.stages().isEmpty());
+        }
+        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
+    }
+
+    @Test
+    void theRequesterIsGivenTheDetailedSummaryTheSameToolWithholdsFromOthers() {
+        List<Review> seen = new ArrayList<>();
+        AiAssistantToolCallReadService echoing = service(AiAssistantDeclaredWriteTools.tools()
+                .stream()
+                .map(tool -> (AiAssistantWriteTool) new EchoingTool(tool, seen))
+                .toList());
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(declaredToolCards(USER_ID));
+
+        for (AiAssistantToolCallReadDto card : echoing.list(SESSION_ID, false)) {
+            assertTrue(card.requestSummary().contains("Acme renewal"), card.toolName());
+            assertTrue(card.requestSummary().contains("secret request"), card.toolName());
+        }
+    }
+
+    @Test
+    void aDetailedSummaryTheSpecialCareScreenExcludesFallsBackToTheGenericOne() {
+        AiChatToolCall toolCall = toolCall(
+                66, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 66, null);
+        toolCall.setArgumentsJson(toolCall.getArgumentsJson().replace("Won", "Diagnosis"));
+        stubVisibleDeal();
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Negotiation"), stage(11, 3, "Diagnosis")));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(toolCall));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Change the deal stage", card.requestSummary());
+        assertEquals("Diagnosis", card.change().proposedValue());
+    }
+
+    @Test
+    void aProposalIsShownApplicableOnlyWhenTheViewerHoldsEveryPermissionTheToolDeclares() {
+        AiAssistantToolCallReadService declaringMore = service(List.of(
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                new AiAssistantChangeDealStageWriteTool(
+                        mock(DealService.class), mock(PipelineService.class)) {
+                    @Override
+                    public Set<Permission> requiredPermissions(String targetKind) {
+                        return Set.of(Permission.DEAL_UPDATE, Permission.DEAL_DELETE);
+                    }
+                }));
+        stubVisibleDeal();
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(toolCall(
+                        67, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 67,
+                        null)));
+
+        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
+        assertEquals(
+                "permissionLost",
+                declaringMore.list(SESSION_ID, false).getFirst().change().state());
+    }
+
+    @Test
+    void aToolIsHandedOnlyTheBatchedInputsItDeclares() {
+        AiAssistantToolCallReadService undeclared = service(List.of(
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                new AiAssistantChangeDealStageWriteTool(
+                        mock(DealService.class), mock(PipelineService.class)) {
+                    @Override
+                    public Set<ReviewInput> reviewInputs() {
+                        return Set.of();
+                    }
+                }));
+        stubVisibleDeal();
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(toolCall(
+                        68, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 68,
+                        null)));
+
+        AiAssistantToolCallReadDto.Change change =
+                undeclared.list(SESSION_ID, false).getFirst().change();
+
+        assertEquals("unresolved", change.state());
+        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
+        verify(workspaceService, never()).getMembers(WORKSPACE_ID);
+    }
+
+    private void stubVisibleDeal() {
+        Deal deal = new Deal();
+        deal.setId(41);
+        deal.setName("Acme renewal");
+        deal.setPipelineId(3);
+        deal.setStageId(9);
+        deal.setUpdatedAt("2026-08-12 11:00:00.000000");
+        when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of(deal));
+    }
+
+    /**
+     * A proposed and an executed card for every declared tool, all on deal 41 and carrying record
+     * values a viewer who may not read the details must never be shown.
+     */
+    private static List<AiChatToolCall> declaredToolCards(int requestedByUserId) {
+        List<AiChatToolCall> cards = new ArrayList<>();
+        int id = 70;
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            String tier = tool.tier().name().toLowerCase();
+            for (String status : List.of("proposed", "executed")) {
+                AiChatToolCall card = toolCall(
+                        id, requestedByUserId, tool.name(), tier, status, "deal", 41, id,
+                        "executed".equals(status)
+                                ? "{\"tier\":\"" + tier + "\",\"outcome\":{\"status\":\"executed\","
+                                        + "\"recordType\":\"deal\","
+                                        + "\"description\":\"secret outcome\","
+                                        + "\"stage\":\"secret outcome\"}}"
+                                : null);
+                card.setArgumentsJson("{\"tool\":\"" + tool.name() + "\",\"tier\":\"" + tier
+                        + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"deal\",\"id\":41},"
+                        + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
+                        + "\"description\":\"secret request\"}}");
+                cards.add(card);
+                id++;
+            }
+        }
+        return cards;
+    }
+
+    private static List<AiAssistantToolCallReadDto> concat(
+            List<AiAssistantToolCallReadDto> first, List<AiAssistantToolCallReadDto> second) {
+        List<AiAssistantToolCallReadDto> all = new ArrayList<>(first);
+        all.addAll(second);
+        return all;
+    }
+
+    private static final String WITHHELD_ECHO = "echo null null null null 0 0";
+
+    /**
+     * A declared tool whose summaries echo every record value its review carries, so a card that
+     * shows none of them proves the framework withheld them rather than the tool declining to.
+     */
+    private record EchoingTool(AiAssistantWriteTool delegate, List<Review> seen)
+            implements AiAssistantWriteTool {
+
+        @Override
+        public String name() {
+            return delegate.name();
+        }
+
+        @Override
+        public ToolTier tier() {
+            return delegate.tier();
+        }
+
+        @Override
+        public Class<? extends AiAssistantWriteToolRequest> requestType() {
+            return delegate.requestType();
+        }
+
+        @Override
+        public Set<String> acceptedTargetKinds() {
+            return delegate.acceptedTargetKinds();
+        }
+
+        @Override
+        public Set<String> declaredWritableFields() {
+            return delegate.declaredWritableFields();
+        }
+
+        @Override
+        public Set<Permission> requiredPermissions(String targetKind) {
+            return delegate.requiredPermissions(targetKind);
+        }
+
+        @Override
+        public Lock lock(String targetKind) {
+            return delegate.lock(targetKind);
+        }
+
+        @Override
+        public List<PrincipalRequest> principals(
+                AiAssistantWriteToolRequest request, MemberDirectory directory) {
+            return delegate.principals(request, directory);
+        }
+
+        @Override
+        public Outcome apply(Execution execution) {
+            return delegate.apply(execution);
+        }
+
+        @Override
+        public boolean inverseAvailable() {
+            return delegate.inverseAvailable();
+        }
+
+        @Override
+        public Set<ReviewInput> reviewInputs() {
+            return Set.of(ReviewInput.MEMBERS, ReviewInput.STAGES);
+        }
+
+        @Override
+        public Diff diff(Review review) {
+            seen.add(review);
+            return null;
+        }
+
+        @Override
+        public String requestSummary(Review review) {
+            return echo(review);
+        }
+
+        @Override
+        public String outcomeSummary(Review review) {
+            return echo(review);
+        }
+
+        @Override
+        public Map<String, Object> modelOutcome(JsonNode storedOutcome) {
+            return delegate.modelOutcome(storedOutcome);
+        }
+
+        @Override
+        public List<String> memberOutcomeFields() {
+            return delegate.memberOutcomeFields();
+        }
+
+        private String echo(Review review) {
+            seen.add(review);
+            return "echo " + review.requestText("stage") + " "
+                    + (review.target() == null ? null : review.target().label()) + " "
+                    + review.outcome() + " "
+                    + review.requestText("description") + " "
+                    + review.members().size() + " "
+                    + review.stages().size();
+        }
     }
 
     private void stubPending(AiChatToolCall toolCall, int personId, List<Person> people) {

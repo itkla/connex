@@ -26,7 +26,9 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>The framework holds the task board root and then the target — the person {@code FOR SHARE},
  * because linking a task does not change it — before this tool calls {@link TaskService#create}.
- * The inverse deletes the task only while it still matches the state this write created.
+ * The write is read back by the record the returned task links to, compared with the target the
+ * framework resolved. The inverse deletes the task only while it still matches the state this write
+ * created.
  */
 @Component
 @RequiredArgsConstructor
@@ -79,7 +81,8 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
-    public List<PrincipalRequest> principals(AiAssistantWriteToolRequest request) {
+    public List<PrincipalRequest> principals(
+            AiAssistantWriteToolRequest request, MemberDirectory directory) {
         return List.of();
     }
 
@@ -112,7 +115,10 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
                         AiAssistantWriteTool.fingerprint(objectMapper, taskState(created)),
                         true,
                         Map.of()),
-                new ReadBack("taskId", null, created.getId()));
+                new ReadBack(
+                        execution.row().target().kind() + "Id",
+                        execution.row().target().id(),
+                        linkedId(created, execution.row().target().kind())));
     }
 
     @Override
@@ -129,6 +135,11 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
     @Override
     public boolean inverseAvailable() {
         return true;
+    }
+
+    @Override
+    public Set<ReviewInput> reviewInputs() {
+        return Set.of();
     }
 
     @Override
@@ -170,6 +181,14 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
             deal.setId(target.id());
             task.setDeal(deal);
         }
+    }
+
+    /** The record the created task is linked to, as the task service returned it. */
+    private static Integer linkedId(Task task, String targetKind) {
+        if ("person".equals(targetKind)) {
+            return task.getPerson() == null ? null : task.getPerson().getId();
+        }
+        return task.getDeal() == null ? null : task.getDeal().getId();
     }
 
     private static Map<String, Object> taskState(Task task) {
