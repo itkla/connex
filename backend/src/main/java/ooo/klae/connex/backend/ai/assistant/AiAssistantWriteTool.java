@@ -158,6 +158,45 @@ public interface AiAssistantWriteTool {
     }
 
     /**
+     * What kind of write the stored request asked for, declared as named flags that {@link
+     * #requestSummary} and {@link #outcomeSummary} may read even for a viewer who may not read the
+     * details.
+     *
+     * <p>Such a viewer's review holds none of the request, so a summary that has always said which
+     * kind of write was asked for — {@code assign_owner} says whether it removed or assigned an
+     * owner — reads it from these flags instead. The declaration is static: the registry reads it
+     * once at startup and refuses a malformed one, and the framework, never the tool, evaluates each
+     * {@link SharedRequestFlag} against the stored request, so a flag can depend on nothing but
+     * whether one request field names one fixed keyword. The framework hands that viewer's review
+     * only these declared names, each holding a boolean, so no request value, workspace string,
+     * identifier or property of the record can reach them through one. Each tool's flags are pinned
+     * by a reviewed ledger in {@code AiAssistantWriteToolRegistryTest}.
+     *
+     * @return the flags by name, none by default
+     */
+    default Map<String, SharedRequestFlag> sharedRequestFlags() {
+        return Map.of();
+    }
+
+    /**
+     * Whether the framework screens this tool's detailed request summary for special-care text.
+     *
+     * <p>A screened summary the screen excludes is replaced by the one given to a viewer who may
+     * not read the details. A tool may decline the screen only when its detailed summary names
+     * nothing but a workspace member's label, resolved server-side against the workspace's own
+     * member list rather than taken from the model or from record content, that the same viewer's
+     * pending card already states unscreened as its {@link #diff} values. Screening such a summary
+     * withholds nothing and only rewrites what the card has always said, so {@code assign_owner}
+     * declines it. Each tool that declines is pinned by a reviewed ledger in
+     * {@code AiAssistantWriteToolRegistryTest}.
+     *
+     * @return whether the detailed request summary is screened, {@code true} by default
+     */
+    default boolean screensDetailedRequestSummary() {
+        return true;
+    }
+
+    /**
      * The workspace data this tool's card projection reads besides its own target and request.
      *
      * <p>The read service batches each input once per page of cards, only for cards whose viewer
@@ -181,9 +220,11 @@ public interface AiAssistantWriteTool {
      * The member-visible request summary.
      *
      * <p>For a viewer who may not read the proposal's details the framework passes a review with
-     * no target, request, members or stages, and an outcome holding at most the boolean
+     * no target, members or stages, a request holding at most the boolean
+     * {@link #sharedRequestFlags()}, and an outcome holding at most the boolean
      * {@link #sharedOutcomeFlags()}, so the summary can say no more than those flags. A detailed
-     * summary is screened for special-care text and replaced by the generic one when the screen
+     * summary is screened for special-care text, unless the tool declines under
+     * {@link #screensDetailedRequestSummary()}, and replaced by the generic one when the screen
      * excludes it.
      *
      * @param review the card's batched, viewer-authorized read state
@@ -248,6 +289,37 @@ public interface AiAssistantWriteTool {
         JsonNode value = source.get(field);
         if (value != null && value.isString() && !value.asString().isBlank()) {
             target.put(field, value.asString());
+        }
+    }
+
+    /**
+     * One request flag a viewer who may not read the details may learn: whether the stored
+     * request's text field {@code field} names the fixed keyword {@code literal}, compared
+     * ignoring case and surrounding whitespace.
+     *
+     * <p>The framework evaluates it; the tool only declares it, so the flag's value is a function
+     * of that one request field and nothing else.
+     *
+     * @param field the request field compared
+     * @param literal the fixed keyword it is compared with
+     */
+    record SharedRequestFlag(String field, String literal) {
+        public SharedRequestFlag {
+            if (field == null || field.isBlank() || literal == null || literal.isBlank()) {
+                throw new IllegalStateException(
+                        "An assistant shared request flag must name a field and a keyword");
+            }
+        }
+
+        /**
+         * @param request the stored request object, or {@code null}
+         * @return whether the request's field is text naming the keyword
+         */
+        public boolean holds(JsonNode request) {
+            JsonNode value = request == null ? null : request.get(field);
+            return value != null
+                    && value.isString()
+                    && literal.equalsIgnoreCase(value.asString().trim());
         }
     }
 
@@ -491,13 +563,15 @@ public interface AiAssistantWriteTool {
      * The batched, viewer-authorized read state one card is projected from.
      *
      * <p>When the viewer may not read the details, the framework withholds every record value:
-     * {@code target} and {@code request} are {@code null}, {@code outcome} holds at most the
-     * tool's boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
+     * {@code target} is {@code null}, {@code request} holds at most the tool's boolean
+     * {@link AiAssistantWriteTool#sharedRequestFlags()}, {@code outcome} holds at most the tool's
+     * boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
      * {@code members} and {@code stages} are empty.
      *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
      * @param target the visible target, or {@code null} when the viewer may not read it
-     * @param request the stored request object, or {@code null} when the viewer may not read it
+     * @param request the stored request object, only its shared request flags when the viewer may
+     *     not read it, or {@code null} when it has none
      * @param outcome the stored outcome of an executed call, only its shared flags when the viewer
      *     may not read it, or {@code null}
      * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}

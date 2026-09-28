@@ -167,7 +167,9 @@ class AiAssistantWriteToolServiceTest {
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, dateResolver, objectMapper),
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
-                        addTagTool)),
+                        addTagTool,
+                        new AiAssistantAssignOwnerWriteTool(
+                                personService, companyService, dealService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -761,6 +763,9 @@ class AiAssistantWriteToolServiceTest {
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 11:59:59");
         when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        Person owned = person(31);
+        owned.setOwnerId(21);
+        when(personService.updateOwner(31, 21)).thenReturn(owned);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 
@@ -816,6 +821,10 @@ class AiAssistantWriteToolServiceTest {
         unchanged.setId(52);
         unchanged.setUpdatedAt("2026-03-05 11:59:00.000000");
         when(companyService.lockOwnedCompanyForUpdate(52)).thenReturn(unchanged);
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(21);
+        when(companyService.updateOwner(52, 21)).thenReturn(owned);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 
@@ -836,6 +845,41 @@ class AiAssistantWriteToolServiceTest {
         lockOrder.verify(companyService).lockOwnedCompanyForUpdate(52);
         verify(workspaceService, never()).lockAndRequireMember(
                 eq(TURN.workspaceId()), anyInt());
+    }
+
+    @Test
+    void theOwnerWrittenIsThePrincipalResolvedAndLockedBeforeTheWrite() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        User renamedInto = new User();
+        renamedInto.setId(22);
+        renamedInto.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(owner))
+                .thenReturn(List.of(renamedInto));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company",
+                52);
+        stored(write, 29);
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(21);
+        when(companyService.updateOwner(52, 21)).thenReturn(owned);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(workspaceService, times(1)).getMembers(TURN.workspaceId());
+        InOrder order = inOrder(workspaceService, companyService);
+        order.verify(workspaceService).getMembers(TURN.workspaceId());
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+        order.verify(companyService).lockOwnedCompanyForUpdate(52);
+        order.verify(companyService).updateOwner(52, 21);
+        verify(companyService, never()).updateOwner(52, 22);
     }
 
     @Test

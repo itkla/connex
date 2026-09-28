@@ -29,8 +29,10 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalReques
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -295,5 +297,43 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         verify(taskService, never()).lockBoardForCreation();
         verify(activityService, never()).getActivitiesByPersonIdInWindow(
                 anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void anApprovedOwnerAssignmentLocksItsOwnerWithTheActorAndWritesOnlyAfterTheScopeGate()
+            throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        Person owned = new Person();
+        owned.setId(31);
+        owned.setOwnerId(21);
+        when(personService.updateOwner(31, 21)).thenReturn(owned);
+        AiAssistantWriteToolService service = service();
+        propose(service, "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person", 31);
+
+        service.approve(TURN.sessionId(), TOOL_CALL_ID);
+
+        InOrder order = inOrder(workspaceService, chatMapper, personService, restrictionEpoch);
+        order.verify(chatMapper).getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(workspaceService).getMembers(TURN.workspaceId());
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
+        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(personService).getPersonById(31);
+        order.verify(personService).updateOwner(31, 21);
+        verify(chatMapper, never()).getTurnByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(taskService, never()).lockBoardForCreation();
+        verify(workspaceService, never()).lockAndRequireMember(anyInt(), anyInt());
     }
 }

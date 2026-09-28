@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Lock;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.TargetLock;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -24,23 +25,30 @@ import ooo.klae.connex.backend.tenant.Permission;
  * declare as a write, a tier that disagrees with the catalog, an accepted kind outside the record
  * kinds or disagreeing with the executor's handle check, a kind with no required permission or no
  * lock, a shared person lock on a non-person target, a malformed or never-writable declared field,
- * and a catalog write tool that has neither a bean nor a place on {@link #LEGACY_TOOLS}.
+ * a malformed shared request flag, and a catalog write tool that has neither a bean nor a place on
+ * {@link #LEGACY_TOOLS}.
+ *
+ * <p>Each tool's {@link AiAssistantWriteTool#sharedRequestFlags()} declaration is read once, here,
+ * and served from {@link #sharedRequestFlags(String)} thereafter, so the read path never asks a
+ * tool for a flag again.
  */
 @Component
 public class AiAssistantWriteToolRegistry {
     /**
-     * Write tools still served by the framework's own per-tool arms while they move onto the SPI.
+     * Write tools served by the framework's own per-tool arms instead of a bean.
      *
-     * <p>It only ever shrinks: a tool that gains a bean must leave it in the same change, which
-     * construction enforces, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to
-     * it.
+     * <p>It is empty: every catalog write tool is a declared bean. Construction refuses a bean whose
+     * name is on it, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to it, so
+     * the bijection between catalog write tools and beans stays total.
      */
-    static final Set<String> LEGACY_TOOLS = Set.of("assign_owner");
+    static final Set<String> LEGACY_TOOLS = Set.of();
 
     private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");
+    private static final Pattern FLAG_NAME = Pattern.compile("[a-z][A-Za-z]*");
 
     private final Map<String, AiAssistantWriteTool> tools;
+    private final Map<String, Map<String, SharedRequestFlag>> sharedRequestFlags;
 
     /**
      * @param catalog the closed tool declaration
@@ -57,15 +65,18 @@ public class AiAssistantWriteToolRegistry {
             requireDeclared(catalog, tool);
         }
         Map<String, AiAssistantWriteTool> ordered = new LinkedHashMap<>();
+        Map<String, Map<String, SharedRequestFlag>> flags = new LinkedHashMap<>();
         for (String name : AiAssistantToolCatalog.writeToolNames()) {
             AiAssistantWriteTool tool = byName.get(name);
             if (tool != null) {
                 ordered.put(name, tool);
+                flags.put(name, declaredRequestFlags(tool));
             } else if (!LEGACY_TOOLS.contains(name)) {
                 throw refused(name, "is declared in the catalog but has no write-tool bean");
             }
         }
         this.tools = Collections.unmodifiableMap(ordered);
+        this.sharedRequestFlags = Collections.unmodifiableMap(flags);
     }
 
     /**
@@ -79,6 +90,33 @@ public class AiAssistantWriteToolRegistry {
     /** @return every registered tool, in catalog order */
     public List<AiAssistantWriteTool> tools() {
         return List.copyOf(tools.values());
+    }
+
+    /**
+     * @param name a tool key
+     * @return the request flags the tool declared at startup, none for an unregistered name
+     */
+    public Map<String, SharedRequestFlag> sharedRequestFlags(String name) {
+        Map<String, SharedRequestFlag> declared = name == null ? null : sharedRequestFlags.get(name);
+        return declared == null ? Map.of() : declared;
+    }
+
+    private static Map<String, SharedRequestFlag> declaredRequestFlags(AiAssistantWriteTool tool) {
+        Map<String, SharedRequestFlag> declared = tool.sharedRequestFlags();
+        if (declared == null) {
+            throw refused(tool.name(), "declares no shared request flags");
+        }
+        for (Map.Entry<String, SharedRequestFlag> flag : declared.entrySet()) {
+            if (flag.getKey() == null || !FLAG_NAME.matcher(flag.getKey()).matches()) {
+                throw refused(tool.name(), "declares malformed shared request flag "
+                        + flag.getKey());
+            }
+            if (flag.getValue() == null) {
+                throw refused(tool.name(), "declares shared request flag " + flag.getKey()
+                        + " without a keyword");
+            }
+        }
+        return Map.copyOf(declared);
     }
 
     private static void requireDeclared(AiAssistantToolCatalog catalog, AiAssistantWriteTool tool) {

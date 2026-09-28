@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,7 +35,6 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Resolution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Row;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ScheduleConflicts;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Target;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AssignOwner;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -44,7 +42,6 @@ import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -79,8 +76,7 @@ import tools.jackson.databind.node.ObjectNode;
  * snapshot, the task board and target locks the tool declares, the restriction fence, proposal
  * freshness for every confirm-tier tool, the permissions re-asserted after the record lock, the
  * owner-scope target gate, the write, the identifier read back off its result, and the fail-closed
- * status write. Tools still on {@link AiAssistantWriteToolRegistry#LEGACY_TOOLS} run through the
- * same order on their existing per-tool arms.
+ * status write.
  */
 @Service
 @RequiredArgsConstructor
@@ -373,10 +369,7 @@ public class AiAssistantWriteToolService {
         if (declared.isPresent()) {
             return apply(declared.get(), write, authority, principals.principals(), mutation);
         }
-        return switch (write.toolName()) {
-            case "assign_owner" -> assignOwner(write, requireOwnerAssignment(principals.owner()));
-            default -> throw new BadRequestException("Unsupported assistant write tool");
-        };
+        throw new BadRequestException("Unsupported assistant write tool");
     }
 
     /**
@@ -443,20 +436,6 @@ public class AiAssistantWriteToolService {
             case "deal" -> dealService.getDealById(write.targetId());
             default -> throw new BadRequestException("Unsupported assistant record kind");
         }
-    }
-
-    private ExecutionOutcome assignOwner(StoredWrite write, OwnerAssignment owner) {
-        switch (write.targetKind()) {
-            case "person" -> personService.updateOwner(write.targetId(), owner.userId());
-            case "company" -> companyService.updateOwner(write.targetId(), owner.userId());
-            case "deal" -> dealService.updateOwner(write.targetId(), owner.userId());
-            default -> throw new BadRequestException("Unsupported owner target");
-        }
-        Map<String, Object> outcome = new LinkedHashMap<>();
-        outcome.put("status", EXECUTED);
-        outcome.put("recordType", write.targetKind());
-        outcome.put("owner", owner.label());
-        return new ExecutionOutcome(outcome, null);
     }
 
     /**
@@ -530,8 +509,7 @@ public class AiAssistantWriteToolService {
      *
      * <p>A declared tool resolves its principals through {@link AiAssistantWriteTool#principals},
      * once, against the framework's member directory; the framework locks exactly those rows and
-     * hands the same objects to the write. A tool
-     * still on the legacy ledger resolves its owner here as before.
+     * hands the same objects to the write, which is handed no member lookup of its own.
      *
      * <p>It is deliberately not an authorization step and takes no permission read of its own. One
      * here would run unlocked selects that the MyBatis first-level cache then replays for every
@@ -559,17 +537,11 @@ public class AiAssistantWriteToolService {
         }
         StoredWrite write = readStored(toolCall);
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            return new PreliminaryPrincipals(
-                    null,
-                    declared.get().principals(
-                            write.typedRequest(), memberDirectory(actor.workspaceId())));
-        }
-        if (!"assign_owner".equals(write.toolName())) {
+        if (declared.isEmpty()) {
             return PreliminaryPrincipals.NONE;
         }
-        return new PreliminaryPrincipals(
-                resolveOwnerAssignment(request(write, AssignOwner.class).owner()), List.of());
+        return new PreliminaryPrincipals(declared.get().principals(
+                write.typedRequest(), memberDirectory(actor.workspaceId())));
     }
 
     /** Refuses an immediate-tier declared tool that names a principal no approval resolved. */
@@ -709,19 +681,7 @@ public class AiAssistantWriteToolService {
         if (declared.isPresent()) {
             return declared.get().requiredPermissions(write.targetKind());
         }
-        return switch (write.toolName()) {
-            case "assign_owner" -> Set.of(updatePermission(write.targetKind()));
-            default -> throw new BadRequestException("Unsupported assistant write tool");
-        };
-    }
-
-    private static Permission updatePermission(String kind) {
-        return switch (kind) {
-            case "person" -> Permission.PERSON_UPDATE;
-            case "company" -> Permission.COMPANY_UPDATE;
-            case "deal" -> Permission.DEAL_UPDATE;
-            default -> throw new BadRequestException("Unsupported assistant record kind");
-        };
+        throw new BadRequestException("Unsupported assistant write tool");
     }
 
     private StoredWrite readStored(AiChatToolCall toolCall) {
@@ -756,13 +716,10 @@ public class AiAssistantWriteToolService {
     private AiAssistantWriteToolRequest readRequest(String name, JsonNode args) {
         try {
             Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(name);
-            AiAssistantWriteToolRequest request = declared.isPresent()
-                    ? objectMapper.treeToValue(args, declared.get().requestType())
-                    : switch (name) {
-                        case "assign_owner" -> objectMapper.treeToValue(args, AssignOwner.class);
-                        default -> throw AiAssistantLoopException.malformed("unknown_write_tool");
-                    };
-            return validate(request);
+            if (declared.isEmpty()) {
+                throw AiAssistantLoopException.malformed("unknown_write_tool");
+            }
+            return validate(objectMapper.treeToValue(args, declared.get().requestType()));
         } catch (JacksonException exception) {
             throw AiAssistantLoopException.malformed("invalid_tool_arguments");
         }
@@ -774,15 +731,6 @@ public class AiAssistantWriteToolService {
             throw AiAssistantLoopException.malformed("invalid_tool_arguments");
         }
         return request;
-    }
-
-    private <T extends AiAssistantWriteToolRequest> T request(
-            StoredWrite write, Class<T> type) {
-        try {
-            return validate(objectMapper.treeToValue(write.request(), type));
-        } catch (JacksonException exception) {
-            throw new IllegalStateException("Assistant tool request could not be read", exception);
-        }
     }
 
     private String resultEnvelope(
@@ -839,13 +787,7 @@ public class AiAssistantWriteToolService {
         if (declared.isPresent()) {
             return declared.get().modelOutcome(outcome);
         }
-        copyText(outcome, result, "recordType");
-        copyText(outcome, result, "owner");
         return result;
-    }
-
-    private static void copyText(JsonNode source, Map<String, Object> target, String field) {
-        AiAssistantWriteTool.copyText(source, target, field);
     }
 
     private AiAssistantToolCallDto dto(AiChatToolCall toolCall) {
@@ -886,43 +828,12 @@ public class AiAssistantWriteToolService {
         }
     }
 
-    private OwnerAssignment resolveOwnerAssignment(String owner) {
-        if ("unassigned".equalsIgnoreCase(owner.trim())) {
-            return new OwnerAssignment(null, "unassigned");
-        }
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<User> matches = workspaceService.getMembers(workspaceId).stream()
-                .filter(user -> user.getDisplayName() != null
-                        && user.getDisplayName().equalsIgnoreCase(owner.trim())
-                        || user.getUsername() != null
-                        && user.getUsername().equalsIgnoreCase(owner.trim()))
-                .toList();
-        if (matches.size() != 1) {
-            throw new ResourceNotFoundException("Owner is unavailable or ambiguous");
-        }
-        User match = matches.getFirst();
-        String label = match.getDisplayName() == null || match.getDisplayName().isBlank()
-                ? match.getUsername()
-                : match.getDisplayName();
-        return new OwnerAssignment(match.getId(), label);
-    }
-
-    private static OwnerAssignment requireOwnerAssignment(OwnerAssignment owner) {
-        if (owner == null) {
-            throw new IllegalStateException("Assistant owner assignment was not resolved");
-        }
-        return owner;
-    }
-
     private Set<String> acceptedKinds(String toolName) {
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
         if (declared.isPresent()) {
             return declared.get().acceptedTargetKinds();
         }
-        return switch (toolName) {
-            case "assign_owner" -> Set.of("person", "company", "deal");
-            default -> Set.of();
-        };
+        return Set.of();
     }
 
     private Actor currentActor() {
@@ -1043,11 +954,6 @@ public class AiAssistantWriteToolService {
             AiAssistantWriteToolRequest typedRequest) {
     }
 
-    private record OwnerAssignment(
-            Integer userId,
-            String label) {
-    }
-
     private record PreparedMutation(
             DealService.LockedStageChange stageChange,
             Resolution resolution,
@@ -1058,29 +964,18 @@ public class AiAssistantWriteToolService {
             Map<String, Object> publicData,
             Map<String, Object> undo,
             Map<String, Object> verification) {
-        private ExecutionOutcome(Map<String, Object> publicData, Map<String, Object> undo) {
-            this(publicData, undo, null);
-        }
     }
 
     /**
      * The principals one approval resolved before any lock.
      *
-     * @param owner a legacy-ledger owner assignment, or {@code null}
      * @param principals a declared tool's principals, locked and handed to its write unchanged
      */
-    private record PreliminaryPrincipals(
-            OwnerAssignment owner,
-            List<PrincipalRequest> principals) {
-        private static final PreliminaryPrincipals NONE = new PreliminaryPrincipals(null, List.of());
+    private record PreliminaryPrincipals(List<PrincipalRequest> principals) {
+        private static final PreliminaryPrincipals NONE = new PreliminaryPrincipals(List.of());
 
         private List<Integer> userIds() {
-            List<Integer> userIds = new ArrayList<>();
-            if (owner != null && owner.userId() != null) {
-                userIds.add(owner.userId());
-            }
-            principals.stream().map(PrincipalRequest::userId).forEach(userIds::add);
-            return List.copyOf(userIds);
+            return principals.stream().map(PrincipalRequest::userId).toList();
         }
     }
 }

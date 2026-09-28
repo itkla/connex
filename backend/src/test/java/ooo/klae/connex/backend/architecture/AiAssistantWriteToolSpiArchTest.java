@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantAddTagWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantAssignOwnerWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
@@ -77,12 +78,6 @@ class AiAssistantWriteToolSpiArchTest {
     private static final Path FRAMEWORK =
             ASSISTANT_SOURCES.resolve("AiAssistantWriteToolService.java");
     private static final Path LOCKING = Path.of("docs/backend/LOCKING.md");
-
-    /**
-     * The legacy ledger's current ceiling. It shrinks with the ledger in every slice, so a tool
-     * that moved onto the SPI can never rejoin it.
-     */
-    private static final Set<String> LEGACY_LEDGER_CEILING = Set.of("assign_owner");
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
@@ -151,6 +146,12 @@ class AiAssistantWriteToolSpiArchTest {
      * {@code removeTag} nor any record update or read is granted: the tool has no inverse, and the
      * framework reads the target through its own scoped gate. {@code change_deal_stage} holds the
      * same {@code DealService} and is granted none of that.
+     *
+     * <p>{@code assign_owner} is granted exactly the call its legacy arm made: each record service's
+     * {@code updateOwner}, which asserts its own update permission, locks the named owner's
+     * membership, records its audit row and returns the updated record the tool reads the owner id
+     * back from. No read, no member lookup and no other mutator is granted: the framework resolved
+     * and locked the owner before the tool runs, and reads the target through its own scoped gate.
      */
     private static final Map<Class<? extends AiAssistantWriteTool>, Map<Class<?>, Set<String>>>
             PERMITTED_SERVICE_METHODS = Map.of(
@@ -169,7 +170,12 @@ class AiAssistantWriteToolSpiArchTest {
                             TagService.class, Set.of("getAllTags"),
                             PersonService.class, Set.of("addTag"),
                             CompanyService.class, Set.of("addTag"),
-                            DealService.class, Set.of("addTag")));
+                            DealService.class, Set.of("addTag")),
+                    AiAssistantAssignOwnerWriteTool.class,
+                    Map.of(
+                            PersonService.class, Set.of("updateOwner"),
+                            CompanyService.class, Set.of("updateOwner"),
+                            DealService.class, Set.of("updateOwner")));
 
     /**
      * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved
@@ -199,33 +205,29 @@ class AiAssistantWriteToolSpiArchTest {
             Pattern.compile("private static final String NAME = \"([a-z_]+)\";");
 
     @Test
-    void everyDeclaredWriteToolHasExactlyOneBeanOrAPlaceOnTheShrinkingLedger() throws IOException {
+    void everyDeclaredWriteToolHasExactlyOneBeanAndEveryBeanIsADeclaredWriteTool()
+            throws IOException {
         List<String> beanNames = new ArrayList<>();
         for (Path tool : toolImplementations()) {
             Matcher name = DECLARED_NAME.matcher(read(tool));
             assertTrue(name.find(), tool + " must declare its catalog key as NAME");
             beanNames.add(name.group(1));
         }
-        Set<String> legacy = legacyTools();
         Set<String> covered = new TreeSet<>(beanNames);
         assertEquals(beanNames.size(), covered.size(), "a write tool has two beans: " + beanNames);
-        Set<String> overlap = new HashSet<>(covered);
-        overlap.retainAll(legacy);
-        assertTrue(overlap.isEmpty(), "tools with a bean are still on the ledger: " + overlap);
-        covered.addAll(legacy);
         assertEquals(
                 new TreeSet<>(AiAssistantToolCatalog.writeToolNames()),
                 covered,
-                "every declared write tool needs a bean or a legacy-ledger entry, and nothing else");
+                "every declared write tool needs exactly one bean, and every bean a declared tool");
     }
 
     @Test
-    void theLegacyLedgerOnlyShrinks() {
-        Set<String> legacy = legacyTools();
-        assertTrue(
-                LEGACY_LEDGER_CEILING.containsAll(legacy),
-                "a tool may leave AiAssistantWriteToolRegistry.LEGACY_TOOLS but never join it: "
-                        + legacy);
+    void theLegacyLedgerIsEmpty() {
+        assertEquals(
+                Set.of(),
+                legacyTools(),
+                "every write tool is a bean; AiAssistantWriteToolRegistry.LEGACY_TOOLS takes no"
+                        + " name");
     }
 
     @Test
@@ -345,6 +347,17 @@ class AiAssistantWriteToolSpiArchTest {
                         AiAssistantAddTagWriteTool.class,
                         tagTool + "\nObject moved = dealService.changeStage(change);"
                                 + "\nObject deal = dealService.getDealById(target.id());\n"));
+        assertEquals(
+                List.of("AiAssistantAddTagWriteTool calls personService.updateOwner"),
+                unpermittedToolUses(
+                        AiAssistantAddTagWriteTool.class,
+                        tagTool + "\nObject owned = personService.updateOwner(target.id(), 21);\n"));
+        String ownerTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAssignOwnerWriteTool.java"));
+        assertEquals(
+                List.of("AiAssistantAssignOwnerWriteTool calls companyService.addTag"),
+                unpermittedToolUses(
+                        AiAssistantAssignOwnerWriteTool.class,
+                        ownerTool + "\nboolean tagged = companyService.addTag(target.id(), 9);\n"));
         assertEquals(
                 List.of("TaskToolHoldingADealService holds " + DealService.class.getName()
                         + " with no permitted-method grant"),

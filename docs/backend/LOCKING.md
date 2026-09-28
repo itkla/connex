@@ -392,8 +392,7 @@ The session row is the per-session mutex. Allocate message sequence with the est
 
 Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
 `READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one
-`AiAssistantWriteTool` bean (tools not yet moved onto it run on the framework's legacy per-tool
-arms, listed in `AiAssistantWriteToolRegistry.LEGACY_TOOLS`, through the same order). The tool
+`AiAssistantWriteTool` bean, and every catalog write tool has exactly one. The tool
 declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
 tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
 `AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
@@ -401,8 +400,9 @@ dependencies to an explicit allowlist of domain services and helpers — no mapp
 `WorkspaceService`, no member or permission source — and lexically by refusing locking-method,
 permission-read and lifecycle-mutator names in tool source; a new dependency is a reviewed edit to
 that allowlist. Before any lock, an approval resolves the principals the write will name
-(`AiAssistantWriteTool.principals`, against the member directory the framework hands it, or the
-legacy `assign_owner` owner), and those same objects reach the write. The framework acquires its
+(`AiAssistantWriteTool.principals`, against the member directory the framework hands it — today
+only `assign_owner`'s owner), and those same objects reach the write: `Execution` carries no member
+lookup, so `assign_owner` writes exactly the owner id locked at step 1. The framework acquires its
 locks in exactly this order:
 
 1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
@@ -436,7 +436,8 @@ the write returned with the one resolved before the lock, recording any divergen
 built, so its link cannot diverge from the target while that holds, and nothing is re-read from
 the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
 whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
-id it resolved with itself and verifying nothing); and
+id it resolved with itself and verifying nothing; `assign_owner` compares the owner id on the record
+`updateOwner` returns with the principal locked at step 1, `null` on both sides for a removal); and
 writes the tool-call status fail-closed. The one
 read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
 `Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool

@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.DiffState;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReviewInput;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -61,8 +62,6 @@ public class AiAssistantToolCallReadService {
     private static final String ACTIVE = "active";
     private static final String PROPOSED = "proposed";
     private static final String EXECUTED = "executed";
-    private static final String UNASSIGNED = "unassigned";
-    private static final String OWNER_FIELD = "owner";
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
@@ -211,13 +210,15 @@ public class AiAssistantToolCallReadService {
                     status,
                     target,
                     declared.isPresent()
-                            ? summary(review, withheld, declared.get()::requestSummary)
-                            : requestSummary(call, readable, assignableOwners),
-                    outcomeSummary(call, status, declared, review, withheld),
+                            ? summary(
+                                    review, withheld, declared.get()::requestSummary,
+                                    declared.get().screensDetailedRequestSummary())
+                            : "Run a write tool",
+                    outcomeSummary(status, declared, review, withheld),
                     readable
                             ? change(
-                                    call, status, visibleTarget, assignableOwners,
-                                    viewerPermissions, declared, review)
+                                    call, status, visibleTarget, viewerPermissions, declared,
+                                    review)
                             : null,
                     readable
                             ? outcomeValues(call, status)
@@ -438,71 +439,19 @@ public class AiAssistantToolCallReadService {
         };
     }
 
-    private static String requestSummary(
-            StoredToolCall call,
-            boolean detailsReadable,
-            List<User> assignableOwners) {
-        String toolName = call.toolCall().getToolName();
-        if (detailsReadable) {
-            String resolved = switch (toolName) {
-                case "assign_owner" -> ownerSummary(call.requestValue(), assignableOwners);
-                default -> null;
-            };
-            if (resolved != null) {
-                return resolved;
-            }
-        }
-        return switch (toolName) {
-            case "assign_owner" -> "Assign an owner";
-            default -> "Run a write tool";
-        };
-    }
-
-    private static String ownerSummary(String requestedOwner, List<User> assignableOwners) {
-        if (UNASSIGNED.equalsIgnoreCase(requestedOwner.trim())) {
-            return "Remove the current owner";
-        }
-        String label = requestedOwnerName(requestedOwner, assignableOwners);
-        return label == null ? null : "Assign owner: " + label;
-    }
-
-    private static String requestedOwnerName(
-            String requestedOwner, List<User> assignableOwners) {
-        User matched = requestedOwner(requestedOwner, assignableOwners);
-        return matched == null ? null : memberName(matched);
-    }
-
-    private static User requestedOwner(String requestedOwner, List<User> assignableOwners) {
-        String normalizedOwner = requestedOwner.trim();
-        List<User> matches = assignableOwners.stream()
-                .filter(user -> user.getDisplayName() != null
-                        && user.getDisplayName().equalsIgnoreCase(normalizedOwner)
-                        || user.getUsername() != null
-                        && user.getUsername().equalsIgnoreCase(normalizedOwner))
-                .toList();
-        return matches.size() == 1 ? matches.getFirst() : null;
-    }
-
     private String outcomeSummary(
-            StoredToolCall call,
             String status,
             Optional<AiAssistantWriteTool> declared,
             Review review,
             Review withheld) {
-        AiChatToolCall toolCall = call.toolCall();
         return switch (status) {
             case "proposed" -> null;
             case "rejected" -> "Request rejected";
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
             case "executed" -> declared.isPresent()
-                    ? summary(review, withheld, declared.get()::outcomeSummary)
-                    : switch (toolCall.getToolName()) {
-                case "assign_owner" -> "unassigned".equalsIgnoreCase(call.requestValue().trim())
-                        ? "Owner removed"
-                        : "Owner assigned";
-                default -> "Request completed";
-            };
+                    ? summary(review, withheld, declared.get()::outcomeSummary, true)
+                    : "Request completed";
             default -> null;
         };
     }
@@ -512,8 +461,8 @@ public class AiAssistantToolCallReadService {
      * such change to state.
      *
      * <p>Every value here is workspace record data resolved server-side, never a value the model
-     * chose: the proposed owner and stage are matched against the workspace's own members and
-     * stages, and an unmatched one is reported as unresolved rather than echoed back. The caller has
+     * chose: each declared tool matches its proposed value against the workspace's own data, and an
+     * unmatched one is reported as unresolved rather than echoed back. The caller has
      * already established that the viewer requested this proposal and can currently read its target,
      * which is what keeps a before-value out of a shared participant's transcript.
      */
@@ -521,35 +470,27 @@ public class AiAssistantToolCallReadService {
             StoredToolCall call,
             String status,
             RecordSnapshot target,
-            List<User> assignableOwners,
             Set<Permission> viewerPermissions,
             Optional<AiAssistantWriteTool> declared,
             Review review) {
-        if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status)) {
+        if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status) || declared.isEmpty()) {
             return null;
         }
-        if (declared.isPresent()) {
-            Diff diff = declared.get().diff(review);
-            if (diff == null) {
-                return null;
-            }
-            return new AiAssistantToolCallReadDto.Change(
-                    diff.field(),
-                    diff.currentValue(),
-                    diff.currentValueUnresolved(),
-                    diff.proposedValue(),
-                    diff.state() == DiffState.UNRESOLVED
-                            ? "unresolved"
-                            : changeState(
-                                    call, target, diff.state() == DiffState.UNCHANGED,
-                                    viewerPermissions,
-                                    declared.get().requiredPermissions(call.targetKind())));
+        Diff diff = declared.get().diff(review);
+        if (diff == null) {
+            return null;
         }
-        return switch (call.toolCall().getToolName()) {
-            case "assign_owner" -> ownerChange(
-                    call, target, assignableOwners, viewerPermissions);
-            default -> null;
-        };
+        return new AiAssistantToolCallReadDto.Change(
+                diff.field(),
+                diff.currentValue(),
+                diff.currentValueUnresolved(),
+                diff.proposedValue(),
+                diff.state() == DiffState.UNRESOLVED
+                        ? "unresolved"
+                        : changeState(
+                                call, target, diff.state() == DiffState.UNCHANGED,
+                                viewerPermissions,
+                                declared.get().requiredPermissions(call.targetKind())));
     }
 
     /**
@@ -557,8 +498,8 @@ public class AiAssistantToolCallReadService {
      *
      * <p>{@link #detailsReadable} is applied here, for every declared tool, rather than trusted to
      * each tool: a viewer who may not read the details gets the withheld review, holding no target,
-     * request, members or stages and no outcome value beyond the tool's boolean shared flags, so no
-     * summary a tool writes can carry a record value to them.
+     * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
+     * no summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
      * outcome only for an executed call, and the members and stages only when the tool declared
      * them; the tool never reads anything this service did not already load for the page of cards.
@@ -591,10 +532,13 @@ public class AiAssistantToolCallReadService {
     /**
      * The review of one card for a viewer who may not read its details.
      *
-     * <p>It holds no record value. Its outcome, for an executed call only, carries just the tool's
-     * declared {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean, and is
-     * {@code null} when none does, so a summary can say whether the write changed anything but
-     * never a workspace string or an identifier.
+     * <p>It holds no record value. Its request carries just the boolean value of each
+     * {@link AiAssistantWriteTool#sharedRequestFlags()} the registry read at startup, evaluated here
+     * rather than by the tool, and is {@code null} when there are none, and
+     * its outcome, for an executed call only, carries just the tool's declared
+     * {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean and is {@code null}
+     * when none does, so a summary can say what kind of write was asked for and whether it changed
+     * anything but never a workspace string or an identifier.
      */
     private Review withheld(
             AiAssistantWriteTool tool,
@@ -602,11 +546,24 @@ public class AiAssistantToolCallReadService {
             String status,
             Set<Permission> viewerPermissions) {
         return new Review(
-                call.targetKind(), call.targetId(), false, null, null,
+                call.targetKind(), call.targetId(), false, null,
+                sharedRequestFlags(tool, call.request()),
                 EXECUTED.equals(status)
                         ? sharedFlags(tool, storedOutcome(call.toolCall()))
                         : null,
                 List.of(), List.of(), viewerPermissions);
+    }
+
+    private JsonNode sharedRequestFlags(AiAssistantWriteTool tool, JsonNode request) {
+        if (request == null) {
+            return null;
+        }
+        ObjectNode flags = objectMapper.createObjectNode();
+        for (Map.Entry<String, SharedRequestFlag> flag
+                : writeToolRegistry.sharedRequestFlags(tool.name()).entrySet()) {
+            flags.put(flag.getKey(), flag.getValue().holds(request));
+        }
+        return flags.isEmpty() ? null : flags;
     }
 
     private JsonNode sharedFlags(AiAssistantWriteTool tool, JsonNode outcome) {
@@ -627,29 +584,26 @@ public class AiAssistantToolCallReadService {
      * A declared tool's summary, screened like every other member-visible value.
      *
      * <p>A detailed summary the special-care screen excludes, or one the tool declines to give, is
-     * replaced by the summary the tool gives a viewer who may not read the details.
+     * replaced by the summary the tool gives a viewer who may not read the details. The screen is
+     * skipped only for a request summary whose tool declined it under
+     * {@link AiAssistantWriteTool#screensDetailedRequestSummary()}.
      */
     private static String summary(
-            Review review, Review withheld, Function<Review, String> summarize) {
+            Review review, Review withheld, Function<Review, String> summarize, boolean screened) {
         String summary = summarize.apply(review);
         if (review.detailsReadable()
-                && (summary == null || SpecialCareTextScreen.screen(summary).excluded())) {
+                && (summary == null
+                        || screened && SpecialCareTextScreen.screen(summary).excluded())) {
             return summarize.apply(withheld);
         }
         return summary;
     }
 
-    /**
-     * Whether one card's projection reads a batched input: a declared tool that asked for it, or
-     * the legacy owner arm, which reads the member list.
-     */
+    /** Whether one card's projection reads a batched input its declared tool asked for. */
     private boolean readsInput(StoredToolCall call, ReviewInput input) {
-        String toolName = call.toolCall().getToolName();
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
-        if (declared.isPresent()) {
-            return declared.get().reviewInputs().contains(input);
-        }
-        return input == ReviewInput.MEMBERS && "assign_owner".equals(toolName);
+        return writeToolRegistry.find(call.toolCall().getToolName())
+                .map(tool -> tool.reviewInputs().contains(input))
+                .orElse(false);
     }
 
     private JsonNode storedOutcome(AiChatToolCall toolCall) {
@@ -666,46 +620,6 @@ public class AiAssistantToolCallReadService {
     }
 
     /**
-     * An owner proposal's before and after values, compared as the record itself stores them.
-     *
-     * <p>Whether the change would do anything is decided on owner ids, never on the names this
-     * workspace can print for them. A record owned by someone who has left cannot be named here, and
-     * comparing that absent name against an unassign proposal's absent name would call a real
-     * removal "already the current value" and withhold the control — refusing exactly the cleanup
-     * the member came to do. The name is for reading; the id is what decides.
-     */
-    private AiAssistantToolCallReadDto.Change ownerChange(
-            StoredToolCall call,
-            RecordSnapshot target,
-            List<User> assignableOwners,
-            Set<Permission> viewerPermissions) {
-        String current = currentOwnerName(assignableOwners, target.ownerId());
-        boolean currentUnresolved = target.ownerId() != null && current == null;
-        String requested = call.requestValue().trim();
-        if (UNASSIGNED.equalsIgnoreCase(requested)) {
-            return new AiAssistantToolCallReadDto.Change(
-                    OWNER_FIELD, current, currentUnresolved, null,
-                    changeState(
-                            call, target, target.ownerId() == null, viewerPermissions,
-                            updatePermissions(call.targetKind())));
-        }
-        User proposed = requestedOwner(requested, assignableOwners);
-        String proposedName = proposed == null ? null : memberName(proposed);
-        if (proposedName == null) {
-            return new AiAssistantToolCallReadDto.Change(
-                    OWNER_FIELD, current, currentUnresolved, null, "unresolved");
-        }
-        return new AiAssistantToolCallReadDto.Change(
-                OWNER_FIELD, current, currentUnresolved, proposedName,
-                changeState(
-                        call,
-                        target,
-                        target.ownerId() != null && target.ownerId() == proposed.getId(),
-                        viewerPermissions,
-                        updatePermissions(call.targetKind())));
-    }
-
-    /**
      * Whether a reviewed change can still be applied as reviewed.
      *
      * <p>Approval revalidates permissions, membership, restrictions, and locked record state at
@@ -719,8 +633,8 @@ public class AiAssistantToolCallReadService {
      *
      * @param unchanged whether the record already holds the proposed value, decided by the callers
      *     on the ids the record stores rather than on the names this workspace can print for them
-     * @param required the permissions the approval itself asserts: a declared tool's
-     *     {@code requiredPermissions} for the target kind, or the target's update permission
+     * @param required the permissions the approval itself asserts: the declared tool's
+     *     {@code requiredPermissions} for the target kind
      */
     private String changeState(
             StoredToolCall call,
@@ -738,41 +652,6 @@ public class AiAssistantToolCallReadService {
                 target.updatedAt(), call.toolCall().getCreatedAt())
                 ? "recordChanged"
                 : "ready";
-    }
-
-    private static Set<Permission> updatePermissions(String kind) {
-        return switch (kind) {
-            case "person" -> Set.of(Permission.PERSON_UPDATE);
-            case "company" -> Set.of(Permission.COMPANY_UPDATE);
-            case "deal" -> Set.of(Permission.DEAL_UPDATE);
-            default -> Set.of();
-        };
-    }
-
-    /**
-     * The record's owner as this workspace can currently name them.
-     *
-     * <p>A record owned by someone who is no longer an active member has no name to state here, and
-     * is reported the same way an unowned record is: nothing is claimed about a person the
-     * workspace's own member list no longer contains.
-     */
-    private static String currentOwnerName(List<User> members, Integer userId) {
-        if (userId == null) {
-            return null;
-        }
-        for (User member : members) {
-            if (member.getId() == userId) {
-                return memberName(member);
-            }
-        }
-        return null;
-    }
-
-    private static String memberName(User member) {
-        String label = member.getDisplayName() == null || member.getDisplayName().isBlank()
-                ? member.getUsername()
-                : member.getDisplayName();
-        return label == null || label.isBlank() ? null : label;
     }
 
     /**
@@ -928,10 +807,7 @@ public class AiAssistantToolCallReadService {
         if (declared.isPresent()) {
             return declared.get().memberOutcomeFields();
         }
-        return switch (toolName) {
-            case "assign_owner" -> List.of(OWNER_FIELD);
-            default -> List.of();
-        };
+        return List.of();
     }
 
     private boolean acceptsTarget(String toolName, String kind) {
@@ -939,11 +815,7 @@ public class AiAssistantToolCallReadService {
         if (declared.isPresent()) {
             return declared.get().acceptedTargetKinds().contains(kind);
         }
-        return switch (toolName) {
-            case "assign_owner" ->
-                    "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
-            default -> false;
-        };
+        return false;
     }
 
     /**
