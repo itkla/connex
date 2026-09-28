@@ -322,6 +322,91 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals(List.of(29), result.stream().map(AiAssistantToolCallReadDto::id).toList());
     }
 
+    /**
+     * A call the loop refused keeps the model's raw arguments under the write tool's name as a
+     * failed row, and those arguments can be shaped like a proposal. A confirm-tier row that does
+     * not name, as text, the owner or stage it would propose is never a card, and a direct read of
+     * it answers 404, however well its tool, tier and target match the declaration.
+     */
+    @Test
+    void aRefusedCallShapedLikeAProposalWithoutItsProposedValueLeavesNoCard() {
+        AiChatToolCall card = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        AiChatToolCall ownerless = toolCall(
+                36, USER_ID, "assign_owner", "confirm", "failed", "deal", 41, 20,
+                "{\"reason\":\"invalid_tool_arguments\"}");
+        ownerless.setArgumentsJson("{\"tool\":\"assign_owner\",\"tier\":\"confirm\","
+                + "\"target\":{\"kind\":\"deal\",\"id\":41},\"request\":{\"handle\":\"r1\"}}");
+        AiChatToolCall stageless = toolCall(
+                37, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 21,
+                "{\"reason\":\"invalid_tool_arguments\"}");
+        stageless.setArgumentsJson("{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
+                + "\"target\":{\"kind\":\"deal\",\"id\":41},\"request\":{\"handle\":\"r1\"}}");
+        AiChatToolCall numericStage = toolCall(
+                38, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 22,
+                "{\"reason\":\"invalid_tool_arguments\"}");
+        numericStage.setArgumentsJson("{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
+                + "\"target\":{\"kind\":\"deal\",\"id\":41},"
+                + "\"request\":{\"handle\":\"r1\",\"stage\":7}}");
+        List<AiChatToolCall> refused = List.of(ownerless, stageless, numericStage);
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(card, ownerless, stageless, numericStage));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+        stubVisibleDeal();
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(29), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+        for (AiChatToolCall row : refused) {
+            when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, row.getId()))
+                    .thenReturn(row);
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> service.get(SESSION_ID, row.getId()),
+                    row.getToolName() + " " + row.getId());
+        }
+    }
+
+    /**
+     * A row whose stored tool matches its name but names no registered write — a read tool's, one
+     * forged with a write tier, or a name the catalog no longer declares — is never a card, and a
+     * direct read of it answers 404.
+     */
+    @Test
+    void aRowNamingNoRegisteredWriteToolLeavesNoCard() {
+        AiChatToolCall card = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        List<AiChatToolCall> unregistered = List.of(
+                toolCall(40, USER_ID, "list_tasks", "read", "executed", "person", 31, 20,
+                        "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"),
+                toolCall(41, USER_ID, "list_tasks", "auto", "executed", "person", 31, 21,
+                        "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"),
+                toolCall(42, USER_ID, "update_record_fields", "confirm", "proposed", "person", 31,
+                        22, null));
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        card, unregistered.get(0), unregistered.get(1), unregistered.get(2)));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(29), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+        for (AiChatToolCall row : unregistered) {
+            when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, row.getId()))
+                    .thenReturn(row);
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> service.get(SESSION_ID, row.getId()),
+                    row.getToolName() + " " + row.getId());
+        }
+    }
+
     @Test
     void sharedViewerGetsKindOnlyTargetAndCannotUndoAnotherParticipantsCall() {
         AiChatToolCall toolCall = toolCall(

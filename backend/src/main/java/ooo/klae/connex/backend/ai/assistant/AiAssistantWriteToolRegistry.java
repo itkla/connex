@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.lang.reflect.RecordComponent;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -24,8 +25,9 @@ import ooo.klae.connex.backend.tenant.Permission;
  * discovered the beans in. Construction refuses a duplicate name, a name the catalog does not
  * declare as a write, a tier that disagrees with the catalog, an accepted kind outside the record
  * kinds, a kind with no required permission or no lock, a shared person lock on a non-person
- * target, a malformed or never-writable declared field, a malformed shared request flag, and a
- * catalog write tool that has no bean.
+ * target, a malformed or never-writable declared field, a malformed shared request flag, a
+ * required request text field its request type does not declare as a string, and a catalog write
+ * tool that has no bean.
  *
  * <p>So once the context has started, every name the catalog declares as a write has exactly one
  * tool here, and {@link #find(String)} is empty only for a name that is not a declared write. The
@@ -143,6 +145,7 @@ public class AiAssistantWriteToolRegistry {
                 throw refused(name, "declares a shared person lock for " + kind);
             }
         }
+        requireRequestText(tool);
         Set<String> fields = tool.declaredWritableFields();
         if (fields == null) {
             throw refused(name, "declares no writable fields");
@@ -156,6 +159,28 @@ public class AiAssistantWriteToolRegistry {
         forbidden.retainAll(AiAssistantWriteFieldPolicy.NEVER_WRITABLE);
         if (!forbidden.isEmpty()) {
             throw refused(name, "declares never-writable fields " + forbidden);
+        }
+    }
+
+    private static void requireRequestText(AiAssistantWriteTool tool) {
+        Set<String> required = tool.requiredRequestText();
+        if (required == null) {
+            throw refused(tool.name(), "declares no required request text");
+        }
+        Set<String> textComponents = new HashSet<>();
+        RecordComponent[] components = tool.requestType().getRecordComponents();
+        if (components != null) {
+            for (RecordComponent component : components) {
+                if (component.getType() == String.class) {
+                    textComponents.add(component.getName());
+                }
+            }
+        }
+        for (String field : required) {
+            if (!textComponents.contains(field)) {
+                throw refused(tool.name(), "requires request text " + field
+                        + " that its request type does not declare");
+            }
         }
     }
 

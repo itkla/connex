@@ -152,6 +152,12 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         return Map.of(REMOVES_OWNER, new SharedRequestFlag(OWNER_FIELD, UNASSIGNED));
     }
 
+    /** A card names the owner it proposes, so a stored row without one is never projected. */
+    @Override
+    public Set<String> requiredRequestText() {
+        return Set.of(OWNER_FIELD);
+    }
+
     /**
      * Declines the special-care screen: the detailed summary names only the member the owner
      * resolves to against the workspace's own member list, which the same requester's pending card

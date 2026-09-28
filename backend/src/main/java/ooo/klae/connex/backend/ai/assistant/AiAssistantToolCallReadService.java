@@ -274,7 +274,8 @@ public class AiAssistantToolCallReadService {
                     || tool == null
                     || tier != toolCatalog.tier(toolName)
                     || (tier != ToolTier.AUTO && tier != ToolTier.CONFIRM)
-                    || !tool.acceptedTargetKinds().contains(targetKind)) {
+                    || !tool.acceptedTargetKinds().contains(targetKind)
+                    || !holdsRequiredText(tool, root.get("request"))) {
                 return null;
             }
             return new StoredToolCall(
@@ -813,6 +814,16 @@ public class AiAssistantToolCallReadService {
             throw new IllegalArgumentException("Assistant tool metadata is invalid");
         }
         return value.asString();
+    }
+
+    private static boolean holdsRequiredText(AiAssistantWriteTool tool, JsonNode request) {
+        for (String field : tool.requiredRequestText()) {
+            JsonNode value = request == null ? null : request.get(field);
+            if (value == null || !value.isString() || value.asString().isBlank()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static int positiveInteger(JsonNode node, String name) {

@@ -186,6 +186,23 @@ public interface AiAssistantWriteTool {
     }
 
     /**
+     * The stored request fields a card requires to hold a non-blank string before it projects the
+     * row at all.
+     *
+     * <p>A row stored under this tool's name is not always a proposal {@code prepare} wrote: a call
+     * the loop refused keeps the model's raw arguments under the same name as a failed row, and
+     * those arguments can be shaped like a proposal. The card projection hides such a row unless
+     * every field named here holds a non-blank string, exactly as it hides a row whose target kind
+     * the tool does not accept. The registry refuses a name that is not a string component of
+     * {@link #requestType()}.
+     *
+     * @return the required request text fields, none by default
+     */
+    default Set<String> requiredRequestText() {
+        return Set.of();
+    }
+
+    /**
      * Whether the framework screens this tool's detailed request summary for special-care text.
      *
      * <p>A screened summary the screen excludes is replaced by the one given to a viewer who may
