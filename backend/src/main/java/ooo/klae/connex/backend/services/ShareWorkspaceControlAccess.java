@@ -5,8 +5,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -102,24 +102,29 @@ public class ShareWorkspaceControlAccess {
     }
 
     /**
-     * One organization's workspaces. {@code workspaceIds} keeps the database's name then id
+     * One organization's workspaces. {@code ranksById} records the database's name then id
      * order, which is the deterministic share-listing order the removed {@code ORDER BY w.name}
-     * used to produce; {@code namesById} is an unordered lookup.
+     * used to produce, as one rank per workspace; {@code namesById} is an unordered lookup.
+     * Both are built once per snapshot so hydrating a listing never rescans the organization.
      */
     public static final class OrganizationWorkspaces {
 
         private final int orgId;
         private final Map<Integer, String> namesById;
-        private final List<Integer> workspaceIds;
+        private final Map<Integer, Integer> ranksById;
         private final String workspaceIdsJson;
 
         OrganizationWorkspaces(int orgId, LinkedHashMap<Integer, String> orderedNamesById) {
             this.orgId = orgId;
-            this.workspaceIds = List.copyOf(orderedNamesById.keySet());
+            LinkedHashMap<Integer, Integer> ranks = new LinkedHashMap<>();
+            StringJoiner ids = new StringJoiner(",", "[", "]");
+            for (Integer workspaceId : orderedNamesById.keySet()) {
+                ranks.put(workspaceId, ranks.size());
+                ids.add(String.valueOf(workspaceId));
+            }
             this.namesById = Map.copyOf(orderedNamesById);
-            this.workspaceIdsJson = this.workspaceIds.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(",", "[", "]"));
+            this.ranksById = Map.copyOf(ranks);
+            this.workspaceIdsJson = ids.toString();
         }
 
         /**
@@ -150,6 +155,10 @@ public class ShareWorkspaceControlAccess {
          * grant path ever refused the second kind, so such a row can predate the ceiling or be
          * written around it; it is now invisible, and therefore not revocable, through the UI.
          *
+         * <p>Ordering is the snapshot's own, reproduced from the precomputed ranks rather than
+         * recomputed in Java, so the response keeps the database collation the removed
+         * {@code ORDER BY w.name} ordered by and costs one map lookup per comparison.
+         *
          * @param shares tenant share rows, without workspace names
          * @return the same rows, named and ordered by workspace name
          */
@@ -164,7 +173,7 @@ public class ShareWorkspaceControlAccess {
                 hydrated.add(share);
             }
             hydrated.sort(Comparator.comparingInt(
-                (ShareDto share) -> workspaceIds.indexOf(share.getWorkspaceId())));
+                (ShareDto share) -> ranksById.get(share.getWorkspaceId())));
             return hydrated;
         }
     }

@@ -75,6 +75,31 @@ public class DuplicateDecisionLockService {
         return lockCurrentOrganization(additionalWorkspaceId, true, requiredPermission);
     }
 
+    /**
+     * Locks the actor, both workspaces and both memberships in the same lifecycle order as
+     * {@link #lockCurrentOrganizationWithMemberWorkspace}, then current permission authority, but
+     * stops short of the organization's duplicate mutex.
+     *
+     * <p>Pipeline sharing needs the target workspace root held from before its organization
+     * ceiling is judged until the tenant grant lands: the grant statements no longer join the
+     * control-plane workspace table and no foreign key refuses the insert, so a teardown
+     * committing in between would leave a share row pointing at a workspace that is gone (#811).
+     * A pipeline is not a duplicate candidate, so entering the mutex would serialize it behind
+     * every person and company decision in the organization for no invariant of its own.
+     *
+     * @param additionalWorkspaceId workspace whose active actor membership is required
+     * @param requiredPermission permission the actor must hold in the current workspace
+     * @return permission authority retained by the locks this method acquired
+     */
+    public LockedPermissionSnapshot lockCurrentWorkspacesWithMemberWorkspace(
+            int additionalWorkspaceId, Permission requiredPermission) {
+        Objects.requireNonNull(requiredPermission, "requiredPermission");
+        lockCurrentOrganizationRoots(additionalWorkspaceId, true);
+        return workspaceService.lockAndRequirePermissionsSnapshot(
+            workspaceService.getCurrentWorkspaceId(),
+            Map.of(workspaceService.getCurrentUserId(), Set.of(requiredPermission)));
+    }
+
     private int lockCurrentOrganization(
             Integer additionalWorkspaceId,
             boolean requireAdditionalMembership) {

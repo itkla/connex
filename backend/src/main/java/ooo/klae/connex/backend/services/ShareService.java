@@ -38,6 +38,13 @@ import ooo.klae.connex.backend.tenant.Permission;
  * borrowed while a tenant write holds locks (see {@code docs/backend/LOCKING.md}).
  * A listing with no share rows needs no snapshot and skips the control query
  * entirely, as deal-collaborator hydration does for an empty collaborator set.
+ *
+ * <p>Every grant holds the target workspace root from before the grant statement
+ * judges that snapshot until the insert lands. The removed {@code JOIN workspace} was
+ * also an existence check on the target at insert time, and V65 dropped the foreign
+ * key that used to refuse a dangling reference, so without the lock a workspace
+ * teardown committing in between would leave a share row addressed to a workspace
+ * that no longer exists.
  */
 @Service
 @RequiredArgsConstructor
@@ -80,8 +87,8 @@ public class ShareService {
         OrganizationWorkspaces organizationWorkspaces =
             shareWorkspaceControlAccess.getForWorkspace(workspaceId);
         LockedPermissionSnapshot authority = type == Type.PIPELINE
-            ? workspaceService.lockAndRequirePermissionsSnapshot(
-                workspaceId, Map.of(actorId, Set.of(Permission.SHARE_MANAGE)))
+            ? duplicateDecisionLockService.lockCurrentWorkspacesWithMemberWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE)
             : duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
                 targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);

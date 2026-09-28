@@ -174,6 +174,34 @@ class ShareWorkspaceControlAccessTest {
             hydrated.stream().map(ShareDto::getWorkspaceName).toList());
     }
 
+    /**
+     * The listing order is the database's, in the database's collation: the snapshot statement
+     * orders by name then id and hydration reproduces exactly that sequence. Names that differ
+     * only by case or by a trailing space are what separates reproducing the snapshot order from
+     * re-sorting the names in Java, whose binary comparison would interleave these five rows
+     * differently.
+     */
+    @Test
+    void hydrationReproducesTheSnapshotOrderRatherThanReSortingTheNames() {
+        TestTransactionManager transactionManager = new TestTransactionManager();
+        ShareWorkspaceControlAccess controlAccess = controlAccess(transactionManager);
+        when(workspaceMapper.findOrganizationWorkspacesForShare(7)).thenReturn(
+            List.of(workspace(5, 900, "alpha"), workspace(21, 900, "Alpha"),
+                workspace(9, 900, "Beta"), workspace(3, 900, "Beta "),
+                workspace(7, 900, "Owner")));
+        OrganizationWorkspaces organizationWorkspaces = controlAccess.getForWorkspace(7);
+
+        List<ShareDto> hydrated = organizationWorkspaces.hydrate(
+            List.of(share(9), share(404), share(3), share(21), share(5)));
+
+        assertEquals(List.of(5, 21, 9, 3),
+            hydrated.stream().map(ShareDto::getWorkspaceId).toList());
+        assertEquals(List.of("alpha", "Alpha", "Beta", "Beta "),
+            hydrated.stream().map(ShareDto::getWorkspaceName).toList());
+        assertEquals("[5,21,9,3,7]", organizationWorkspaces.workspaceIdsJson(),
+            "the allowlist keeps the same snapshot order the ranks are read from");
+    }
+
     private ShareWorkspaceControlAccess controlAccess(TestTransactionManager transactionManager) {
         TenantWorkScope tenantWorkScope = new TenantWorkScope(
             tenantContext, tenantCatalogResolver, workspaceMapper);
