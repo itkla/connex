@@ -131,13 +131,10 @@ def scriptedTrajectoryPattern = '**/*ScriptedTrajectory*Test.class'
 
 tasks.named('test') {
 	useJUnitPlatform()
-	// One partition of `forkEvery` classes, holding up to `spring.test.context.cache.maxSize` live
-	// contexts, has to fit in this heap. At 2048m a fork OOMed during classpath scanning while
-	// building the next context (#1852). Because adding any test class re-partitions the groups,
-	// that failure follows whichever branch shifts the boundary rather than the code that caused
-	// it. Raising the ceiling costs no wall-clock, unlike a smaller `forkEvery` or a tighter
-	// context cache, and the job runs alongside its service containers inside the runner's 16 GB.
-	maxHeapSize = '2560m'
+	// Ten cached contexts plus one loading sat at the edge of 2048m: adding any test class shifts the
+	// 100-class fork windows and the storage fork then fails with OutOfMemoryError while loading its
+	// context. The hosted runner has 16 GB, so the fork gets headroom instead of fragile window luck.
+	maxHeapSize = '3072m'
 	maxParallelForks = 1
 	forkEvery = 100
 	// One test fork retains at most 10 cached pools. Including one context loading, the application-pool
