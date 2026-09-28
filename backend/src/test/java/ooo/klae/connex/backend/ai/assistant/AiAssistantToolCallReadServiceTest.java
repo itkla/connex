@@ -213,6 +213,47 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * Every key the grammar refuses drops its row, however valid the row is otherwise.
+     *
+     * <p>The card list ties a row to its turn only through the one key parser, so a key past the
+     * step ceiling, zero-padded, carrying a zero ordinal, a segment the grammar does not have, or a
+     * number too large to read names no turn, and its row is dropped beside a card that is read.
+     */
+    @Test
+    void everyKeyTheGrammarRefusesDropsItsRow() {
+        List<String> refusedKeys = List.of(
+                "turn-19-step-" + (AiChatAgentLoopService.HARD_MAX_STEPS + 1),
+                "turn-019-step-2",
+                "turn-19-step-2-call-0",
+                "turn-19-step-2-row-1",
+                "turn-2147483648-step-2",
+                "turn-19-step-2 ");
+        List<AiChatToolCall> rows = new ArrayList<>();
+        rows.add(toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"));
+        for (int index = 0; index < refusedKeys.size(); index++) {
+            AiChatToolCall refused = toolCall(
+                    40 + index, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                    "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+            refused.setIdempotencyKey(refusedKeys.get(index));
+            rows.add(refused);
+        }
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(rows);
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(19), 100))
+                .thenReturn(List.of(assistantMessage(91, 19)));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(29), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+    }
+
+    /**
      * A write refused whole with its batch leaves a suffixed failed row no card is built from.
      *
      * <p>{@code mixed_tier_step} writes one failed row per call of the refused batch, the write

@@ -565,14 +565,9 @@ public class AiChatTurnPersistenceService {
     /**
      * Renders the durable idempotency key one tool call owns.
      *
-     * <p>A call that was the only one its step made keeps the exact key this service has always
-     * written — no suffix at all — so every executed or proposed write, every executed
-     * {@code find_tools}, every unbatched read and every server-side skill plan step stays
-     * byte-identical, along with the {@code turn-N-step-} prefix scan that reads them back. Only a
-     * call that shared its step renders the {@code -call-k} suffix, which fits the existing column
-     * and its uniqueness constraint. That includes the failed row of every call of a batch refused
-     * whole before anything ran, a write or {@code find_tools} among them; such a row is never
-     * executed, never a pending proposal and never the loaded toolset's source.
+     * <p>The grammar is {@link AiAssistantToolCallKey}'s alone: the sole call of a step keeps the
+     * exact unsuffixed key this service has always written, and only a call that shared its step
+     * renders the {@code -call-k} suffix.
      *
      * @param turnId the durable turn id
      * @param stepNumber the durable model-step number
@@ -580,13 +575,7 @@ public class AiChatTurnPersistenceService {
      * @return the durable idempotency key
      */
     private static String turnStepKey(int turnId, int stepNumber, int callOrdinal) {
-        if (turnId <= 0
-                || stepNumber <= 0
-                || stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
-            throw new IllegalArgumentException("Assistant tool turn and step must be positive");
-        }
-        return "turn-" + turnId + "-step-" + stepNumber
-                + new AiAssistantToolCallRef(stepNumber, callOrdinal).keySuffix();
+        return new AiAssistantToolCallKey(turnId, stepNumber, callOrdinal).value();
     }
 
     private String userMessageMetadata(
