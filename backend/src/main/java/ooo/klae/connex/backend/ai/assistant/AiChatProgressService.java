@@ -6,8 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
@@ -26,16 +24,6 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatProgressService {
-    /**
-     * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
-     *
-     * <p>The suffix group is optional because a call that was the only one its step made still
-     * writes the unsuffixed key. Without the group a suffixed row would not match at all and would
-     * fall through to the {@code HARD_MAX_STEPS} placeholder, sorting a real milestone to the very
-     * end of the turn.
-     */
-    private static final Pattern TURN_STEP = Pattern.compile(
-            "turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?");
     private static final int MAX_PROGRESS_COUNT = 1_000;
     private static final String SCOPE = "scope";
     private static final String ANSWER = "answer";
@@ -76,9 +64,8 @@ public class AiChatProgressService {
         Map<String, ProgressAccumulator> milestones = new LinkedHashMap<>();
         milestones.put(SCOPE, new ProgressAccumulator(
                 0, SCOPE, "queued".equals(turnStatus) ? "running" : "complete"));
-        String prefix = "turn-" + turnId + "-step-";
         for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
-                workspaceId, sessionId, prefix,
+                workspaceId, sessionId, AiAssistantToolCallKey.turnPrefix(turnId),
                 AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN)) {
             if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
                 continue;
@@ -243,34 +230,22 @@ public class AiChatProgressService {
     /**
      * Reads the model step a durable key names, or the placeholder that sorts it last.
      *
-     * <p>The call ordinal is parsed only to be bounded. A key claiming an ordinal past
-     * {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} is one no step of this loop could have
-     * written, so it is treated exactly as a malformed key rather than trusted for its step number.
+     * <p>A key {@link AiAssistantToolCallKey} does not accept — malformed, past the step ceiling,
+     * or claiming an ordinal past {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} — is one
+     * no step of this loop could have written, so it sorts last rather than being trusted for its
+     * step number; so does a key naming another turn. Without the optional call suffix a row
+     * written by a call that shared its step would land there too, sorting a real milestone to the
+     * very end of the turn.
      *
      * @param idempotencyKey the durable row's idempotency key
      * @param turnId the turn the projection is reading
      * @return the milestone's ordering step number
      */
     private static int step(String idempotencyKey, int turnId) {
-        Matcher matcher = TURN_STEP.matcher(idempotencyKey == null ? "" : idempotencyKey);
-        if (!matcher.matches()) {
-            return AiChatAgentLoopService.HARD_MAX_STEPS;
-        }
-        try {
-            if (Integer.parseInt(matcher.group(1)) != turnId) {
-                return AiChatAgentLoopService.HARD_MAX_STEPS;
-            }
-            String ordinal = matcher.group(3);
-            if (ordinal != null
-                    && Integer.parseInt(ordinal)
-                            > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
-                return AiChatAgentLoopService.HARD_MAX_STEPS;
-            }
-            return Math.min(
-                    Integer.parseInt(matcher.group(2)), AiChatAgentLoopService.HARD_MAX_STEPS);
-        } catch (NumberFormatException exception) {
-            return AiChatAgentLoopService.HARD_MAX_STEPS;
-        }
+        return AiAssistantToolCallKey.parse(idempotencyKey)
+                .filter(key -> key.turnId() == turnId)
+                .map(AiAssistantToolCallKey::stepNumber)
+                .orElse(AiChatAgentLoopService.HARD_MAX_STEPS);
     }
 
     /**

@@ -14,8 +14,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +26,6 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReviewInput;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
-import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -66,21 +63,6 @@ public class AiAssistantToolCallReadService {
     private static final String UNASSIGNED = "unassigned";
     private static final String OWNER_FIELD = "owner";
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
-    /**
-     * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
-     *
-     * <p>Anchored and still strict: a malformed key is rejected exactly as before, the step number
-     * stays bounded by the loop's own backstop and the ordinal by the per-step call ceiling, so a
-     * key claiming a position no step could have produced is refused rather than read. An executed
-     * or proposed write is always the sole call of its step and never carries the suffix. A write
-     * refused whole with its batch does — its failed row is keyed by its ordinal — but it holds the
-     * model's raw arguments rather than a prepared write's tool, tier and target, so the stored-row
-     * checks drop it however its key parses. The suffix group exists so a suffixed row parses
-     * instead of being dropped silently for its key alone.
-     */
-    private static final Pattern TURN_STEP_KEY = Pattern.compile(
-            "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?$");
-
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiChatMapper chatMapper;
@@ -966,22 +948,24 @@ public class AiAssistantToolCallReadService {
         };
     }
 
+    /**
+     * Resolves the turn a stored row's idempotency key names.
+     *
+     * <p>A malformed key, or one claiming a position no step could have produced, is rejected
+     * rather than read. An executed or proposed write is always the sole call of its step and never
+     * carries the suffix. A write refused whole with its batch does — its failed row is keyed by its
+     * ordinal — but it holds the model's raw arguments rather than a prepared write's tool, tier and
+     * target, so the stored-row checks drop it however its key parses. The suffix still parses so a
+     * suffixed row is never dropped silently for its key alone.
+     *
+     * @param idempotencyKey the durable row's idempotency key
+     * @return the durable turn id the key names
+     */
     private static int turnId(String idempotencyKey) {
-        Matcher matcher = TURN_STEP_KEY.matcher(
-                idempotencyKey == null ? "" : idempotencyKey);
-        if (!matcher.matches()) {
-            throw new IllegalArgumentException("Assistant tool association is invalid");
-        }
-        int turnId = Integer.parseInt(matcher.group(1));
-        int stepNumber = Integer.parseInt(matcher.group(2));
-        String callOrdinal = matcher.group(3);
-        if (stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS
-                || (callOrdinal != null
-                        && Integer.parseInt(callOrdinal)
-                                > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS)) {
-            throw new IllegalArgumentException("Assistant tool association is invalid");
-        }
-        return turnId;
+        return AiAssistantToolCallKey.parse(idempotencyKey)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Assistant tool association is invalid"))
+                .turnId();
     }
 
     private static String text(JsonNode node, String name) {
