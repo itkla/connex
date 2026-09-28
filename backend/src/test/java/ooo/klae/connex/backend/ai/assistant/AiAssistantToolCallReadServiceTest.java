@@ -150,9 +150,9 @@ class AiAssistantToolCallReadServiceTest {
     /**
      * Both key shapes resolve a row to its turn, and a malformed key still drops it.
      *
-     * <p>A write is always the only call of its step, so no row this service reads carries a call
-     * ordinal today; parsing one anyway keeps the widening forward-looking rather than a landmine,
-     * and the anchored pattern still refuses anything else outright. The ordinal is bounded by the
+     * <p>An executed or proposed write is always the only call of its step, so no such row
+     * carries a call ordinal; parsing one anyway keeps the widening from being a landmine, and the
+     * anchored pattern still refuses anything else outright. The ordinal is bounded by the
      * per-step call ceiling for the same reason the step number is bounded by the loop's backstop:
      * a position no step could have produced names no call this service should attribute.
      */
@@ -186,6 +186,40 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals(29, result.getFirst().id());
         assertEquals(19, result.getFirst().turnId());
         assertEquals(91, result.getFirst().messageId());
+    }
+
+    /**
+     * A write refused whole with its batch leaves a suffixed failed row no card is built from.
+     *
+     * <p>{@code mixed_tier_step} writes one failed row per call of the refused batch, the write
+     * among them, under that call's {@code -call-k} key. The write never reached
+     * {@code writeToolService.prepare}, so its row holds the model's raw arguments rather than a
+     * prepared write's tool, tier and target, and must be dropped however well its key parses —
+     * while an ordinary card beside it is still read.
+     */
+    @Test
+    void aWriteRefusedWholeWithItsBatchLeavesNoCardDespiteItsSuffixedKey() {
+        AiChatToolCall card = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        AiChatToolCall refusedWrite = toolCall(
+                35, USER_ID, "create_task", "auto", "failed", "person", 31, 19,
+                "{\"reason\":\"mixed_tier_step\"}");
+        refusedWrite.setArgumentsJson("{\"handle\":\"r1\",\"title\":\"Call back\"}");
+        refusedWrite.setIdempotencyKey("turn-19-step-2-call-2");
+        refusedWrite.setExecutedAt(null);
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(card, refusedWrite));
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(19), 100))
+                .thenReturn(List.of(assistantMessage(91, 19)));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(29), result.stream().map(AiAssistantToolCallReadDto::id).toList());
     }
 
     @Test
