@@ -913,7 +913,8 @@ class AiAssistantPromptAssemblerTest {
         summary.setContent("Restricted Person is the key contact.");
         summary.setStructuredJson("""
                 {"kind":"history_summary","sourceFromSeq":1,"throughSeq":4,
-                "resources":[{"handle":"r1","kind":"person","id":71}]}
+                "resources":[{"handle":"r1","kind":"person","id":71}],
+                "identifiers":[{"kind":"person","value":"Restricted Person"}]}
                 """);
 
         MaskedPrompt prompt = assembler.assemble(
@@ -925,6 +926,20 @@ class AiAssistantPromptAssemblerTest {
                 AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
+
+        AiChatResourceRegistry authorizedResources = new AiChatResourceRegistry();
+        authorizedResources.register("person", 71);
+        MaskedPrompt authorizedPrompt = assembler.assemble(
+                List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                authorizedResources,
+                AiAssistantToolCatalog.ALL);
+
+        assertEquals(1, authorizedPrompt.getMessages().size());
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent()
+                .contains("{{P1}} is the key contact."));
     }
 
     @Test
@@ -1089,10 +1104,11 @@ class AiAssistantPromptAssemblerTest {
     void compactionOmitsUserSourceWhosePageContextIsNoLongerAuthorized() {
         AiChatMessage priorRequest = new AiChatMessage();
         priorRequest.setAuthorKind("user");
-        priorRequest.setContent("What changed on the current record?");
+        priorRequest.setContent("What changed for Restricted Person on the current record?");
         priorRequest.setStructuredJson("""
                 {"kind":"user_message","resources":[
-                {"handle":"r1","kind":"person","id":71}]}
+                {"handle":"r1","kind":"person","id":71}],
+                "identifiers":[{"kind":"person","value":"Restricted Person"}]}
                 """);
 
         MaskedPrompt prompt = assembler.assembleSummary(
@@ -1102,6 +1118,17 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry());
 
         assertFalse(prompt.getMessages().getFirst().getContent().contains("current record"));
+
+        AiChatResourceRegistry authorizedResources = new AiChatResourceRegistry();
+        authorizedResources.register("person", 71);
+        MaskedPrompt authorizedPrompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                authorizedResources);
+
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent().contains("current record"));
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent().contains("{{P1}}"));
     }
 
     @Test
@@ -1277,6 +1304,37 @@ class AiAssistantPromptAssemblerTest {
         assertEquals(withoutRepair.exchanges(), withRepair.exchanges());
         assertEquals(withoutRepair.audit(), withRepair.audit());
         assertTrue(withRepair.repairMessage().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    /**
+     * A native tool-call repair offers exactly the calls its request permits.
+     *
+     * <p>A request bounded to one call keeps its repair byte for byte, so every undeclared
+     * endpoint's wire is unchanged; a request that invites a batch says it may return up to that
+     * many, rather than steering a batching model back to one call per step.
+     */
+    @Test
+    void nativeToolRepairOffersTheCallsItsRequestPermits() {
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
+        AiStructuredRepair repair = AiStructuredRepair.from("native_duplicate_call_id", "");
+
+        String single = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair).repairMessage();
+        String bounded = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair, 1).repairMessage();
+        String batched = assembler.nativeReplay(
+                List.of(), Map.of(), new MaskingContext(), budget, repair, 4).repairMessage();
+
+        assertEquals(
+                "Your previous native tool call violated the duplicate-call-id rule. Return exactly "
+                        + "one valid native tool call or one valid JSON final answer.",
+                single);
+        assertEquals(single, bounded);
+        assertEquals(
+                "Your previous native tool call violated the duplicate-call-id rule. Return up to 4 "
+                        + "valid native tool calls or one valid JSON final answer.",
+                batched);
     }
 
     @Test

@@ -2,19 +2,24 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiRequestJournal;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -23,6 +28,9 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Goldens 1-8: whole scripted trajectories run end to end with nothing mocked below the loop.
@@ -313,6 +321,451 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         }
         assertTrue(sawAReplayedExchange,
                 "a multi-step turn must replay its earlier exchanges to the provider");
+    }
+
+    /**
+     * An undeclared endpoint that batches anyway is refused whole, and nothing it named is executed.
+     *
+     * <p>The scripted provider can emit several calls in one assistant message, and this capability
+     * class declares no batch, exactly like every endpoint an operator has not probed. The loop
+     * executes batches only up to what the endpoint declared, so it asks this one for a single call
+     * per step; the batch is then refused at the parse boundary under the same
+     * {@code multiple-calls} rule an over-delivering provider has always produced, and audited as
+     * the malformed response it is rather than as a clean parse the server discarded. The
+     * assertions are what the fixture cannot fake: no durable tool-call row exists for either call,
+     * every request the provider received asked for one call, the repair it received names the
+     * rule, and both batched responses were audited as malformed native tool calls.
+     */
+    @Test
+    void aBatchedStepIsRefusedWholeAndExecutesNeitherOfItsCalls() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_calls_refused", "look this contact up two ways");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of(), trajectory.toolNames(),
+                "a refused batch must leave no durable tool call behind");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .allMatch(nativeTools -> nativeTools.maxParallelCalls() == 1),
+                "an endpoint that declared no batch must never be asked for one");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .map(AiNativeToolRequest::repairMessage)
+                        .filter(java.util.Objects::nonNull)
+                        .anyMatch(message -> message.contains("multiple-calls rule")),
+                "the loop must tell the model which rule its batch broke");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .allMatch(nativeTools -> nativeTools.exchanges().isEmpty()),
+                "a refused batch must replay no exchange to the provider");
+        assertEquals(
+                2,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_tool_call"),
+                "each batched response the server refused must be audited as malformed");
+        assertEquals(0, auditRowsParsedAs("ai.llm.call", "parsed", "native_tool_call"));
+    }
+
+    /**
+     * A batch that invented a placeholder ends the turn instead of being repaired for its size.
+     *
+     * <p>The endpoint declared no batch, so the loop asks for one call per step and the parse
+     * boundary refuses this batch for its size; the second call names a placeholder the turn never
+     * issued, and the boundary demasks the response before it decides, so the refusal ends the
+     * turn as malformed output — what one call inventing that placeholder gets. The fixture scripts
+     * the repair a laundering server would ask for, answered with a clean final answer, so this
+     * golden passes only if the server never asks: one provider request, a failed turn, no answer,
+     * no durable tool call, and one audit row recording the refused response as a malformed native
+     * call.
+     */
+    @Test
+    void aBatchInventingAPlaceholderEndsTheTurnWithoutARepair() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_calls_invented_placeholder",
+                "look this contact up two ways");
+
+        assertEquals("failed", trajectory.status());
+        assertEquals("malformed_output", trajectory.terminalReason());
+        assertEquals(1, journal().recorded().size(),
+                "an invented placeholder must end the turn, not earn the cardinality repair");
+        assertEquals(List.of(), trajectory.toolNames(),
+                "a refused batch must leave no durable tool call behind");
+        assertEquals(List.of(), trajectory.answers(),
+                "a turn ended for an invented placeholder delivers no answer");
+        assertEquals(
+                1,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_tool_call"),
+                "the refused response must be audited as a malformed native call");
+    }
+
+    /**
+     * A batch the endpoint declared, one of whose calls invented a placeholder, runs no call.
+     *
+     * <p>The declared twin of the golden above. On an endpoint that declared a batch the parse
+     * boundary admits this response within its bound — no envelope refusal fires — and sums the
+     * demask warnings of its calls, so the only thing standing between the invented placeholder
+     * and the execution of its sibling is the loop settling an admitted batch that carries a
+     * warning as malformed output before admission. The fixture scripts both what a laundering
+     * server would ask for (a repair) and what an executing one would reach (a step after two
+     * calls), each answered cleanly, so this golden passes only if the server does neither: one
+     * provider request, bounded to the declared batch, a failed turn, no durable tool call, no
+     * answer, and the response audited as the parsed batch it was with its warning recorded.
+     */
+    @Test
+    void aDeclaredBatchInventingAPlaceholderRunsNoCallAndEndsTheTurn() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_declared_batch_invented_placeholder",
+                "look this contact up two ways");
+
+        assertEquals("failed", trajectory.status());
+        assertEquals("malformed_output", trajectory.terminalReason());
+        assertEquals(1, journal().recorded().size(),
+                "an invented placeholder must end the turn, not earn a repair or a next step");
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                journal().recorded().getFirst().request().nativeTools().maxParallelCalls(),
+                "the response must have arrived within a declared batch bound");
+        assertEquals(List.of(), trajectory.toolNames(),
+                "no call of a batch carrying an invented placeholder may run or leave a row");
+        assertEquals(List.of(), trajectory.answers(),
+                "a turn ended for an invented placeholder delivers no answer");
+        assertEquals(0,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_multiple_calls"),
+                "a batch within its declared bound is not an over-bound refusal");
+        assertEquals(1, auditRowsWithDemaskWarnings("ai.llm.call", "parsed"),
+                "the admitted response must be audited with its invented placeholder counted");
+    }
+
+    /**
+     * Golden 11: three reads the model emits together run in one step and are all cited.
+     *
+     * <p>On an endpoint that declared a batch, the loop asks for one and executes it: three durable
+     * rows share the step and carry the {@code -call-k} suffix in provider order, the next request
+     * replays them as one step with dense ordinals, and the answer cites the three records the
+     * three reads found. The whole investigation cost one model call beside the answer — the
+     * point of batching — which the two journaled requests and the two calls' audit rows prove.
+     */
+    @Test
+    void parallelReadsExecuteInOneStepAndCiteAll() {
+        BatchSeed seed = batchSeed();
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_reads", "look this account up everywhere at once");
+
+        assertBatchOfThreeReads(trajectory, seed);
+        assertEquals(4, auditRows("ai.llm.call"),
+                "every model call writes an attempt row and an outcome row, and three reads in "
+                        + "one step must cost one model call beside the answer: two calls");
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                journal().recorded().getFirst().request().nativeTools().maxParallelCalls(),
+                "a declared endpoint must be asked for the batch the loop can now execute");
+    }
+
+    /**
+     * Two calls of one step coexist under the real key constraint, and neither can be written twice.
+     *
+     * <p>The loop has just written the step's rows through the real persistence service when the
+     * final step is requested. Proposing either suffixed call again from there, through the same
+     * service, must be refused by the {@code (workspace_id, idempotency_key)} uniqueness constraint
+     * itself — so the {@code -call-k} keys are distinct from each other and each is still unique —
+     * and the turn must settle with exactly the rows the loop wrote.
+     */
+    @Test
+    void twoCallsOfOneStepCoexistUnderTheRealKeyConstraintAndNeitherIsWrittenTwice() {
+        BatchSeed seed = batchSeed();
+        useCapabilityClass("scripted-native-parallel");
+        List<RuntimeException> replays = new CopyOnWriteArrayList<>();
+        onScriptedStep((scriptId, completedToolCalls) -> {
+            if (completedToolCalls == 3) {
+                replays.add(proposeReadAgain(1, 1));
+                replays.add(proposeReadAgain(1, 2));
+            }
+        });
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_reads", "look this account up everywhere at once");
+
+        assertBatchOfThreeReads(trajectory, seed);
+        assertEquals(2, replays.size(), "both suffixed calls must have been proposed again");
+        for (RuntimeException replay : replays) {
+            assertInstanceOf(DuplicateKeyException.class, replay,
+                    "a second row under a step's call key must be refused by the constraint");
+        }
+    }
+
+    /**
+     * Golden 12: a batch pairing a read with a write is refused whole, and the write lands alone.
+     *
+     * <p>Both calls of the batch settle as failed {@code mixed_tier_step} rows and nothing is
+     * written by that step; the model is answered with both refusals, so the cursor moves on by
+     * two, and the same write emitted alone next executes normally — one task, not two.
+     */
+    @Test
+    void mixedTierStepIsRefusedWholeAndTheWriteStillLandsAlone() {
+        Person contact = person("Harrowmere Voss", "harrowmere.voss@example.invalid", null);
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_mixed_tier_refusal",
+                "read this contact and add the follow-up");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(
+                List.of("search_records", "find_tools", "get_record", "create_task",
+                        "create_task"),
+                trajectory.toolNames());
+        assertEquals(
+                List.of("executed", "executed", "failed", "failed", "executed"),
+                statuses(trajectory));
+        String turn = "turn-" + trajectory.turnId() + "-step-";
+        assertEquals(
+                List.of(turn + "1", turn + "2", turn + "3-call-1", turn + "3-call-2", turn + "4"),
+                keys(trajectory));
+        for (AiChatToolCall refused : trajectory.toolCalls().subList(2, 4)) {
+            assertTrue(refused.getResultJson().contains("mixed_tier_step"),
+                    "each call of the refused batch records the whole-step reason");
+        }
+        assertEquals(1, tasksFor(contact.getId()),
+                "only the write emitted alone may create a task");
+        assertRefusedStepReplayed(
+                journal().recorded().get(3).request().nativeTools(), 3, 2, "mixed_tier_step");
+    }
+
+    /**
+     * Golden 13: one bad call in a batch is refused alone while its siblings run.
+     *
+     * <p>The middle call names a handle the turn never issued. It settles as a failed row with the
+     * stable {@code unknown_handle} reason, the two reads beside it execute, all three are replayed
+     * with dense ordinals, and the answer is built from the two results that exist.
+     */
+    @Test
+    void partialFailureInABatchRefusesOnlyItsOwnCall() {
+        Person contact = person("Pellinore Asquith", "pellinore.asquith@example.invalid", null);
+        Company company = company("Pellinore Holdings");
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_partial_failure", "look these up together");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(
+                List.of("search_records", "get_record", "search_records"),
+                trajectory.toolNames());
+        assertEquals(List.of("executed", "failed", "executed"), statuses(trajectory));
+        assertTrue(trajectory.toolCalls().get(1).getResultJson().contains("unknown_handle"));
+        List<AiToolExchange> replayed =
+                journal().recorded().getLast().request().nativeTools().exchanges();
+        assertEquals(List.of(1, 2, 3),
+                replayed.stream().map(AiToolExchange::callOrdinal).toList());
+        assertTrue(replayed.get(1).maskedResult().contains("unknown_handle"),
+                "the refused call is answered with its own stable reason");
+        assertTrue(trajectory.answer().contains("](person:" + contact.getId() + ")"),
+                trajectory.answer());
+        assertTrue(trajectory.answer().contains("](company:" + company.getId() + ")"),
+                trajectory.answer());
+    }
+
+    /**
+     * Golden 14: {@code find_tools} batched with a core read is refused whole and widens nothing.
+     *
+     * <p>Batched with a read the turn already holds, the refusal is {@code find_tools_alone}
+     * rather than {@code tool_not_loaded}. The next request still offers no analytics tool, which
+     * is what an unwidened set looks like on the wire, until a lone {@code find_tools} loads it.
+     */
+    @Test
+    void findToolsBatchedWithACoreCallIsRefusedWhole() {
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_find_tools_refusal", "load what you need and look");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(
+                List.of("find_tools", "search_records", "find_tools"), trajectory.toolNames());
+        assertEquals(List.of("failed", "failed", "executed"), statuses(trajectory));
+        for (AiChatToolCall refused : trajectory.toolCalls().subList(0, 2)) {
+            assertTrue(refused.getResultJson().contains("find_tools_alone"));
+        }
+        List<ScriptedAiRequestJournal.Entry> requests = journal().recorded();
+        assertEquals(3, requests.size());
+        assertRefusedStepReplayed(requests.get(1).request().nativeTools(), 1, 2, "find_tools_alone");
+        assertFalse(definitionNames(requests.get(1)).contains("aggregate_metric"),
+                "a refused find_tools must leave the loaded set unwidened");
+        assertTrue(definitionNames(requests.get(2)).contains("aggregate_metric"),
+                "a lone find_tools must widen it");
+    }
+
+    /**
+     * Golden 15: the streamed native path carries a batch end to end.
+     *
+     * <p>Streaming and the call bound are independent declarations on the endpoint this feature
+     * targets, so the combination is rehearsed rather than assumed: the same three reads run in one
+     * step of a streamed turn, and the streamed answer settles citing all three.
+     */
+    @Test
+    void streamedParallelReadsExecuteInOneStep() {
+        BatchSeed seed = batchSeed();
+        useCapabilityClass("scripted-native-parallel-stream");
+
+        Trajectory trajectory = run(
+                "connex_script_streamed_parallel_reads", "look this account up everywhere at once");
+
+        assertTrue(turnRow(trajectory).isStreamed(),
+                "the turn must really have streamed, or the combination was never exercised");
+        assertBatchOfThreeReads(trajectory, seed);
+    }
+
+    /** The three records a batched read golden finds, one per record kind. */
+    private record BatchSeed(Person contact, Company company, Deal deal) {
+    }
+
+    private BatchSeed batchSeed() {
+        Person contact = person("Brackenridge Oake", "brackenridge.oake@example.invalid", null);
+        Company company = company("Brackenridge Mills");
+        Pipeline pipeline = pipeline("Brackenridge renewals");
+        Stage stage = stage(pipeline, "Qualify", 1);
+        Deal deal = deal("Brackenridge renewal", pipeline, stage, company);
+        return new BatchSeed(contact, company, deal);
+    }
+
+    private void assertBatchOfThreeReads(Trajectory trajectory, BatchSeed seed) {
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(
+                List.of("search_records", "search_records", "search_records"),
+                trajectory.toolNames());
+        assertEquals(List.of("executed", "executed", "executed"), statuses(trajectory));
+        String step = "turn-" + trajectory.turnId() + "-step-1-call-";
+        assertEquals(List.of(step + "1", step + "2", step + "3"), keys(trajectory));
+        List<ScriptedAiRequestJournal.Entry> requests = journal().recorded();
+        assertEquals(2, requests.size(), "one step for the batch and one for the answer");
+        List<AiToolExchange> replayed = requests.get(1).request().nativeTools().exchanges();
+        assertEquals(List.of(1, 1, 1), replayed.stream().map(AiToolExchange::step).toList());
+        assertEquals(List.of(1, 2, 3),
+                replayed.stream().map(AiToolExchange::callOrdinal).toList());
+        String answer = trajectory.answer();
+        assertTrue(answer.contains("](person:" + seed.contact().getId() + ")"), answer);
+        assertTrue(answer.contains("](company:" + seed.company().getId() + ")"), answer);
+        assertTrue(answer.contains("](deal:" + seed.deal().getId() + ")"), answer);
+    }
+
+    private static void assertRefusedStepReplayed(
+            AiNativeToolRequest request, int step, int calls, String reason) {
+        List<AiToolExchange> refused = request.exchanges().stream()
+                .filter(exchange -> exchange.step() == step)
+                .toList();
+        assertEquals(calls, refused.size(), "every call of a refused batch is answered");
+        for (int index = 0; index < calls; index++) {
+            assertEquals(index + 1, refused.get(index).callOrdinal());
+            assertTrue(refused.get(index).maskedResult().contains(reason),
+                    "each refused call is answered with the stable reason");
+        }
+    }
+
+    private static List<String> statuses(Trajectory trajectory) {
+        return trajectory.toolCalls().stream().map(AiChatToolCall::getStatus).toList();
+    }
+
+    private static List<String> keys(Trajectory trajectory) {
+        return trajectory.toolCalls().stream().map(AiChatToolCall::getIdempotencyKey).toList();
+    }
+
+    private static List<String> definitionNames(ScriptedAiRequestJournal.Entry entry) {
+        return entry.request().nativeTools().definitions().stream()
+                .map(AiToolDefinition::name)
+                .toList();
+    }
+
+    /**
+     * The JSON ReAct path still writes the keys and replays the results it always has.
+     *
+     * <p>Its counterpart pins the native path, and the correlation refactor touched the key both
+     * paths render and the tool-result envelope both paths replay. The JSON path has no
+     * provider-assigned call identity at all, so a sole-call ordinal that leaked into its keys or
+     * into a replayed result, or a replay renumbered or reordered by the refactor, would be
+     * invisible in every native golden. Each request the provider really received is read back:
+     * the n-th carries exactly the results of steps 1..n-1, in order, each naming its own step and
+     * tool and none carrying a call ordinal.
+     */
+    @Test
+    void aJsonProtocolTurnKeepsItsUnsuffixedKeysAndSendsNoNativeRequest() {
+        person("Quillon Marsh", "quillon.marsh@example.invalid", null);
+        useCapabilityClass("scripted-json");
+
+        Trajectory trajectory = run(
+                "connex_script_json_protocol_single_call", "check this contact before I call them");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "get_record"), trajectory.toolNames());
+        assertEquals(
+                List.of(
+                        "turn-" + trajectory.turnId() + "-step-1",
+                        "turn-" + trajectory.turnId() + "-step-2"),
+                trajectory.toolCalls().stream()
+                        .map(AiChatToolCall::getIdempotencyKey)
+                        .toList());
+        List<AiCompletionRequest> requests = journal().recorded().stream()
+                .map(ScriptedAiRequestJournal.Entry::request)
+                .toList();
+        assertEquals(3, requests.size());
+        assertEquals(List.of(), replayedToolResults(requests.get(0)));
+        assertEquals(
+                List.of("{\"step\":1,\"tool\":\"search_records\"}"),
+                replayedToolResults(requests.get(1)));
+        assertEquals(
+                List.of(
+                        "{\"step\":1,\"tool\":\"search_records\"}",
+                        "{\"step\":2,\"tool\":\"get_record\"}"),
+                replayedToolResults(requests.get(2)));
+    }
+
+    /**
+     * The correlation fields of every tool result one JSON-protocol request replays, in order.
+     *
+     * <p>Reads the envelopes the assembler wrote into the prompt messages and keeps each result's
+     * {@code step}, its {@code call} ordinal when one is present, and its {@code tool} — so a
+     * leaked ordinal shows up as an extra field rather than being filtered away.
+     *
+     * @param request one journaled request
+     * @return compact JSON of each replayed result's correlation fields
+     */
+    private static List<String> replayedToolResults(AiCompletionRequest request) {
+        ObjectMapper mapper = new ObjectMapper();
+        List<String> results = new ArrayList<>();
+        for (AiMessage message : request.messages()) {
+            String content = message.content();
+            if (!content.startsWith("CRM_DATA_BEGIN\n")) {
+                continue;
+            }
+            String body = content.substring(
+                    "CRM_DATA_BEGIN\n".length(), content.lastIndexOf("\nCRM_DATA_END"));
+            JsonNode envelope = mapper.readTree(body);
+            if (!"tool_result".equals(envelope.path("type").asString())) {
+                continue;
+            }
+            JsonNode data = envelope.path("data");
+            ObjectNode correlation = mapper.createObjectNode();
+            correlation.set("step", data.path("step"));
+            if (data.has("call")) {
+                correlation.set("call", data.path("call"));
+            }
+            correlation.set("tool", data.path("tool"));
+            results.add(correlation.toString());
+        }
+        return List.copyOf(results);
     }
 
     /**

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+
 /**
  * Names one tool call within a turn by the model step it belongs to and its place in that step.
  *
@@ -9,9 +11,13 @@ package ooo.klae.connex.backend.ai.assistant;
  * the same call rather than about the same decision.
  *
  * <p>{@code callOrdinal == 0} means <em>the sole call of its step</em> and renders no key suffix at
- * all, so every write, every {@code find_tools}, every unbatched read and every server-side skill
- * plan step keeps the exact durable key it has always had. Ordinals from 1 upwards are positions in
- * the order the model emitted its calls.
+ * all, so every executed or proposed write, every executed {@code find_tools}, every unbatched read
+ * and every server-side skill plan step keeps the exact durable key it has always had. Ordinals from
+ * 1 upwards are positions in the order the model emitted its calls. A batch refused whole before
+ * any of its calls runs — {@code tool_not_loaded}, {@code mixed_tier_step},
+ * {@code find_tools_alone}, {@code duplicate_parallel_call} — still writes one failed row per call
+ * under its ordinal, whatever the tool, so a failed write or {@code find_tools} row may carry a
+ * suffix. No such row is ever executed, proposed for approval or read as the loaded toolset.
  *
  * @param stepNumber the durable model-step number, from 1
  * @param callOrdinal the call's position in its step, or 0 when it is the step's only call
@@ -33,8 +39,10 @@ public record AiAssistantToolCallRef(int stepNumber, int callOrdinal) {
         if (stepNumber <= 0) {
             throw new IllegalArgumentException("Assistant tool call step must be positive");
         }
-        if (callOrdinal < 0) {
-            throw new IllegalArgumentException("Assistant tool call ordinal must not be negative");
+        if (callOrdinal < 0 || callOrdinal > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
+            throw new IllegalArgumentException(
+                    "Assistant tool call ordinal must be between 0 and "
+                            + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
         }
     }
 

@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.atMost;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -1193,6 +1195,116 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                 eq(directAdmission), any(Runnable.class));
+    }
+
+    /** An undeclared endpoint's turn keeps sending the single-call bound it always has. */
+    @Test
+    void anUndeclaredEndpointsTurnStillBoundsEveryStepToOneCall() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Nothing needs attention.", List.of())));
+
+        service.run(TURN);
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, requests.getValue().maxParallelCalls());
+    }
+
+    /**
+     * A batch carrying an invented placeholder fails the turn exactly as one call carrying it does.
+     *
+     * <p>The cardinality refusal is repairable and the demask rule is not. Checking cardinality
+     * first would launder a response that invented a placeholder into a repair merely because it
+     * carried a sibling call, and executing the sibling would act on a decision the server cannot
+     * trust; the turn must end as malformed output after one provider call, with no repair request
+     * and nothing executed, even though the endpoint declared the batch.
+     */
+    @Test
+    void aBatchCarryingADemaskWarningFailsTheTurnWithoutARepair() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeToolBatch(
+                        List.of(
+                                new AiToolCall(
+                                        "call_1", "search_records",
+                                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"),
+                                new AiToolCall(
+                                        "call_2", "search_records",
+                                        "{\"query\":\"{{P99}}\",\"kinds\":[\"person\"]}")),
+                        1));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(invocationService, times(1)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class));
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), any(), any());
+    }
+
+    /**
+     * An over-delivered batch that invented a placeholder ends the turn after one provider call.
+     *
+     * <p>An undeclared endpoint's turn bounds every request to one call, so a batch it sends
+     * anyway never reaches the loop as a batch: the parse boundary refuses it for its size, after
+     * demasking it, and carries the warning count on the refusal. The loop must settle that refusal
+     * as malformed output with no repair — the outcome one call inventing the placeholder gets —
+     * rather than read the refusal's cardinality rule and ask the model again.
+     */
+    @Test
+    void anOverBoundRefusalCarryingADemaskWarningFailsTheTurnWithoutARepair() {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(new AiNativeToolCompletion.Malformed<>(
+                        3, 5, "tool_calls", Optional.empty(), "native_multiple_calls", 1));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(1)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, requests.getValue().maxParallelCalls());
+        assertNull(requests.getValue().repairMessage());
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), anyString(), anyString(), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), any(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
     }
 
     @Test
@@ -2932,13 +3044,35 @@ class AiChatAgentLoopServiceTest {
     }
 
     private void useNativeMemory(AiAssistantPromptBudget budget) {
+        useNativeMemory(budget, 1);
+    }
+
+    private void useNativeMemory(AiAssistantPromptBudget budget, int parallelToolCalls) {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
                         budget,
                         0,
                         0,
-                        true));
+                        true,
+                        parallelToolCalls));
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeToolBatch(
+            List<AiToolCall> calls, int demaskWarnings) throws JacksonException {
+        List<JsonNode> arguments = new ArrayList<>(calls.size());
+        for (AiToolCall call : calls) {
+            arguments.add(objectMapper.readTree(call.arguments()));
+        }
+        return new AiNativeToolCompletion.Tool<>(
+                calls,
+                arguments,
+                demaskWarnings,
+                3,
+                5,
+                "tool_calls",
+                Optional.empty(),
+                Optional.empty());
     }
 
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeTool(

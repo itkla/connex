@@ -425,7 +425,8 @@ public final class AiModelCatalog {
      */
     public static boolean streamingDeclared(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
-        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::streamingFor);
+        return endpointDeclared(
+                family, target, overrides, AiProperties.ModelOverride::streamingFor, false);
     }
 
     /**
@@ -443,28 +444,82 @@ public final class AiModelCatalog {
      */
     public static boolean thoughtsDeclared(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
-        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::thoughtsFor);
+        return endpointDeclared(
+                family, target, overrides, AiProperties.ModelOverride::thoughtsFor, false);
     }
 
-    private static boolean endpointDeclared(
+    /**
+     * How many function calls an operator has declared this exact endpoint may emit in one step.
+     *
+     * <p>Answered from declaration alone, on the same endpoint terms as
+     * {@link #streamingDeclared}, with one deliberate narrowing: the model id must match the
+     * configured one <em>including its namespace</em>. Streaming and thoughts are properties of the
+     * wire protocol and survive the OpenAI-compatible family's namespace stripping, but whether a
+     * batch really carries distinct ids and per-call replay state is a property of the one upstream
+     * model the operator probed. A router endpoint serving {@code google/gemini-2.5-pro} and
+     * {@code somemirror/gemini-2.5-pro} serves two different answers, so a declaration names the
+     * configured id exactly, case-insensitively.
+     *
+     * <p>A declared value outside 1..{@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} — which
+     * bean validation refuses at binding but a programmatic override could still carry — reads as
+     * 1, never as the ceiling, so a configuration mistake enables nothing. An undeclared endpoint —
+     * which is every endpoint until an operator records a probe — answers 1, which is exactly
+     * today's behaviour at every layer below.
+     *
+     * @param family provider family owning the target
+     * @param target configured provider target, may be {@code null}
+     * @param overrides deployment overrides, may be {@code null}
+     * @return the declared per-step call ceiling, between 1 and
+     *     {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS}
+     */
+    public static int parallelReadCalls(
+            Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        String modelId = modelIdOf(target);
+        int declared = endpointDeclared(
+                family,
+                modelId == null ? null : modelId.trim().toLowerCase(Locale.ROOT),
+                target,
+                overrides,
+                AiProperties.ModelOverride::parallelReadCallsFor,
+                1);
+        return AiProviderCapabilities.parallelToolCallsOrSingle(declared);
+    }
+
+    private static <T> T endpointDeclared(
             Family family,
             AiProviderTarget target,
             List<AiProperties.ModelOverride> overrides,
-            EndpointDeclaration declaration) {
+            EndpointDeclaration<T> declaration,
+            T undeclared) {
+        return endpointDeclared(
+                family,
+                family.normalize(modelIdOf(target)),
+                target,
+                overrides,
+                declaration,
+                undeclared);
+    }
+
+    private static <T> T endpointDeclared(
+            Family family,
+            String candidateModelId,
+            AiProviderTarget target,
+            List<AiProperties.ModelOverride> overrides,
+            EndpointDeclaration<T> declaration,
+            T undeclared) {
         if (overrides == null || overrides.isEmpty() || target == null) {
-            return false;
+            return undeclared;
         }
-        String normalizedModelId = family.normalize(modelIdOf(target));
-        if (normalizedModelId == null || normalizedModelId.isBlank()) {
-            return false;
+        if (candidateModelId == null || candidateModelId.isBlank()) {
+            return undeclared;
         }
-        boolean declared = false;
+        T declared = undeclared;
         for (AiProperties.ModelOverride override : overrides) {
             if (override == null) {
                 continue;
             }
-            Boolean value = declaration.resolve(
-                    override, family.providerId(), normalizedModelId, target.endpoint());
+            T value = declaration.resolve(
+                    override, family.providerId(), candidateModelId, target.endpoint());
             if (value != null) {
                 declared = value;
             }
@@ -472,10 +527,14 @@ public final class AiModelCatalog {
         return declared;
     }
 
-    /** One override's answer to an endpoint-scoped capability question. */
+    /**
+     * One override's answer to an endpoint-scoped capability question.
+     *
+     * @param <T> the declared value's type, {@code null} when the override says nothing
+     */
     @FunctionalInterface
-    private interface EndpointDeclaration {
-        Boolean resolve(
+    private interface EndpointDeclaration<T> {
+        T resolve(
                 AiProperties.ModelOverride override,
                 String providerId,
                 String normalizedModelId,

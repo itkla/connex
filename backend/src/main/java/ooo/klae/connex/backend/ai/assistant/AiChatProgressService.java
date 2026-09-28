@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
@@ -64,12 +65,11 @@ public class AiChatProgressService {
      * for it, so projecting one would raise an {@code other} milestone that appeared live and
      * vanished on reload. It reads nothing, so there is no coverage for it to claim.
      *
-     * <p>The row limit is {@link AiChatAgentLoopService#HARD_MAX_STEPS} because a turn writes at
-     * most one {@code ai_chat_tool_call} row per model step: each step takes exactly one of the
-     * read- or write-proposal paths, so the step ceiling is an exact bound on the rows. The
-     * moment a step may propose more than one call, that equality breaks and this limit has to
-     * rise with it, or a turn past the ceiling silently loses real milestones here while the
-     * suffixed keys it wrote still parse and look healthy.
+     * <p>The row limit is {@link AiChatAgentLoopService#MAX_TOOL_CALL_ROWS_PER_TURN} rather than the
+     * step ceiling, because a step is no longer guaranteed to write exactly one
+     * {@code ai_chat_tool_call} row. The step ceiling was an exact bound only while that equality
+     * held; a turn whose steps may each carry several calls would silently lose real milestones
+     * under it, while every suffixed key it wrote still parsed and looked healthy.
      */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {
@@ -78,7 +78,8 @@ public class AiChatProgressService {
                 0, SCOPE, "queued".equals(turnStatus) ? "running" : "complete"));
         String prefix = "turn-" + turnId + "-step-";
         for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
-                workspaceId, sessionId, prefix, AiChatAgentLoopService.HARD_MAX_STEPS)) {
+                workspaceId, sessionId, prefix,
+                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN)) {
             if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
                 continue;
             }
@@ -154,22 +155,37 @@ public class AiChatProgressService {
         }
         try {
             JsonNode result = objectMapper.readTree(toolCall.getResultJson());
-            Integer count = switch (toolCall.getToolName()) {
-                case "search_records", "get_records" -> arraySize(result, "records");
-                case "get_record", "create_activity", "create_task", "create_note",
-                        "add_tag", "change_deal_stage", "assign_owner",
-                        "relationship_metrics" -> 1;
-                case "list_activities", "list_scope_activities" ->
-                        arraySize(result, "activities");
-                case "deal_attention" -> arraySize(result, "deals");
-                case "list_tasks" -> arraySize(result, "tasks");
-                case "find_schedule_conflicts" -> arraySize(result, "conflicts");
-                default -> null;
-            };
-            return new ProgressResult(count, containsTruncation(result));
+            return new ProgressResult(
+                    resultCount(toolCall.getToolName(), result), containsTruncation(result));
         } catch (JacksonException exception) {
             return ProgressResult.EMPTY;
         }
+    }
+
+    /**
+     * Counts what one executed tool call produced, for the milestone's viewer-safe count.
+     *
+     * <p>Every write tool counts as one completed action. An unmapped tool reports no count rather
+     * than a guessed one; {@code AiChatProgressServiceTest} fails when a declared write tool is left
+     * unmapped here or in {@link #sourceForTool}.
+     *
+     * @param tool internal tool key
+     * @param result the executed call's stored result
+     * @return the bounded count, or {@code null} when the tool reports none
+     */
+    static Integer resultCount(String tool, JsonNode result) {
+        return switch (tool == null ? "" : tool) {
+            case "search_records", "get_records" -> arraySize(result, "records");
+            case "get_record", "create_activity", "create_task", "create_note",
+                    "add_tag", "change_deal_stage", "assign_owner",
+                    "relationship_metrics" -> 1;
+            case "list_activities", "list_scope_activities" ->
+                    arraySize(result, "activities");
+            case "deal_attention" -> arraySize(result, "deals");
+            case "list_tasks" -> arraySize(result, "tasks");
+            case "find_schedule_conflicts" -> arraySize(result, "conflicts");
+            default -> null;
+        };
     }
 
     private static Integer arraySize(JsonNode node, String field) {
@@ -224,6 +240,17 @@ public class AiChatProgressService {
         return Set.copyOf(combined);
     }
 
+    /**
+     * Reads the model step a durable key names, or the placeholder that sorts it last.
+     *
+     * <p>The call ordinal is parsed only to be bounded. A key claiming an ordinal past
+     * {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} is one no step of this loop could have
+     * written, so it is treated exactly as a malformed key rather than trusted for its step number.
+     *
+     * @param idempotencyKey the durable row's idempotency key
+     * @param turnId the turn the projection is reading
+     * @return the milestone's ordering step number
+     */
     private static int step(String idempotencyKey, int turnId) {
         Matcher matcher = TURN_STEP.matcher(idempotencyKey == null ? "" : idempotencyKey);
         if (!matcher.matches()) {
@@ -231,6 +258,12 @@ public class AiChatProgressService {
         }
         try {
             if (Integer.parseInt(matcher.group(1)) != turnId) {
+                return AiChatAgentLoopService.HARD_MAX_STEPS;
+            }
+            String ordinal = matcher.group(3);
+            if (ordinal != null
+                    && Integer.parseInt(ordinal)
+                            > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
                 return AiChatAgentLoopService.HARD_MAX_STEPS;
             }
             return Math.min(

@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -797,11 +798,23 @@ class AiChatTurnPersistenceServiceTest {
         assertTrue(persisted.getAllValues().getLast().getIdempotencyKey().length() <= 64);
     }
 
+    /**
+     * An ordinal outside the per-step call ceiling writes no row at all.
+     *
+     * <p>Bounded on both sides for the same reason the step number is bounded above: the key is
+     * read back by anchored patterns that this ceiling is part of, so a position no step could have
+     * produced must be refused where it is rendered rather than written and silently skipped by
+     * every reader afterwards.
+     */
     @Test
-    void aNegativeCallOrdinalIsRefusedBeforeAnyRowIsWritten() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> service.proposeTool(TURN, 4, -1, "search_records", "{}"));
+    void aCallOrdinalOutsideTheStepsCallCeilingIsRefusedBeforeAnyRowIsWritten() {
+        for (int invalid : new int[] {
+                -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1}) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> service.proposeTool(TURN, 4, invalid, "search_records", "{}"),
+                    "expected a refusal for call ordinal " + invalid);
+        }
 
         verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
     }

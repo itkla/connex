@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -154,6 +155,7 @@ abstract class AbstractScriptedTrajectoryTest {
 
     @Autowired private AiAssistantTurnService turnService;
     @Autowired private AiAssistantWriteToolService writeToolService;
+    @Autowired private AiChatTurnPersistenceService persistenceService;
     @Autowired private ScriptedAiRequestJournal journal;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private CompanyMapper companyMapper;
@@ -432,6 +434,48 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * Counts provider-call audit rows by how the server parsed the response they record.
+     *
+     * <p>A refused response and an accepted one can share an audit outcome, so a golden about a
+     * response the server discarded has to read the parse outcome to tell them apart.
+     *
+     * @param action stable audit action key
+     * @param parseOutcome the {@code parseOutcome} the metadata must carry
+     * @param schemaRule the {@code schemaRule} diagnostic the metadata must carry
+     * @return how many rows match, for this workspace
+     */
+    final int auditRowsParsedAs(String action, String parseOutcome, String schemaRule) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.parseOutcome')) = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.schemaRule')) = ?
+                """, Integer.class, workspace.getId(), action, parseOutcome, schemaRule);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Counts provider-call audit rows that recorded invented placeholders in the response.
+     *
+     * <p>A response the parse boundary admitted is audited as parsed even when one of its calls
+     * named a placeholder the turn never issued, so a golden about that response has to read the
+     * recorded {@code demaskWarnings} to prove the server saw it.
+     *
+     * @param action stable audit action key
+     * @param parseOutcome the {@code parseOutcome} the metadata must carry
+     * @return how many rows match with a positive {@code demaskWarnings}, for this workspace
+     */
+    final int auditRowsWithDemaskWarnings(String action, String parseOutcome) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.parseOutcome')) = ?
+                  AND CAST(JSON_EXTRACT(changes, '$.demaskWarnings') AS SIGNED) > 0
+                """, Integer.class, workspace.getId(), action, parseOutcome);
+        return count == null ? 0 : count;
+    }
+
+    /**
      * Reads a session's current title straight from the row.
      *
      * @param sessionId the trajectory's session
@@ -486,6 +530,51 @@ abstract class AbstractScriptedTrajectoryTest {
                 "SELECT stage_id FROM deal WHERE workspace_id = ? AND id = ?",
                 Integer.class, workspace.getId(), dealId);
         return stageId == null ? 0 : stageId;
+    }
+
+    /**
+     * Proposes one read call of the running turn again, through the real persistence service and
+     * against the real {@code (workspace_id, idempotency_key)} uniqueness constraint.
+     *
+     * <p>Only meaningful from a step hook: that runs on the loop thread, between two model steps,
+     * where the turn is still running and the actor the service re-checks is the turn's own. The
+     * turn and its initiating message are read back from the rows the loop already committed, so
+     * nothing about the proposal is invented by the test.
+     *
+     * @param stepNumber the durable model step to propose under
+     * @param callOrdinal the call's position in that step, or 0 for a step's only call
+     * @return the failure the proposal raised, or null when it wrote a row
+     */
+    final RuntimeException proposeReadAgain(int stepNumber, int callOrdinal) {
+        Map<String, Object> turn = jdbcTemplate.queryForMap(
+                "SELECT id, session_id FROM ai_chat_turn"
+                        + " WHERE workspace_id = ? AND status = 'running'",
+                workspace.getId());
+        int messageId = Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT message_id FROM ai_chat_tool_call"
+                        + " WHERE workspace_id = ? ORDER BY id LIMIT 1",
+                Integer.class, workspace.getId()));
+        int messageSeq = Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT seq FROM ai_chat_message WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspace.getId(), messageId));
+        AiChatQueuedTurn queued = new AiChatQueuedTurn(
+                workspace.getId(),
+                member.getId(),
+                ((Number) turn.get("session_id")).intValue(),
+                ((Number) turn.get("id")).intValue(),
+                messageId,
+                messageSeq,
+                restrictionEpoch.current(workspace.getId()),
+                false,
+                List.of(),
+                List.of());
+        try {
+            persistenceService.proposeTool(
+                    queued, stepNumber, callOrdinal, "search_records", "{}");
+            return null;
+        } catch (RuntimeException exception) {
+            return exception;
+        }
     }
 
     /** Installs the member's identity and tenant placement on the calling thread. */

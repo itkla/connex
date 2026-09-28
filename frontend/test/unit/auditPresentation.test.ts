@@ -74,11 +74,10 @@ describe('presentAuditEntry', () => {
             expect.objectContaining({ key: 'correlationId', value: '123e4567-e89b-42d3-a456-426614174000' }),
             expect.objectContaining({ key: 'result', value: 'blocked' }),
         ]));
-        expect(presentation.metadata.map((row) => row.key)).not.toEqual(expect.arrayContaining([
-            'prompt',
-            'response',
-            'credential',
-        ]));
+        const keys = presentation.metadata.map((row) => row.key);
+        for (const forbidden of ['prompt', 'response', 'credential']) {
+            expect(keys, `${forbidden} must never reach the rendered metadata`).not.toContain(forbidden);
+        }
         expect(auditOutcome(entry({
             action: 'ai.llm.call',
             entityType: 'ai_call',
@@ -128,6 +127,45 @@ describe('presentAuditEntry', () => {
         ]));
     });
 
+    it('never renders the old/new changes of a sensitive entry as field diffs', () => {
+        const aiCall = presentAuditEntry(entry({
+            action: 'ai.llm.call',
+            entityType: 'ai_call',
+            changes: {
+                provider: { old: null, new: 'vertex' },
+                prompt: { old: null, new: 'private CRM content' },
+                response: { old: null, new: 'private model output' },
+                credential: { old: 'previous-secret-token', new: 'secret-token' },
+            },
+        }));
+        const secret = presentAuditEntry(entry({
+            action: 'secret_store.secret.rewrap',
+            entityType: 'organization',
+            changes: {
+                keyId: { old: 'retired', new: 'primary' },
+                plaintext: { old: 'previous-secret-token', new: 'secret-token' },
+                ciphertext: { old: 'wrapped-before', new: 'wrapped-after' },
+            },
+        }));
+
+        expect(aiCall.diffs).toEqual([]);
+        expect(secret.diffs).toEqual([]);
+        expect(aiCall.metadata).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'provider', value: 'vertex' }),
+        ]));
+        expect(secret.metadata).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'keyId', value: 'primary' }),
+        ]));
+        const aiKeys = aiCall.metadata.map((row) => row.key);
+        for (const forbidden of ['prompt', 'response', 'credential']) {
+            expect(aiKeys, `${forbidden} must never reach the rendered metadata`).not.toContain(forbidden);
+        }
+        const secretKeys = secret.metadata.map((row) => row.key);
+        for (const forbidden of ['plaintext', 'ciphertext']) {
+            expect(secretKeys, `${forbidden} must never reach the rendered metadata`).not.toContain(forbidden);
+        }
+    });
+
     it('leaves the server-written summary of a redacted entry to the surface to translate', () => {
         const secret = entry({ action: 'secret_store.secret.rewrap', entityType: 'organization', summary: 'Secret rewrapped' });
         const ordinary = entry({ summary: 'Updated company' });
@@ -174,15 +212,10 @@ describe('presentAuditEntry', () => {
         });
         const presentation = presentAuditEntry(unsafe);
 
-        expect(presentation.metadata.map((row) => row.key)).not.toEqual(expect.arrayContaining([
-            'provider',
-            'region',
-            'model',
-            'feature',
-            'correlationId',
-            'inputTokens',
-            'mediaTypes',
-        ]));
+        const keys = presentation.metadata.map((row) => row.key);
+        for (const rejected of ['provider', 'region', 'model', 'feature', 'correlationId', 'inputTokens', 'mediaTypes']) {
+            expect(keys, `an uncontrolled ${rejected} value must not render`).not.toContain(rejected);
+        }
         expect(auditTargetLabel(unsafe)).toBe('ai_call');
         expect(auditSummary(unsafe)).toBeNull();
         expect(auditError(unsafe)).toBeNull();

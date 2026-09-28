@@ -388,6 +388,116 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+### Assistant write tools
+
+Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
+`READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one
+`AiAssistantWriteTool` bean (tools not yet moved onto it run on the framework's legacy per-tool
+arms, listed in `AiAssistantWriteToolRegistry.LEGACY_TOOLS`, through the same order). The tool
+declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
+tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
+`AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
+dependencies to an explicit allowlist of domain services and helpers — no mapper, no
+`WorkspaceService`, no member or permission source — and lexically by refusing locking-method,
+permission-read and lifecycle-mutator names in tool source; a new dependency is a reviewed edit to
+that allowlist. Before any lock, an approval resolves the principals the write will name
+(`AiAssistantWriteTool.principals`, against the member directory the framework hands it, or the
+legacy `assign_owner` owner), and those same objects reach the write. The framework acquires its
+locks in exactly this order:
+
+1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
+   covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals
+   (today only `assign_owner`'s owner), each named principal, who carries no requirement. That call takes the user roots `FOR SHARE` ascending by user id, then the
+   active workspace root `FOR SHARE`, then the memberships `FOR UPDATE` ascending by user id, then the
+   custom-role row and its `workspace_role_permission` rows `FOR UPDATE` ascending by role id. Roles
+   are locked only for users with a non-empty requirement, so the actor's custom role is locked and
+   the owner's never is. An owner whose account deletion is reserved is refused here with `User N is
+   not a member of this workspace` even while its membership row is still active.
+2. Exact `(workspace_id,id)` `ai_chat_session` root `FOR UPDATE`.
+3. Exact `ai_chat_tool_call` row `FOR UPDATE`.
+4. Immediate tier only: exact `ai_chat_turn` row `FOR UPDATE`. The real order is session → tool call
+   → turn, not session → turn → tool call.
+5. Immediate execution and approval only: the `task_board_lock` workspace root, when the tool
+   declares it (task creation). The value the write moves its target to — a deal's new stage — is
+   resolved by non-locking reads just before this step, because the stage-change lock needs it.
+6. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
+   tool only links to it (task creation on a person), otherwise the person, company or deal
+   `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
+
+After step 6 the framework, still in this order and taking no further lock of its own: retains the
+restriction-epoch read fence to completion; for every confirm-tier tool refuses a target written
+after the proposal (`AiAssistantProposalFreshness`) — the freshness check is derived from the tier,
+and no tool can opt out of it; re-asserts the tool's permissions from the step-1 snapshot; runs the
+owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
+target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier
+the write returned with the one resolved before the lock, recording any divergence as a
+`verification` sibling of the stored outcome; and writes the tool-call status fail-closed.
+
+The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
+stage tool reads its deal through the same scoped getter before step 6 to resolve the stage, and
+inside one transaction MyBatis answers an identical select from its first-level cache. Every target
+lock statement the framework takes at step 6 — `getVisiblePersonByIdForShare`,
+`getVisiblePersonByIdForUpdate`, `getOwnedCompanyByIdForUpdate` and `getDealByIdForUpdate` —
+therefore declares `flushCache="true"`, so the gate's getter goes to the database after the lock.
+`AiAssistantWriteTargetGateCacheIntegrationTest` pins this against MySQL for each of them. Do not
+remove the flag, and give any new target lock statement the same flag.
+
+Rejection takes no lock after step 3. Undo takes none of its own after step 3; the domain `deleteIf`
+it calls takes what that service documents — for a task the board root and then the exact task rows
+(see Tasks above), for a note or an activity the exact row `FOR UPDATE`. Domain services on this
+path may re-acquire a membership step 1 already holds (`lockAndRequireMember` for the actor in
+`TaskService.lockBoardForCreation`, for the owner in `updateOwner`); that re-acquisition adds no
+edge.
+
+**The authority is the step-1 snapshot, and its rows stay locked until commit.** The tool's own
+permissions become known only after step 3 has read the durable proposal, so the service asserts
+them in memory against the snapshot through `LockedPermissionSnapshot.effectiveFor(actorId)`. It
+asserts them the same way again after the record lock; that second assertion reads the same
+immutable snapshot and cannot fail once the first has passed, so it is a structural check, not the
+protection. The protection is the held rows: a revocation that arrives mid-decision — a `DELETE` of a
+role permission, a role change, a membership removal — waits until the decision commits, and one
+committed before step 1 is seen by it. `AiAssistantWriteToolConcurrencyIntegrationTest` pins this
+for immediate execution, approval and undo by observing the revocation waiting in
+`performance_schema.data_lock_waits`.
+
+Rules that keep this sound:
+
+- **No permission read before step 1 in the same transaction.** An unlocked `permissionsFor` read
+  populates the MyBatis first-level cache, and every later identical read in that transaction —
+  including a domain service's own `@RequirePermission` check — is then answered with the pre-lock
+  result. `preliminaryPrincipals` resolves which principal rows to lock and deliberately takes no
+  permission read. An `AiAssistantWriteTool.principals` implementation is handed only the request
+  and a member directory — a plain `WorkspaceService.getMembers` read — and may not reach anything
+  else: `AiAssistantWriteToolRegistryTest` proves, for every declared tool, that principal
+  resolution touches none of its injected dependencies, so it cannot call a domain getter whose
+  `@RequirePermission` check would be the pre-lock read. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
+  unknown tool call, an unparseable proposal, an owner that no longer resolves) and the locked 403
+  after them.
+- **After step 1, only non-locking permission reads, and only in the domain layer.** The service's
+  own assertions read the snapshot. The domain services it calls still run their `@RequirePermission`
+  and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
+  after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
+  `ActivityService.create`, `NoteService.create`, the `addTag` and `updateOwner` methods,
+  `DealService.changeStage`, and every `deleteIf` undo uses. Those reads add no lock edge, and while
+  the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
+  Do not turn one of them into a locking read, and do not route an assistant write through a
+  domain method that has no permission check on the assumption that the snapshot makes it redundant.
+- **Organization lifecycle is not in the snapshot.** `lockAndRequirePermissions` checks the
+  workspace's lifecycle, not the organization's. An organization entering teardown is refused by the
+  unlocked entry gate (`WorkspaceService.isMember`, which joins `organization.lifecycle_state`) and,
+  for built-in roles, by the domain layer's `permissionsFor` read; one that enters teardown between
+  the entry gate and step 1 is not refused by the snapshot. No write path may rely on the snapshot
+  alone to prove the organization is active.
+
+**Contention.** Per decision the service holds, until commit, the actor's `app_user` row (S), the
+workspace row (S) and the actor's membership (X) — plus the owner's on `assign_owner` — and, for a
+custom-role actor, that role's `workspace_role` row and every one of its `workspace_role_permission`
+rows (X). Assistant decisions by different members who share one custom role therefore serialize on
+that role row, and they also queue behind every other `lockAndRequirePermissions*` or
+`lockedPermissionsFor` caller for that role (note update and delete, document approvals, chat
+attachment uploads and the rest). Built-in-role members still serialize only per user. Memberships
+are always locked before any role, each ascending, so two such callers cannot form a cycle.
+
 ### AI run leases
 
 `ai_run_lease` is a leaf. The lock order is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`, and

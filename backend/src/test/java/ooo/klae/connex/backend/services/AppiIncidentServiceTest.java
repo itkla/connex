@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -141,6 +143,12 @@ class AppiIncidentServiceTest extends AbstractServiceTest {
         AppiIncidentDto mineIncident = appiIncidentService.create(mine.getId(), currentUser.getId(), request("Mine"));
         AppiIncidentDto otherIncident = appiIncidentService.create(other.getId(), currentUser.getId(), request("Other"));
 
+        assertEquals(Set.of(mineIncident.getId()),
+            appiIncidentService.list(mine.getId(), currentUser.getId(), 50, 0).stream()
+                .map(AppiIncidentDto::getId).collect(Collectors.toSet()));
+        assertEquals(Set.of(otherIncident.getId()),
+            appiIncidentService.list(other.getId(), currentUser.getId(), 50, 0).stream()
+                .map(AppiIncidentDto::getId).collect(Collectors.toSet()));
         assertEquals(mineIncident.getId(), appiIncidentService.get(mine.getId(), mineIncident.getId(),
             currentUser.getId()).getId());
         assertThrows(ooo.klae.connex.backend.exceptions.ResourceNotFoundException.class,
