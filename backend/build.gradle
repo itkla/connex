@@ -131,7 +131,10 @@ def scriptedTrajectoryPattern = '**/*ScriptedTrajectory*Test.class'
 
 tasks.named('test') {
 	useJUnitPlatform()
-	maxHeapSize = '2048m'
+	// A fork caches up to ten application contexts, and the suite now sits close enough to the old
+	// 2048m ceiling that adding one test class, which only shifts where forkEvery cuts the class
+	// list, made a context load in an unrelated class run out of heap three runs in a row (#1851).
+	maxHeapSize = '3072m'
 	maxParallelForks = 1
 	forkEvery = 100
 	// One test fork retains at most 10 cached pools. Including one context loading, the application-pool
