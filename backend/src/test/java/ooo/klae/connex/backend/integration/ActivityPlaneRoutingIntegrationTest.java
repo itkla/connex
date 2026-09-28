@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.InputStream;
@@ -20,8 +21,8 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -50,8 +51,8 @@ class ActivityPlaneRoutingIntegrationTest {
     private static int orgId;
     private static int workspaceId;
 
-    @BeforeAll
-    static void setUp() throws Exception {
+    @BeforeEach
+    void setUp() throws Exception {
         url = System.getenv().getOrDefault("CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
         username = System.getenv("CONNEX_DB_USERNAME");
@@ -66,7 +67,12 @@ class ActivityPlaneRoutingIntegrationTest {
                 Statement statement = connection.createStatement()) {
             assumeTrue(tableExists(connection, defaultCatalog, "workspace"),
                 "Default catalog is not migrated; skipping Activity plane-routing integration test");
-            statement.execute("CREATE DATABASE " + scratchCatalog);
+            try {
+                statement.execute("CREATE DATABASE " + scratchCatalog);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + scratchCatalog + " ("
+                    + exception.getMessage() + ")");
+            }
             scratchCatalogCreated = true;
             statement.execute("CREATE TABLE " + scratchCatalog + ".deal ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, company_id INT NULL)");
@@ -80,9 +86,6 @@ class ActivityPlaneRoutingIntegrationTest {
                 + "provider_admitted_fields_json JSON NULL, "
                 + "provider_material_exclusions_json JSON NULL)");
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(false, "Cannot prepare scratch catalog " + scratchCatalog + " ("
-                + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -99,8 +102,8 @@ class ActivityPlaneRoutingIntegrationTest {
         sqlSessionFactory = sqlSessionFactory(routing);
     }
 
-    @AfterAll
-    static void tearDown() throws SQLException {
+    @AfterEach
+    void tearDown() throws SQLException {
         if (pool != null) {
             pool.close();
         }
@@ -187,7 +190,7 @@ class ActivityPlaneRoutingIntegrationTest {
         String resource = "mappers/ActivityMapper.xml";
         try (InputStream input = ActivityPlaneRoutingIntegrationTest.class
                 .getClassLoader().getResourceAsStream(resource)) {
-            assumeTrue(input != null, "Missing mapper resource " + resource);
+            assertNotNull(input, "Missing mapper resource " + resource);
             new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
         }
         return new SqlSessionFactoryBuilder().build(configuration);

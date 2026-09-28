@@ -327,10 +327,10 @@ class PublicApiCredentialIntegrationTest {
         grantApiManager(workspace, manager, "refusal");
         MockHttpSession session = loginWithStepUp(manager);
         Issued expired = issue(session, workspace, "Expired", "crm.read");
+        Issued revoked = issue(session, workspace, "Revoked", "crm.read");
         jdbcTemplate.update(
             "UPDATE api_credential SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?",
             expired.id());
-        Issued revoked = issue(session, workspace, "Revoked", "crm.read");
         mockMvc.perform(delete("/api/api-credentials/{id}", revoked.id())
                 .session(session)
                 .header("X-Workspace-Id", workspace.getId())
@@ -342,6 +342,10 @@ class PublicApiCredentialIntegrationTest {
         assertInvalid("Bearer ");
         assertInvalid("Bearer wrong_prefix_" + "a".repeat(43));
         assertInvalid("Bearer cnx_pat_" + "a".repeat(43));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential WHERE id = ? AND workspace_id = ? "
+                + "AND token_hash = ? AND revoked_at IS NULL AND expires_at < UTC_TIMESTAMP(6)",
+            Integer.class, expired.id(), workspace.getId(), sha256Hex(expired.token())));
         assertInvalid("Bearer " + expired.token());
         assertInvalid("Bearer " + revoked.token());
         mockMvc.perform(get("/api/v1/me")

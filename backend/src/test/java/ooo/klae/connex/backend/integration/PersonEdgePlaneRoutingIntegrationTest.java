@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -25,8 +26,8 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -63,8 +64,8 @@ class PersonEdgePlaneRoutingIntegrationTest {
     private static int foreignOrgId;
     private static int foreignWorkspaceId;
 
-    @BeforeAll
-    static void setUp() throws Exception {
+    @BeforeEach
+    void setUp() throws Exception {
         url = System.getenv().getOrDefault("CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
         username = System.getenv("CONNEX_DB_USERNAME");
@@ -79,13 +80,15 @@ class PersonEdgePlaneRoutingIntegrationTest {
                 Statement statement = connection.createStatement()) {
             assumeTrue(tableExists(connection, defaultCatalog, "workspace"),
                 "Default catalog is not migrated; skipping PersonEdge routing test");
-            statement.execute("CREATE DATABASE " + scratchCatalog);
+            try {
+                statement.execute("CREATE DATABASE " + scratchCatalog);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + scratchCatalog + " ("
+                    + exception.getMessage() + ")");
+            }
             scratchCatalogCreated = true;
             createTenantTables(statement);
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(false, "Cannot prepare scratch catalog " + scratchCatalog + " ("
-                + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -133,8 +136,8 @@ class PersonEdgePlaneRoutingIntegrationTest {
         personEdgeReader = new PersonEdgeReadService(personEdgeMapper, controlAccess);
     }
 
-    @AfterAll
-    static void tearDown() throws SQLException {
+    @AfterEach
+    void tearDown() throws SQLException {
         if (pool != null) {
             pool.close();
         }
@@ -272,7 +275,7 @@ class PersonEdgePlaneRoutingIntegrationTest {
         for (String resource : List.of("mappers/PersonEdgeMapper.xml", "mappers/WorkspaceMapper.xml")) {
             try (InputStream input = PersonEdgePlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
             }
         }

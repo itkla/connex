@@ -21,8 +21,8 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -55,8 +55,8 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
     private static int workspaceId;
     private static int defaultPersonId;
 
-    @BeforeAll
-    static void setUp() throws Exception {
+    @BeforeEach
+    void setUp() throws Exception {
         url = System.getenv().getOrDefault(
             "CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
@@ -73,7 +73,12 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
             assumeTrue(
                 tableExists(connection, "tenant_operation_lease"),
                 "Default catalog is not migrated; skipping lifecycle routing test");
-            statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
+            try {
+                statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + SCRATCH_CATALOG + " ("
+                    + exception.getMessage() + ")");
+            }
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company_tag");
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".tag");
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company");
@@ -93,11 +98,6 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
                     + " FOREIGN KEY (company_id) REFERENCES "
                     + SCRATCH_CATALOG + ".company(id) ON DELETE CASCADE");
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(
-                false,
-                "Cannot prepare scratch catalog " + SCRATCH_CATALOG
-                    + " (" + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -121,8 +121,8 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
         sqlSessionFactory = sqlSessionFactory(routing);
     }
 
-    @AfterAll
-    static void tearDown() throws SQLException {
+    @AfterEach
+    void tearDown() throws SQLException {
         if (pool != null) {
             pool.close();
         }
@@ -259,7 +259,7 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
             try (InputStream input = TenantLifecyclePlaneRoutingIntegrationTest.class
                     .getClassLoader()
                     .getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(
                     input,
                     configuration,
