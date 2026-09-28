@@ -408,13 +408,33 @@ lookup, so `assign_owner` writes exactly the owner id locked at step 1. A confir
 also pins, when it is prepared in the turn, what its principals and its value resolved to: the
 `principals` ids and the `resolution` field and id are stored as additive siblings of the stored
 arguments, and a name that resolves to no single row is refused before any proposal is stored. The
-approval compares its own pre-lock resolution with the pins — the principals once step 3 has read
-the locked proposal, the value just before step 5, before any board or target lock — and refuses
-any difference with `Assistant proposal target changed`, so a rename or an offboarding between the
-proposal and the approval can never hand a record to a member, or move a deal to a stage, that the
-card did not name. The comparison reads no row and takes no lock. A proposal stored before pinning
-carries neither sibling and is approved exactly as before. The framework acquires its locks in
-exactly this order:
+approval compares its own pre-lock resolution with the pins — the principals before step 1, on the
+proposal read unlocked, so a drifted member's authorization rows are never locked and its own 403
+never answers first, and again once step 3 has read the locked proposal; the value just before
+step 5, before any board or target lock — and refuses any difference with `Assistant proposal
+target changed`, so a rename or an offboarding between the proposal and the approval can never hand
+a record to a member, or move a deal to a stage, that the card did not name. The comparison reads
+no row and takes no lock. The card resolves the stored name exactly as the approval does and names
+only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
+the card and refused at approval with the same 404 as before pinning, rather than labelled by its
+id.
+
+The pins protect only the proposals that carry them, on a build that reads them:
+
+- A proposal stored before pinning carries neither sibling and is approved exactly as before.
+  Pending proposals never expire, so a confirm-tier proposal still pending from before this change
+  keeps resolving its names at approval — the #1865 drift stays possible for that row until it is
+  decided.
+- A build from before the pins reads only the stored `tool`, `tier`, `restrictionEpoch`, `target`
+  and `request` and ignores both siblings, so after a rollback to it a pinned proposal renders,
+  approves and rejects by name exactly as an unpinned one, without the pin's protection. That is
+  not safe equivalence: a rollback past this change must first reject (or have the member
+  re-propose) every pending proposal whose stored arguments carry `principals` —
+  `status = 'proposed'` and `JSON_CONTAINS_PATH(arguments_json, 'one', '$.principals')` on
+  `ai_chat_tool_call` — before approvals are served by the older build. Failing closed on rollback
+  instead would need a pin-aware reader shipped before this writer.
+
+The framework acquires its locks in exactly this order:
 
 1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
    covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals

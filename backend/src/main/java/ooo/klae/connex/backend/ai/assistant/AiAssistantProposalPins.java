@@ -23,10 +23,15 @@ import tools.jackson.databind.JsonNode;
  * ids in ascending order, written for every confirm-tier proposal and empty when the write names
  * nobody, and {@code resolution}, holding the resolved {@code field} and {@code id}, written only
  * when the tool resolved a value. A proposal without {@code principals} was stored before pinning
- * and is approved and reviewed exactly as it always was. Every reader that predates the pins reads
- * the stored proposal's {@code tool}, {@code tier}, {@code restrictionEpoch}, {@code target} and
- * {@code request} by name and nothing else, so a pinned proposal still reads, renders, approves
- * and rejects on a build without them exactly as one stored without them.
+ * and is approved and reviewed exactly as it always was, so one still pending from before pinning
+ * keeps resolving its names at approval without this protection.
+ *
+ * <p>Every reader that predates the pins reads the stored proposal's {@code tool}, {@code tier},
+ * {@code restrictionEpoch}, {@code target} and {@code request} by name and nothing else, so a build
+ * without them still parses a pinned proposal. It does not enforce the pins: it renders, approves
+ * and rejects a pinned proposal by name exactly as an unpinned one, which is the drift the pins
+ * exist to refuse. A rollback past pinning must therefore first reject every pending proposal
+ * carrying {@code principals}, as {@code docs/backend/LOCKING.md} states.
  *
  * <p>Both pins are identifiers of rows the member's own card already names, and neither reaches
  * the model or a viewer who may not read the proposal's details.
