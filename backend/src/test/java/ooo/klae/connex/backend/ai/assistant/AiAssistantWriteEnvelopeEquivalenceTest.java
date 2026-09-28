@@ -7,8 +7,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +23,8 @@ import java.time.ZoneOffset;
 import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import org.junit.jupiter.api.AfterAll;
@@ -48,6 +52,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -80,7 +85,9 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>The expected strings were captured from the per-tool switch arms before each tool moved —
  * {@code create_task} and {@code change_deal_stage} first, then {@code create_activity}, with its
  * meeting schedule-conflict enrichment, and {@code create_note}, then {@code add_tag} on every record
- * kind it accepts, both when it adds the tag and when the tag was already present — so
+ * kind it accepts, both when it adds the tag and when the tag was already present, then
+ * {@code assign_owner} on every record kind it accepts, as a real change, as a no-op to the current
+ * owner and as a removal, with its unresolvable and offboarded owner refusals — so
  * a green run after the move is evidence that the move changed none of them: the stored proposal,
  * the stored result envelope with its outcome and inverse key order, the approval, rejection and
  * undo responses, the model's own view of the outcome, and the transcript cards. A key that
@@ -1205,6 +1212,306 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "person, 31, 'grace hopper ', 11, Grace Hopper, 21",
+            "company, 52, 'grace hopper ', 11, Grace Hopper, 21",
+            "deal, 44, 'grace hopper ', 11, Grace Hopper, 21",
+            "person, 31, ghopper, 21, Grace Hopper, 21",
+            "company, 52, ghopper, 21, Grace Hopper, 21",
+            "deal, 44, ghopper, 21, Grace Hopper, 21",
+            "company, 52, ' Unassigned', 11, unassigned, ",
+            "deal, 44, unassigned, , unassigned, "})
+    void anApprovedOwnerAssignmentKeepsEveryDurableApiAndModelByteOnEveryRecordKind(
+            String kind,
+            int id,
+            String owner,
+            Integer currentOwnerId,
+            String label,
+            Integer assignedOwnerId) throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(members());
+        stubOwnerTarget(kind, id, currentOwnerId, assignedOwnerId);
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"" + owner + "\"}", kind, id);
+
+        assertEquals(ownerArguments(kind, id, owner), write.argumentsJson());
+        stored(write);
+        assertEquals(
+                "{\"toolCallId\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
+                        + "\"status\":\"approval_required\",\"outcome\":{}}",
+                objectMapper.writeValueAsString(service.proposalResult(
+                        write, new AiAssistantToolProposal(29, "proposed", null, true)).data()));
+
+        String approved = objectMapper.writeValueAsString(service.approve(TURN.sessionId(), 29));
+
+        String outcome = "{\"status\":\"executed\",\"recordType\":\"" + kind + "\","
+                + "\"owner\":\"" + label + "\"}";
+        String resultJson = capturedExecutedResult();
+        assertEquals(
+                "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
+                        + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":" + outcome + "}",
+                resultJson);
+        String dto = "{\"id\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
+                + "\"status\":\"executed\",\"result\":" + outcome + ","
+                + "\"undoAvailable\":false,\"undoExpiresAt\":null}";
+        assertEquals(dto, approved);
+        assertEquals(
+                "{\"toolCallId\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
+                        + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"" + kind + "\","
+                        + "\"owner\":\"" + label + "\"}}",
+                objectMapper.writeValueAsString(service.proposalResult(
+                        write,
+                        new AiAssistantToolProposal(29, "executed", resultJson, true)).data()));
+        assertFalse(resultJson.contains("verification"));
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                assignedOwnerId == null
+                        ? Map.of(TURN.userId(), Set.of(Permission.AI_USE))
+                        : Map.of(
+                                TURN.userId(), Set.of(Permission.AI_USE),
+                                assignedOwnerId, Set.of()));
+        verify(workspaceService, times(assignedOwnerId == null ? 0 : 1))
+                .getMembers(TURN.workspaceId());
+        verify(personService, times("person".equals(kind) ? 1 : 0))
+                .updateOwner(anyInt(), any());
+        verify(companyService, times("company".equals(kind) ? 1 : 0))
+                .updateOwner(anyInt(), any());
+        verify(dealService, times("deal".equals(kind) ? 1 : 0))
+                .updateOwner(anyInt(), any());
+        switch (kind) {
+            case "person" -> verify(personService).updateOwner(id, assignedOwnerId);
+            case "company" -> verify(companyService).updateOwner(id, assignedOwnerId);
+            default -> verify(dealService).updateOwner(id, assignedOwnerId);
+        }
+
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(resultJson);
+        assertEquals(dto, objectMapper.writeValueAsString(service.approve(TURN.sessionId(), 29)));
+        verify(chatMapper).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void aRejectedOwnerAssignmentKeepsItsResponseAndStoredEnvelope() throws Exception {
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"grace hopper \"}", "company", 52));
+
+        assertEquals(
+                "{\"id\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
+                        + "\"status\":\"rejected\",\"result\":{},\"undoAvailable\":false,"
+                        + "\"undoExpiresAt\":null}",
+                objectMapper.writeValueAsString(service.reject(TURN.sessionId(), 29)));
+        ArgumentCaptor<String> rejected = ArgumentCaptor.forClass(String.class);
+        verify(chatMapper).updateToolCall(
+                eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
+                eq("rejected"), rejected.capture(), eq(TURN.userId()));
+        assertEquals(
+                "{\"tier\":\"confirm\",\"approval\":{\"status\":\"rejected\","
+                        + "\"at\":\"2026-03-06T15:00:00Z\"}}",
+                rejected.getValue());
+        verify(workspaceService, never()).getMembers(anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+    }
+
+    @Test
+    void anUnresolvableOrOffboardedOwnerRefusesWithItsMessageAndWritesNothing() throws Exception {
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}", "company", 52));
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(11, "Ada Owner", "ada-owner")));
+
+        ResourceNotFoundException unknown = assertThrows(
+                ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(
+                member(21, "Grace Hopper", "ghopper"),
+                member(22, "Admiral", "grace hopper")));
+
+        ResourceNotFoundException ambiguous = assertThrows(
+                ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(members());
+        doThrow(new ForbiddenException("User 21 is not a member of this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(
+                        TURN.workspaceId(),
+                        Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+
+        ForbiddenException offboarded = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Owner is unavailable or ambiguous", unknown.getMessage());
+        assertEquals("Owner is unavailable or ambiguous", ambiguous.getMessage());
+        assertEquals("User 21 is not a member of this workspace", offboarded.getMessage());
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(companyService, never()).lockOwnedCompanyForUpdate(anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void theTranscriptCardsForOwnerAssignmentsKeepEveryByte() throws Exception {
+        AiChatMapper readChatMapper = mock(AiChatMapper.class);
+        WorkspaceService readWorkspace = mock(WorkspaceService.class);
+        PersonMapper readPersonMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        PipelineMapper pipelineMapper = mock(PipelineMapper.class);
+        when(readWorkspace.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(readWorkspace.getCurrentUserId()).thenReturn(TURN.userId());
+        when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(EnumSet.allOf(Permission.class));
+        when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(members());
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setStatus("active");
+        when(readChatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        String assignCompany = ownerArguments("company", 52, "grace hopper ");
+        String unassignDeal = ownerArguments("deal", 44, "Unassigned");
+        String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
+                + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"company\",\"owner\":\"Grace Hopper\"}}";
+        String unassignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
+                + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
+        when(readChatMapper.listToolCallsBySession(
+                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                card(61, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
+                card(62, TURN.userId(), "proposed", "assign_owner",
+                        ownerArguments("person", 31, "ghopper"), null),
+                card(63, TURN.userId(), "proposed", "assign_owner", unassignDeal, null),
+                card(64, TURN.userId(), "proposed", "assign_owner",
+                        ownerArguments("company", 52, "Nobody"), null),
+                card(65, 99, "proposed", "assign_owner", assignCompany, null),
+                card(66, TURN.userId(), "executed", "assign_owner", assignCompany,
+                        assignedResult),
+                card(67, TURN.userId(), "executed", "assign_owner", unassignDeal,
+                        unassignedResult),
+                card(68, 99, "executed", "assign_owner", unassignDeal, unassignedResult),
+                card(69, 99, "executed", "assign_owner", assignCompany, assignedResult),
+                card(70, TURN.userId(), "rejected", "assign_owner", assignCompany,
+                        "{\"tier\":\"confirm\",\"approval\":{\"status\":\"rejected\","
+                                + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
+                card(71, TURN.userId(), "failed", "assign_owner", assignCompany, null)));
+        when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                .thenReturn(List.of());
+        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+                .thenReturn(List.of(ownedPerson(31, 21)));
+        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+                .thenReturn(List.of(ownedCompany(52, 11)));
+        when(dealMapper.getByIds(TURN.workspaceId(), List.of(44)))
+                .thenReturn(List.of(ownedDeal(44, 77)));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
+                readChatMapper,
+                readWorkspace,
+                readPersonMapper,
+                companyMapper,
+                dealMapper,
+                pipelineMapper,
+                mock(ActivityMapper.class),
+                mock(TaskMapper.class),
+                mock(NoteMapper.class),
+                mock(AiAssistantSessionReadAudit.class),
+                objectMapper,
+                CLOCK);
+        String company52 =
+                "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
+        String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
+        String deal44 = "\"target\":{\"kind\":\"deal\",\"id\":44,\"label\":\"Acme renewal\"},";
+        String noUndo = "\"createdRecord\":null,\"messageId\":null,\"turnId\":17,"
+                + "\"undoExpiresAt\":null,\"undoAvailable\":false,";
+
+        assertEquals(
+                "[" + String.join(",", List.of(
+                        "{\"id\":61,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Grace Hopper\","
+                                + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
+                                + "\"currentValue\":\"Ada Owner\","
+                                + "\"currentValueUnresolved\":false,"
+                                + "\"proposedValue\":\"Grace Hopper\",\"state\":\"ready\"},"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":62,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + person31
+                                + "\"requestSummary\":\"Assign owner: Grace Hopper\","
+                                + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
+                                + "\"currentValue\":\"Grace Hopper\","
+                                + "\"currentValueUnresolved\":false,"
+                                + "\"proposedValue\":\"Grace Hopper\","
+                                + "\"state\":\"unchanged\"},"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":63,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + deal44
+                                + "\"requestSummary\":\"Remove the current owner\","
+                                + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
+                                + "\"currentValue\":null,\"currentValueUnresolved\":true,"
+                                + "\"proposedValue\":null,\"state\":\"ready\"},"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":64,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + company52
+                                + "\"requestSummary\":\"Assign an owner\","
+                                + "\"outcomeSummary\":null,\"change\":{\"field\":\"owner\","
+                                + "\"currentValue\":\"Ada Owner\","
+                                + "\"currentValueUnresolved\":false,"
+                                + "\"proposedValue\":null,\"state\":\"unresolved\"},"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":65,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"proposed\"," + company52
+                                + "\"requestSummary\":\"Assign an owner\","
+                                + "\"outcomeSummary\":null,\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":66,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"executed\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Grace Hopper\","
+                                + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
+                                + "\"outcomeValues\":[{\"field\":\"owner\","
+                                + "\"value\":\"Grace Hopper\"}]," + noUndo + TIMES + "}",
+                        "{\"id\":67,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"executed\"," + deal44
+                                + "\"requestSummary\":\"Remove the current owner\","
+                                + "\"outcomeSummary\":\"Owner removed\",\"change\":null,"
+                                + "\"outcomeValues\":[{\"field\":\"owner\","
+                                + "\"value\":\"unassigned\"}]," + noUndo + TIMES + "}",
+                        "{\"id\":68,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"executed\"," + deal44
+                                + "\"requestSummary\":\"Assign an owner\","
+                                + "\"outcomeSummary\":\"Owner removed\",\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":69,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"executed\"," + company52
+                                + "\"requestSummary\":\"Assign an owner\","
+                                + "\"outcomeSummary\":\"Owner assigned\",\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":70,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"rejected\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Grace Hopper\","
+                                + "\"outcomeSummary\":\"Request rejected\",\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}",
+                        "{\"id\":71,\"toolName\":\"assign_owner\",\"tier\":\"confirm\","
+                                + "\"status\":\"failed\"," + company52
+                                + "\"requestSummary\":\"Assign owner: Grace Hopper\","
+                                + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
+                                + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
+                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+        verify(pipelineMapper, never()).getAllStages(anyInt());
+    }
+
     private static final String TIMES = "\"createdAt\":\"2026-03-06 14:59:00.000000\","
             + "\"updatedAt\":\"2026-03-06 15:00:00.000000\","
             + "\"executedAt\":\"2026-03-06 15:00:00.000000\"";
@@ -1250,6 +1557,75 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "},\"undo\":{\"status\":\"unavailable\","
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"tag\","
                 + "\"entityId\":" + id + ",\"fingerprint\":\"present:9\",\"tagId\":9}}";
+    }
+
+    private static String ownerArguments(String kind, int id, String owner) {
+        return "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                + "\"target\":{\"kind\":\"" + kind + "\",\"id\":" + id + "},"
+                + "\"request\":{\"handle\":\"r1\",\"owner\":\"" + owner + "\"}}";
+    }
+
+    /**
+     * The target is locked holding its current owner, last written before the proposal, and its
+     * record service returns it holding the assigned owner, as the real one does.
+     */
+    private void stubOwnerTarget(
+            String kind, int id, Integer currentOwnerId, Integer assignedOwnerId) {
+        switch (kind) {
+            case "person" -> {
+                when(personService.lockProcessablePersonForUpdate(id))
+                        .thenReturn(ownedPerson(id, currentOwnerId));
+                when(personService.updateOwner(id, assignedOwnerId))
+                        .thenReturn(ownedPerson(id, assignedOwnerId));
+            }
+            case "company" -> {
+                when(companyService.lockOwnedCompanyForUpdate(id))
+                        .thenReturn(ownedCompany(id, currentOwnerId));
+                when(companyService.updateOwner(id, assignedOwnerId))
+                        .thenReturn(ownedCompany(id, assignedOwnerId));
+            }
+            default -> {
+                when(dealService.lockDealForUpdate(id)).thenReturn(ownedDeal(id, currentOwnerId));
+                when(dealService.updateOwner(id, assignedOwnerId))
+                        .thenReturn(ownedDeal(id, assignedOwnerId));
+            }
+        }
+    }
+
+    private static Person ownedPerson(int id, Integer ownerId) {
+        Person person = person(id);
+        person.setOwnerId(ownerId);
+        person.setUpdatedAt("2026-03-06 14:00:00.000000");
+        return person;
+    }
+
+    private static Company ownedCompany(int id, Integer ownerId) {
+        Company company = new Company();
+        company.setId(id);
+        company.setName("Acme Holdings");
+        company.setOwnerId(ownerId);
+        company.setUpdatedAt("2026-03-06 14:00:00.000000");
+        return company;
+    }
+
+    private static Deal ownedDeal(int id, Integer ownerId) {
+        Deal deal = deal();
+        deal.setId(id);
+        deal.setOwnerId(ownerId);
+        deal.setUpdatedAt("2026-03-06 14:00:00.000000");
+        return deal;
+    }
+
+    private static List<User> members() {
+        return List.of(member(11, "Ada Owner", "ada-owner"), member(21, "Grace Hopper", "ghopper"));
+    }
+
+    private static User member(int id, String displayName, String username) {
+        User user = new User();
+        user.setId(id);
+        user.setDisplayName(displayName);
+        user.setUsername(username);
+        return user;
     }
 
     private static Tag tag(int id, String name) {
