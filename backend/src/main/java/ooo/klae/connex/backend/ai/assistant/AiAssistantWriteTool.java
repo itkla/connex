@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -298,6 +299,31 @@ public interface AiAssistantWriteTool {
     record Authority(int workspaceId, int userId, int toolCallId, Instant at) {
     }
 
+    /**
+     * The one read a write may make besides its own domain services: the point-in-time activities
+     * already on the row's own person target's calendar inside one UTC window.
+     *
+     * <p>The framework binds it to the row's target before handing it over, so a tool names only a
+     * window and can never read the calendar of a person it did not lock and gate; on a target that
+     * is not a person it refuses. The framework answers it through the read-tool executor, which
+     * refuses a person the workspace may no longer process and drops every activity linked to one,
+     * so a tool reaches that calendar without holding the mapper or member lookup the executor
+     * reads through. A tool receives it only in {@link Execution}, after every lock the write
+     * depends on.
+     */
+    @FunctionalInterface
+    interface ScheduleConflicts {
+
+        /**
+         * @param startUtc the window's start in UTC
+         * @param endUtc the window's end in UTC
+         * @return the executor's result, carrying its {@code conflicts} list and its
+         *     {@code conflictsTruncated} flag
+         * @throws IllegalStateException when the row's target is not a person
+         */
+        AiAssistantToolResult find(LocalDateTime startUtc, LocalDateTime endUtc);
+    }
+
     /** What the framework holds locked for the target when it calls {@link #apply}. */
     record LockedTarget(String updatedAt, DealService.LockedStageChange stageChange) {
     }
@@ -306,16 +332,20 @@ public interface AiAssistantWriteTool {
      * One locked, authorized unit of work.
      *
      * <p>{@link #apply} may not re-resolve {@link #principals()} or {@link #resolution()} and may
-     * not take a lock: every one of those was established before the locks it depends on.
+     * not take a lock: every one of those was established before the locks it depends on. Its one
+     * read beyond its own domain services is {@link #scheduleConflicts()}.
      */
     record Execution(
             Authority authority,
             Row row,
             List<PrincipalRequest> principals,
             Resolution resolution,
-            LockedTarget lockedTarget) {
+            LockedTarget lockedTarget,
+            ScheduleConflicts scheduleConflicts) {
         public Execution {
             principals = List.copyOf(principals);
+            Objects.requireNonNull(
+                    scheduleConflicts, "An assistant write is handed the schedule read");
         }
     }
 

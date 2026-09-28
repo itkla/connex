@@ -416,23 +416,15 @@ public class AiAssistantToolCallReadService {
      * <p>A declared tool is offered undo only when it can ever be undone and the viewer holds the
      * permissions its write requires on that target — the same set the undo itself asserts. A tool
      * that records an inverse it cannot apply, such as a tag association it may not have created,
-     * is therefore never offered one.
+     * is therefore never offered one, and neither is a tool still on the legacy ledger.
      */
     private boolean hasUndoPermissions(StoredToolCall call, Set<Permission> viewerPermissions) {
         Optional<AiAssistantWriteTool> declared =
                 writeToolRegistry.find(call.toolCall().getToolName());
-        if (declared.isPresent()) {
-            return declared.get().inverseAvailable()
-                    && viewerPermissions.containsAll(
-                            declared.get().requiredPermissions(call.targetKind()));
-        }
-        return switch (call.toolCall().getToolName()) {
-            case "create_activity" -> viewerPermissions.containsAll(
-                    Set.of(Permission.ACTIVITY_CREATE, Permission.ACTIVITY_DELETE));
-            case "create_note" -> viewerPermissions.containsAll(
-                    Set.of(Permission.NOTE_CREATE, Permission.NOTE_DELETE));
-            default -> false;
-        };
+        return declared.isPresent()
+                && declared.get().inverseAvailable()
+                && viewerPermissions.containsAll(
+                        declared.get().requiredPermissions(call.targetKind()));
     }
 
     private static String publicStatus(AiChatToolCall toolCall) {
@@ -457,8 +449,6 @@ public class AiAssistantToolCallReadService {
             }
         }
         return switch (toolName) {
-            case "create_activity" -> "Create an activity";
-            case "create_note" -> "Create a note";
             case "add_tag" -> "Add an existing tag";
             case "assign_owner" -> "Assign an owner";
             default -> "Run a write tool";
@@ -504,8 +494,6 @@ public class AiAssistantToolCallReadService {
             case "executed" -> declared.isPresent()
                     ? summary(review, declared.get()::outcomeSummary)
                     : switch (toolCall.getToolName()) {
-                case "create_activity" -> "Activity created";
-                case "create_note" -> "Note created";
                 case "add_tag" -> addTagOutcomeSummary(toolCall.getResultJson());
                 case "assign_owner" -> "unassigned".equalsIgnoreCase(call.requestValue().trim())
                         ? "Owner removed"
@@ -909,8 +897,6 @@ public class AiAssistantToolCallReadService {
             return declared.get().memberOutcomeFields();
         }
         return switch (toolName) {
-            case "create_activity" -> List.of("type", "subject", "start");
-            case "create_note" -> List.of("title", "visibility");
             case "add_tag" -> List.of("tag");
             case "assign_owner" -> List.of(OWNER_FIELD);
             default -> List.of();
@@ -940,8 +926,6 @@ public class AiAssistantToolCallReadService {
             return declared.get().acceptedTargetKinds().contains(kind);
         }
         return switch (toolName) {
-            case "create_activity", "create_note" ->
-                    "person".equals(kind) || "deal".equals(kind);
             case "add_tag", "assign_owner" ->
                     "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
             default -> false;

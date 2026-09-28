@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.EnumSet;
 import java.util.HexFormat;
@@ -28,15 +30,18 @@ import org.mockito.ArgumentCaptor;
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -64,9 +69,11 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Pins every durable, API and model-visible byte the two tools moved onto the write-tool SPI emit.
+ * Pins every durable, API and model-visible byte the tools moved onto the write-tool SPI emit.
  *
- * <p>The expected strings were captured from the per-tool switch arms before either tool moved, so
+ * <p>The expected strings were captured from the per-tool switch arms before each tool moved —
+ * {@code create_task} and {@code change_deal_stage} first, then {@code create_activity}, with its
+ * meeting schedule-conflict enrichment, and {@code create_note} — so
  * a green run after the move is evidence that the move changed none of them: the stored proposal,
  * the stored result envelope with its outcome and inverse key order, the approval, rejection and
  * undo responses, the model's own view of the outcome, and the transcript cards. A key that
@@ -91,6 +98,31 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
             + "\"tier\":\"confirm\",\"restrictionEpoch\":23,"
             + "\"target\":{\"kind\":\"deal\",\"id\":44},"
             + "\"request\":{\"handle\":\"r1\",\"stage\":\"proposal \"}}";
+    private static final String MEETING_ARGUMENTS = "{\"tool\":\"create_activity\","
+            + "\"tier\":\"auto\",\"restrictionEpoch\":23,"
+            + "\"target\":{\"kind\":\"person\",\"id\":31},"
+            + "\"request\":{\"handle\":\"r1\",\"type\":\"meeting\",\"subject\":\"Planning\","
+            + "\"notes\":\"Bring the deck\",\"start\":\"9:00am next Thursday\","
+            + "\"duration_minutes\":45}}";
+    private static final String MEETING_STATE = "{\"type\":\"meeting\",\"subject\":\"Planning\","
+            + "\"notes\":\"Bring the deck\",\"timestamp\":\"2026-03-12 13:00:00\","
+            + "\"personId\":31,\"dealId\":0}";
+    private static final String MEETING_OUTCOME = "{\"status\":\"executed\","
+            + "\"recordType\":\"activity\",\"type\":\"meeting\",\"subject\":\"Planning\","
+            + "\"start\":\"2026-03-12 13:00:00\",\"timezone\":\"America/New_York\","
+            + "\"conflicts\":[{\"type\":\"meeting\",\"subject\":\"Board review\","
+            + "\"notes\":\"Quarterly numbers\",\"timestamp\":\"2026-03-12 13:15:00\"},"
+            + "{\"type\":\"call\",\"subject\":\"Pipeline sync\","
+            + "\"timestamp\":\"2026-03-12 13:30:00\"}],\"conflictsTruncated\":false}";
+    private static final String NOTE_ARGUMENTS = "{\"tool\":\"create_note\",\"tier\":\"auto\","
+            + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"deal\",\"id\":44},"
+            + "\"request\":{\"handle\":\"r1\",\"content\":\"Shared follow-up\","
+            + "\"title\":\"Follow-up\",\"visibility\":\"workspace\"}}";
+    private static final String NOTE_STATE = "{\"content\":\"Shared follow-up\","
+            + "\"title\":\"Follow-up\",\"visibility\":\"workspace\",\"personId\":0,"
+            + "\"dealId\":44}";
+    private static final String NOTE_OUTCOME = "{\"status\":\"executed\","
+            + "\"recordType\":\"note\",\"title\":\"Follow-up\",\"visibility\":\"workspace\"}";
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
@@ -99,6 +131,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     private DealService dealService;
     private TaskService taskService;
     private PipelineService pipelineService;
+    private ActivityService activityService;
+    private NoteService noteService;
+    private PersonMapper executorPersonMapper;
     private WorkspaceService.LockedPermissionSnapshot authority;
     private AiAssistantWriteToolService service;
     private AiChatToolCall storedToolCall;
@@ -116,6 +151,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
         pipelineService = mock(PipelineService.class);
+        activityService = mock(ActivityService.class);
+        noteService = mock(NoteService.class);
+        executorPersonMapper = mock(PersonMapper.class);
         AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
         AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
@@ -136,7 +174,6 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         CompanyService companyService = mock(CompanyService.class);
-        ActivityService activityService = mock(ActivityService.class);
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
                 mock(SearchService.class),
@@ -148,7 +185,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(AiAssistantHistoryService.class),
                 mock(ScoringService.class),
                 workspaceService,
-                mock(PersonMapper.class),
+                executorPersonMapper,
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
@@ -157,14 +194,17 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, dateResolver, objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
                 workspaceService,
                 activityService,
                 taskService,
-                mock(NoteService.class),
+                noteService,
                 mock(TagService.class),
                 personService,
                 companyService,
@@ -427,7 +467,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readChatMapper,
                 readWorkspace,
                 personMapper,
@@ -520,6 +563,417 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
     }
 
+    @Test
+    void anImmediateMeetingKeepsEveryDurableApiAndModelByte() throws Exception {
+        stubConflictSearch(List.of(
+                conflict(88, "meeting", "Board review", "Quarterly numbers", "2026-03-12 13:15:00"),
+                conflict(89, "call", "Pipeline sync", null, "2026-03-12 13:30:00")));
+        doAnswer(invocation -> {
+            Activity created = invocation.getArgument(0);
+            created.setId(73);
+            return created;
+        }).when(activityService).create(any(Activity.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"meeting\",\"subject\":\"Planning\","
+                        + "\"notes\":\"Bring the deck\",\"start\":\"9:00am next Thursday\","
+                        + "\"duration_minutes\":45}",
+                "person",
+                31);
+
+        assertEquals(MEETING_ARGUMENTS, write.argumentsJson());
+        stored(write);
+
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
+
+        verify(activityService).getActivitiesByPersonIdInWindow(
+                31,
+                LocalDateTime.of(2026, 3, 12, 13, 0),
+                LocalDateTime.of(2026, 3, 12, 13, 45),
+                101);
+        String resultJson = capturedExecutedResult();
+        String expectedResult = "{\"tier\":\"auto\",\"outcome\":" + MEETING_OUTCOME
+                + ",\"undo\":{\"status\":\"available\","
+                + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
+                + "\"entityId\":73,\"fingerprint\":\"" + sha256(MEETING_STATE) + "\"}}";
+        assertEquals(expectedResult, resultJson);
+        assertEquals(
+                "{\"id\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
+                        + "\"status\":\"executed\",\"result\":" + MEETING_OUTCOME + ","
+                        + "\"undoAvailable\":true,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
+                objectMapper.writeValueAsString(execution.toolCall()));
+        String modelView = "{\"toolCallId\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
+                + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"activity\","
+                + "\"type\":\"meeting\",\"subject\":\"Planning\","
+                + "\"start\":\"2026-03-12 13:00:00\",\"timezone\":\"America/New_York\","
+                + "\"conflictCount\":2,\"conflictsTruncated\":false}}";
+        assertEquals(modelView, objectMapper.writeValueAsString(execution.toolResult().data()));
+        assertFalse(resultJson.contains("verification"));
+
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(resultJson);
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(
+                        service.executeAuto(TURN, 29, result -> { }).toolResult().data()));
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(service.proposalResult(
+                        write,
+                        new AiAssistantToolProposal(29, "executed", resultJson, true)).data()));
+
+        doAnswer(invocation -> {
+            Predicate<Activity> guard = invocation.getArgument(1);
+            Activity current = new Activity();
+            current.setId(73);
+            current.setType("meeting");
+            current.setSubject("Planning");
+            current.setNotes("Bring the deck");
+            current.setTimestamp("2026-03-12 13:00:00");
+            current.setPerson(person(31));
+            if (!guard.test(current)) {
+                throw new ConflictException("changed");
+            }
+            return null;
+        }).when(activityService).deleteIf(eq(73), any());
+
+        assertEquals(
+                "{\"id\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
+                        + "\"status\":\"undone\",\"result\":" + MEETING_OUTCOME + ","
+                        + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
+                objectMapper.writeValueAsString(service.undo(TURN.sessionId(), 29)));
+        ArgumentCaptor<String> undone = ArgumentCaptor.forClass(String.class);
+        verify(chatMapper).updateExecutedToolResult(
+                eq(TURN.workspaceId()), eq(29), undone.capture(), eq(TURN.userId()));
+        assertEquals(
+                "{\"tier\":\"auto\",\"outcome\":" + MEETING_OUTCOME
+                        + ",\"undo\":{\"status\":\"undone\","
+                        + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
+                        + "\"entityId\":73,\"fingerprint\":\"" + sha256(MEETING_STATE) + "\","
+                        + "\"undoneAt\":\"2026-03-06T15:00:00Z\"}}",
+                undone.getValue());
+    }
+
+    @Test
+    void anImmediateCallOnADealSearchesNoScheduleAndKeepsItsBytes() throws Exception {
+        doAnswer(invocation -> {
+            Activity created = invocation.getArgument(0);
+            created.setId(76);
+            return created;
+        }).when(activityService).create(any(Activity.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal check-in\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "deal",
+                44);
+
+        assertEquals(
+                "{\"tool\":\"create_activity\",\"tier\":\"auto\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"type\":\"call\","
+                        + "\"subject\":\"Renewal check-in\",\"notes\":null,"
+                        + "\"start\":\"9:00am next Thursday\",\"duration_minutes\":null}}",
+                write.argumentsJson());
+        stored(write);
+
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
+
+        verify(activityService, never()).getActivitiesByPersonIdInWindow(
+                anyInt(), any(), any(), anyInt());
+        assertEquals(
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
+                        + "\"recordType\":\"activity\",\"type\":\"call\","
+                        + "\"subject\":\"Renewal check-in\",\"start\":\"2026-03-12 13:00:00\","
+                        + "\"timezone\":\"America/New_York\",\"conflicts\":[],"
+                        + "\"conflictsTruncated\":false},\"undo\":{\"status\":\"available\","
+                        + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
+                        + "\"entityId\":76,\"fingerprint\":\"" + sha256(
+                                "{\"type\":\"call\",\"subject\":\"Renewal check-in\","
+                                        + "\"notes\":null,\"timestamp\":\"2026-03-12 13:00:00\","
+                                        + "\"personId\":0,\"dealId\":44}") + "\"}}",
+                capturedExecutedResult());
+        assertEquals(
+                "{\"toolCallId\":29,\"tool\":\"create_activity\",\"tier\":\"auto\","
+                        + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"activity\","
+                        + "\"type\":\"call\",\"subject\":\"Renewal check-in\","
+                        + "\"start\":\"2026-03-12 13:00:00\",\"timezone\":\"America/New_York\","
+                        + "\"conflictCount\":0,\"conflictsTruncated\":false}}",
+                objectMapper.writeValueAsString(execution.toolResult().data()));
+    }
+
+    @Test
+    void anImmediateNoteKeepsEveryDurableApiAndModelByte() throws Exception {
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            return created;
+        }).when(noteService).create(any(Note.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_note",
+                "{\"handle\":\"r1\",\"content\":\"Shared follow-up\",\"title\":\"Follow-up\","
+                        + "\"visibility\":\"workspace\"}",
+                "deal",
+                44);
+
+        assertEquals(NOTE_ARGUMENTS, write.argumentsJson());
+        stored(write);
+
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
+
+        String resultJson = capturedExecutedResult();
+        String expectedResult = "{\"tier\":\"auto\",\"outcome\":" + NOTE_OUTCOME
+                + ",\"undo\":{\"status\":\"available\","
+                + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
+                + "\"entityId\":75,\"fingerprint\":\"" + sha256(NOTE_STATE) + "\"}}";
+        assertEquals(expectedResult, resultJson);
+        assertEquals(
+                "{\"id\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
+                        + "\"status\":\"executed\",\"result\":" + NOTE_OUTCOME + ","
+                        + "\"undoAvailable\":true,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
+                objectMapper.writeValueAsString(execution.toolCall()));
+        String modelView = "{\"toolCallId\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
+                + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"note\","
+                + "\"title\":\"Follow-up\",\"visibility\":\"workspace\"}}";
+        assertEquals(modelView, objectMapper.writeValueAsString(execution.toolResult().data()));
+        assertFalse(resultJson.contains("verification"));
+
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(resultJson);
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(
+                        service.executeAuto(TURN, 29, result -> { }).toolResult().data()));
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(service.proposalResult(
+                        write,
+                        new AiAssistantToolProposal(29, "executed", resultJson, true)).data()));
+
+        doAnswer(invocation -> {
+            Predicate<Note> guard = invocation.getArgument(1);
+            Note current = new Note();
+            current.setId(75);
+            current.setContent("Shared follow-up");
+            current.setTitle("Follow-up");
+            current.setVisibility("workspace");
+            current.setDeal(deal());
+            if (!guard.test(current)) {
+                throw new ConflictException("changed");
+            }
+            return null;
+        }).when(noteService).deleteIf(eq(75), any());
+
+        assertEquals(
+                "{\"id\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
+                        + "\"status\":\"undone\",\"result\":" + NOTE_OUTCOME + ","
+                        + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
+                objectMapper.writeValueAsString(service.undo(TURN.sessionId(), 29)));
+        ArgumentCaptor<String> undone = ArgumentCaptor.forClass(String.class);
+        verify(chatMapper).updateExecutedToolResult(
+                eq(TURN.workspaceId()), eq(29), undone.capture(), eq(TURN.userId()));
+        assertEquals(
+                "{\"tier\":\"auto\",\"outcome\":" + NOTE_OUTCOME
+                        + ",\"undo\":{\"status\":\"undone\","
+                        + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
+                        + "\"entityId\":75,\"fingerprint\":\"" + sha256(NOTE_STATE) + "\","
+                        + "\"undoneAt\":\"2026-03-06T15:00:00Z\"}}",
+                undone.getValue());
+    }
+
+    @Test
+    void anUntitledPrivateNoteKeepsItsBytes() throws Exception {
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(77);
+            return created;
+        }).when(noteService).create(any(Note.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_note",
+                "{\"handle\":\"r1\",\"content\":\"Private reminder\","
+                        + "\"visibility\":\"private\"}",
+                "person",
+                31);
+
+        assertEquals(
+                "{\"tool\":\"create_note\",\"tier\":\"auto\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"person\",\"id\":31},"
+                        + "\"request\":{\"handle\":\"r1\",\"content\":\"Private reminder\","
+                        + "\"title\":null,\"visibility\":\"private\"}}",
+                write.argumentsJson());
+        stored(write);
+
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
+
+        assertEquals(
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
+                        + "\"recordType\":\"note\",\"visibility\":\"private\"},"
+                        + "\"undo\":{\"status\":\"available\","
+                        + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
+                        + "\"entityId\":77,\"fingerprint\":\"" + sha256(
+                                "{\"content\":\"Private reminder\",\"title\":null,"
+                                        + "\"visibility\":\"private\",\"personId\":31,"
+                                        + "\"dealId\":0}") + "\"}}",
+                capturedExecutedResult());
+        assertEquals(
+                "{\"toolCallId\":29,\"tool\":\"create_note\",\"tier\":\"auto\","
+                        + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"note\","
+                        + "\"visibility\":\"private\"}}",
+                objectMapper.writeValueAsString(execution.toolResult().data()));
+    }
+
+    @Test
+    void theTranscriptCardsForActivitiesAndNotesKeepEveryByte() throws Exception {
+        AiChatMapper readChatMapper = mock(AiChatMapper.class);
+        WorkspaceService readWorkspace = mock(WorkspaceService.class);
+        PersonMapper readPersonMapper = mock(PersonMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        when(readWorkspace.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(readWorkspace.getCurrentUserId()).thenReturn(TURN.userId());
+        when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(EnumSet.allOf(Permission.class));
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setStatus("active");
+        when(readChatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        String meetingResult = "{\"tier\":\"auto\",\"outcome\":" + MEETING_OUTCOME
+                + ",\"undo\":{\"status\":\"available\","
+                + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
+                + "\"entityId\":73,\"fingerprint\":\"f\"}}";
+        String noteResult = "{\"tier\":\"auto\",\"outcome\":" + NOTE_OUTCOME
+                + ",\"undo\":{\"status\":\"available\","
+                + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
+                + "\"entityId\":75,\"fingerprint\":\"f\"}}";
+        when(readChatMapper.listToolCallsBySession(
+                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                card(41, TURN.userId(), "executed", "create_activity",
+                        MEETING_ARGUMENTS, meetingResult),
+                card(42, TURN.userId(), "executed", "create_activity", MEETING_ARGUMENTS,
+                        meetingResult.replace("\"available\"", "\"undone\"")),
+                card(43, 99, "executed", "create_activity", MEETING_ARGUMENTS, meetingResult),
+                card(44, TURN.userId(), "failed", "create_activity", MEETING_ARGUMENTS, null),
+                card(45, TURN.userId(), "executed", "create_note", NOTE_ARGUMENTS, noteResult),
+                card(46, TURN.userId(), "executed", "create_note", NOTE_ARGUMENTS,
+                        noteResult.replace("\"available\"", "\"undone\"")),
+                card(47, 99, "executed", "create_note", NOTE_ARGUMENTS, noteResult)));
+        when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                .thenReturn(List.of());
+        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+                .thenReturn(List.of(person(31)));
+        when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
+        when(activityMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(73)))
+                .thenReturn(List.of(73));
+        when(noteMapper.getVisibleNoteIdsIn(TURN.workspaceId(), List.of(75), TURN.userId()))
+                .thenReturn(List.of(75));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                readChatMapper,
+                readWorkspace,
+                readPersonMapper,
+                mock(CompanyMapper.class),
+                dealMapper,
+                mock(PipelineMapper.class),
+                activityMapper,
+                mock(TaskMapper.class),
+                noteMapper,
+                mock(AiAssistantSessionReadAudit.class),
+                objectMapper,
+                CLOCK);
+        String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
+        String deal44 = "\"target\":{\"kind\":\"deal\",\"id\":44,\"label\":\"Acme renewal\"},";
+
+        assertEquals(
+                "[" + String.join(",", List.of(
+                        "{\"id\":41,\"toolName\":\"create_activity\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Create an activity\","
+                                + "\"outcomeSummary\":\"Activity created\",\"change\":null,"
+                                + "\"outcomeValues\":[{\"field\":\"type\",\"value\":\"meeting\"},"
+                                + "{\"field\":\"subject\",\"value\":\"Planning\"},"
+                                + "{\"field\":\"start\",\"value\":\"2026-03-12 13:00:00\"}],"
+                                + "\"createdRecord\":{\"kind\":\"activity\",\"id\":73},"
+                                + "\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":true," + TIMES + "}",
+                        "{\"id\":42,\"toolName\":\"create_activity\",\"tier\":\"auto\","
+                                + "\"status\":\"undone\"," + person31
+                                + "\"requestSummary\":\"Create an activity\","
+                                + "\"outcomeSummary\":\"Created record removed\","
+                                + "\"change\":null,\"outcomeValues\":[],"
+                                + "\"createdRecord\":null,\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":false," + TIMES + "}",
+                        "{\"id\":43,\"toolName\":\"create_activity\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Create an activity\","
+                                + "\"outcomeSummary\":\"Activity created\",\"change\":null,"
+                                + "\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":false," + TIMES + "}",
+                        "{\"id\":44,\"toolName\":\"create_activity\",\"tier\":\"auto\","
+                                + "\"status\":\"failed\"," + person31
+                                + "\"requestSummary\":\"Create an activity\","
+                                + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
+                                + "\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
+                                + "\"undoAvailable\":false," + TIMES + "}",
+                        "{\"id\":45,\"toolName\":\"create_note\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + deal44
+                                + "\"requestSummary\":\"Create a note\","
+                                + "\"outcomeSummary\":\"Note created\",\"change\":null,"
+                                + "\"outcomeValues\":[{\"field\":\"title\",\"value\":\"Follow-up\"},"
+                                + "{\"field\":\"visibility\",\"value\":\"workspace\"}],"
+                                + "\"createdRecord\":{\"kind\":\"note\",\"id\":75},"
+                                + "\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":true," + TIMES + "}",
+                        "{\"id\":46,\"toolName\":\"create_note\",\"tier\":\"auto\","
+                                + "\"status\":\"undone\"," + deal44
+                                + "\"requestSummary\":\"Create a note\","
+                                + "\"outcomeSummary\":\"Created record removed\","
+                                + "\"change\":null,\"outcomeValues\":[],"
+                                + "\"createdRecord\":null,\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":false," + TIMES + "}",
+                        "{\"id\":47,\"toolName\":\"create_note\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + deal44
+                                + "\"requestSummary\":\"Create a note\","
+                                + "\"outcomeSummary\":\"Note created\",\"change\":null,"
+                                + "\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17,"
+                                + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
+                                + "\"undoAvailable\":false," + TIMES + "}")) + "]",
+                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+
+        when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(EnumSet.complementOf(
+                        EnumSet.of(Permission.ACTIVITY_DELETE, Permission.NOTE_DELETE)));
+
+        assertEquals(
+                List.of(false, false, false, false, false, false, false),
+                readService.list(TURN.sessionId(), false).stream()
+                        .map(AiAssistantToolCallReadDto::undoAvailable)
+                        .toList());
+    }
+
     private static final String TIMES = "\"createdAt\":\"2026-03-06 14:59:00.000000\","
             + "\"updatedAt\":\"2026-03-06 15:00:00.000000\","
             + "\"executedAt\":\"2026-03-06 15:00:00.000000\"";
@@ -555,13 +1009,26 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     private static AiChatToolCall card(
             int id, int requestedBy, String status, String arguments, String result) {
+        return card(
+                id, requestedBy, status,
+                arguments.contains("create_task") ? "create_task" : "change_deal_stage",
+                arguments, result);
+    }
+
+    private static AiChatToolCall card(
+            int id,
+            int requestedBy,
+            String status,
+            String tool,
+            String arguments,
+            String result) {
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setId(id);
         toolCall.setWorkspaceId(TURN.workspaceId());
         toolCall.setMessageId(TURN.userMessageId());
         toolCall.setSessionId(TURN.sessionId());
         toolCall.setRequestedByUserId(requestedBy);
-        toolCall.setToolName(arguments.contains("create_task") ? "create_task" : "change_deal_stage");
+        toolCall.setToolName(tool);
         toolCall.setStatus(status);
         toolCall.setArgumentsJson(arguments);
         toolCall.setResultJson(result);
@@ -570,6 +1037,34 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         toolCall.setUpdatedAt("2026-03-06 15:00:00.000000");
         toolCall.setExecutedAt("2026-03-06 15:00:00.000000");
         return toolCall;
+    }
+
+    /** The person is processable and each candidate activity links to it, as the executor requires. */
+    private void stubConflictSearch(List<Activity> candidates) {
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person(31));
+        when(executorPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+                .thenReturn(List.of(person(31)));
+        when(activityService.getActivitiesByPersonIdInWindow(
+                eq(31), any(), any(), eq(101))).thenReturn(candidates);
+    }
+
+    private static Activity conflict(
+            int id, String type, String subject, String notes, String timestamp) {
+        Activity activity = new Activity();
+        activity.setId(id);
+        activity.setType(type);
+        activity.setSubject(subject);
+        activity.setNotes(notes);
+        activity.setTimestamp(timestamp);
+        activity.setPerson(person(31));
+        return activity;
+    }
+
+    private static Person person(int id) {
+        Person person = new Person();
+        person.setId(id);
+        person.setName("Ada Lovelace");
+        return person;
     }
 
     private AiAssistantPreparedWrite prepared(

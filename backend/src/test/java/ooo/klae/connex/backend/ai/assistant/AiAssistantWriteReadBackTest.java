@@ -13,7 +13,10 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Outcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReadBack;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.services.DealService;
@@ -29,6 +32,11 @@ import tools.jackson.databind.JsonNode;
  * keep their exact keys. Every write declares a comparison and a {@code null} on either side is
  * compared like any other value, so no tool can opt out of the check. The mocks here have no
  * {@code SqlSession}, so nothing is claimed about the MyBatis first-level cache.
+ *
+ * <p>The create-activity and create-note cases pin the framework's comparison and its placement
+ * for those tools, not a read-back of stored state: the real {@code ActivityService.create} and
+ * {@code NoteService.create} return the bean the tool built, so in production their link cannot
+ * diverge, and these stubs rewrite it only to prove the framework would record it if it did.
  */
 class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
 
@@ -162,5 +170,59 @@ class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
                 "{\"field\":\"stageId\",\"requested\":null,\"applied\":9}",
                 objectMapper.writeValueAsString(
                         objectMapper.readTree(capturedExecutedResult()).get("verification")));
+    }
+
+    @Test
+    void aCreatedActivityTheServiceReturnedUnlinkedRecordsTheDivergence() throws Exception {
+        doAnswer(invocation -> {
+            Activity created = invocation.getArgument(0);
+            created.setId(73);
+            created.setDeal(null);
+            return created;
+        }).when(activityService).create(any(Activity.class));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "deal", 44);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        JsonNode stored = objectMapper.readTree(capturedExecutedResult());
+        assertEquals(
+                List.of("tier", "outcome", "undo", "verification"),
+                List.copyOf(stored.propertyNames()));
+        assertEquals(
+                "{\"field\":\"dealId\",\"requested\":44,\"applied\":null}",
+                objectMapper.writeValueAsString(stored.get("verification")));
+        assertEquals("call", stored.path("outcome").path("type").asString());
+    }
+
+    @Test
+    void aCreatedNoteTheServiceLinkedElsewhereRecordsTheDivergence() throws Exception {
+        doAnswer(invocation -> {
+            Note created = invocation.getArgument(0);
+            created.setId(75);
+            Person other = new Person();
+            other.setId(32);
+            created.setPerson(other);
+            return created;
+        }).when(noteService).create(any(Note.class));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_note", "{\"handle\":\"r1\",\"content\":\"Shared follow-up\"}",
+                "person", 31);
+
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+
+        JsonNode stored = objectMapper.readTree(capturedExecutedResult());
+        assertEquals(
+                List.of("tier", "outcome", "undo", "verification"),
+                List.copyOf(stored.propertyNames()));
+        assertEquals(
+                "{\"field\":\"personId\",\"requested\":31,\"applied\":32}",
+                objectMapper.writeValueAsString(stored.get("verification")));
+        assertEquals(
+                List.of("status", "recordType", "visibility"),
+                List.copyOf(stored.path("outcome").propertyNames()));
     }
 }

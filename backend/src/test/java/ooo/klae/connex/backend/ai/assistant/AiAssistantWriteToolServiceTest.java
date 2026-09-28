@@ -157,7 +157,10 @@ class AiAssistantWriteToolServiceTest {
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, dateResolver, objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -244,10 +247,9 @@ class AiAssistantWriteToolServiceTest {
                 execution.toolCall().result().path("timezone").asString());
         assertEquals(20, execution.toolCall().result().path("conflicts").size());
         assertTrue(execution.toolCall().result().path("conflictsTruncated").asBoolean());
-        assertEquals(
-                20,
-                ((Map<?, ?>) execution.toolResult().data().get("outcome"))
-                        .get("conflictCount"));
+        Map<?, ?> modelOutcome = (Map<?, ?>) execution.toolResult().data().get("outcome");
+        assertEquals(20, modelOutcome.get("conflictCount"));
+        assertEquals(Boolean.TRUE, modelOutcome.get("conflictsTruncated"));
         assertEquals(execution.toolResult(), guardedResult.get());
         assertEquals("executed", execution.toolResult().data().get("status"));
         assertTrue(execution.toolCall().undoAvailable());

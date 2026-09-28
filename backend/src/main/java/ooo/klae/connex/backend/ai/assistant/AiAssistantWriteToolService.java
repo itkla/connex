@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -23,7 +22,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver.ResolvedDateTime;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Authority;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Execution;
@@ -36,19 +34,16 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalReques
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReadBack;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Resolution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Row;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ScheduleConflicts;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Target;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AddTag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AssignOwner;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreateActivity;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreateNote;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
-import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
@@ -99,7 +94,6 @@ public class AiAssistantWriteToolService {
     private static final String REJECTED = "rejected";
     private static final String SHARED = "shared";
     private static final Duration UNDO_WINDOW = Duration.ofMinutes(10);
-    private static final int DEFAULT_MEETING_MINUTES = 60;
 
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
@@ -352,7 +346,7 @@ public class AiAssistantWriteToolService {
                             true,
                             storedExtra(undo)));
         } else {
-            undo(write, undo);
+            undo(undo);
         }
         undo.put("status", "undone");
         undo.put("undoneAt", clock.instant().toString());
@@ -385,8 +379,6 @@ public class AiAssistantWriteToolService {
             return apply(declared.get(), write, authority, principals.principals(), mutation);
         }
         return switch (write.toolName()) {
-            case "create_activity" -> createActivity(write);
-            case "create_note" -> createNote(write);
             case "add_tag" -> addTag(write);
             case "assign_owner" -> assignOwner(write, requireOwnerAssignment(principals.owner()));
             default -> throw new BadRequestException("Unsupported assistant write tool");
@@ -412,7 +404,8 @@ public class AiAssistantWriteToolService {
                 row,
                 principals,
                 mutation.resolution(),
-                new LockedTarget(mutation.targetUpdatedAt(), mutation.stageChange())));
+                new LockedTarget(mutation.targetUpdatedAt(), mutation.stageChange()),
+                scheduleOf(row.target())));
         Inverse inverse = outcome.inverse();
         Map<String, Object> undo = null;
         if (inverse != null) {
@@ -422,6 +415,20 @@ public class AiAssistantWriteToolService {
             undo.putAll(inverse.extra());
         }
         return new ExecutionOutcome(outcome.data(), undo, verification(outcome.readBack()));
+    }
+
+    /**
+     * Binds the schedule read to the row's own locked and gated target, refusing any target that is
+     * not a person, so a tool can never name whose calendar it reads.
+     */
+    private ScheduleConflicts scheduleOf(Target target) {
+        return (startUtc, endUtc) -> {
+            if (!"person".equals(target.kind())) {
+                throw new IllegalStateException(
+                        "Assistant schedule read is bound to a person target");
+            }
+            return readToolExecutor.findScheduleConflicts(target.id(), startUtc, endUtc);
+        };
     }
 
     private static Map<String, Object> verification(ReadBack readBack) {
@@ -442,60 +449,6 @@ public class AiAssistantWriteToolService {
             case "deal" -> dealService.getDealById(write.targetId());
             default -> throw new BadRequestException("Unsupported assistant record kind");
         }
-    }
-
-    private ExecutionOutcome createActivity(StoredWrite write) {
-        CreateActivity request = request(write, CreateActivity.class);
-        ResolvedDateTime start = dateResolver.resolveDateTime(request.start());
-        int durationMinutes = request.durationMinutes() == null
-                ? DEFAULT_MEETING_MINUTES
-                : request.durationMinutes();
-        LocalDateTime endUtc = start.utc().plusMinutes(durationMinutes);
-        List<?> conflicts = List.of();
-        boolean conflictsTruncated = false;
-        if ("meeting".equalsIgnoreCase(request.type()) && "person".equals(write.targetKind())) {
-            AiAssistantToolResult conflictResult = readToolExecutor.findScheduleConflicts(
-                    write.targetId(), start.utc(), endUtc);
-            Object conflictData = conflictResult.data().get("conflicts");
-            conflicts = conflictData instanceof List<?> list ? list : List.of();
-            conflictsTruncated = Boolean.TRUE.equals(
-                    conflictResult.data().get("conflictsTruncated"));
-        }
-        Activity activity = new Activity();
-        activity.setType(request.type());
-        activity.setSubject(request.subject());
-        activity.setNotes(request.notes());
-        activity.setTimestamp(start.mysqlUtc());
-        link(activity, write);
-        Activity created = activityService.create(activity);
-        Map<String, Object> outcome = new LinkedHashMap<>();
-        outcome.put("status", EXECUTED);
-        outcome.put("recordType", "activity");
-        outcome.put("type", created.getType());
-        outcome.put("subject", created.getSubject());
-        outcome.put("start", created.getTimestamp());
-        outcome.put("timezone", start.timezone().getId());
-        outcome.put("conflicts", conflicts);
-        outcome.put("conflictsTruncated", conflictsTruncated);
-        return new ExecutionOutcome(outcome, undoData(
-                "activity", created.getId(), fingerprint(activityState(created)), true));
-    }
-
-    private ExecutionOutcome createNote(StoredWrite write) {
-        CreateNote request = request(write, CreateNote.class);
-        Note note = new Note();
-        note.setContent(request.content());
-        note.setTitle(request.title());
-        note.setVisibility(request.visibility());
-        link(note, write);
-        Note created = noteService.create(note);
-        Map<String, Object> outcome = new LinkedHashMap<>();
-        outcome.put("status", EXECUTED);
-        outcome.put("recordType", "note");
-        put(outcome, "title", created.getTitle());
-        outcome.put("visibility", created.getVisibility());
-        return new ExecutionOutcome(outcome, undoData(
-                "note", created.getId(), fingerprint(noteState(created)), true));
     }
 
     private ExecutionOutcome addTag(StoredWrite write) {
@@ -527,16 +480,8 @@ public class AiAssistantWriteToolService {
         return new ExecutionOutcome(outcome, null);
     }
 
-    private void undo(StoredWrite write, ObjectNode undo) {
-        String expected = text(undo, "fingerprint");
-        int entityId = integer(undo, "entityId");
+    private void undo(ObjectNode undo) {
         switch (text(undo, "entityKind")) {
-            case "activity" -> activityService.deleteIf(
-                    entityId,
-                    current -> expected.equals(fingerprint(activityState(current))));
-            case "note" -> noteService.deleteIf(
-                    entityId,
-                    current -> expected.equals(fingerprint(noteState(current))));
             case "tag" -> throw new ConflictException("Assistant tag undo is unavailable");
             default -> throw new ConflictException("Assistant tool undo metadata is invalid");
         }
@@ -793,8 +738,6 @@ public class AiAssistantWriteToolService {
             return declared.get().requiredPermissions(write.targetKind());
         }
         return switch (write.toolName()) {
-            case "create_activity" -> Set.of(Permission.ACTIVITY_CREATE, Permission.ACTIVITY_DELETE);
-            case "create_note" -> Set.of(Permission.NOTE_CREATE, Permission.NOTE_DELETE);
             case "add_tag", "assign_owner" -> Set.of(updatePermission(write.targetKind()));
             default -> throw new BadRequestException("Unsupported assistant write tool");
         };
@@ -844,9 +787,6 @@ public class AiAssistantWriteToolService {
             AiAssistantWriteToolRequest request = declared.isPresent()
                     ? objectMapper.treeToValue(args, declared.get().requestType())
                     : switch (name) {
-                        case "create_activity" -> objectMapper.treeToValue(
-                                args, CreateActivity.class);
-                        case "create_note" -> objectMapper.treeToValue(args, CreateNote.class);
                         case "add_tag" -> objectMapper.treeToValue(args, AddTag.class);
                         case "assign_owner" -> objectMapper.treeToValue(args, AssignOwner.class);
                         default -> throw AiAssistantLoopException.malformed("unknown_write_tool");
@@ -929,20 +869,6 @@ public class AiAssistantWriteToolService {
             return declared.get().modelOutcome(outcome);
         }
         switch (tool) {
-            case "create_activity" -> {
-                copyText(outcome, result, "recordType");
-                copyText(outcome, result, "type");
-                copyText(outcome, result, "subject");
-                copyText(outcome, result, "start");
-                copyText(outcome, result, "timezone");
-                result.put("conflictCount", outcome.path("conflicts").size());
-                result.put("conflictsTruncated", outcome.path("conflictsTruncated").asBoolean());
-            }
-            case "create_note" -> {
-                copyText(outcome, result, "recordType");
-                copyText(outcome, result, "title");
-                copyText(outcome, result, "visibility");
-            }
             case "add_tag" -> {
                 copyText(outcome, result, "recordType");
                 copyText(outcome, result, "tag");
@@ -1045,62 +971,12 @@ public class AiAssistantWriteToolService {
         return owner;
     }
 
-    private static Map<String, Object> activityState(Activity activity) {
-        Map<String, Object> state = new LinkedHashMap<>();
-        state.put("type", activity.getType());
-        state.put("subject", activity.getSubject());
-        state.put("notes", activity.getNotes());
-        state.put("timestamp", activity.getTimestamp());
-        state.put("personId", id(activity.getPerson()));
-        state.put("dealId", id(activity.getDeal()));
-        return state;
-    }
-
-    private static Map<String, Object> noteState(Note note) {
-        Map<String, Object> state = new LinkedHashMap<>();
-        state.put("content", note.getContent());
-        state.put("title", note.getTitle());
-        state.put("visibility", note.getVisibility());
-        state.put("personId", id(note.getPerson()));
-        state.put("dealId", id(note.getDeal()));
-        return state;
-    }
-
-    private String fingerprint(Map<String, Object> state) {
-        return AiAssistantWriteTool.fingerprint(objectMapper, state);
-    }
-
-    private static void link(Activity activity, StoredWrite write) {
-        if ("person".equals(write.targetKind())) {
-            Person person = new Person();
-            person.setId(write.targetId());
-            activity.setPerson(person);
-        } else {
-            Deal deal = new Deal();
-            deal.setId(write.targetId());
-            activity.setDeal(deal);
-        }
-    }
-
-    private static void link(Note note, StoredWrite write) {
-        if ("person".equals(write.targetKind())) {
-            Person person = new Person();
-            person.setId(write.targetId());
-            note.setPerson(person);
-        } else {
-            Deal deal = new Deal();
-            deal.setId(write.targetId());
-            note.setDeal(deal);
-        }
-    }
-
     private Set<String> acceptedKinds(String toolName) {
         Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
         if (declared.isPresent()) {
             return declared.get().acceptedTargetKinds();
         }
         return switch (toolName) {
-            case "create_activity", "create_note" -> Set.of("person", "deal");
             case "add_tag", "assign_owner" -> Set.of("person", "company", "deal");
             default -> Set.of();
         };
@@ -1197,20 +1073,6 @@ public class AiAssistantWriteToolService {
 
     private static ResourceNotFoundException inaccessible() {
         return new ResourceNotFoundException("AI assistant session is not accessible");
-    }
-
-    private static void put(Map<String, Object> map, String key, Object value) {
-        if (value != null) {
-            map.put(key, value);
-        }
-    }
-
-    private static int id(Person person) {
-        return person == null ? 0 : person.getId();
-    }
-
-    private static int id(Deal deal) {
-        return deal == null ? 0 : deal.getId();
     }
 
     /** Auto-tier execution result for the next model step and API clients. */

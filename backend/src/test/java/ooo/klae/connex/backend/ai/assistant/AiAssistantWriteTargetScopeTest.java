@@ -9,8 +9,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.DealService;
@@ -85,5 +90,79 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         verify(chatMapper, never()).updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(TOOL_CALL_ID),
                 eq("executed"), any(), eq(TURN.userId()));
+    }
+
+    @Test
+    void anImmediateMeetingWithAPersonOutsideTheActorsScopeReadsNoCalendarAndIsNeverLogged()
+            throws Exception {
+        person31IsProcessable();
+        when(personService.getPersonById(31))
+                .thenThrow(new ResourceNotFoundException("Person not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"meeting\",\"subject\":\"Planning\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "person", 31);
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
+
+        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(activityService, never()).getActivitiesByPersonIdInWindow(
+                anyInt(), any(), any(), anyInt());
+        verify(activityService, never()).create(any(Activity.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void anImmediateNoteOnADealOutsideTheActorsScopeIsNeverWritten() throws Exception {
+        when(dealService.getDealById(44))
+                .thenThrow(new ResourceNotFoundException("Deal not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_note", "{\"handle\":\"r1\",\"content\":\"Shared follow-up\"}",
+                "deal", 44);
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
+
+        verify(dealService).lockDealForUpdate(44);
+        verify(noteService, never()).create(any(Note.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
+            throws Exception {
+        AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
+                activityService, dateResolver, objectMapper) {
+            @Override
+            public Outcome apply(Execution execution) {
+                execution.scheduleConflicts().find(
+                        LocalDateTime.of(2026, 3, 12, 13, 0),
+                        LocalDateTime.of(2026, 3, 12, 14, 0));
+                return super.apply(execution);
+            }
+        };
+        AiAssistantWriteToolService service = framework(
+                List.of(createTaskTool(), stageTool(), probing, createNoteTool()));
+        propose(service, "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "deal", 44);
+
+        IllegalStateException refused = assertThrows(
+                IllegalStateException.class,
+                () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
+
+        assertEquals("Assistant schedule read is bound to a person target", refused.getMessage());
+        verify(dealService).getDealById(44);
+        verify(executorPersonMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(activityService, never()).getActivitiesByPersonIdInWindow(
+                anyInt(), any(), any(), anyInt());
+        verify(activityService, never()).create(any(Activity.class));
     }
 }
