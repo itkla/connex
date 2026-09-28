@@ -53,7 +53,14 @@ public interface AiAssistantWriteTool {
     /** @return the record of the sealed request vocabulary this tool's arguments bind to */
     Class<? extends AiAssistantWriteToolRequest> requestType();
 
-    /** @return the non-empty set of record kinds a target handle may name */
+    /**
+     * The record kinds this tool's target handle may name.
+     *
+     * <p>It is the only statement of them: the read-tool executor's handle check, the framework's
+     * proposal and revalidation, and the card projection all read it from here.
+     *
+     * @return the non-empty set of record kinds a target handle may name
+     */
     Set<String> acceptedTargetKinds();
 
     /**
