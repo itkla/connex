@@ -264,6 +264,49 @@ class AiSkillCatalogTest {
         }
     }
 
+    /**
+     * Holding a family is all-or-nothing, so a write skill allowed only some of a family's writes
+     * is offered none of them: the authority gate would admit the tool, but the turn could never
+     * load the family that declares it. That is a deliberate narrowing of #1808's "intersects"
+     * direction, and it must fail here rather than silently, including when a family a skill
+     * already holds grows a write tool the skill was never widened to allow.
+     */
+    @Test
+    void everyWriteToolAWriteSkillIsAllowedSitsInAFamilyItMayHold() {
+        for (SkillSpec shipped : catalog.skills()) {
+            assertEquals(Set.of(), unreachableWrites(shipped),
+                    () -> shipped.key() + " is allowed write tools it can never be offered");
+        }
+        Toolset family = AiAssistantToolCatalog.LOADABLE.stream()
+                .filter(toolset -> AiAssistantToolCatalog.writeToolsOf(toolset).size() > 1)
+                .findFirst()
+                .orElseThrow();
+        List<String> writes = AiAssistantToolCatalog.writeToolsOf(family);
+        SkillSpec partlyAllowed = spec(
+                Set.of(), AiSkillCatalog.Authority.EXECUTE_REVERSIBLE, Set.of(writes.getFirst()));
+        SkillSpec whollyAllowed = spec(
+                Set.of(), AiSkillCatalog.Authority.EXECUTE_REVERSIBLE, Set.copyOf(writes));
+
+        assertEquals(Set.of(writes.getFirst()), unreachableWrites(partlyAllowed),
+                "a write skill allowed part of a family is caught, not silently narrowed");
+        assertEquals(Set.of(), unreachableWrites(whollyAllowed));
+    }
+
+    private Set<String> unreachableWrites(SkillSpec spec) {
+        Set<String> unreachable = new LinkedHashSet<>();
+        if (spec.authority() == AiSkillCatalog.Authority.READ) {
+            return unreachable;
+        }
+        for (String tool : spec.allowedTools()) {
+            if (toolCatalog.isWrite(tool)
+                    && !AiSkillCatalog.mayHold(
+                            spec.authority(), spec.allowedTools(), toolCatalog.toolsetOf(tool))) {
+                unreachable.add(tool);
+            }
+        }
+        return unreachable;
+    }
+
     private static boolean declares(
             Set<String> toolsets, AiSkillCatalog.Authority authority, Set<String> allowedTools) {
         try {
