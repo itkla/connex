@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -14,8 +15,10 @@ import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
 
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -33,18 +36,20 @@ import tools.jackson.databind.ObjectMapper;
  * plus {@link #RESERVED_LOADABLE_TOOLSETS} loadable toolsets), and {@link AiAssistantPromptBudget}
  * spends that envelope directly out of the output-token allocation, whose conservative term
  * reduces to {@code contextTokens - fixedEnvelopeBytes - 14,848}. On a 32k window that is
- * {@code 17,920 - fixedEnvelopeBytes}. Measured for issue #1817, the reservation is 13,676
- * JSON-ReAct bytes and 11,293 native bytes over a core of 9,912 and 8,711, which would leave a 32k
- * model 4,244 output tokens: under half the configured answer budget, so 32k stays refused rather
- * than quietly starved.
+ * {@code 17,920 - fixedEnvelopeBytes}, which
+ * {@link #theSameEnvelopeIsRefusedOnAThirtyTwoThousandTokenModel} holds under half the configured
+ * answer budget, so 32k stays refused rather than quietly starved.
+ * The measured reservation, core and margins are printed as {@code [envelope]} lines rather than
+ * restated here.
  *
  * <p>This test guards the relationship at the floor instead. At
  * {@link AiAssistantPromptBudget#ASSISTANT_MIN_CONTEXT_TOKENS} the envelope must still leave at
- * least twice the operator-configured output ceiling — {@value #MINIMUM_FLOOR_OUTPUT_TOKENS} tokens
- * — so the answer budget is funded with room rather than exactly. That admits a fixed envelope of
- * at most 17,920 bytes on either protocol. A new tool or a new sentence of policy that eats that
- * margin fails here, with the numbers printed, rather than silently reducing what the floor was
- * raised to protect.
+ * least twice the operator-configured output ceiling — {@link #MINIMUM_FLOOR_OUTPUT_TOKENS} — so
+ * the answer budget is funded with room rather than exactly. That admits a fixed envelope of at
+ * most {@link #FLOOR_ADMISSIBLE_ENVELOPE_BYTES} bytes on either protocol, pinned by
+ * {@link #everyPinnedCeilingFitsTheShareTheFloorMarginFundsPerReservedToolset}. A new tool or a new
+ * sentence of policy that eats that margin fails here, with the numbers printed, rather than
+ * silently reducing what the floor was raised to protect.
  *
  * <p>Growth is budgeted in advance by literal ceilings: {@link #CORE_CEILING} for the core and
  * {@link #TOOLSET_CEILINGS} for every loadable toolset, including toolsets that are planned but
@@ -56,7 +61,16 @@ class AiAssistantPromptEnvelopeTest {
 
     private static final int FLOOR_CONTEXT_TOKENS =
             AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS;
-    private static final int CONFIGURED_MAX_OUTPUT_TOKENS = 16_384;
+
+    /**
+     * The production default for the assistant's per-step output ceiling.
+     *
+     * <p>Read from {@link AiProperties} rather than restated, and checked against
+     * {@code application.yml} by {@link #theConfiguredOutputCeilingIsTheProductionDefault}, so a
+     * changed default moves the floor budget every ceiling below is certified against.
+     */
+    private static final int CONFIGURED_MAX_OUTPUT_TOKENS =
+            new AiProperties().getAssistantMaxOutputTokens();
     private static final int PROVIDER_MAX_OUTPUT_TOKENS = 8_192;
 
     /**
@@ -64,10 +78,19 @@ class AiAssistantPromptEnvelopeTest {
      *
      * <p>Twice {@link #CONFIGURED_MAX_OUTPUT_TOKENS}: the floor exists so the envelope is absorbed
      * without competing with the answer, so it may consume at most half of what the window grants
-     * beyond the configured ceiling. Measured for issue #1817, the reserved JSON-ReAct envelope
-     * leaves 37,012 tokens and the native envelope 39,395, margins of 4,244 and 6,627.
+     * beyond the configured ceiling.
      */
     private static final int MINIMUM_FLOOR_OUTPUT_TOKENS = 2 * CONFIGURED_MAX_OUTPUT_TOKENS;
+
+    /**
+     * The largest fixed envelope that still leaves {@link #MINIMUM_FLOOR_OUTPUT_TOKENS} at the
+     * floor, on either protocol, as {@link AiAssistantPromptBudget#from} derives it today.
+     *
+     * <p>Pinned so that a change to the budget's repair or variable-input reserves, to the floor,
+     * or to the configured output default fails loudly instead of silently re-certifying every
+     * ceiling below against a different margin.
+     */
+    private static final int FLOOR_ADMISSIBLE_ENVELOPE_BYTES = 17_920;
 
     /** Loadable toolsets the reservation carries, and therefore the ceiling's divisor. */
     private static final int RESERVED_LOADABLE_TOOLSETS =
@@ -77,12 +100,42 @@ class AiAssistantPromptEnvelopeTest {
     /**
      * The most the core envelope may ever cost, in serialized bytes per protocol.
      *
-     * <p>Measured at 9,912 JSON-ReAct and 8,711 native bytes for issue #1817, plus the 600 and 500
-     * bytes the action surface commits to the task-handle rule in the {@code list_tasks}
-     * description. Every toolset ceiling is checked against this value rather than today's core.
+     * <p>Each literal is the core as measured when it was pinned (issue #1817) plus an itemized
+     * allowance for everything the action surface adds to the core, JSON-ReAct / native:
+     * <ul>
+     *   <li>Declaring {@link #PLANNED_TOOLSET_KEYS}, 400 / 340 (393 / 336 computed). Every loadable
+     *       toolset costs the core whether or not it is loaded: a directory line
+     *       ({@code "\n" + key + " - " + summary + " - available"}, JSON-escaped) on both
+     *       protocols, and a value in the closed {@code find_tools} enum, which JSON-ReAct
+     *       serializes twice ({@code "|" + key} in the prompt vocabulary and {@code ,"key"} in the
+     *       step schema) and native once ({@code ,"key"} in the tool parameters). Per toolset,
+     *       directory + enum:
+     *       {@code write_followup} 80 + 32 / 80 + 17, {@code write_fields} 69 + 28 / 69 + 15,
+     *       {@code write_create} 66 + 28 / 66 + 15, {@code write_workspace} 66 + 34 / 66 + 18.</li>
+     *   <li>The task-handle rule, 300 on either protocol. On native it can live in the
+     *       {@code list_tasks} description. JSON-ReAct never serializes tool descriptions (the
+     *       prompt vocabulary carries only name, tier and arguments, and the step schema no
+     *       description), so on that protocol the rule costs nothing through the description and
+     *       reaches the model only as a system-prompt sentence, which this allowance funds.</li>
+     * </ul>
+     * The planned rewording of the {@code write_content} and {@code write_pipeline} summaries saves
+     * 4 and 6 bytes on both protocols; that saving is left unclaimed. Every toolset ceiling is
+     * checked against this value rather than today's core, so spending the allowance cannot
+     * invalidate a toolset's.
      */
     private static final EnvelopeCeiling CORE_CEILING =
-            new EnvelopeCeiling("core", 10_512, 9_211);
+            new EnvelopeCeiling("core", 9_912 + 400 + 300, 8_711 + 340 + 300);
+
+    /**
+     * Wire keys of toolsets the action surface plans but has not yet declared.
+     *
+     * <p>Their ceilings in {@link #TOOLSET_CEILINGS} are committed before their first tool exists.
+     * Declaring one must move its key out of this set, and dropping or renaming one must delete or
+     * rename its ceiling, so the ledger never budgets a toolset that is neither declared nor
+     * planned.
+     */
+    private static final Set<String> PLANNED_TOOLSET_KEYS =
+            Set.of("write_followup", "write_fields", "write_create", "write_workspace");
 
     /**
      * The most each loadable toolset may add over the core envelope, per protocol.
@@ -90,16 +143,18 @@ class AiAssistantPromptEnvelopeTest {
      * <p>Declared toolsets are pinned at their bytes as measured for issue #1817, plus the
      * allocation the action surface commits to the tools it adds to them: 900 and 700 bytes for
      * {@code log_activities}, 450 and 350 for {@code remove_tag} and for {@code draft_document}.
-     * The last four entries are toolsets the action surface plans but has not yet declared; their
-     * allocations are committed here so each is proven to fit the floor before its first tool
-     * exists. Raising any entry is a budget decision, not a re-measurement.
+     * The last four entries are {@link #PLANNED_TOOLSET_KEYS}; their allocations are committed here
+     * so each is proven to fit the floor before its first tool exists. A toolset's cost to the core
+     * (its directory line and {@code find_tools} value) is not part of its entry here; it is
+     * funded by {@link #CORE_CEILING}. Raising any entry is a budget decision, not a
+     * re-measurement.
      */
     private static final List<EnvelopeCeiling> TOOLSET_CEILINGS = List.of(
             new EnvelopeCeiling("analytics", 1_316, 669),
             new EnvelopeCeiling("schedule", 506, 388),
-            new EnvelopeCeiling("write_activity", 2_251, 1_785),
-            new EnvelopeCeiling("write_content", 1_547, 1_178),
-            new EnvelopeCeiling("write_pipeline", 1_309, 990),
+            new EnvelopeCeiling("write_activity", 1_351 + 900, 1_085 + 700),
+            new EnvelopeCeiling("write_content", 1_097 + 450, 828 + 350),
+            new EnvelopeCeiling("write_pipeline", 859 + 450, 640 + 350),
             new EnvelopeCeiling("write_followup", 950, 750),
             new EnvelopeCeiling("write_fields", 1_000, 800),
             new EnvelopeCeiling("write_create", 1_800, 1_400),
@@ -116,10 +171,13 @@ class AiAssistantPromptEnvelopeTest {
     void theFixedEnvelopeLeavesRoomToSpareAtTheDeclaredMinimumContextWindow() {
         int reactEnvelope = reactEnvelopeBytes(toolCatalog.reservationToolsets());
         int nativeEnvelope = nativeEnvelopeBytes(toolCatalog.reservationToolsets());
-        int reactFloorOutputTokens = unclampedFloorOutputTokens(reactEnvelope);
-        int nativeFloorOutputTokens = unclampedFloorOutputTokens(nativeEnvelope);
-        AiAssistantPromptBudget reactBudget = budget(reactEnvelope);
-        AiAssistantPromptBudget nativeBudget = budget(nativeEnvelope);
+        int reactFloorOutputTokens =
+                unclampedFloorOutputTokens(reactEnvelope, AiToolCallingMode.NONE);
+        int nativeFloorOutputTokens =
+                unclampedFloorOutputTokens(nativeEnvelope, AiToolCallingMode.NATIVE_FUNCTIONS);
+        AiAssistantPromptBudget reactBudget = budget(reactEnvelope, AiToolCallingMode.NONE);
+        AiAssistantPromptBudget nativeBudget =
+                budget(nativeEnvelope, AiToolCallingMode.NATIVE_FUNCTIONS);
         System.out.println("[envelope] floor=" + FLOOR_CONTEXT_TOKENS
                 + " minimumFloorOutputTokens=" + MINIMUM_FLOOR_OUTPUT_TOKENS);
         System.out.println("[envelope] react fixed=" + reactEnvelope
@@ -192,7 +250,7 @@ class AiAssistantPromptEnvelopeTest {
     @Test
     void theSameFixedEnvelopeScalesIntoAMillionTokenWindow() {
         int reactEnvelope = reactEnvelopeBytes(toolCatalog.reservationToolsets());
-        AiAssistantPromptBudget atFloor = budget(reactEnvelope);
+        AiAssistantPromptBudget atFloor = budget(reactEnvelope, AiToolCallingMode.NONE);
         AiAssistantPromptBudget atMillion = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
@@ -312,11 +370,14 @@ class AiAssistantPromptEnvelopeTest {
                 "the reservation must cost less than today's whole-catalog envelope");
         assertTrue(reservationNative < nativeEnvelopeBytes(),
                 "the reservation must cost less than today's whole-catalog envelope");
-        assertTrue(unclampedFloorOutputTokens(reservationReact) >= MINIMUM_FLOOR_OUTPUT_TOKENS,
+        assertTrue(unclampedFloorOutputTokens(reservationReact, AiToolCallingMode.NONE)
+                        >= MINIMUM_FLOOR_OUTPUT_TOKENS,
                 "the reserved JSON-ReAct envelope of " + reservationReact
                         + " bytes starves the answer budget at the "
                         + FLOOR_CONTEXT_TOKENS + "-token floor");
-        assertTrue(unclampedFloorOutputTokens(reservationNative) >= MINIMUM_FLOOR_OUTPUT_TOKENS,
+        assertTrue(unclampedFloorOutputTokens(
+                        reservationNative, AiToolCallingMode.NATIVE_FUNCTIONS)
+                        >= MINIMUM_FLOOR_OUTPUT_TOKENS,
                 "the reserved native envelope of " + reservationNative
                         + " bytes starves the answer budget at the "
                         + FLOOR_CONTEXT_TOKENS + "-token floor");
@@ -415,6 +476,56 @@ class AiAssistantPromptEnvelopeTest {
     }
 
     /**
+     * Holds the ceiling ledger to the toolsets that exist or are planned.
+     *
+     * <p>Every entry must name a declared loadable toolset or a {@link #PLANNED_TOOLSET_KEYS} key,
+     * every planned key must have an entry, and no planned key may already be declared. Renaming,
+     * folding or deferring a planned toolset therefore fails here until its ceiling is renamed,
+     * moved or deleted, instead of leaving an orphan that budgets a toolset nobody will ship.
+     */
+    @Test
+    void everyPinnedCeilingNamesADeclaredOrPlannedToolset() {
+        Set<String> declared = new LinkedHashSet<>();
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            declared.add(toolset.key());
+        }
+        Set<String> pinned = new LinkedHashSet<>();
+        for (EnvelopeCeiling ceiling : TOOLSET_CEILINGS) {
+            pinned.add(ceiling.key());
+            assertTrue(declared.contains(ceiling.key())
+                            || PLANNED_TOOLSET_KEYS.contains(ceiling.key()),
+                    () -> ceiling.key() + " is pinned but neither declared nor planned; delete or"
+                            + " rename its ceiling");
+        }
+        for (String planned : PLANNED_TOOLSET_KEYS) {
+            assertFalse(declared.contains(planned),
+                    () -> planned + " is declared now; move it out of PLANNED_TOOLSET_KEYS");
+            assertTrue(pinned.contains(planned),
+                    () -> planned + " is planned without a pinned envelope ceiling");
+        }
+    }
+
+    /**
+     * Ties the output ceiling every floor figure here derives from to the one production ships.
+     *
+     * <p>{@link #CONFIGURED_MAX_OUTPUT_TOKENS} is read from the {@link AiProperties} field default;
+     * this proves {@code application.yml} binds the same default, so raising it in either place
+     * moves the floor budget and fails the pinned admissible envelope rather than leaving every
+     * ceiling certified against a stale margin.
+     */
+    @Test
+    void theConfiguredOutputCeilingIsTheProductionDefault() throws IOException {
+        String yaml = new String(
+                new ClassPathResource("application.yml").getInputStream().readAllBytes(),
+                StandardCharsets.UTF_8);
+        assertTrue(yaml.contains("assistant-max-output-tokens: "
+                        + "${CONNEX_AI_ASSISTANT_MAX_OUTPUT_TOKENS:"
+                        + CONFIGURED_MAX_OUTPUT_TOKENS + "}"),
+                "application.yml binds a different assistant output default than AiProperties; the"
+                        + " floor budget must be re-derived against the default production ships");
+    }
+
+    /**
      * Proves every pinned ceiling, declared or planned, fits the floor before any tool spends it.
      *
      * <p>The cap is {@code (floor-admissible envelope - CORE_CEILING) / RESERVED_LOADABLE_TOOLSETS}
@@ -438,6 +549,14 @@ class AiAssistantPromptEnvelopeTest {
                 + " coreCeilingNative=" + CORE_CEILING.nativeBytes()
                 + " reservedLoadableToolsets=" + RESERVED_LOADABLE_TOOLSETS
                 + " reactCap=" + reactCap + " nativeCap=" + nativeCap);
+        assertEquals(FLOOR_ADMISSIBLE_ENVELOPE_BYTES, reactAdmissible,
+                "the JSON-ReAct floor-admissible envelope moved; AiAssistantPromptBudget, the floor"
+                        + " or the configured output default changed, so re-derive the floor budget"
+                        + " and every ceiling certified against it before re-pinning");
+        assertEquals(FLOOR_ADMISSIBLE_ENVELOPE_BYTES, nativeAdmissible,
+                "the native floor-admissible envelope moved; AiAssistantPromptBudget, the floor"
+                        + " or the configured output default changed, so re-derive the floor budget"
+                        + " and every ceiling certified against it before re-pinning");
         assertTrue(reactCap > 0 && nativeCap > 0,
                 "the core ceiling leaves the floor margin nothing to fund toolsets with");
 
@@ -508,31 +627,25 @@ class AiAssistantPromptEnvelopeTest {
         }
     }
 
-    private static AiAssistantPromptBudget budget(int fixedEnvelopeBytes) {
+    private static AiAssistantPromptBudget budget(
+            int fixedEnvelopeBytes, AiToolCallingMode toolCalling) {
         return AiAssistantPromptBudget.from(
-                capabilities(PROVIDER_MAX_OUTPUT_TOKENS),
+                capabilities(PROVIDER_MAX_OUTPUT_TOKENS, toolCalling),
                 CONFIGURED_MAX_OUTPUT_TOKENS,
                 fixedEnvelopeBytes);
     }
 
     /**
      * Returns the floor-preserving output allocation before any provider or operator ceiling clamps
-     * it, by asking for more output than either ceiling would ever grant.
+     * it, by asking for more output than either ceiling would ever grant, for a provider speaking
+     * the given tool protocol exactly as a turn's capabilities would declare it.
      */
-    private static int unclampedFloorOutputTokens(int fixedEnvelopeBytes) {
-        return unclampedFloorOutputTokens(fixedEnvelopeBytes, AiToolCallingMode.NONE);
-    }
-
     private static int unclampedFloorOutputTokens(
             int fixedEnvelopeBytes, AiToolCallingMode toolCalling) {
         return AiAssistantPromptBudget.from(
                 capabilities(FLOOR_CONTEXT_TOKENS - 1, toolCalling),
                 FLOOR_CONTEXT_TOKENS - 1,
                 fixedEnvelopeBytes).maxOutputTokens();
-    }
-
-    private static AiProviderCapabilities capabilities(int maxOutputTokens) {
-        return capabilities(maxOutputTokens, AiToolCallingMode.NONE);
     }
 
     private static AiProviderCapabilities capabilities(
