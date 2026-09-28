@@ -122,7 +122,8 @@ class SupportBundleArchiveDumpTest {
         assertEquals("manifest.json", entries.keySet().stream().toList().getLast());
         JsonNode manifest = new ObjectMapper().readTree(entries.get("manifest.json"));
         assertNotNull(manifest);
-        assertEquals(3, manifest.path("schemaVersion").asInt());
+        assertTrue(manifest.path("schemaVersion").isInt(), "schemaVersion must be an integer");
+        assertEquals(3, manifest.path("schemaVersion").intValue());
         assertEquals("test", manifest.path("productVersion").asString());
         assertEquals("job_run_not_available", manifest.path("omissions").path("job-runs.json").asString());
         assertEquals(5, manifest.path("files").size());
@@ -132,7 +133,8 @@ class SupportBundleArchiveDumpTest {
             assertTrue(inventoried.add(path), "Duplicate inventory path: " + path);
             byte[] content = entries.get(path);
             assertNotNull(content, path);
-            assertEquals(content.length, file.path("byteLength").asInt(), path);
+            assertTrue(file.path("byteLength").isInt(), path + ": byteLength must be an integer");
+            assertEquals(content.length, file.path("byteLength").intValue(), path);
             assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)),
                 file.path("sha256").asString(), path);
         }

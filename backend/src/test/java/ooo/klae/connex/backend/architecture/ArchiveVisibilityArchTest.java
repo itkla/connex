@@ -82,11 +82,11 @@ class ArchiveVisibilityArchTest {
      * alias when the table is used unaliased.
      */
     private static final Pattern RECORD_ALIAS = Pattern.compile(
-        "\\b(?:FROM|JOIN)\\s+[`\"]?(person|company)[`\"]?\\b"
+        "\\b(?:FROM|JOIN)\\s+[`\"]?(person|company)\\b[`\"]?"
             + "(?:\\s+(?:AS\\s+)?"
             + "(?!ON\\b|WHERE\\b|SET\\b|USING\\b|LEFT\\b|RIGHT\\b|INNER\\b|JOIN\\b|GROUP\\b"
             + "|ORDER\\b|UNION\\b|LIMIT\\b|HAVING\\b|AND\\b|OR\\b|SELECT\\b)"
-            + "([A-Za-z_][A-Za-z0-9_]*))?",
+            + "[`\"]?([A-Za-z_][A-Za-z0-9_]*)[`\"]?)?",
         Pattern.CASE_INSENSITIVE);
 
     private static final Set<String> PERSON_IDENTIFYING_COLUMNS =
@@ -365,6 +365,34 @@ class ArchiveVisibilityArchTest {
                 SELECT * FROM person WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
                 UNION ALL
                 SELECT * FROM person WHERE workspace_id = #{workspaceId} AND (archived_at IS NULL)
+                """, Set.of()),
+            Arguments.of("SELECT p.* FROM `person` p WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT p.* FROM `person` p WHERE p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT `p`.* FROM person `p` WHERE `p`.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT `p`.* FROM person `p` WHERE `p`.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT `c`.* FROM `company` AS `c` WHERE `c`.workspace_id = #{workspaceId}", Set.of("c")),
+            Arguments.of("SELECT `c`.* FROM `company` AS `c` WHERE `c`.`archived_at` IS NULL", Set.of()),
+            Arguments.of("SELECT * FROM `person` WHERE workspace_id = #{workspaceId}", Set.of("person")),
+            Arguments.of("SELECT * FROM `person` WHERE `archived_at` IS NULL", Set.of()),
+            Arguments.of("SELECT person.* FROM `person` JOIN company `c` ON `c`.id = person.company_id"
+                + " WHERE `c`.`archived_at` IS NULL", Set.of("person")),
+            Arguments.of("""
+                SELECT `p`.* FROM `person` AS `p` WHERE `p`.`archived_at` IS NULL
+                UNION ALL
+                SELECT `p`.* FROM `person` AS `p` WHERE `p`.workspace_id = #{workspaceId}
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT `p`.* FROM `person` AS `p` WHERE `p`.`archived_at` IS NULL
+                UNION ALL
+                SELECT `p`.* FROM `person` AS `p` WHERE (`p`.`archived_at` IS NULL)
+                """, Set.of()),
+            Arguments.of("""
+                SELECT `p`.* FROM `person` AS `p` WHERE `p`.`archived_at` IS NULL
+                  AND EXISTS (SELECT `p`.* FROM `person` AS `p` WHERE `p`.workspace_id = #{workspaceId})
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT `p`.* FROM `person` AS `p` WHERE `p`.`archived_at` IS NULL
+                  AND EXISTS (SELECT `p`.* FROM `person` AS `p` WHERE (`p`.`archived_at` IS NULL))
                 """, Set.of()));
     }
 
@@ -451,12 +479,13 @@ class ArchiveVisibilityArchTest {
     }
 
     private boolean hasArchivePredicate(String sql, String alias, String table) {
-        if (Pattern.compile("\\b" + Pattern.quote(alias) + "\\.archived_at\\s+IS\\s+(?:NOT\\s+)?NULL",
+        if (Pattern.compile("(?<![\\w`\"])[`\"]?" + Pattern.quote(alias)
+                + "[`\"]?\\s*\\.\\s*[`\"]?archived_at[`\"]?\\s+IS\\s+(?:NOT\\s+)?NULL",
                 Pattern.CASE_INSENSITIVE).matcher(sql).find()) {
             return true;
         }
         return alias.equals(table)
-            && Pattern.compile("(?<![\\w.])archived_at\\s+IS\\s+(?:NOT\\s+)?NULL",
+            && Pattern.compile("(?<![\\w.`\"])[`\"]?archived_at[`\"]?\\s+IS\\s+(?:NOT\\s+)?NULL",
                 Pattern.CASE_INSENSITIVE).matcher(sql).find();
     }
 
