@@ -1452,18 +1452,20 @@ public class DealService {
      * Removes a tag from a deal.
      * @param dealId
      * @param tagId
+     * @return whether this invocation removed the tag association
      */
     @RequirePermission(Permission.DEAL_UPDATE)
-    public void removeTag(int dealId, int tagId) {
+    public boolean removeTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        dealMapper.removeTag(workspaceId, dealId, tagId);
+        boolean removed = dealMapper.removeTag(workspaceId, dealId, tagId) == 1;
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
             "Removed tag " + tagName + " from " + deal.getName(),
             auditService.singleChange("tag", tagName, null));
+        return removed;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */

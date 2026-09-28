@@ -290,6 +290,26 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsEitherWay() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        Tag tag = newTag();
+        dealService.addTag(deal.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(dealService.removeTag(deal.getId(), tag.getId()));
+        assertFalse(dealService.removeTag(deal.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 2, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.removeTag'",
+            Integer.class,
+            workspace.getId()));
+    }
+
+    @Test
     void deleteRemovesOnlyTheDealsCommentThreadsAndTheirCascadedComments() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);

@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -90,6 +91,25 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertThrows(
             ConflictException.class,
             () -> companyService.removeTagIfUnchanged(company.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsEitherWay() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        companyService.addTag(company.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'company.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(companyService.removeTag(company.getId(), tag.getId()));
+        assertFalse(companyService.removeTag(company.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 2, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'company.removeTag'",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test

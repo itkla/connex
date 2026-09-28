@@ -681,17 +681,19 @@ public class CompanyService {
 
     /**
      * Removes a tag from a company in the active workspace.
+     * @return whether this invocation removed the tag association
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
-    public void removeTag(int companyId, int tagId) {
+    public boolean removeTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        companyMapper.removeTag(workspaceId, companyId, tagId);
+        boolean removed = companyMapper.removeTag(workspaceId, companyId, tagId) == 1;
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("company.removeTag", "company", companyId, company.getName(),
             "Removed tag " + tagName + " from " + company.getName(),
             auditService.singleChange("tag", tagName, null));
+        return removed;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */

@@ -114,6 +114,25 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsEitherWay() {
+        Person person = newPerson(newCompany());
+        Tag tag = newTag();
+        personService.addTag(person.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(personService.removeTag(person.getId(), tag.getId()));
+        assertFalse(personService.removeTag(person.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 2, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId()));
+    }
+
+    @Test
     void createAndUpdateReconcileCurrentIdentityHistory() {
         Company company = newCompany();
         Person draft = new Person();
