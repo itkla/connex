@@ -83,6 +83,21 @@ public class AiAssistantPromptAssembler {
                     + AiAssistantToolCatalog.capSentence()
                     + " Every loadable set is listed below as key - what it covers - whether it "
                     + "is already loaded.";
+    /**
+     * The {@link #FIND_TOOLS_DIRECTIVE} of a turn offered only some loadable toolsets.
+     *
+     * <p>The {@code find_tools} argument enum still names every loadable key on every turn, so a
+     * routed turn's directory is not the whole of what the schema lists. Telling such a turn that
+     * the directory is everything it may load, and that any other key is refused, keeps the prompt
+     * from contradicting the loader. A generic turn keeps {@link #FIND_TOOLS_DIRECTIVE} byte for
+     * byte, and dropping even the shortest directory line saves more than this sentence adds.
+     */
+    private static final String OFFERED_FIND_TOOLS_DIRECTIVE =
+            "Only the tools declared in this step are callable. When they cannot do the job, call "
+                    + "find_tools with the key of one more toolset; a set loads once, and "
+                    + AiAssistantToolCatalog.capSentence()
+                    + " Only the sets listed below can load here; any other key is refused. Each is"
+                    + " listed as key - what it covers - whether it is already loaded.";
 
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
@@ -358,7 +373,8 @@ public class AiAssistantPromptAssembler {
      * Assembles one step whose toolset directory lists only the toolsets the turn is offered.
      *
      * @param offeredToolsets the loadable toolsets this turn may hold; the directory renders only
-     *     these, so a routed turn is never shown a family its skill's authority cannot call
+     *     these, so a routed turn's directory never lists a family its skill's authority cannot
+     *     call
      */
     public MaskedPrompt assemble(
             List<AiChatMessage> history,
@@ -442,7 +458,8 @@ public class AiAssistantPromptAssembler {
      * offered.
      *
      * @param offeredToolsets the loadable toolsets this turn may hold; the directory renders only
-     *     these, so a routed turn is never shown a family its skill's authority cannot call
+     *     these, so a routed turn's directory never lists a family its skill's authority cannot
+     *     call
      */
     public MaskedPrompt assembleNative(
             List<AiChatMessage> history,
@@ -1550,7 +1567,7 @@ public class AiAssistantPromptAssembler {
 
                 %s
                 """.formatted(
-                        FIND_TOOLS_DIRECTIVE,
+                        findToolsDirective(offeredToolsets),
                         toolsetDirectory(loadedToolsets, offeredToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,
@@ -1591,6 +1608,12 @@ public class AiAssistantPromptAssembler {
         return directory.toString();
     }
 
+    private static String findToolsDirective(Set<Toolset> offeredToolsets) {
+        return offeredToolsets.containsAll(AiAssistantToolCatalog.LOADABLE)
+                ? FIND_TOOLS_DIRECTIVE
+                : OFFERED_FIND_TOOLS_DIRECTIVE;
+    }
+
     private String nativeSystemPrompt(Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         return """
                 You are Ask Connex, a thorough relationship-intelligence assistant. Use only the supplied native function tools. When you have enough evidence, return exactly one JSON object matching the final-answer schema. Do not describe or encode a tool call in ordinary content.
@@ -1619,7 +1642,7 @@ public class AiAssistantPromptAssembler {
                 Valid first final response: %s
                 Valid conversation-ending final response: %s
                 """.formatted(
-                        FIND_TOOLS_DIRECTIVE,
+                        findToolsDirective(offeredToolsets),
                         toolsetDirectory(loadedToolsets, offeredToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,

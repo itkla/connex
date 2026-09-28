@@ -293,9 +293,17 @@ public class AiSkillCatalog {
      *
      * <p>This is the one rule for both sides of the offer. {@link SkillSpec} refuses a declaration
      * that seeds a family failing it, and the agent loop offers a routed turn only the families
-     * passing it, so a model is never shown a toolset whose use the authority gate then refuses
-     * with a turn-terminal {@code tool_outside_skill_authority}. It narrows what is offered and
-     * grants nothing: {@code requireSkillAuthority} stays the binding gate for every write.
+     * passing it, so a model is never listed or loaded a toolset whose use the authority gate
+     * then refuses with a turn-terminal {@code tool_outside_skill_authority}. It narrows what is
+     * offered and grants nothing: {@code requireSkillAuthority} stays the binding gate for every
+     * write.
+     *
+     * <p>Requiring every write, rather than any, deliberately narrows #1808's "allowedTools
+     * intersects it" direction: a family is held whole, so a skill allowed only some of its writes
+     * would otherwise hold write tools it may not call. A write skill must therefore be allowed
+     * every write in a family to be offered it, and a family that grows drops out of every skill
+     * not widened to match; {@code AiSkillCatalogTest} fails the build on a shipped skill left
+     * allowed a write tool no family it may hold contains.
      *
      * @param authority the most the declaration may do
      * @param allowedTools every tool key the declaration may cause to run

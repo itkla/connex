@@ -1478,8 +1478,11 @@ public class AiChatAgentLoopService {
      * <p>A generic turn is offered every loadable toolset, exactly as before routing existed. A
      * routed turn is offered only the families {@link AiSkillCatalog#mayHold} admits for its
      * skill — the same rule {@code SkillSpec} applies to what a declaration seeds — so a read-only
-     * skill is never shown, and never loads, a write family whose first use
-     * {@link #requireSkillAuthority} would end the turn for with no answer. The offer is computed
+     * skill's directory never lists, and its {@code find_tools} never loads, a write family whose
+     * first use {@link #requireSkillAuthority} would end the turn for with no answer. The
+     * {@code find_tools} argument enum still names every loadable key, so the directory and the
+     * loader are what narrow; the directive tells a narrowed turn that any other key is refused,
+     * and the loader's refusal is recoverable. The offer is computed
      * from the skill the turn actually runs under: a routed turn whose plan did not execute has no
      * active skill, keeps the full offer, and is also outside the authority gate.
      *
