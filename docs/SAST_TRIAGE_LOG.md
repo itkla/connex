@@ -1019,14 +1019,33 @@ timestamp or lazily created row" without qualification, and cited `TenantScopeIn
 it were the Spring `HandlerInterceptor`. It is not: the only `HandlerInterceptor` is
 `TenantResolutionInterceptor`, and it writes `app_user.last_active_workspace_id` on GET **by
 design** (`TenantResolutionInterceptor:184`, and `:216` sets it NULL; `WORKSPACE_RECOVERY_METHODS`
-admits GET/HEAD/OPTIONS per #1108). Two further writes reach any non-allowlisted `/api/**` GET:
-`PrivilegedMfaEnforcementFilter:93` inserts an `audit_log` row plus a lazily created
-`audit_log_integrity_head` row for a privileged passkey-less caller, and Spring Session JDBC updates
-`SPRING_SESSION.LAST_ACCESS_TIME` on every authenticated request. None is attacker-controlled beyond
-the trigger and all are route- and method-independent, so none differentiates an alert of this class
-— but the unqualified phrasing was wrong for the request path and is corrected here and in the
-alert's dismissal comment. Every dismissal of this class must be scoped to the handler, service and
-mapper path.
+admits GET/HEAD/OPTIONS per #1108).
+
+The filter and interceptor layer reaches at least the following durable writes on a non-allowlisted
+`/api/**` GET. This list is the corrected inventory for future re-reviewers of this alert class:
+
+1. the workspace-pin heal above — value server-derived from the victim's own default workspace,
+   never request data;
+2. `PrivilegedMfaEnforcementFilter:93` — an `audit_log` insert plus a lazily created
+   `audit_log_integrity_head` row, for a privileged passkey-less caller. The session cookie is
+   `SameSite=Lax`, so a cross-site **top-level navigation** does trigger it. Content is fixed and
+   derived from the victim's identity, but repetition is unbounded, so this is tracked as a finding
+   in its own right on [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into
+   this false-positive rationale;
+3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
+   request (verified in spring-session-jdbc 4.1.0 bytecode);
+4. gated session-attribute writes — when an authenticated session lacks the legacy
+   `connex.authenticatedAt` or user stamp, `AbsoluteSessionTimeoutFilter` →
+   `SessionSecurityService.ensureAuthenticatedSessionStarted` calls `session.setAttribute`, which
+   persists to `SPRING_SESSION_ATTRIBUTES`; `SessionEpochFilter` → `repairSessionEpochFromGrant`
+   can stamp the epoch the same way when the grant matches; and past the absolute timeout
+   `session.invalidate()` deletes the session's JDBC rows.
+
+Items 1, 3 and 4 are route- and method-independent and not attacker-controlled beyond the trigger,
+so none of them differentiates an alert of this class; item 2 has its own disposition. The
+unqualified phrasing was wrong for the request path and is corrected here and in the alert's
+dismissal comment. **Every dismissal of this class must be scoped to the handler, service and
+mapper path.**
 
 **Why CodeQL fired.** The sink is `Supplier.get()` at `TenantWorkScope.java:233`. CodeQL resolves
 that functional-interface call context-insensitively to every `Supplier` lambda reaching
@@ -1052,7 +1071,8 @@ truth. Cite methods plus a commit sha rather than bare line numbers: #67's recor
 `UserService (:91)`, which on current `main` is a different method.
 
 **Disposition: false positive.** Tracking issue
-[#1814](https://github.com/itkla/connex/issues/1814); owner Hunter Nakagawa; approver Security
+[#1814](https://github.com/itkla/connex/issues/1814), which is the canonical exception record for
+this alert class and also carries alert #189 (below); owner Hunter Nakagawa; approver Security
 Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
 **2027-01-14**. Re-evaluation triggers: any write added to the `getCollaborators` path,
 `DealCollaboratorControlAccess` gaining a mutating statement, or a material update to the query.
@@ -1087,9 +1107,12 @@ GET in the filter and interceptor layer (workspace-pin heal, the privileged-MFA 
 and the Spring Session last-access update); none is attacker-controlled beyond the trigger and none
 differentiates this alert.
 
-**Disposition: false positive.** Recorded on
-[#1815](https://github.com/itkla/connex/issues/1815), which now carries the inventory record for this
-alert class rather than a third bespoke issue; owner Hunter Nakagawa; approver Security Owner role
+**Disposition: false positive.** Per `STATIC_ANALYSIS.md` and `VULNERABILITY_MANAGEMENT.md`, a
+duplicate alert links to the **oldest** open finding issue and keeps its own identifier, so #189's
+canonical exception record sits with #186's on
+[#1814](https://github.com/itkla/connex/issues/1814); the structural remediation for the whole class
+is cross-linked on [#1815](https://github.com/itkla/connex/issues/1815). Owner Hunter Nakagawa;
+approver Security Owner role
 ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
 **2027-01-14**. Re-evaluation triggers: any write added to the `listShares` path,
 `ShareWorkspaceControlAccess` gaining a mutating statement, a structural split of
