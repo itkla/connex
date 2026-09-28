@@ -1077,8 +1077,26 @@ public class AiChatAgentLoopService {
             state.planPublications++;
         }
         if (toolCatalog.isWrite(toolName)) {
-            AiAssistantPreparedWrite write = writeToolService.prepare(
-                    toolName, call.tool().args(), context.resources(), turn.restrictionEpoch());
+            Optional<String> storedArguments =
+                    persistenceService.storedWriteArguments(turn, stepNumber);
+            AiAssistantPreparedWrite write;
+            try {
+                write = storedArguments.isPresent()
+                        ? writeToolService.prepareReplay(
+                                toolName, call.tool().args(), context.resources(),
+                                turn.restrictionEpoch(), storedArguments.get())
+                        : writeToolService.prepare(
+                                toolName, call.tool().args(), context.resources(),
+                                turn.restrictionEpoch());
+            } catch (AiAssistantLoopException exception) {
+                if (!exception.recoverable()) {
+                    throw exception;
+                }
+                return refuseCall(
+                        context, stepNumber, closingAttempted, nativeTools, call, state, progress,
+                        exception.detailReason(),
+                        !nativeTools || state.nativeCalls.containsKey(callRef));
+            }
             if (!context.attachments().isEmpty()
                     && write.tier() == AiAssistantToolCatalog.ToolTier.AUTO) {
                 return new StepCallOutcome.Fail("attachment_auto_write_blocked");

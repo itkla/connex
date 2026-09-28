@@ -518,6 +518,35 @@ public class AiChatTurnPersistenceService {
         return toolCall.getId();
     }
 
+    /**
+     * Reads the stored arguments of the write proposal that already holds one step's key.
+     *
+     * <p>The loop reads them before the step prepares its call, because a step whose proposal is
+     * already durable must replay that proposal rather than prepare a new one: a confirm-tier
+     * proposal stores the resolution and principals its card was reviewed against, and resolving
+     * them afresh against the workspace as it is now would disagree with the stored row after any
+     * rename or offboarding in between. The arguments are only an input to {@link
+     * #proposeWriteTool}, which still decides under its own locks whether the call is the stored
+     * proposal. The read takes no lock.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @return the stored arguments, or empty when no proposal holds the step's key yet
+     */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public Optional<String> storedWriteArguments(AiChatQueuedTurn turn, int stepNumber) {
+        requireCurrentActorRead(turn);
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        return Optional.ofNullable(chatMapper.getToolCallByIdempotencyKey(
+                        turn.workspaceId(),
+                        turnStepKey(turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL)))
+                .map(AiChatToolCall::getArgumentsJson);
+    }
+
     /** Persists or replays one validated write proposal under its caller-retained key. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAssistantToolProposal proposeWriteTool(
