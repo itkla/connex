@@ -34,6 +34,16 @@ import ooo.klae.connex.backend.dto.ShareDto;
  * allowlist rather than joining the control-plane {@code workspace} table, so
  * these tests supply the allowlist ShareService would and additionally forge one
  * to prove the owning end of the ceiling is enforced too.
+ *
+ * <p>The guarantee these tests pin is therefore narrower than it was: the statement
+ * consults no control fact, so it refuses a cross-organization grant for every
+ * allowlist DERIVED from a real snapshot — the owner's snapshot omits the foreign
+ * target, the target's snapshot omits the owner — but a caller that fabricates an
+ * array naming workspaces from both organizations is not refused. That residual is
+ * pinned by {@code shareCompany_fabricatedAllowlistSpanningTwoOrganizations_insertsARowTheReadCeilingRefuses}
+ * — which also shows the forged row grants no visibility, because the read path
+ * carries its own ceiling — and bounded by {@code ShareGrantAllowlistProvenanceArchTest},
+ * which keeps the allowlist supplied only by the control-plane snapshot component.
  */
 class ShareMapperTest extends AbstractMapperTest {
 
@@ -183,12 +193,12 @@ class ShareMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * A caller that bypasses ShareService and forges an allowlist belonging to the FOREIGN
-     * organization still inserts nothing: the grant checks the owning workspace against the
-     * same allowlist, and a foreign organization's snapshot does not contain it.
+     * A caller that bypasses ShareService and anchors on the TARGET's organization — the real
+     * snapshot of the foreign organization — still inserts nothing: the grant checks the owning
+     * workspace against the same allowlist, and that snapshot does not contain it.
      */
     @Test
-    void shareCompany_forgedForeignOrganizationAllowlist_insertsNothing() {
+    void shareCompany_allowlistSnapshotOfTheTargetsOrganization_insertsNothing() {
         Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
         Company company = newCompany();
 
@@ -203,7 +213,7 @@ class ShareMapperTest extends AbstractMapperTest {
 
     /** The same owner-side refusal for contacts and pipelines. */
     @Test
-    void sharePersonAndPipeline_forgedForeignOrganizationAllowlist_insertNothing() {
+    void sharePersonAndPipeline_allowlistSnapshotOfTheTargetsOrganization_insertNothing() {
         Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
         Person person = newPerson(newCompany());
         Pipeline pipeline = newPipeline();
@@ -215,6 +225,57 @@ class ShareMapperTest extends AbstractMapperTest {
             foreign.getId(), newUser().getId(), false, forged));
         assertFalse(personMapper.exists(foreign.getId(), person.getId()));
         assertFalse(pipelineMapper.pipelineExists(foreign.getId(), pipeline.getId()));
+    }
+
+    /**
+     * Documented residual, not a guard that closes a hole. The grant statement judges both ends
+     * against the array it is handed and consults no control fact, so its refusal is only as
+     * strong as the array's provenance. Every array derived from a real snapshot refuses this
+     * cross-organization grant, whichever end it is anchored on; an array a direct caller
+     * FABRICATES from both organizations is not refused, and the row lands.
+     *
+     * <p>What that row does NOT buy is cross-organization visibility: every share-reading
+     * visibility predicate carries its own same-organization ceiling
+     * ({@code OrgShareCeilingArchTest.every_share_read_predicate_carries_the_same_org_ceiling}),
+     * so the forged row is inert on the read path. The bound on the grant statement's own
+     * guarantee is why {@code ShareGrantAllowlistProvenanceArchTest} constrains the supplier; this
+     * test exists so nobody reads the tests above as proving more than they do, in either
+     * direction.
+     */
+    @Test
+    void shareCompany_fabricatedAllowlistSpanningTwoOrganizations_insertsARowTheReadCeilingRefuses() {
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
+        Company company = newCompany();
+        int grantedBy = newUser().getId();
+
+        assertEquals(0, shareMapper.shareCompany(company.getId(), workspace.getId(),
+            foreign.getId(), grantedBy, false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId())),
+            "the owning organization's snapshot omits the foreign target");
+        assertEquals(0, shareMapper.shareCompany(company.getId(), workspace.getId(),
+            foreign.getId(), grantedBy, false,
+                orgWorkspaceIdsJson(workspaceMapper, foreign.getId())),
+            "the target organization's snapshot omits the owning workspace");
+        assertEquals(0, shareRowCount(company.getId(), foreign.getId()));
+
+        int fabricated = shareMapper.shareCompany(company.getId(), workspace.getId(),
+            foreign.getId(), grantedBy, false,
+                workspaceIdsJson(workspace.getId(), foreign.getId()));
+
+        assertEquals(1, fabricated,
+            "residual: an allowlist no snapshot could produce is not refused by SQL alone");
+        assertEquals(1, shareRowCount(company.getId(), foreign.getId()),
+            "the forged grant really does write a cross-organization share row");
+        assertFalse(companyMapper.exists(foreign.getId(), company.getId()),
+            "the forged row is inert: the read-path organization ceiling refuses it independently, "
+                + "so the residual is an unwanted row rather than cross-organization visibility");
+    }
+
+    private int shareRowCount(int companyId, int targetWorkspaceId) {
+        Integer rows = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM company_share WHERE company_id = ? AND workspace_id = ?",
+            Integer.class, companyId, targetWorkspaceId);
+        return rows == null ? 0 : rows;
     }
 
     /** An absent or empty allowlist selects no rows, so the grant fails closed. */

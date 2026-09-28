@@ -134,9 +134,16 @@
   <!-- Listings return tenant share rows only. The workspace NAME and the name ordering the
        response carries are control-plane data, so ShareService hydrates and orders them from
        its unrouted organization snapshot (#811). A share row whose target is absent from that
-       snapshot is dropped there, exactly as the removed `JOIN workspace` dropped a share whose
-       target workspace row no longer existed — V65 removed the foreign key that used to make
-       that impossible. -->
+       snapshot is dropped there, and that covers two cases, only one of which the removed
+       `JOIN workspace` also dropped:
+         1. the target workspace row no longer exists (V65 removed the foreign key that used to
+            make that impossible) — the old join dropped it too, so no change;
+         2. the target workspace belongs to ANOTHER organization — the old join had no org
+            predicate, so it listed such a row under the foreign workspace's name. Only the grant
+            statements above ever refused a cross-org target, so a row like this can predate the
+            ceiling or be written around it. It is now omitted, which also means it can no longer
+            be revoked through the UI; direct SQL or a future sweep is needed.
+       This is a deliberate narrowing, disclosed on the PR. -->
   <select id="listCompanyShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
     SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM company_share s

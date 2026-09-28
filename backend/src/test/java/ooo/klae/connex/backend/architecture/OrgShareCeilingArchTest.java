@@ -21,8 +21,13 @@ import org.w3c.dom.NodeList;
  * The same-org invariant lives in hand-written SQL — the {@code INSERT..SELECT}
  * grants in {@code ShareMapper.xml} (write path) and the {@code EXISTS} share
  * branches of the owned-or-shared visibility predicates in the entity mappers
- * (read path). Both paths now receive that ceiling as a trusted control-derived
- * workspace allowlist instead of joining the control table.
+ * (read path). The two paths express it differently and this test knows which is
+ * which: every write grant now receives a trusted control-derived workspace
+ * allowlist instead of joining the control table (#811), while on the read path
+ * only {@code AiAssistantIdentifierMapper}, {@code IdentityMapper} and
+ * {@code PersonEdgeMapper} bind that allowlist — the remaining five mappers in
+ * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
+ * match {@code ows.org_id = vws.org_id}.
  * The workspace-predicate scan cannot see either model (it only checks
  * {@code #{workspaceId}} is bound). These tests assert both paths carry their
  * reviewed ceiling, so a future shareable entity type copied without it fails

@@ -36,6 +36,8 @@ import ooo.klae.connex.backend.tenant.Permission;
  * what filters stale listing targets, and what supplies workspace names and their
  * ordering. It is taken before any row lock, so no second pooled connection is
  * borrowed while a tenant write holds locks (see {@code docs/backend/LOCKING.md}).
+ * A listing with no share rows needs no snapshot and skips the control query
+ * entirely, as deal-collaborator hydration does for an empty collaborator set.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,6 +65,9 @@ public class ShareService {
             case PERSON -> shareMapper.listPersonShares(workspaceId, entityId);
             case PIPELINE -> shareMapper.listPipelineShares(workspaceId, entityId);
         };
+        if (shares.isEmpty()) {
+            return List.of();
+        }
         return shareWorkspaceControlAccess.getForWorkspace(workspaceId).hydrate(shares);
     }
 

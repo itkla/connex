@@ -182,10 +182,14 @@ class ShareServiceTest extends AbstractServiceTest {
     /**
      * Workspace names and their ordering are control-plane data the tenant listing no longer
      * carries, so the service hydrates both from its organization snapshot. The siblings are
-     * created in reverse alphabetical order, so an id-ordered listing would fail this.
+     * created in reverse alphabetical order, so an id-ordered listing would fail this. The
+     * assertion on the raw tenant rows is what makes this a regression test rather than a
+     * behaviour-preservation one: the name-ordered, named response is identical to what the
+     * removed {@code JOIN workspace} returned, so only the absence of a workspace name on the
+     * tenant side distinguishes the two implementations.
      */
     @Test
-    void listSharesHydratesWorkspaceNamesAndOrdersThemByName() {
+    void listSharesHydratesWorkspaceNamesFromTheControlSnapshotAndOrdersThemByName() {
         WorkspaceMembershipDto owner = workspaceService.createWorkspace("Hydration Owner", currentUser.getId());
         WorkspaceMembershipDto zulu = createSiblingWorkspace(owner, "Zulu Grantee");
         WorkspaceMembershipDto alpha = createSiblingWorkspace(owner, "Alpha Grantee");
@@ -194,6 +198,13 @@ class ShareServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, owner.getId());
         shareService.share("company", company.getId(), zulu.getId(), false);
         shareService.share("company", company.getId(), alpha.getId(), true);
+
+        assertTrue(shareMapper.listCompanyShares(owner.getId(), company.getId()).stream()
+                .allMatch(row -> row.getWorkspaceName() == null),
+            "the tenant listing must carry no workspace name; the name is control data the "
+                + "service hydrates, so a listing statement that names workspaces itself cannot "
+                + "run in a dedicated organization catalog. This has to be read before the "
+                + "service call: hydration mutates the rows MyBatis caches for this transaction");
 
         List<ShareDto> shares = shareService.listShares("company", company.getId());
 
@@ -209,11 +220,16 @@ class ShareServiceTest extends AbstractServiceTest {
 
     /**
      * A share row whose target workspace is absent from the control snapshot is omitted, not a
-     * hard failure — the behaviour the removed {@code JOIN workspace} produced for a share whose
-     * target workspace row no longer existed (V65 dropped the foreign key that prevented that).
+     * hard failure. The row this test plants targets a workspace in ANOTHER organization, which
+     * is the case that narrows: the removed {@code JOIN workspace} carried no organization
+     * predicate, so it listed such a row under the foreign workspace's name, and only the grant
+     * statements ever refused a cross-organization target. The row is now omitted, and therefore
+     * no longer revocable through the UI. The other omitted case — a target workspace row that no
+     * longer exists at all, possible since V65 dropped the foreign key — behaves exactly as the
+     * old join did.
      */
     @Test
-    void listSharesOmitsTargetsMissingFromTheOrganizationSnapshot() {
+    void listSharesOmitsCrossOrganizationTargetsTheRemovedJoinWouldHaveNamed() {
         WorkspaceMembershipDto owner = workspaceService.createWorkspace("Stale Owner", currentUser.getId());
         WorkspaceMembershipDto sibling = createSiblingWorkspace(owner, "Stale Sibling");
         Company company = companyIn(owner.getId());
