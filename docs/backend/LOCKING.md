@@ -407,7 +407,11 @@ only `assign_owner`'s owner), and those same objects reach the write: `Execution
 lookup, so `assign_owner` writes exactly the owner id locked at step 1. A confirm-tier proposal
 also pins, when it is prepared in the turn, what its principals and its value resolved to: the
 `principals` ids and the `resolution` field and id are stored as additive siblings of the stored
-arguments, and a name that resolves to no single row is refused before any proposal is stored. The
+arguments, and a name that resolves to no single row is refused before any proposal is stored. A
+step that reaches the write again after its proposal was stored under the step's key resolves
+nothing: the loop first reads that stored row, without a lock, and the call carries its pins
+verbatim, so a rename or an offboarding in between cannot turn the replay into a reused-key or
+unresolved refusal, and only what the model asked for is compared with the stored row. The
 approval compares its own pre-lock resolution with the pins — the principals before step 1, on the
 proposal read unlocked, so a drifted member's authorization rows are never locked and its own 403
 never answers first, and again once step 3 has read the locked proposal; the value just before
@@ -433,6 +437,16 @@ The pins protect only the proposals that carry them, on a build that reads them:
   `status = 'proposed'` and `JSON_CONTAINS_PATH(arguments_json, 'one', '$.principals')` on
   `ai_chat_tool_call` — before approvals are served by the older build. Failing closed on rollback
   instead would need a pin-aware reader shipped before this writer.
+- The staging deployment's automatic rollback does not run that rejection. When
+  `post_deploy_smoke` fails after the target backend and frontend are live, `deployment_exit` calls
+  `rollback_release`, which restarts the previous backend and frontend without reading
+  `ai_chat_tool_call`, and the interrupted-deployment recovery in `recover_transaction` can fall
+  back to the same `rollback_release`. A pinned proposal created while the target release served
+  survives that rollback, and the older build approves it by name without its pin — how every
+  confirm-tier proposal was approved before #1865, so the protection lapses for those rows rather
+  than a new exposure opening. Gating the automatic rollback is a separate Tier 3 deployment change
+  tracked in #1871; until it lands, run the rejection above by hand after any automatic rollback
+  past this change.
 
 The framework acquires its locks in exactly this order:
 
