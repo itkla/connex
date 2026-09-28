@@ -523,6 +523,65 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
+    void aTagIsNeverOfferedUndoEvenWhenItsStoredInverseSaysAvailable() {
+        AiChatToolCall toolCall = toolCall(
+                38,
+                USER_ID,
+                "add_tag",
+                "auto",
+                "executed",
+                "person",
+                31,
+                27,
+                "{\"outcome\":{\"status\":\"executed\",\"changed\":true},"
+                        + "\"undo\":{\"status\":\"available\","
+                        + "\"expiresAt\":\"2026-08-12T12:10:00Z\",\"entityKind\":\"tag\","
+                        + "\"entityId\":31,\"fingerprint\":\"present:5\",\"tagId\":5}}");
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100)).thenReturn(List.of(toolCall));
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(27), 100)).thenReturn(List.of());
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        AiAssistantToolCallReadDto result = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("executed", result.status());
+        assertEquals("Tag added", result.outcomeSummary());
+        assertEquals("2026-08-12T12:10:00Z", result.undoExpiresAt());
+        assertFalse(result.undoAvailable());
+    }
+
+    @Test
+    void aSharedParticipantStillReadsWhetherTheTagWasAddedButNotWhichTag() {
+        AiChatToolCall toolCall = toolCall(
+                38,
+                USER_ID + 1,
+                "add_tag",
+                "auto",
+                "executed",
+                "person",
+                31,
+                27,
+                "{\"outcome\":{\"status\":\"executed\",\"recordType\":\"person\","
+                        + "\"tag\":\"Priority\",\"changed\":true},"
+                        + "\"undo\":{\"status\":\"unavailable\"}}");
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100)).thenReturn(List.of(toolCall));
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(27), 100)).thenReturn(List.of());
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        AiAssistantToolCallReadDto result = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Add an existing tag", result.requestSummary());
+        assertEquals("Tag added", result.outcomeSummary());
+        assertEquals(List.of(), result.outcomeValues());
+        assertFalse(result.undoAvailable());
+    }
+
+    @Test
     void archivedSessionNeverAdvertisesUndo() {
         accessibleSession.setStatus("archived");
         AiChatToolCall toolCall = toolCall(
