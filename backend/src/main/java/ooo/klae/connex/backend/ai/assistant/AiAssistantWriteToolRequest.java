@@ -8,7 +8,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** Closed typed request vocabulary for assistant write tools. */
+/**
+ * Closed typed request vocabulary for assistant write tools.
+ *
+ * <p>Each record is bound to its tool by that tool's {@link AiAssistantWriteTool#requestType()}; a
+ * new write tool adds its record here, its bean, and its catalog declaration. The stored request
+ * bytes depend on these records' fields and order, so an existing record is never reshaped.
+ */
 public sealed interface AiAssistantWriteToolRequest {
     String HANDLE = "r[1-9][0-9]*";
 

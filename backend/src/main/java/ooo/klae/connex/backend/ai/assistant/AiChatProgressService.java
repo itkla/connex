@@ -155,22 +155,37 @@ public class AiChatProgressService {
         }
         try {
             JsonNode result = objectMapper.readTree(toolCall.getResultJson());
-            Integer count = switch (toolCall.getToolName()) {
-                case "search_records", "get_records" -> arraySize(result, "records");
-                case "get_record", "create_activity", "create_task", "create_note",
-                        "add_tag", "change_deal_stage", "assign_owner",
-                        "relationship_metrics" -> 1;
-                case "list_activities", "list_scope_activities" ->
-                        arraySize(result, "activities");
-                case "deal_attention" -> arraySize(result, "deals");
-                case "list_tasks" -> arraySize(result, "tasks");
-                case "find_schedule_conflicts" -> arraySize(result, "conflicts");
-                default -> null;
-            };
-            return new ProgressResult(count, containsTruncation(result));
+            return new ProgressResult(
+                    resultCount(toolCall.getToolName(), result), containsTruncation(result));
         } catch (JacksonException exception) {
             return ProgressResult.EMPTY;
         }
+    }
+
+    /**
+     * Counts what one executed tool call produced, for the milestone's viewer-safe count.
+     *
+     * <p>Every write tool counts as one completed action. An unmapped tool reports no count rather
+     * than a guessed one; {@code AiChatProgressServiceTest} fails when a declared write tool is left
+     * unmapped here or in {@link #sourceForTool}.
+     *
+     * @param tool internal tool key
+     * @param result the executed call's stored result
+     * @return the bounded count, or {@code null} when the tool reports none
+     */
+    static Integer resultCount(String tool, JsonNode result) {
+        return switch (tool == null ? "" : tool) {
+            case "search_records", "get_records" -> arraySize(result, "records");
+            case "get_record", "create_activity", "create_task", "create_note",
+                    "add_tag", "change_deal_stage", "assign_owner",
+                    "relationship_metrics" -> 1;
+            case "list_activities", "list_scope_activities" ->
+                    arraySize(result, "activities");
+            case "deal_attention" -> arraySize(result, "deals");
+            case "list_tasks" -> arraySize(result, "tasks");
+            case "find_schedule_conflicts" -> arraySize(result, "conflicts");
+            default -> null;
+        };
     }
 
     private static Integer arraySize(JsonNode node, String field) {

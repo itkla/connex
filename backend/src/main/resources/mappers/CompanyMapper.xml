@@ -899,7 +899,9 @@
     FOR UPDATE
   </select>
 
-  <select id="getOwnedCompanyByIdForUpdate" resultType="Company">
+  <!-- flushCache is required: a caller may read this company through getCompanyById before the
+       lock and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+  <select id="getOwnedCompanyByIdForUpdate" resultType="Company" flushCache="true">
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
     WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
