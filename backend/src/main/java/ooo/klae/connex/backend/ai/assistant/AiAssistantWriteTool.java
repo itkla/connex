@@ -605,10 +605,15 @@ public interface AiAssistantWriteTool {
      * <p>A proposal prepared since resolutions were pinned carries the id {@link
      * AiAssistantWriteTool#resolve} and the member ids {@link AiAssistantWriteTool#principals}
      * returned when it was proposed; a proposal stored before then carries neither and is reviewed
-     * by name exactly as it always was. A tool that reviews a pinned proposal names only the pinned
-     * row, and reports the value unresolved when the request no longer resolves to it, because
-     * the approval refuses exactly that. Neither pin is handed to a viewer who may not read the
-     * details.
+     * by name exactly as it always was. A proposal is pinned exactly when {@code
+     * pinnedPrincipalIds} is non-null; {@code pinnedResolutionId} is {@code null} on a pinned
+     * proposal whose tool resolved no value, and never on its own marks a proposal as unpinned. A
+     * tool that reviews a pinned proposal names only the pinned rows, and reports the value
+     * unresolved whenever its approval would refuse: when the request no longer resolves to the
+     * pinned row, when a resolution the tool never makes is pinned, or when one it makes is not.
+     * The card still resolves the stored name, as the approval does, so a pinned row renamed
+     * since the proposal is unresolved rather than labelled by its id. Neither pin is handed to a
+     * viewer who may not read the details.
      *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
      * @param target the visible target, or {@code null} when the viewer may not read it

@@ -311,12 +311,15 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
 
     /**
      * The member the requested owner resolves to, and for a pinned proposal only while that is the
-     * pinned member.
+     * pinned member and no value is pinned, which is exactly when its approval can pass.
      */
     private static User reviewedOwner(Review review, String requested) {
         User matched = requestedOwner(requested, review.members());
         List<Integer> pinned = review.pinnedPrincipalIds();
-        return matched == null || pinned == null || pinned.equals(List.of(matched.getId()))
+        if (matched == null || pinned == null) {
+            return matched;
+        }
+        return review.pinnedResolutionId() == null && pinned.equals(List.of(matched.getId()))
                 ? matched
                 : null;
     }

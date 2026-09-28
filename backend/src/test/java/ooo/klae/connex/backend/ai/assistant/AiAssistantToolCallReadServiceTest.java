@@ -1472,6 +1472,50 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("Ada Owner", drifted.change().currentValue());
     }
 
+    /**
+     * A pinned proposal is recognised by its principals, not by its resolution: a stage proposal
+     * pinned with no stage, or with a member, and an owner proposal pinned with a value, are each
+     * refused by every approval, so each card is unresolved and arms nothing, even though its name
+     * still resolves exactly as an unpinned card would show it ready.
+     */
+    @Test
+    void aPinnedProposalWhoseApprovalCanOnlyRefuseIsUnresolved() {
+        stubVisibleDeal();
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
+        for (String pins : List.of(",\"principals\":[]",
+                ",\"resolution\":{\"field\":\"stage\",\"id\":10},\"principals\":[55]")) {
+            when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                    .thenReturn(List.of(pinned(
+                            toolCall(85, USER_ID, "change_deal_stage", "confirm", "proposed",
+                                    "deal", 41, 85, null),
+                            pins)));
+
+            AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+            assertEquals("Change the deal stage", card.requestSummary(), pins);
+            assertNull(card.change().proposedValue(), pins);
+            assertEquals("unresolved", card.change().state(), pins);
+        }
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(55, "Grace Hopper", "grace-hopper")));
+        Person owned = person(31, "Ada Lovelace");
+        owned.setOwnerId(USER_ID);
+        owned.setUpdatedAt("2026-08-12 11:00:00.000000");
+        stubPending(
+                pinned(ownerProposal(86, 31, "Grace Hopper"),
+                        ",\"resolution\":{\"field\":\"owner\",\"id\":55},"
+                                + "\"principals\":[55]"),
+                31, List.of(owned));
+
+        AiAssistantToolCallReadDto owner = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Assign an owner", owner.requestSummary());
+        assertNull(owner.change().proposedValue());
+        assertEquals("unresolved", owner.change().state());
+    }
+
     /** Pins only the framework writes that do not parse leave no card at all. */
     @Test
     void aProposalWhosePinsDoNotParseLeavesNoCard() {

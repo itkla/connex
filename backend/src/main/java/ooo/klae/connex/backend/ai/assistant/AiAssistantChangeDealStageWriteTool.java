@@ -27,8 +27,9 @@ import tools.jackson.databind.JsonNode;
  * locks the board rows that move toward that stage and refuses the approval if the deal was written
  * after the proposal. The stage id resolved when the proposal was prepared is pinned, so an
  * approval whose name now resolves to another stage — one stage renamed away and another renamed
- * in — is refused rather than moving the deal somewhere its card never named. The write is read back by stage id, while the stored {@code stage} label stays
- * the name resolved before the lock. A stage change records no inverse.
+ * in — is refused rather than moving the deal somewhere its card never named. The write is read
+ * back by stage id, while the stored {@code stage} label stays the name resolved before the lock.
+ * A stage change records no inverse.
  */
 @Component
 @RequiredArgsConstructor
@@ -195,13 +196,20 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
 
     /**
      * The stage the requested name resolves to in the deal's own pipeline, and for a pinned
-     * proposal only while that is the pinned stage.
+     * proposal only while that is the pinned stage and no member is pinned, which is exactly when
+     * its approval can pass. A proposal is pinned when it carries pinned principals; one pinned
+     * without a resolution is refused by every approval, so it names no stage.
      */
     private static Stage reviewedStage(Review review) {
         Stage matched = requestedStage(
                 review.requestText(STAGE_FIELD), review.target().pipelineId(), review.stages());
-        Integer pinned = review.pinnedResolutionId();
-        return matched == null || pinned == null || matched.getId() == pinned ? matched : null;
+        if (matched == null || review.pinnedPrincipalIds() == null) {
+            return matched;
+        }
+        return review.pinnedPrincipalIds().isEmpty()
+                && Integer.valueOf(matched.getId()).equals(review.pinnedResolutionId())
+                ? matched
+                : null;
     }
 
     private static Stage requestedStage(
