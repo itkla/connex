@@ -1267,6 +1267,35 @@ class AiAssistantWriteToolServiceTest {
     }
 
     /**
+     * The drifted member is compared with the pin before any authorization lock: member 22, who
+     * took the reviewed name and whose account deletion is reserved, is never locked or asked
+     * about, and the approver is told the proposal changed rather than that permission was lost.
+     */
+    @Test
+    void aDriftedPrincipalIsRefusedBeforeItsAuthorizationRowsAreLocked() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company", 52), 29);
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper"), member(11, "Ada Owner")));
+        doThrow(new ForbiddenException("User 22 is not a member of this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(
+                        TURN.workspaceId(),
+                        Map.of(TURN.userId(), Set.of(Permission.AI_USE), 22, Set.of()));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(anyInt(), anyInt(), anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+    }
+
+    /**
      * A proposal stored before pinning carries neither pin and is approved exactly as it always
      * was: its names are resolved again before the lock and whatever they resolve to is written.
      */

@@ -539,8 +539,11 @@ public class AiAssistantWriteToolService {
      *
      * <p>A caller without {@code AI_USE} therefore reaches this step before the locked 403. An
      * unknown or foreign tool call answers 404, a stored proposal that no longer parses answers its
-     * parse error, and an {@code assign_owner} proposal whose owner no longer resolves answers 404
-     * {@code Owner is unavailable or ambiguous}. Each concerns only the caller's own proposal.
+     * parse error, an {@code assign_owner} proposal whose owner no longer resolves answers 404
+     * {@code Owner is unavailable or ambiguous}, and a proposal whose principals now resolve to
+     * members other than the ones pinned when it was prepared answers 409 {@code Assistant proposal
+     * target changed}, so no member the approver never reviewed is ever locked or asked about. Each
+     * concerns only the caller's own proposal.
      */
     private PreliminaryPrincipals preliminaryPrincipals(
             Actor actor, int sessionId, int toolCallId) {
@@ -556,8 +559,10 @@ public class AiAssistantWriteToolService {
             return PreliminaryPrincipals.NONE;
         }
         StoredWrite write = readStored(toolCall);
-        return new PreliminaryPrincipals(write.tool().principals(
+        PreliminaryPrincipals principals = new PreliminaryPrincipals(write.tool().principals(
                 write.typedRequest(), memberDirectory(actor.workspaceId())));
+        requirePinnedPrincipals(write, principals);
+        return principals;
     }
 
     /** Refuses an immediate-tier tool that names a principal no approval resolved. */
@@ -574,8 +579,11 @@ public class AiAssistantWriteToolService {
      * <p>The principals were resolved again before any lock, by the same name the model wrote. A
      * member renamed or offboarded since the proposal can make that name resolve to someone the
      * approver never saw on the card, and the record would be handed to them, so a proposal pinned
-     * when it was prepared refuses every other resolution. A proposal stored before pinning is
-     * approved exactly as it always was.
+     * when it was prepared refuses every other resolution. It runs twice: before any lock, on the
+     * proposal read unlocked, so a drifted member's authorization rows are never locked and the
+     * approval answers this refusal rather than that member's own 403; and again on the proposal
+     * read under its row lock. A proposal stored before pinning is approved exactly as it always
+     * was.
      */
     private static void requirePinnedPrincipals(
             StoredWrite write, PreliminaryPrincipals principals) {
