@@ -455,6 +455,27 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * Counts provider-call audit rows that recorded invented placeholders in the response.
+     *
+     * <p>A response the parse boundary admitted is audited as parsed even when one of its calls
+     * named a placeholder the turn never issued, so a golden about that response has to read the
+     * recorded {@code demaskWarnings} to prove the server saw it.
+     *
+     * @param action stable audit action key
+     * @param parseOutcome the {@code parseOutcome} the metadata must carry
+     * @return how many rows match with a positive {@code demaskWarnings}, for this workspace
+     */
+    final int auditRowsWithDemaskWarnings(String action, String parseOutcome) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.parseOutcome')) = ?
+                  AND CAST(JSON_EXTRACT(changes, '$.demaskWarnings') AS SIGNED) > 0
+                """, Integer.class, workspace.getId(), action, parseOutcome);
+        return count == null ? 0 : count;
+    }
+
+    /**
      * Reads a session's current title straight from the row.
      *
      * @param sessionId the trajectory's session

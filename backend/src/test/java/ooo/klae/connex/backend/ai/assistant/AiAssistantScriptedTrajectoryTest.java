@@ -408,6 +408,47 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * A batch the endpoint declared, one of whose calls invented a placeholder, runs no call.
+     *
+     * <p>The declared twin of the golden above. On an endpoint that declared a batch the parse
+     * boundary admits this response within its bound — no envelope refusal fires — and sums the
+     * demask warnings of its calls, so the only thing standing between the invented placeholder
+     * and the execution of its sibling is the loop settling an admitted batch that carries a
+     * warning as malformed output before admission. The fixture scripts both what a laundering
+     * server would ask for (a repair) and what an executing one would reach (a step after two
+     * calls), each answered cleanly, so this golden passes only if the server does neither: one
+     * provider request, bounded to the declared batch, a failed turn, no durable tool call, no
+     * answer, and the response audited as the parsed batch it was with its warning recorded.
+     */
+    @Test
+    void aDeclaredBatchInventingAPlaceholderRunsNoCallAndEndsTheTurn() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_declared_batch_invented_placeholder",
+                "look this contact up two ways");
+
+        assertEquals("failed", trajectory.status());
+        assertEquals("malformed_output", trajectory.terminalReason());
+        assertEquals(1, journal().recorded().size(),
+                "an invented placeholder must end the turn, not earn a repair or a next step");
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                journal().recorded().getFirst().request().nativeTools().maxParallelCalls(),
+                "the response must have arrived within a declared batch bound");
+        assertEquals(List.of(), trajectory.toolNames(),
+                "no call of a batch carrying an invented placeholder may run or leave a row");
+        assertEquals(List.of(), trajectory.answers(),
+                "a turn ended for an invented placeholder delivers no answer");
+        assertEquals(0,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_multiple_calls"),
+                "a batch within its declared bound is not an over-bound refusal");
+        assertEquals(1, auditRowsWithDemaskWarnings("ai.llm.call", "parsed"),
+                "the admitted response must be audited with its invented placeholder counted");
+    }
+
+    /**
      * Golden 11: three reads the model emits together run in one step and are all cited.
      *
      * <p>On an endpoint that declared a batch, the loop asks for one and executes it: three durable

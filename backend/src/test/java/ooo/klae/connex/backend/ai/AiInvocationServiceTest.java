@@ -890,8 +890,9 @@ class AiInvocationServiceTest {
     /**
      * Every envelope refusal of a batch carries the batch's warnings, not only the guard's.
      *
-     * <p>A shared identifier and unparsable sibling arguments are repairable too, so each of them
-     * must also leave an invented placeholder elsewhere in the response turn-ending.
+     * <p>A shared identifier, unparsable sibling arguments and reasoning text beside the calls are
+     * repairable too, so each of them must also leave an invented placeholder elsewhere in the
+     * response turn-ending.
      */
     @Test
     void everyEnvelopeRefusalOfABatchCarriesItsInventedPlaceholders() {
@@ -914,6 +915,18 @@ class AiInvocationServiceTest {
                                 searchCall("call_2", "{{P99}}"))));
         assertEquals("native_arguments_not_object", unparsable.repairRule());
         assertEquals(1, unparsable.demaskWarnings());
+
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
+        AiNativeToolCompletion.Malformed<?> content = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                invokeNativeTools(
+                        4,
+                        "Looking both up now </think>",
+                        List.of(
+                                searchCall("call_1", "Bellweather"),
+                                searchCall("call_2", "{{P99}}"))));
+        assertEquals("native_call_content", content.repairRule());
+        assertEquals(1, content.demaskWarnings());
     }
 
     /**
@@ -969,6 +982,19 @@ class AiInvocationServiceTest {
      */
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
             int maxParallelCalls, List<AiToolCall> calls) {
+        return invokeNativeTools(maxParallelCalls, "", calls);
+    }
+
+    /**
+     * Runs one native completion whose response carries the given text beside its calls.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param text the assistant text the provider returns with the calls
+     * @param calls the calls the provider returns
+     * @return the parsed completion
+     */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
+            int maxParallelCalls, String text, List<AiToolCall> calls) {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
@@ -976,7 +1002,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         providerReturns(new AiCompletionResult(
-                "",
+                text,
                 12,
                 7,
                 "tool_calls",
