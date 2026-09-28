@@ -62,6 +62,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
@@ -210,6 +211,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
                 new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                 new AiAssistantAddTagWriteTool(
+                        tagService, personService, companyService, dealService),
+                new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
@@ -504,6 +507,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                         new AiAssistantAddTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantRemoveTagWriteTool(
+                                tagService, personService, companyService, dealService),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -512,6 +517,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(CompanyMapper.class),
                 dealMapper,
                 pipelineMapper,
+                mock(TagMapper.class),
                 mock(ActivityMapper.class),
                 taskMapper,
                 mock(NoteMapper.class),
@@ -921,6 +927,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                         new AiAssistantAddTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantRemoveTagWriteTool(
+                                tagService, personService, companyService, dealService),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -929,6 +937,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(CompanyMapper.class),
                 dealMapper,
                 mock(PipelineMapper.class),
+                mock(TagMapper.class),
                 activityMapper,
                 mock(TaskMapper.class),
                 noteMapper,
@@ -1160,6 +1169,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                         new AiAssistantAddTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantRemoveTagWriteTool(
+                                tagService, personService, companyService, dealService),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1168,6 +1179,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 companyMapper,
                 dealMapper,
                 mock(PipelineMapper.class),
+                mock(TagMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1444,6 +1456,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                         new AiAssistantAddTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantRemoveTagWriteTool(
+                                tagService, personService, companyService, dealService),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1452,6 +1466,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 companyMapper,
                 dealMapper,
                 pipelineMapper,
+                mock(TagMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1592,6 +1607,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                         new AiAssistantAddTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantRemoveTagWriteTool(
+                                tagService, personService, companyService, dealService),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1600,6 +1617,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 companyMapper,
                 mock(DealMapper.class),
                 pipelineMapper,
+                mock(TagMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),

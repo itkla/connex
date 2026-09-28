@@ -65,7 +65,7 @@ public class AiAssistantToolCatalog {
         ANALYTICS("analytics", "Workspace pipeline, activity, and warmth metric aggregates"),
         SCHEDULE("schedule", "Meeting conflict and availability reads for one record"),
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
-        WRITE_CONTENT("write_content", "Write notes and add tags to one record"),
+        WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
         WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments");
 
         private final String key;
@@ -510,6 +510,9 @@ public class AiAssistantToolCatalog {
         add(tools, auto(Toolset.WRITE_CONTENT, "add_tag",
                 handle(),
                 string("tag", true, 1, 64, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CONTENT, "remove_tag",
+                handle(),
+                string("tag", true, 1, 64, Set.of())));
         add(tools, confirm(Toolset.WRITE_PIPELINE, "change_deal_stage",
                 handle(),
                 string("stage", true, 1, 128, Set.of())));
@@ -558,6 +561,7 @@ public class AiAssistantToolCatalog {
             case "create_task" -> "Create an immediately executed, undoable task for one record.";
             case "create_note" -> "Create an immediately executed, undoable note for one record.";
             case "add_tag" -> "Add a tag immediately to one record.";
+            case "remove_tag" -> "Propose a tag removal that requires human confirmation.";
             case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
             default -> throw new IllegalStateException("Assistant native tool description is missing");

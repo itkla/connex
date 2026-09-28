@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,14 +33,23 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "change_deal_stage", "assign_owner"),
+                        "remove_tag", "change_deal_stage", "assign_owner"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(16, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(17, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
         assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("create_activity"));
         assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("add_tag"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("remove_tag"));
+        assertEquals(
+                Set.of("create_activity", "create_task", "create_note", "add_tag"),
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                        .filter(spec -> spec.tier() == AiAssistantToolCatalog.ToolTier.AUTO)
+                        .map(AiAssistantToolCatalog.ToolSpec::name)
+                        .collect(Collectors.toSet()),
+                "docs/PRODUCT.md enumerates the only immediate assistant writes; every other"
+                        + " write tool is confirm-tier");
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("change_deal_stage"));
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("assign_owner"));
         assertFalse(catalog.isExecutable("get_deal_brief"));
@@ -98,7 +108,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(16, definitions.size());
+        assertEquals(17, definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -141,7 +151,8 @@ class AiAssistantToolCatalogTest {
         assertEquals(List.of("find_schedule_conflicts"), byToolset.get(Toolset.SCHEDULE));
         assertEquals(List.of("create_activity", "create_task"),
                 byToolset.get(Toolset.WRITE_ACTIVITY));
-        assertEquals(List.of("create_note", "add_tag"), byToolset.get(Toolset.WRITE_CONTENT));
+        assertEquals(List.of("create_note", "add_tag", "remove_tag"),
+                byToolset.get(Toolset.WRITE_CONTENT));
         assertEquals(List.of("change_deal_stage", "assign_owner"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
         assertEquals(

@@ -165,13 +165,14 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     /**
      * @param tools the task and stage tools under test, possibly overridden
-     * @return the framework over those tools plus the activity, note, tag and owner tools
+     * @return the framework over those tools plus the activity, note, both tag and the owner tools
      */
     AiAssistantWriteToolService service(List<AiAssistantWriteTool> tools) {
         List<AiAssistantWriteTool> declared = new ArrayList<>(tools);
         declared.add(createActivityTool());
         declared.add(createNoteTool());
         declared.add(addTagTool());
+        declared.add(removeTagTool());
         declared.add(assignOwnerTool());
         return framework(declared);
     }
@@ -234,6 +235,11 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     AiAssistantAddTagWriteTool addTagTool() {
         return new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService);
+    }
+
+    AiAssistantRemoveTagWriteTool removeTagTool() {
+        return new AiAssistantRemoveTagWriteTool(
                 tagService, personService, companyService, dealService);
     }
 

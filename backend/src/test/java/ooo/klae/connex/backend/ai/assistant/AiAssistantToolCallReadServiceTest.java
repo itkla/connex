@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -31,7 +32,9 @@ import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -42,6 +45,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
@@ -69,6 +73,7 @@ class AiAssistantToolCallReadServiceTest {
     private PersonMapper personMapper;
     private DealMapper dealMapper;
     private PipelineMapper pipelineMapper;
+    private TagMapper tagMapper;
     private ActivityMapper activityMapper;
     private TaskMapper taskMapper;
     private NoteMapper noteMapper;
@@ -83,6 +88,7 @@ class AiAssistantToolCallReadServiceTest {
         personMapper = mock(PersonMapper.class);
         dealMapper = mock(DealMapper.class);
         pipelineMapper = mock(PipelineMapper.class);
+        tagMapper = mock(TagMapper.class);
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
         noteMapper = mock(NoteMapper.class);
@@ -116,6 +122,7 @@ class AiAssistantToolCallReadServiceTest {
                         JsonMapper.builder().build()),
                 stageTool(),
                 tagTool(),
+                removeTagTool(),
                 ownerTool()));
     }
 
@@ -130,6 +137,7 @@ class AiAssistantToolCallReadServiceTest {
                 mock(CompanyMapper.class),
                 dealMapper,
                 pipelineMapper,
+                tagMapper,
                 activityMapper,
                 taskMapper,
                 noteMapper,
@@ -152,6 +160,14 @@ class AiAssistantToolCallReadServiceTest {
 
     private static AiAssistantAddTagWriteTool tagTool() {
         return new AiAssistantAddTagWriteTool(
+                mock(TagService.class),
+                mock(PersonService.class),
+                mock(CompanyService.class),
+                mock(DealService.class));
+    }
+
+    private static AiAssistantRemoveTagWriteTool removeTagTool() {
+        return new AiAssistantRemoveTagWriteTool(
                 mock(TagService.class),
                 mock(PersonService.class),
                 mock(CompanyService.class),
@@ -1257,10 +1273,13 @@ class AiAssistantToolCallReadServiceTest {
             assertNull(review.outcome());
             assertTrue(review.members().isEmpty());
             assertTrue(review.stages().isEmpty());
+            assertTrue(review.tags().isEmpty());
+            assertTrue(review.targetTags().isEmpty());
             assertNull(review.pinnedResolutionId());
             assertNull(review.pinnedPrincipalIds());
         }
         verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
+        verifyNoInteractions(tagMapper);
     }
 
     @Test
@@ -1288,6 +1307,7 @@ class AiAssistantToolCallReadServiceTest {
                         return String.valueOf(review.outcome());
                     }
                 },
+                removeTagTool(),
                 ownerTool()));
         stubVisibleDeal();
         String flagged = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
@@ -1322,6 +1342,7 @@ class AiAssistantToolCallReadServiceTest {
                         JsonMapper.builder().build()),
                 stageTool(),
                 tagTool(),
+                removeTagTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1438,6 +1459,58 @@ class AiAssistantToolCallReadServiceTest {
         assertNull(drifted.change().proposedValue());
         assertEquals("unresolved", drifted.change().state());
         assertEquals("Won", drifted.change().currentValue());
+    }
+
+    /**
+     * A tag removal card reviews its pinned tag against the tags its record holds, read for the
+     * whole page in one batch: a held tag is removed, an absent one would change nothing, and a
+     * tag deleted and re-created under the reviewed name is unresolved, exactly as its approval
+     * would refuse, while the record's own tag under that name is still shown as what it holds.
+     */
+    @Test
+    void aTagRemovalCardReviewsItsPinnedTagAgainstTheTagsItsRecordHolds() {
+        AiChatToolCall held = pinned(
+                toolCall(83, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 83, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":9},\"principals\":[]");
+        AiChatToolCall sameRecord = pinned(
+                toolCall(84, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 84, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":9},\"principals\":[]");
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(held, sameRecord));
+        when(tagMapper.getAllTags(WORKSPACE_ID))
+                .thenReturn(List.of(tag(8, "Prospect"), tag(9, "Priority")));
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(new RecordTag(41, 9, "Priority")));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        assertEquals(2, cards.size());
+        AiAssistantToolCallReadDto ready = cards.getFirst();
+        assertEquals("Remove tag: Priority", ready.requestSummary());
+        assertEquals("tag", ready.change().field());
+        assertEquals("Priority", ready.change().currentValue());
+        assertNull(ready.change().proposedValue());
+        assertEquals("ready", ready.change().state());
+        verify(tagMapper).getAllTags(WORKSPACE_ID);
+        verify(tagMapper).getTagsForRecords(WORKSPACE_ID, "deal", List.of(41));
+
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(new RecordTag(41, 8, "Prospect")));
+        AiAssistantToolCallReadDto unchanged = service.list(SESSION_ID, false).getFirst();
+        assertEquals("Remove tag: Priority", unchanged.requestSummary());
+        assertNull(unchanged.change().currentValue());
+        assertEquals("unchanged", unchanged.change().state());
+
+        when(tagMapper.getAllTags(WORKSPACE_ID))
+                .thenReturn(List.of(tag(8, "Prospect"), tag(12, "Priority")));
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(new RecordTag(41, 12, "Priority")));
+        AiAssistantToolCallReadDto drifted = service.list(SESSION_ID, false).getFirst();
+        assertEquals("Remove a tag", drifted.requestSummary());
+        assertEquals("Priority", drifted.change().currentValue());
+        assertNull(drifted.change().proposedValue());
+        assertEquals("unresolved", drifted.change().state());
     }
 
     /**
@@ -1568,6 +1641,7 @@ class AiAssistantToolCallReadServiceTest {
                         JsonMapper.builder().build()),
                 stageTool(),
                 tagTool(),
+                removeTagTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1599,6 +1673,7 @@ class AiAssistantToolCallReadServiceTest {
                         JsonMapper.builder().build()),
                 stageTool(),
                 tagTool(),
+                removeTagTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1644,6 +1719,7 @@ class AiAssistantToolCallReadServiceTest {
                     }
                 },
                 tagTool(),
+                removeTagTool(),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -1676,6 +1752,7 @@ class AiAssistantToolCallReadServiceTest {
                     }
                 },
                 tagTool(),
+                removeTagTool(),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -1724,7 +1801,8 @@ class AiAssistantToolCallReadServiceTest {
                 card.setArgumentsJson("{\"tool\":\"" + tool.name() + "\",\"tier\":\"" + tier
                         + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"deal\",\"id\":41},"
                         + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
-                        + "\"description\":\"secret request\",\"owner\":\"secret request\"},"
+                        + "\"description\":\"secret request\",\"owner\":\"secret request\","
+                        + "\"tag\":\"secret request\"},"
                         + "\"resolution\":{\"field\":\"stage\",\"id\":9},\"principals\":[55]}");
                 cards.add(card);
                 id++;
@@ -1855,6 +1933,13 @@ class AiAssistantToolCallReadServiceTest {
      * @param pins the pin siblings a proposal prepared now carries after its request
      * @return the same proposal carrying those pins
      */
+    private static Tag tag(int id, String name) {
+        Tag tag = new Tag();
+        tag.setId(id);
+        tag.setName(name);
+        return tag;
+    }
+
     private static AiChatToolCall pinned(AiChatToolCall toolCall, String pins) {
         String stored = toolCall.getArgumentsJson();
         toolCall.setArgumentsJson(stored.substring(0, stored.length() - 1) + pins + "}");
@@ -1901,6 +1986,7 @@ class AiAssistantToolCallReadServiceTest {
         String request = switch (tool) {
             case "assign_owner" -> "{\"handle\":\"r1\",\"owner\":\" Ada Owner \"}";
             case "change_deal_stage" -> "{\"handle\":\"r1\",\"stage\":\"Won\"}";
+            case "remove_tag" -> "{\"handle\":\"r1\",\"tag\":\"priority\"}";
             default -> "{\"handle\":\"r1\"}";
         };
         toolCall.setArgumentsJson("{\"tool\":\"" + tool + "\",\"tier\":\"" + tier

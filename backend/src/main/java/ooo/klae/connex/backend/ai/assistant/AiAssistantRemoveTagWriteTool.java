@@ -1,0 +1,263 @@
+package ooo.klae.connex.backend.ai.assistant;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.springframework.stereotype.Component;
+
+import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.RemoveTag;
+import ooo.klae.connex.backend.beans.RecordTag;
+import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.TagService;
+import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * Removes one existing workspace tag from a person, company or deal, only after the member
+ * approves it.
+ *
+ * <p>Removing a tag changes an existing record, and {@code docs/PRODUCT.md} enumerates only the
+ * immediate writes an assistant may make; a removal is not one of them, so this tool is
+ * confirm-tier. The tag is resolved by exactly one case-insensitive name match over the
+ * workspace's tags, and the tag id it resolved to when the proposal was prepared is pinned: a tag
+ * deleted and re-created under the same name between the proposal and the approval is another
+ * tag, and the approval is refused rather than removing an association the member never
+ * reviewed. The framework holds the target {@code FOR UPDATE}, refuses the approval if the record
+ * was written after the proposal, and runs the owner-scope gate before this tool removes the
+ * association through the record's own service, which records the audit row.
+ *
+ * <p>The read-back is {@link ReadBack#structural structural} and verifies nothing: the record
+ * services report only whether they removed the association, never which tag they removed, and
+ * the permitted-method allowlist grants this tool no read of the association, so there is no
+ * identifier to compare. It cannot diverge and reads nothing back from the database.
+ *
+ * <p>The write records no inverse. An association this call found already absent was never this
+ * call's to restore, and restoring one it removed would re-add a label the member approved
+ * removing, so the card never offers undo.
+ */
+@Component
+@RequiredArgsConstructor
+public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
+    private static final String NAME = "remove_tag";
+    private static final String TAG_FIELD = "tag";
+    private static final String CHANGED = "changed";
+    private static final String REQUEST_COMPLETED = "Request completed";
+    private static final Set<String> TARGET_KINDS = Set.of("person", "company", "deal");
+
+    private final TagService tagService;
+    private final PersonService personService;
+    private final CompanyService companyService;
+    private final DealService dealService;
+
+    @Override
+    public String name() {
+        return NAME;
+    }
+
+    @Override
+    public ToolTier tier() {
+        return ToolTier.CONFIRM;
+    }
+
+    @Override
+    public Class<? extends AiAssistantWriteToolRequest> requestType() {
+        return RemoveTag.class;
+    }
+
+    @Override
+    public Set<String> acceptedTargetKinds() {
+        return TARGET_KINDS;
+    }
+
+    @Override
+    public Set<String> declaredWritableFields() {
+        return Set.of("person.tags", "company.tags", "deal.tags");
+    }
+
+    @Override
+    public Set<Permission> requiredPermissions(String targetKind) {
+        return switch (targetKind) {
+            case "person" -> Set.of(Permission.PERSON_UPDATE);
+            case "company" -> Set.of(Permission.COMPANY_UPDATE);
+            case "deal" -> Set.of(Permission.DEAL_UPDATE);
+            default -> throw new BadRequestException("Unsupported assistant record kind");
+        };
+    }
+
+    @Override
+    public Lock lock(String targetKind) {
+        return new Lock(false, TargetLock.RECORD_UPDATE);
+    }
+
+    @Override
+    public List<PrincipalRequest> principals(
+            AiAssistantWriteToolRequest request, MemberDirectory directory) {
+        return List.of();
+    }
+
+    /**
+     * The one workspace tag the requested name matches case-insensitively.
+     *
+     * <p>A name matching no tag, or more than one, refuses: when the proposal is prepared the
+     * framework turns that into a recoverable {@code unresolved_reference}, so no card is ever
+     * shown for a tag its approval could only refuse.
+     */
+    @Override
+    public Resolution resolve(Target target, AiAssistantWriteToolRequest request) {
+        if (!(request instanceof RemoveTag tagRequest)) {
+            throw new IllegalStateException("Assistant tool request is invalid");
+        }
+        Tag tag = requestedTag(tagRequest.tag(), tagService.getAllTags());
+        if (tag == null) {
+            throw new ResourceNotFoundException("Tag is unavailable or ambiguous");
+        }
+        return new Resolution(TAG_FIELD, tag.getId(), tag.getName());
+    }
+
+    @Override
+    public Outcome apply(Execution execution) {
+        Resolution resolution = execution.resolution();
+        if (resolution == null) {
+            throw new ConflictException("Prepared tag removal is unavailable");
+        }
+        Target target = execution.row().target();
+        boolean changed = switch (target.kind()) {
+            case "person" -> personService.removeTag(target.id(), resolution.id());
+            case "company" -> companyService.removeTag(target.id(), resolution.id());
+            case "deal" -> dealService.removeTag(target.id(), resolution.id());
+            default -> throw new BadRequestException("Unsupported tag target");
+        };
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("status", "executed");
+        outcome.put("recordType", target.kind());
+        outcome.put(TAG_FIELD, resolution.label());
+        outcome.put(CHANGED, changed);
+        return new Outcome(outcome, null, ReadBack.structural("tagId", resolution.id()));
+    }
+
+    @Override
+    public boolean inverseAvailable() {
+        return false;
+    }
+
+    @Override
+    public Set<String> sharedOutcomeFlags() {
+        return Set.of(CHANGED);
+    }
+
+    /** A card names the tag it proposes to remove, so a stored row without one is never projected. */
+    @Override
+    public Set<String> requiredRequestText() {
+        return Set.of(TAG_FIELD);
+    }
+
+    @Override
+    public Set<ReviewInput> reviewInputs() {
+        return Set.of(ReviewInput.TAGS);
+    }
+
+    /**
+     * The pinned tag while the record holds it, and nothing after the removal.
+     *
+     * <p>A record that no longer holds the tag would be left exactly as it is, so the change is
+     * unchanged. A requested name that no longer resolves to the pinned tag — the tag was deleted,
+     * renamed, or deleted and re-created under the same name — is unresolved, which is exactly
+     * when the approval refuses; the record's own tag under that name, if it holds one, is shown
+     * as the current value so the card never claims the record holds nothing.
+     */
+    @Override
+    public Diff diff(Review review) {
+        Tag reviewed = reviewedTag(review);
+        if (reviewed == null) {
+            return new Diff(
+                    TAG_FIELD, heldName(review), false, null, DiffState.UNRESOLVED);
+        }
+        boolean held = review.targetTags().stream()
+                .anyMatch(tag -> tag.tagId() == reviewed.getId());
+        return held
+                ? new Diff(TAG_FIELD, reviewed.getName(), false, null, DiffState.CHANGED)
+                : new Diff(TAG_FIELD, null, false, null, DiffState.UNCHANGED);
+    }
+
+    @Override
+    public String requestSummary(Review review) {
+        if (review.detailsReadable()) {
+            Tag reviewed = reviewedTag(review);
+            if (reviewed != null && reviewed.getName() != null) {
+                return "Remove tag: " + reviewed.getName();
+            }
+        }
+        return "Remove a tag";
+    }
+
+    @Override
+    public String outcomeSummary(Review review) {
+        JsonNode changed = review.outcome() == null ? null : review.outcome().get(CHANGED);
+        if (changed == null || !changed.isBoolean()) {
+            return REQUEST_COMPLETED;
+        }
+        return changed.asBoolean() ? "Tag removed" : "Tag was not on the record";
+    }
+
+    @Override
+    public Map<String, Object> modelOutcome(JsonNode storedOutcome) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        AiAssistantWriteTool.copyText(storedOutcome, result, "recordType");
+        AiAssistantWriteTool.copyText(storedOutcome, result, TAG_FIELD);
+        result.put(CHANGED, storedOutcome.path(CHANGED).asBoolean());
+        return result;
+    }
+
+    @Override
+    public List<String> memberOutcomeFields() {
+        return List.of(TAG_FIELD);
+    }
+
+    /**
+     * The tag the requested name resolves to, and for a pinned proposal only while that is the
+     * pinned tag and no member is pinned, which is exactly when its approval can pass.
+     */
+    private static Tag reviewedTag(Review review) {
+        Tag matched = requestedTag(review.requestText(TAG_FIELD), review.tags());
+        if (matched == null || review.pinnedPrincipalIds() == null) {
+            return matched;
+        }
+        return review.pinnedPrincipalIds().isEmpty()
+                && Integer.valueOf(matched.getId()).equals(review.pinnedResolutionId())
+                ? matched
+                : null;
+    }
+
+    private static Tag requestedTag(String requested, List<Tag> tags) {
+        if (requested == null) {
+            return null;
+        }
+        List<Tag> matches = tags.stream()
+                .filter(tag -> tag.getName() != null
+                        && tag.getName().equalsIgnoreCase(requested.trim()))
+                .toList();
+        return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    private static String heldName(Review review) {
+        String requested = review.requestText(TAG_FIELD);
+        if (requested == null) {
+            return null;
+        }
+        return review.targetTags().stream()
+                .map(RecordTag::name)
+                .filter(name -> name != null && name.equalsIgnoreCase(requested.trim()))
+                .findFirst()
+                .orElse(null);
+    }
+}

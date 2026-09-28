@@ -71,6 +71,7 @@ import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -150,6 +151,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
                 new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
                 addTagTool,
+                new AiAssistantRemoveTagWriteTool(
+                        tagService, personService, companyService, dealService),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -1296,6 +1299,83 @@ class AiAssistantWriteToolServiceTest {
     }
 
     /**
+     * A tag removal pins the one tag its name resolved to, and its approval removes exactly that
+     * tag through the record's own service, reporting whether anything was removed and recording
+     * no undo and no divergence.
+     */
+    @Test
+    void aTagRemovalPinsItsTagAndItsApprovalRemovesThatTagThroughTheRecordService()
+            throws Exception {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(8, "Prospect"), tag(9, "Priority")));
+        AiAssistantPreparedWrite write = prepared(
+                "remove_tag", "{\"handle\":\"r1\",\"tag\":\" priority\"}", "person", 31);
+        assertEquals(
+                "{\"tool\":\"remove_tag\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"person\",\"id\":31},"
+                        + "\"request\":{\"handle\":\"r1\",\"tag\":\" priority\"},"
+                        + "\"resolution\":{\"field\":\"tag\",\"id\":9},\"principals\":[]}",
+                write.argumentsJson());
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
+        Person unchanged = person(31);
+        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.getPersonById(31)).thenReturn(unchanged);
+        when(personService.removeTag(31, 9)).thenReturn(true);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(personService).removeTag(31, 9);
+        verify(personService, never()).removeTagIfUnchanged(anyInt(), anyInt());
+        JsonNode result = objectMapper.readTree(capturedResultJson());
+        assertEquals(
+                "{\"status\":\"executed\",\"recordType\":\"person\",\"tag\":\"Priority\","
+                        + "\"changed\":true}",
+                result.get("outcome").toString());
+        assertFalse(result.has("undo"), "a tag removal records no inverse");
+        assertFalse(result.has("verification"), "a structural read-back never diverges");
+    }
+
+    /**
+     * The reviewed tag is deleted and another is created under the same name after the proposal:
+     * the name now resolves to a tag the card never named, so the approval is refused before the
+     * record is locked, and no association is removed.
+     */
+    @Test
+    void aTagRemovalWhoseTagWasRecreatedUnderTheSameNameIsRefusedBeforeAnyLock()
+            throws Exception {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
+        stored(prepared(
+                "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31), 29);
+        when(tagService.getAllTags()).thenReturn(List.of(tag(10, "Priority")));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /** A tag name that matches no workspace tag is refused recoverably before anything is stored. */
+    @Test
+    void aTagRemovalNamingNoWorkspaceTagIsRefusedRecoverably() {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
+
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Dormant\"}",
+                        "company", 52));
+
+        assertTrue(refusal.recoverable());
+        assertEquals("unresolved_reference", refusal.detailReason());
+        verify(companyService, never()).removeTag(anyInt(), anyInt());
+    }
+
+    /**
      * A proposal stored before pinning carries neither pin and is approved exactly as it always
      * was: its names are resolved again before the lock and whatever they resolve to is written.
      */
@@ -1474,6 +1554,13 @@ class AiAssistantWriteToolServiceTest {
         stage.setName(name);
         stage.setPipeline(pipeline);
         return stage;
+    }
+
+    private static Tag tag(int id, String name) {
+        Tag tag = new Tag();
+        tag.setId(id);
+        tag.setName(name);
+        return tag;
     }
 
     private static User member(int id, String displayName) {

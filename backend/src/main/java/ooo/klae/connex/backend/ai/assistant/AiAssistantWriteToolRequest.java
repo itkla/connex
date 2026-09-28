@@ -58,6 +58,13 @@ public sealed interface AiAssistantWriteToolRequest {
             implements AiAssistantWriteToolRequest {
     }
 
+    /** Typed existing-tag removal proposal. */
+    record RemoveTag(
+            @NotBlank @Pattern(regexp = HANDLE) String handle,
+            @NotBlank @Size(max = 64) String tag)
+            implements AiAssistantWriteToolRequest {
+    }
+
     /** Typed deal-stage proposal. */
     record ChangeDealStage(
             @NotBlank @Pattern(regexp = HANDLE) String handle,

@@ -53,12 +53,13 @@ class AiAssistantWriteToolRegistryTest {
      * <p>Such a viewer is a shared participant, or a requester who has since lost sight of the
      * target, and {@code detailsReadable} exists to withhold record state from them; a shared flag
      * passes that gate. So a flag may say only how the write went — {@code add_tag}'s
-     * {@code changed}, whether this call created the association — and never a property of the
-     * record, such as whether it is archived or restricted. Adding a flag, or a tool with one, is a
-     * reviewed edit here.
+     * {@code changed}, whether this call created the association, and {@code remove_tag}'s,
+     * whether this call removed it — and never a property of the record, such as whether it is
+     * archived or restricted. Adding a flag, or a tool with one, is a reviewed edit here.
      */
-    private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS =
-            Map.of("add_tag", Set.of("changed"));
+    private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS = Map.of(
+            "add_tag", Set.of("changed"),
+            "remove_tag", Set.of("changed"));
 
     /**
      * The reviewed request flags each tool may share with a viewer who may not read its details.
@@ -85,12 +86,13 @@ class AiAssistantWriteToolRegistryTest {
     private static final Set<String> UNSCREENED_REQUEST_SUMMARIES = Set.of("assign_owner");
 
     /**
-     * The reviewed request text each tool's card requires before it projects a stored row: the two
+     * The reviewed request text each tool's card requires before it projects a stored row: the
      * confirm-tier tools name the value they propose, and a stored row without it is never shown.
      */
     private static final Map<String, Set<String>> REQUIRED_REQUEST_TEXT = Map.of(
             "assign_owner", Set.of("owner"),
-            "change_deal_stage", Set.of("stage"));
+            "change_deal_stage", Set.of("stage"),
+            "remove_tag", Set.of("tag"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -100,12 +102,13 @@ class AiAssistantWriteToolRegistryTest {
                 tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("assign_owner", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
+                tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "change_deal_stage", "assign_owner"),
+                        "remove_tag", "change_deal_stage", "assign_owner"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -121,9 +124,10 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null)));
 
-        assertEquals(6, registry.tools().size());
+        assertEquals(7, registry.tools().size());
     }
 
     @Test
@@ -199,6 +203,7 @@ class AiAssistantWriteToolRegistryTest {
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
+                        tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
         assertRefused(
                 "change_deal_stage is declared in the catalog but has no write-tool bean",
@@ -206,7 +211,16 @@ class AiAssistantWriteToolRegistryTest {
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
-                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal"))));
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
+                        tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal"))));
+        assertRefused(
+                "remove_tag is declared in the catalog but has no write-tool bean",
+                List.of(
+                        tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
+                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
         assertRefused(
                 "add_tag is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -474,6 +488,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
                     public Map<String, SharedRequestFlag> sharedRequestFlags() {
@@ -491,6 +506,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
                     public Set<String> requiredRequestText() {
