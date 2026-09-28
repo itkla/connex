@@ -304,6 +304,10 @@ class ArchiveVisibilityArchTest {
             Arguments.of("SELECT * FROM person WHERE archived_at IS NULL", Set.of()),
             Arguments.of("SELECT c.* FROM company c WHERE c.archived_at IS NULL", Set.of()),
             Arguments.of("SELECT COUNT(*) FROM person p", Set.of()),
+            Arguments.of("SELECT EXTRACT(YEAR FROM p.created_at) AS record_year, p.* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT EXTRACT(YEAR FROM p.created_at) AS record_year, p.* FROM person p"
+                + " WHERE p.workspace_id = #{workspaceId} AND (p.archived_at IS NULL)", Set.of()),
             Arguments.of("SELECT p.id * 2 FROM person p", Set.of()),
             Arguments.of("SELECT (p.id) * (2) FROM person p", Set.of()),
             Arguments.of("SELECT 'SELECT * FROM person p' FROM deal d", Set.of()),
@@ -311,6 +315,57 @@ class ArchiveVisibilityArchTest {
             Arguments.of("SELECT d.* FROM deal d JOIN person p ON p.id = d.person_id", Set.of()),
             Arguments.of("SELECT * FROM deal d WHERE EXISTS (SELECT p.id FROM person p)", Set.of()),
             Arguments.of("SELECT d.id FROM deal d WHERE EXISTS (SELECT * FROM person p)", Set.of("p")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("wildcardProjectionScopes")
+    void wildcardPredicatesCannotCoverAnotherSelectScope(String sql, Set<String> expectedAliases) {
+        assertEquals(expectedAliases, unguardedProjections(new Statement("fixture", "scopes", sql)));
+    }
+
+    private static Stream<Arguments> wildcardProjectionScopes() {
+        return Stream.of(
+            Arguments.of("""
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+                UNION ALL
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}
+                UNION ALL
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+                UNION ALL
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId} AND (p.archived_at IS NULL)
+                """, Set.of()),
+            Arguments.of("""
+                SELECT p.* FROM person p
+                WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+                  AND EXISTS (SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId})
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}
+                  AND EXISTS (SELECT p.* FROM person p
+                              WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL)
+                """, Set.of("p")),
+            Arguments.of("""
+                SELECT p.* FROM person p
+                WHERE p.workspace_id = #{workspaceId} AND (p.archived_at IS NULL
+                  AND EXISTS (SELECT p.* FROM person p
+                              WHERE p.workspace_id = #{workspaceId} AND (p.archived_at IS NULL)))
+                """, Set.of()),
+            Arguments.of("""
+                SELECT * FROM person WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+                UNION ALL
+                SELECT * FROM person WHERE workspace_id = #{workspaceId}
+                """, Set.of("person")),
+            Arguments.of("""
+                SELECT * FROM person WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+                UNION ALL
+                SELECT * FROM person WHERE workspace_id = #{workspaceId} AND (archived_at IS NULL)
+                """, Set.of()));
     }
 
     private String reasonFailure(StatementExemption exemption, Statement statement) {
@@ -379,25 +434,30 @@ class ArchiveVisibilityArchTest {
     /** Record aliases the statement reads identifying columns through without the archive predicate. */
     private Set<String> unguardedProjections(Statement statement) {
         Set<String> unguarded = new LinkedHashSet<>();
+        for (WildcardRead read : wildcardReads(statement.sql())) {
+            if (!hasArchivePredicate(read.scope(), read.alias(), read.table())) {
+                unguarded.add(read.alias());
+            }
+        }
         for (Map.Entry<String, String> alias : recordAliases(statement.sql()).entrySet()) {
             if (identifyingColumnsRead(statement, alias.getKey()).isEmpty()) {
                 continue;
             }
-            if (!hasArchivePredicate(statement, alias.getKey(), alias.getValue())) {
+            if (!hasArchivePredicate(statement.sql(), alias.getKey(), alias.getValue())) {
                 unguarded.add(alias.getKey());
             }
         }
         return unguarded;
     }
 
-    private boolean hasArchivePredicate(Statement statement, String alias, String table) {
+    private boolean hasArchivePredicate(String sql, String alias, String table) {
         if (Pattern.compile("\\b" + Pattern.quote(alias) + "\\.archived_at\\s+IS\\s+(?:NOT\\s+)?NULL",
-                Pattern.CASE_INSENSITIVE).matcher(statement.sql()).find()) {
+                Pattern.CASE_INSENSITIVE).matcher(sql).find()) {
             return true;
         }
         return alias.equals(table)
             && Pattern.compile("(?<![\\w.])archived_at\\s+IS\\s+(?:NOT\\s+)?NULL",
-                Pattern.CASE_INSENSITIVE).matcher(statement.sql()).find();
+                Pattern.CASE_INSENSITIVE).matcher(sql).find();
     }
 
     /** Identifying columns of the aliased record table that the statement projects or filters on. */
@@ -411,7 +471,7 @@ class ArchiveVisibilityArchTest {
             ? PERSON_IDENTIFYING_COLUMNS : COMPANY_IDENTIFYING_COLUMNS;
         boolean unaliasedAndAlone = alias.equals(table) && aliases.size() == 1;
         Set<String> read = new LinkedHashSet<>();
-        if (wildcardAliases(statement.sql()).contains(alias)) {
+        if (wildcardReads(statement.sql()).stream().anyMatch(wildcard -> wildcard.alias().equals(alias))) {
             read.addAll(columns);
         }
         for (String column : columns) {
@@ -427,29 +487,29 @@ class ArchiveVisibilityArchTest {
         return read;
     }
 
-    private Set<String> wildcardAliases(String sql) {
-        Set<String> reads = new LinkedHashSet<>();
+    private List<WildcardRead> wildcardReads(String sql) {
+        List<WildcardRead> reads = new ArrayList<>();
         Matcher selects = Pattern.compile("'(?:''|[^'])*'|\\bSELECT\\b", Pattern.CASE_INSENSITIVE).matcher(sql);
         while (selects.find()) {
             if (!selects.group().equalsIgnoreCase("SELECT")) {
                 continue;
             }
             String scope = selectScope(sql.substring(selects.end()));
-            Matcher from = Pattern.compile("\\bFROM\\b", Pattern.CASE_INSENSITIVE).matcher(scope);
-            if (!from.find()) {
+            int from = projectionEnd(scope);
+            if (from < 0) {
                 continue;
             }
-            String projection = scope.substring(0, from.start())
+            String projection = scope.substring(0, from)
                 .replaceFirst("(?i)^\\s*(?:DISTINCT|ALL)\\s+", "");
-            Map<String, String> aliases = recordAliases(scope.substring(from.start()));
+            Map<String, String> aliases = recordAliases(scope.substring(from));
             for (String item : projection.split(",")) {
                 String column = item.trim();
                 if (column.equals("*")) {
-                    reads.addAll(aliases.keySet());
+                    aliases.forEach((alias, table) -> reads.add(new WildcardRead(alias, table, scope)));
                 } else {
-                    for (String alias : aliases.keySet()) {
-                        if (column.matches("(?i)[`\"]?" + Pattern.quote(alias) + "[`\"]?\\s*\\.\\s*\\*")) {
-                            reads.add(alias);
+                    for (Map.Entry<String, String> alias : aliases.entrySet()) {
+                        if (column.matches("(?i)[`\"]?" + Pattern.quote(alias.getKey()) + "[`\"]?\\s*\\.\\s*\\*")) {
+                            reads.add(new WildcardRead(alias.getKey(), alias.getValue(), scope));
                         }
                     }
                 }
@@ -458,20 +518,37 @@ class ArchiveVisibilityArchTest {
         return reads;
     }
 
-    /** Keeps a SELECT's own projection and tables without borrowing aliases from nested queries. */
+    private int projectionEnd(String scope) {
+        Matcher tokens = Pattern.compile("[()]|\\bFROM\\b", Pattern.CASE_INSENSITIVE).matcher(scope);
+        int depth = 0;
+        while (tokens.find()) {
+            String token = tokens.group();
+            if (token.equals("(")) {
+                depth++;
+            } else if (token.equals(")")) {
+                depth--;
+            } else if (depth == 0) {
+                return tokens.start();
+            }
+        }
+        return -1;
+    }
+
+    /** Keeps a SELECT's projection, tables and predicates, excluding nested queries and UNION arms. */
     private String selectScope(String sql) {
-        Matcher tokens = Pattern.compile("'(?:''|[^'])*'|[()]|\\bUNION\\b", Pattern.CASE_INSENSITIVE)
+        Matcher tokens = Pattern.compile("'(?:''|[^'])*'|[()]|\\b(?:SELECT|UNION)\\b", Pattern.CASE_INSENSITIVE)
             .matcher(sql);
         StringBuilder scope = new StringBuilder();
         int depth = 0;
+        int subqueryDepth = -1;
         int cursor = 0;
         while (tokens.find()) {
-            if (depth == 0) {
+            if (subqueryDepth < 0) {
                 scope.append(sql, cursor, tokens.start());
             }
             String token = tokens.group();
             if (token.equals("(")) {
-                if (depth == 0) {
+                if (subqueryDepth < 0) {
                     scope.append('(');
                 }
                 depth++;
@@ -479,18 +556,23 @@ class ArchiveVisibilityArchTest {
                 if (depth == 0) {
                     return scope.toString();
                 }
+                if (depth == subqueryDepth) {
+                    subqueryDepth = -1;
+                }
                 depth--;
-                if (depth == 0) {
+                if (subqueryDepth < 0) {
                     scope.append(')');
                 }
+            } else if (token.equalsIgnoreCase("SELECT") && depth > 0 && subqueryDepth < 0) {
+                subqueryDepth = depth;
             } else if (token.equalsIgnoreCase("UNION") && depth == 0) {
                 return scope.toString();
-            } else if (depth == 0) {
+            } else if (subqueryDepth < 0) {
                 scope.append("''");
             }
             cursor = tokens.end();
         }
-        if (depth == 0) {
+        if (subqueryDepth < 0) {
             scope.append(sql, cursor, sql.length());
         }
         return scope.toString();
@@ -645,6 +727,10 @@ class ArchiveVisibilityArchTest {
         }
         matcher.appendTail(resolved);
         return resolved.toString();
+    }
+
+    /** A wildcard's table binding and the SELECT scope that must carry its archive predicate. */
+    private record WildcardRead(String alias, String table, String scope) {
     }
 
     /** One mapper file: its resolved reusable fragments, its statements, and all of that SQL. */
