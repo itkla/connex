@@ -109,6 +109,46 @@ public class AiAssistantWriteToolService {
             JsonNode args,
             AiChatResourceRegistry resources,
             long expectedRestrictionEpoch) {
+        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty());
+    }
+
+    /**
+     * Converts one provider tool call into the durable proposal its step already stored.
+     *
+     * <p>The call is validated and its target resolved exactly as {@link #prepare} does them, but
+     * a confirm-tier proposal resolves nothing else: it carries, verbatim, the resolution and
+     * principals the stored proposal pinned. Those pins record what the member's card was reviewed
+     * against when the proposal was first prepared. Resolving the same names again after a rename
+     * or an offboarding would disagree with them, so a step reached again after its proposal was
+     * stored would be refused as a reused key, or refused as unresolved, instead of replaying it.
+     * What is left to compare is what the model asked for: {@code
+     * AiChatTurnPersistenceService.proposeWriteTool} still refuses a call whose request or target
+     * differs from the stored proposal's.
+     *
+     * @param name the write tool the call names
+     * @param args the model's arguments
+     * @param resources the turn's handles
+     * @param expectedRestrictionEpoch the turn's restriction epoch
+     * @param storedArgumentsJson the arguments of the proposal already holding the step's key
+     * @return the proposal to replay, pinned exactly as the stored one
+     */
+    public AiAssistantPreparedWrite prepareReplay(
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            long expectedRestrictionEpoch,
+            String storedArgumentsJson) {
+        return prepare(
+                name, args, resources, expectedRestrictionEpoch,
+                Optional.of(storedArgumentsJson));
+    }
+
+    private AiAssistantPreparedWrite prepare(
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            long expectedRestrictionEpoch,
+            Optional<String> storedArgumentsJson) {
         if (!toolCatalog.isWrite(name) || !toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed("unknown_write_tool");
         }
@@ -117,9 +157,11 @@ public class AiAssistantWriteToolService {
                 .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
         AiAssistantWriteToolRequest request = readRequest(tool, args);
         ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
-        AiAssistantProposalPins pins = toolCatalog.tier(name) == ToolTier.CONFIRM
-                ? pins(tool, new Target(target.kind(), target.id()), request)
-                : null;
+        AiAssistantProposalPins pins = toolCatalog.tier(name) != ToolTier.CONFIRM
+                ? null
+                : storedArgumentsJson.isPresent()
+                        ? storedPins(storedArgumentsJson.get())
+                        : pins(tool, new Target(target.kind(), target.id()), request);
         ObjectNode storedRequest = objectMapper.valueToTree(request);
         storedRequest.put("handle", "r1");
         Map<String, Object> targetData = new LinkedHashMap<>();
@@ -162,6 +204,21 @@ public class AiAssistantWriteToolService {
                             request, memberDirectory(workspaceService.getCurrentWorkspaceId())));
         } catch (ResourceNotFoundException exception) {
             throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+        }
+    }
+
+    /**
+     * Reads the pins a stored proposal carries, so that replaying it resolves nothing again.
+     *
+     * <p>A stored row without pins, one stored before pinning or the raw arguments of a refused
+     * call, yields none, and a replayed proposal then carries none either; a stored row whose pins
+     * do not parse is refused like any other stored proposal that no longer parses.
+     */
+    private AiAssistantProposalPins storedPins(String storedArgumentsJson) {
+        try {
+            return AiAssistantProposalPins.read(objectMapper.readTree(storedArgumentsJson));
+        } catch (JacksonException | IllegalArgumentException exception) {
+            throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
     }
 

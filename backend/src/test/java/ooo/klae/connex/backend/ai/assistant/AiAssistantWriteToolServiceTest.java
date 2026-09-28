@@ -1383,6 +1383,48 @@ class AiAssistantWriteToolServiceTest {
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
 
+    /**
+     * A step reached again after its proposal was stored replays the stored pins verbatim. The
+     * reviewed member was offboarded and the stage renamed away since, so the same calls prepared
+     * afresh are now unresolved; replayed, neither name is resolved again and each rebuilt proposal
+     * is byte-identical to the stored one. A stored row whose pins do not parse is refused like
+     * any other stored proposal that no longer parses.
+     */
+    @Test
+    void aReplayCarriesTheStoredPinsAndResolvesNothingAgain() throws Exception {
+        String ownerCall = "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}";
+        String stageCall = "{\"handle\":\"r1\",\"stage\":\"Proposal\"}";
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper")));
+        String storedOwner = prepared("assign_owner", ownerCall, "company", 52).argumentsJson();
+        String storedStage = prepared("change_deal_stage", stageCall, "deal", 44).argumentsJson();
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(11, "Ada Owner")));
+        when(pipelineService.getAllStages())
+                .thenReturn(List.of(pipelineStage(6, "Proposal (retired)")));
+        for (AiAssistantLoopException refusal : List.of(
+                assertThrows(AiAssistantLoopException.class,
+                        () -> prepared("assign_owner", ownerCall, "company", 52)),
+                assertThrows(AiAssistantLoopException.class,
+                        () -> prepared("change_deal_stage", stageCall, "deal", 44)))) {
+            assertEquals("unresolved_reference", refusal.detailReason());
+        }
+        clearInvocations(workspaceService, pipelineService, dealService);
+
+        assertEquals(storedOwner,
+                replayed("assign_owner", ownerCall, "company", 52, storedOwner).argumentsJson());
+        assertEquals(storedStage,
+                replayed("change_deal_stage", stageCall, "deal", 44, storedStage)
+                        .argumentsJson());
+        verify(workspaceService, never()).getMembers(anyInt());
+        verify(pipelineService, never()).getAllStages();
+        verify(dealService, never()).getDealById(anyInt());
+
+        String malformed = storedStage.replace("\"principals\":[]", "\"principals\":[0]");
+        assertThrows(IllegalStateException.class,
+                () -> replayed("change_deal_stage", stageCall, "deal", 44, malformed));
+    }
+
     private void grantAllExcept(Permission... revoked) {
         EnumSet<Permission> granted = EnumSet.allOf(Permission.class);
         granted.removeAll(List.of(revoked));
@@ -1395,6 +1437,16 @@ class AiAssistantWriteToolServiceTest {
         resources.register(targetKind, targetId);
         return service.prepare(
                 tool, objectMapper.readTree(json), resources, TURN.restrictionEpoch());
+    }
+
+    private AiAssistantPreparedWrite replayed(
+            String tool, String json, String targetKind, int targetId, String storedArguments)
+            throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register(targetKind, targetId);
+        return service.prepareReplay(
+                tool, objectMapper.readTree(json), resources, TURN.restrictionEpoch(),
+                storedArguments);
     }
 
     private void stored(AiAssistantPreparedWrite write, int id) {

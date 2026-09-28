@@ -1077,11 +1077,17 @@ public class AiChatAgentLoopService {
             state.planPublications++;
         }
         if (toolCatalog.isWrite(toolName)) {
+            Optional<String> storedArguments =
+                    persistenceService.storedWriteArguments(turn, stepNumber);
             AiAssistantPreparedWrite write;
             try {
-                write = writeToolService.prepare(
-                        toolName, call.tool().args(), context.resources(),
-                        turn.restrictionEpoch());
+                write = storedArguments.isPresent()
+                        ? writeToolService.prepareReplay(
+                                toolName, call.tool().args(), context.resources(),
+                                turn.restrictionEpoch(), storedArguments.get())
+                        : writeToolService.prepare(
+                                toolName, call.tool().args(), context.resources(),
+                                turn.restrictionEpoch());
             } catch (AiAssistantLoopException exception) {
                 if (!exception.recoverable()) {
                     throw exception;

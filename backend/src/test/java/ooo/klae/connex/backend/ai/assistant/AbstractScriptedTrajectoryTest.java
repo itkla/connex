@@ -546,6 +546,45 @@ abstract class AbstractScriptedTrajectoryTest {
      * @return the failure the proposal raised, or null when it wrote a row
      */
     final RuntimeException proposeReadAgain(int stepNumber, int callOrdinal) {
+        AiChatQueuedTurn queued = runningTurn();
+        try {
+            persistenceService.proposeTool(
+                    queued, stepNumber, callOrdinal, "search_records", "{}");
+            return null;
+        } catch (RuntimeException exception) {
+            return exception;
+        }
+    }
+
+    /**
+     * Stores the write proposal one step of the running turn would store, as a worker that stopped
+     * right after storing it would leave it behind for that step to be reached again.
+     *
+     * <p>Only meaningful from a step hook, for the reasons {@link #proposeReadAgain} states. The
+     * proposal is prepared and stored through the real write-tool and persistence services, the
+     * way the loop prepares and stores a fresh one, with the handle {@code r1} naming the target.
+     *
+     * @param stepNumber the durable model step whose key the proposal takes
+     * @param tool the write tool
+     * @param arguments the model's arguments, naming the target as {@code r1}
+     * @param targetKind the kind of the record {@code r1} names
+     * @param targetId the record {@code r1} names
+     * @return the stored proposal's identifier
+     */
+    final int storeWriteProposal(
+            int stepNumber, String tool, String arguments, String targetKind, int targetId) {
+        AiChatQueuedTurn queued = runningTurn();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register(targetKind, targetId);
+        AiAssistantPreparedWrite write = writeToolService.prepare(
+                tool, objectMapper.readTree(arguments), resources, queued.restrictionEpoch());
+        return persistenceService.proposeWriteTool(queued, stepNumber, write).id();
+    }
+
+    /**
+     * Reads the running turn and its initiating message back from the rows the loop committed.
+     */
+    private AiChatQueuedTurn runningTurn() {
         Map<String, Object> turn = jdbcTemplate.queryForMap(
                 "SELECT id, session_id FROM ai_chat_turn"
                         + " WHERE workspace_id = ? AND status = 'running'",
@@ -557,7 +596,7 @@ abstract class AbstractScriptedTrajectoryTest {
         int messageSeq = Objects.requireNonNull(jdbcTemplate.queryForObject(
                 "SELECT seq FROM ai_chat_message WHERE workspace_id = ? AND id = ?",
                 Integer.class, workspace.getId(), messageId));
-        AiChatQueuedTurn queued = new AiChatQueuedTurn(
+        return new AiChatQueuedTurn(
                 workspace.getId(),
                 member.getId(),
                 ((Number) turn.get("session_id")).intValue(),
@@ -568,13 +607,6 @@ abstract class AbstractScriptedTrajectoryTest {
                 false,
                 List.of(),
                 List.of());
-        try {
-            persistenceService.proposeTool(
-                    queued, stepNumber, callOrdinal, "search_records", "{}");
-            return null;
-        } catch (RuntimeException exception) {
-            return exception;
-        }
     }
 
     /** Installs the member's identity and tenant placement on the calling thread. */
