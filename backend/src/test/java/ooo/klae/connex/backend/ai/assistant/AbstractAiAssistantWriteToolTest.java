@@ -122,22 +122,6 @@ abstract class AbstractAiAssistantWriteToolTest {
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         catalog = new AiAssistantToolCatalog();
-        readExecutor = new AiAssistantToolExecutor(
-                catalog,
-                mock(SearchService.class),
-                personService,
-                companyService,
-                dealService,
-                activityService,
-                taskService,
-                mock(AiAssistantHistoryService.class),
-                mock(ScoringService.class),
-                workspaceService,
-                executorPersonMapper,
-                mock(CompanyMapper.class),
-                mock(DealMapper.class),
-                dateResolver,
-                mock(AiAssistantScopeReadService.class));
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
@@ -197,17 +181,31 @@ abstract class AbstractAiAssistantWriteToolTest {
      * @return the framework over those tools
      */
     AiAssistantWriteToolService framework(List<AiAssistantWriteTool> tools) {
-        return new AiAssistantWriteToolService(
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, tools);
+        readExecutor = new AiAssistantToolExecutor(
                 catalog,
-                new AiAssistantWriteToolRegistry(catalog, tools),
-                readExecutor,
-                dateResolver,
-                chatMapper,
-                workspaceService,
+                registry,
+                mock(SearchService.class),
+                personService,
+                companyService,
+                dealService,
                 activityService,
                 taskService,
-                noteService,
-                tagService,
+                mock(AiAssistantHistoryService.class),
+                mock(ScoringService.class),
+                workspaceService,
+                executorPersonMapper,
+                mock(CompanyMapper.class),
+                mock(DealMapper.class),
+                dateResolver,
+                mock(AiAssistantScopeReadService.class));
+        return new AiAssistantWriteToolService(
+                catalog,
+                registry,
+                readExecutor,
+                chatMapper,
+                workspaceService,
+                taskService,
                 personService,
                 companyService,
                 dealService,

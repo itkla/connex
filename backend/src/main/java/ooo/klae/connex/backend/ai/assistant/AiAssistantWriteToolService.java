@@ -48,13 +48,10 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
-import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
-import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
-import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
@@ -92,13 +89,9 @@ public class AiAssistantWriteToolService {
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiAssistantToolExecutor readToolExecutor;
-    private final AiAssistantDateResolver dateResolver;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
-    private final ActivityService activityService;
     private final TaskService taskService;
-    private final NoteService noteService;
-    private final TagService tagService;
     private final PersonService personService;
     private final CompanyService companyService;
     private final DealService dealService;
@@ -118,8 +111,10 @@ public class AiAssistantWriteToolService {
             throw AiAssistantLoopException.malformed("unknown_write_tool");
         }
         readToolExecutor.validateReferences(name, args, resources);
-        AiAssistantWriteToolRequest request = readRequest(name, args);
-        ResourceRef target = resources.resolve(request.handle(), acceptedKinds(name));
+        AiAssistantWriteTool tool = writeToolRegistry.find(name)
+                .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
+        AiAssistantWriteToolRequest request = readRequest(tool, args);
+        ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
         ObjectNode storedRequest = objectMapper.valueToTree(request);
         storedRequest.put("handle", "r1");
         Map<String, Object> targetData = new LinkedHashMap<>();
@@ -325,12 +320,10 @@ public class AiAssistantWriteToolService {
             throw new ConflictException("Assistant tool undo window has expired");
         }
         requirePermissions(authorized.authority(), actor.userId(), write);
-        AiAssistantWriteTool tool = writeToolRegistry.find(write.toolName())
-                .orElseThrow(() -> new ConflictException("Assistant tool undo metadata is invalid"));
-        if (!tool.inverseAvailable()) {
+        if (!write.tool().inverseAvailable()) {
             throw new ConflictException("Assistant tool has no owned inverse");
         }
-        tool.undo(
+        write.tool().undo(
                 new Authority(
                         actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
                 new Inverse(
@@ -365,11 +358,7 @@ public class AiAssistantWriteToolService {
             PreliminaryPrincipals principals,
             PreparedMutation mutation) {
         requireTargetAccessible(write);
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            return apply(declared.get(), write, authority, principals.principals(), mutation);
-        }
-        throw new BadRequestException("Unsupported assistant write tool");
+        return apply(write, authority, principals.principals(), mutation);
     }
 
     /**
@@ -380,13 +369,12 @@ public class AiAssistantWriteToolService {
      * outcome the member and the model read keeps its exact keys.
      */
     private ExecutionOutcome apply(
-            AiAssistantWriteTool tool,
             StoredWrite write,
             Authority authority,
             List<PrincipalRequest> principals,
             PreparedMutation mutation) {
         Row row = new Row(new Target(write.targetKind(), write.targetId()), write.typedRequest());
-        Outcome outcome = tool.apply(new Execution(
+        Outcome outcome = write.tool().apply(new Execution(
                 authority,
                 row,
                 principals,
@@ -507,9 +495,9 @@ public class AiAssistantWriteToolService {
     /**
      * Resolves, before any lock, which principal rows the approval will have to lock.
      *
-     * <p>A declared tool resolves its principals through {@link AiAssistantWriteTool#principals},
-     * once, against the framework's member directory; the framework locks exactly those rows and
-     * hands the same objects to the write, which is handed no member lookup of its own.
+     * <p>The tool resolves its principals through {@link AiAssistantWriteTool#principals}, once,
+     * against the framework's member directory; the framework locks exactly those rows and hands
+     * the same objects to the write, which is handed no member lookup of its own.
      *
      * <p>It is deliberately not an authorization step and takes no permission read of its own. One
      * here would run unlocked selects that the MyBatis first-level cache then replays for every
@@ -536,20 +524,14 @@ public class AiAssistantWriteToolService {
             return PreliminaryPrincipals.NONE;
         }
         StoredWrite write = readStored(toolCall);
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isEmpty()) {
-            return PreliminaryPrincipals.NONE;
-        }
-        return new PreliminaryPrincipals(declared.get().principals(
+        return new PreliminaryPrincipals(write.tool().principals(
                 write.typedRequest(), memberDirectory(actor.workspaceId())));
     }
 
-    /** Refuses an immediate-tier declared tool that names a principal no approval resolved. */
+    /** Refuses an immediate-tier tool that names a principal no approval resolved. */
     private void requireNoPrincipals(StoredWrite write, int workspaceId) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()
-                && !declared.get().principals(
-                        write.typedRequest(), memberDirectory(workspaceId)).isEmpty()) {
+        if (!write.tool().principals(
+                write.typedRequest(), memberDirectory(workspaceId)).isEmpty()) {
             throw new IllegalStateException("An immediate assistant tool cannot name a principal");
         }
     }
@@ -565,25 +547,17 @@ public class AiAssistantWriteToolService {
         return () -> workspaceService.getMembers(workspaceId);
     }
 
-    private PreparedMutation lockMutationTarget(StoredWrite write) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            return lockDeclaredTarget(declared.get(), write);
-        }
-        return new PreparedMutation(null, null, lockTargetForUpdate(write));
-    }
-
     /**
-     * Takes a declared tool's aggregate locks in the framework's fixed order.
+     * Takes the tool's aggregate locks in the framework's fixed order.
      *
      * <p>The target value is resolved first, by non-locking reads, because a stage change locks the
      * rows of the stage it resolves. Then the task board root when the tool declares it — the board
      * is always taken before any person, as the task-board lock order requires — and then the target
      * row. A tool never takes a lock of its own.
      */
-    private PreparedMutation lockDeclaredTarget(AiAssistantWriteTool tool, StoredWrite write) {
-        Lock lock = tool.lock(write.targetKind());
-        Resolution resolution = tool.resolve(
+    private PreparedMutation lockMutationTarget(StoredWrite write) {
+        Lock lock = write.tool().lock(write.targetKind());
+        Resolution resolution = write.tool().resolve(
                 new Target(write.targetKind(), write.targetId()), write.typedRequest());
         if (lock.taskBoard()) {
             taskService.lockBoardForCreation();
@@ -668,20 +642,13 @@ public class AiAssistantWriteToolService {
             LockedPermissionSnapshot authority, int userId, StoredWrite write) {
         authority.revalidate();
         Set<Permission> effective = authority.effectiveFor(userId);
-        for (Permission permission : EnumSet.copyOf(permissions(write))) {
+        for (Permission permission
+                : EnumSet.copyOf(write.tool().requiredPermissions(write.targetKind()))) {
             if (!effective.contains(permission)) {
                 throw new ForbiddenException(
                         "Requires the " + permission + " permission in this workspace");
             }
         }
-    }
-
-    private Set<Permission> permissions(StoredWrite write) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            return declared.get().requiredPermissions(write.targetKind());
-        }
-        throw new BadRequestException("Unsupported assistant write tool");
     }
 
     private StoredWrite readStored(AiChatToolCall toolCall) {
@@ -697,29 +664,27 @@ public class AiAssistantWriteToolService {
             String targetKind = text(target, "kind");
             int targetId = integer(target, "id");
             JsonNode request = root.get("request");
+            AiAssistantWriteTool tool = writeToolRegistry.find(toolName).orElse(null);
             if (!toolCall.getToolName().equals(toolName)
                     || tier != toolCatalog.tier(toolName)
-                    || !acceptedKinds(toolName).contains(targetKind)
+                    || tool == null
+                    || !tool.acceptedTargetKinds().contains(targetKind)
                     || targetId <= 0
                     || request == null || !request.isObject()) {
                 throw new IllegalStateException("Assistant tool proposal is invalid");
             }
-            AiAssistantWriteToolRequest typedRequest = readRequest(toolName, request);
+            AiAssistantWriteToolRequest typedRequest = readRequest(tool, request);
             return new StoredWrite(
-                    toolName, tier, targetKind, targetId,
+                    tool, tier, targetKind, targetId,
                     expectedRestrictionEpoch, request, typedRequest);
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
     }
 
-    private AiAssistantWriteToolRequest readRequest(String name, JsonNode args) {
+    private AiAssistantWriteToolRequest readRequest(AiAssistantWriteTool tool, JsonNode args) {
         try {
-            Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(name);
-            if (declared.isEmpty()) {
-                throw AiAssistantLoopException.malformed("unknown_write_tool");
-            }
-            return validate(objectMapper.treeToValue(args, declared.get().requestType()));
+            return validate(objectMapper.treeToValue(args, tool.requestType()));
         } catch (JacksonException exception) {
             throw AiAssistantLoopException.malformed("invalid_tool_arguments");
         }
@@ -778,6 +743,13 @@ public class AiAssistantWriteToolService {
         return new AiAssistantToolResult(result, List.of());
     }
 
+    /**
+     * The model's view of one stored outcome, projected by the write tool that stored it.
+     *
+     * <p>Every write tool the catalog declares is a registered bean, so a missing tool here means
+     * the row names no write tool at all — a read tool's executed row replayed by its id — and such
+     * a row projects no outcome.
+     */
     private Map<String, Object> modelOutcome(String tool, JsonNode outcome) {
         Map<String, Object> result = new LinkedHashMap<>();
         if (outcome == null || !outcome.isObject()) {
@@ -826,14 +798,6 @@ public class AiAssistantWriteToolService {
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant tool result could not be read", exception);
         }
-    }
-
-    private Set<String> acceptedKinds(String toolName) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
-        if (declared.isPresent()) {
-            return declared.get().acceptedTargetKinds();
-        }
-        return Set.of();
     }
 
     private Actor currentActor() {
@@ -945,7 +909,7 @@ public class AiAssistantWriteToolService {
     }
 
     private record StoredWrite(
-            String toolName,
+            AiAssistantWriteTool tool,
             ToolTier tier,
             String targetKind,
             int targetId,

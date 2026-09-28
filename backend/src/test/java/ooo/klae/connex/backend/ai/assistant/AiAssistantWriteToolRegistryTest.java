@@ -149,12 +149,6 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
-    void refusesAcceptedKindsTheExecutorsHandleCheckWouldDisagreeWith() {
-        assertRefused("create_task accepts", List.of(
-                tool("create_task", ToolTier.AUTO, Set.of("person", "company", "deal"))));
-    }
-
-    @Test
     void refusesAKindWithNoRequiredPermission() {
         assertRefused("change_deal_stage requires no permission for deal", List.of(
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
@@ -189,8 +183,7 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
-    void theLegacyLedgerIsEmptySoEveryCatalogWriteToolNeedsItsBean() {
-        assertEquals(Set.of(), AiAssistantWriteToolRegistry.LEGACY_TOOLS);
+    void refusesEveryCatalogWriteToolThatHasNoBean() {
         assertRefused(
                 "assign_owner is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -199,10 +192,6 @@ class AiAssistantWriteToolRegistryTest {
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
-    }
-
-    @Test
-    void refusesADeclaredWriteToolWithNeitherABeanNorALedgerEntry() {
         assertRefused(
                 "change_deal_stage is declared in the catalog but has no write-tool bean",
                 List.of(

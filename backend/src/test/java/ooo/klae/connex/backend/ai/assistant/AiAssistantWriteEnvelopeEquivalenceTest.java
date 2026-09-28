@@ -191,8 +191,17 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         companyService = mock(CompanyService.class);
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
+                new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
+                new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                new AiAssistantAddTagWriteTool(
+                        tagService, personService, companyService, dealService),
+                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
+                registry,
                 mock(SearchService.class),
                 personService,
                 companyService,
@@ -209,24 +218,11 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(AiAssistantScopeReadService.class));
         service = new AiAssistantWriteToolService(
                 catalog,
-                new AiAssistantWriteToolRegistry(catalog, List.of(
-                        new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
-                        new AiAssistantCreateActivityWriteTool(
-                                activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
-                        new AiAssistantAddTagWriteTool(
-                                tagService, personService, companyService, dealService),
-                        new AiAssistantAssignOwnerWriteTool(
-                                personService, companyService, dealService))),
+                registry,
                 readExecutor,
-                dateResolver,
                 chatMapper,
                 workspaceService,
-                activityService,
                 taskService,
-                noteService,
-                tagService,
                 personService,
                 companyService,
                 dealService,

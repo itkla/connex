@@ -141,8 +141,18 @@ class AiAssistantWriteToolServiceTest {
                 .thenReturn(person(31));
         when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
+        addTagTool = spy(new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService));
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
+                new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
+                new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                addTagTool,
+                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
+                registry,
                 mock(SearchService.class),
                 personService,
                 companyService,
@@ -157,27 +167,13 @@ class AiAssistantWriteToolServiceTest {
                 mock(DealMapper.class),
                 dateResolver,
                 mock(AiAssistantScopeReadService.class));
-        addTagTool = spy(new AiAssistantAddTagWriteTool(
-                tagService, personService, companyService, dealService));
         service = new AiAssistantWriteToolService(
                 catalog,
-                new AiAssistantWriteToolRegistry(catalog, List.of(
-                        new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
-                        new AiAssistantCreateActivityWriteTool(
-                                activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
-                        addTagTool,
-                        new AiAssistantAssignOwnerWriteTool(
-                                personService, companyService, dealService))),
+                registry,
                 readExecutor,
-                dateResolver,
                 chatMapper,
                 workspaceService,
-                activityService,
                 taskService,
-                noteService,
-                tagService,
                 personService,
                 companyService,
                 dealService,

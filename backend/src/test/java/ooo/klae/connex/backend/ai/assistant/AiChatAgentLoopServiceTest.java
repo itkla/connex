@@ -2932,6 +2932,7 @@ class AiChatAgentLoopServiceTest {
         var catalog = new AiAssistantToolCatalog();
         AiAssistantToolExecutor realExecutor = new AiAssistantToolExecutor(
                 catalog,
+                new AiAssistantWriteToolRegistry(catalog, AiAssistantDeclaredWriteTools.tools()),
                 mock(ooo.klae.connex.backend.services.SearchService.class),
                 mock(ooo.klae.connex.backend.services.PersonService.class),
                 mock(ooo.klae.connex.backend.services.CompanyService.class),

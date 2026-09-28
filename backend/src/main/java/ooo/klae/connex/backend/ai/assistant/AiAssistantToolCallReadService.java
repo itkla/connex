@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -62,6 +61,12 @@ public class AiAssistantToolCallReadService {
     private static final String ACTIVE = "active";
     private static final String PROPOSED = "proposed";
     private static final String EXECUTED = "executed";
+    /**
+     * The entity kinds a durable inverse may name as a record it created, keyed by entity kind
+     * rather than by tool: exactly the kinds {@link #liveCreatedRecordKeys} checks against the
+     * workspace's live rows. An inverse naming its target instead, as a tag association does, names
+     * no created record.
+     */
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
@@ -194,31 +199,23 @@ public class AiAssistantToolCallReadService {
                             call.targetKind(), call.targetId(), visibleTarget.label());
             Integer messageId = assistantMessages.get(call.turnId());
             boolean readable = detailsReadable(call, viewer.userId(), visibleTargets);
-            Optional<AiAssistantWriteTool> declared =
-                    writeToolRegistry.find(call.toolCall().getToolName());
-            Review withheld = declared.isPresent()
-                    ? withheld(declared.get(), call, status, viewerPermissions)
-                    : null;
-            Review review = declared.isPresent()
-                    ? review(declared.get(), call, status, readable, visibleTarget,
-                            assignableOwners, stages, withheld)
-                    : null;
+            AiAssistantWriteTool tool = call.tool();
+            Review withheld = withheld(tool, call, status, viewerPermissions);
+            Review review = review(
+                    tool, call, status, readable, visibleTarget, assignableOwners, stages,
+                    withheld);
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
                     call.tier().name().toLowerCase(),
                     status,
                     target,
-                    declared.isPresent()
-                            ? summary(
-                                    review, withheld, declared.get()::requestSummary,
-                                    declared.get().screensDetailedRequestSummary())
-                            : "Run a write tool",
-                    outcomeSummary(status, declared, review, withheld),
+                    summary(
+                            review, withheld, tool::requestSummary,
+                            tool.screensDetailedRequestSummary()),
+                    outcomeSummary(status, tool, review, withheld),
                     readable
-                            ? change(
-                                    call, status, visibleTarget, viewerPermissions, declared,
-                                    review)
+                            ? change(call, status, visibleTarget, viewerPermissions, review)
                             : null,
                     readable
                             ? outcomeValues(call, status)
@@ -270,23 +267,18 @@ public class AiAssistantToolCallReadService {
             JsonNode target = root.get("target");
             String targetKind = text(target, "kind");
             int targetId = positiveInteger(target, "id");
-            String requestValue = switch (toolName) {
-                case "assign_owner" -> text(root.get("request"), "owner");
-                case "change_deal_stage" -> text(root.get("request"), "stage");
-                default -> null;
-            };
             int turnId = turnId(toolCall.getIdempotencyKey());
+            AiAssistantWriteTool tool = writeToolRegistry.find(toolName).orElse(null);
             if (!toolCall.getToolName().equals(toolName)
                     || !toolCatalog.isExecutable(toolName)
-                    || !toolCatalog.isWrite(toolName)
+                    || tool == null
                     || tier != toolCatalog.tier(toolName)
                     || (tier != ToolTier.AUTO && tier != ToolTier.CONFIRM)
-                    || !acceptsTarget(toolName, targetKind)) {
+                    || !tool.acceptedTargetKinds().contains(targetKind)) {
                 return null;
             }
             return new StoredToolCall(
-                    toolCall, tier, targetKind, targetId, turnId, requestValue,
-                    root.get("request"));
+                    toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"));
         } catch (JacksonException | IllegalArgumentException exception) {
             return null;
         }
@@ -418,18 +410,16 @@ public class AiAssistantToolCallReadService {
     /**
      * Whether the viewer could apply this call's inverse.
      *
-     * <p>A declared tool is offered undo only when it can ever be undone and the viewer holds the
+     * <p>A tool is offered undo only when it can ever be undone and the viewer holds the
      * permissions its write requires on that target — the same set the undo itself asserts. A tool
      * that records an inverse it cannot apply, such as a tag association it may not have created,
-     * is therefore never offered one, and neither is a tool still on the legacy ledger.
+     * is therefore never offered one.
      */
-    private boolean hasUndoPermissions(StoredToolCall call, Set<Permission> viewerPermissions) {
-        Optional<AiAssistantWriteTool> declared =
-                writeToolRegistry.find(call.toolCall().getToolName());
-        return declared.isPresent()
-                && declared.get().inverseAvailable()
+    private static boolean hasUndoPermissions(
+            StoredToolCall call, Set<Permission> viewerPermissions) {
+        return call.tool().inverseAvailable()
                 && viewerPermissions.containsAll(
-                        declared.get().requiredPermissions(call.targetKind()));
+                        call.tool().requiredPermissions(call.targetKind()));
     }
 
     private static String publicStatus(AiChatToolCall toolCall) {
@@ -439,9 +429,9 @@ public class AiAssistantToolCallReadService {
         };
     }
 
-    private String outcomeSummary(
+    private static String outcomeSummary(
             String status,
-            Optional<AiAssistantWriteTool> declared,
+            AiAssistantWriteTool tool,
             Review review,
             Review withheld) {
         return switch (status) {
@@ -449,9 +439,7 @@ public class AiAssistantToolCallReadService {
             case "rejected" -> "Request rejected";
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
-            case "executed" -> declared.isPresent()
-                    ? summary(review, withheld, declared.get()::outcomeSummary, true)
-                    : "Request completed";
+            case "executed" -> summary(review, withheld, tool::outcomeSummary, true);
             default -> null;
         };
     }
@@ -461,7 +449,7 @@ public class AiAssistantToolCallReadService {
      * such change to state.
      *
      * <p>Every value here is workspace record data resolved server-side, never a value the model
-     * chose: each declared tool matches its proposed value against the workspace's own data, and an
+     * chose: each tool matches its proposed value against the workspace's own data, and an
      * unmatched one is reported as unresolved rather than echoed back. The caller has
      * already established that the viewer requested this proposal and can currently read its target,
      * which is what keeps a before-value out of a shared participant's transcript.
@@ -471,12 +459,11 @@ public class AiAssistantToolCallReadService {
             String status,
             RecordSnapshot target,
             Set<Permission> viewerPermissions,
-            Optional<AiAssistantWriteTool> declared,
             Review review) {
-        if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status) || declared.isEmpty()) {
+        if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status)) {
             return null;
         }
-        Diff diff = declared.get().diff(review);
+        Diff diff = call.tool().diff(review);
         if (diff == null) {
             return null;
         }
@@ -490,13 +477,13 @@ public class AiAssistantToolCallReadService {
                         : changeState(
                                 call, target, diff.state() == DiffState.UNCHANGED,
                                 viewerPermissions,
-                                declared.get().requiredPermissions(call.targetKind())));
+                                call.tool().requiredPermissions(call.targetKind())));
     }
 
     /**
      * The batched, viewer-authorized read state a declared tool projects one card from.
      *
-     * <p>{@link #detailsReadable} is applied here, for every declared tool, rather than trusted to
+     * <p>{@link #detailsReadable} is applied here, for every tool, rather than trusted to
      * each tool: a viewer who may not read the details gets the withheld review, holding no target,
      * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
      * no summary a tool writes can carry a record value to them.
@@ -599,11 +586,9 @@ public class AiAssistantToolCallReadService {
         return summary;
     }
 
-    /** Whether one card's projection reads a batched input its declared tool asked for. */
-    private boolean readsInput(StoredToolCall call, ReviewInput input) {
-        return writeToolRegistry.find(call.toolCall().getToolName())
-                .map(tool -> tool.reviewInputs().contains(input))
-                .orElse(false);
+    /** Whether one card's projection reads a batched input its tool asked for. */
+    private static boolean readsInput(StoredToolCall call, ReviewInput input) {
+        return call.tool().reviewInputs().contains(input);
     }
 
     private JsonNode storedOutcome(AiChatToolCall toolCall) {
@@ -679,7 +664,7 @@ public class AiAssistantToolCallReadService {
             return List.of();
         }
         List<AiAssistantToolCallReadDto.OutcomeValue> values = new ArrayList<>();
-        for (String field : outcomeFields(call.toolCall().getToolName())) {
+        for (String field : call.tool().memberOutcomeFields()) {
             JsonNode value = outcome.get(field);
             if (value == null || !value.isString()) {
                 continue;
@@ -802,22 +787,6 @@ public class AiAssistantToolCallReadService {
         }
     }
 
-    private List<String> outcomeFields(String toolName) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
-        if (declared.isPresent()) {
-            return declared.get().memberOutcomeFields();
-        }
-        return List.of();
-    }
-
-    private boolean acceptsTarget(String toolName, String kind) {
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(toolName);
-        if (declared.isPresent()) {
-            return declared.get().acceptedTargetKinds().contains(kind);
-        }
-        return false;
-    }
-
     /**
      * Resolves the turn a stored row's idempotency key names.
      *
@@ -932,11 +901,11 @@ public class AiAssistantToolCallReadService {
 
     private record StoredToolCall(
             AiChatToolCall toolCall,
+            AiAssistantWriteTool tool,
             ToolTier tier,
             String targetKind,
             int targetId,
             int turnId,
-            String requestValue,
             JsonNode request) {
     }
 

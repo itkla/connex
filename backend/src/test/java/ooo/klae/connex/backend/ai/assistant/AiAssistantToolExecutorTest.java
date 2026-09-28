@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -16,8 +17,11 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -81,12 +85,96 @@ class AiAssistantToolExecutorTest {
         companyMapper = mock(CompanyMapper.class);
         dealMapper = mock(DealMapper.class);
         dateResolver = mock(AiAssistantDateResolver.class);
-        executor = new AiAssistantToolExecutor(
-                new AiAssistantToolCatalog(), searchService, personService, companyService,
+        executor = executor(AiAssistantDeclaredWriteTools.tools());
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools) {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        return new AiAssistantToolExecutor(
+                catalog, new AiAssistantWriteToolRegistry(catalog, writeTools),
+                searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
                 mock(AiAssistantScopeReadService.class));
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    /**
+     * A write tool's handle is refused before any proposal unless it names a kind the tool itself
+     * accepts, and a read tool keeps the kinds this executor names for it.
+     */
+    @Test
+    void aHandleIsCheckedAgainstTheKindsItsToolAccepts() throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        Map<String, String> handles = Map.of(
+                "person", resources.register("person", 7),
+                "company", resources.register("company", 5),
+                "deal", resources.register("deal", 8));
+        Map<String, String> arguments = Map.of(
+                "create_activity", ",\"type\":\"call\",\"subject\":\"Call\",\"start\":\"today\"",
+                "create_task", ",\"description\":\"Follow up\"",
+                "create_note", ",\"content\":\"Met\"",
+                "add_tag", ",\"tag\":\"VIP\"",
+                "change_deal_stage", ",\"stage\":\"Won\"",
+                "assign_owner", ",\"owner\":\"Ana\"",
+                "get_deal_brief", "");
+        Map<String, Set<String>> accepted = new HashMap<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            accepted.put(tool.name(), tool.acceptedTargetKinds());
+        }
+        accepted.put("get_deal_brief", Set.of("deal"));
+        assertEquals(arguments.keySet(), accepted.keySet());
+        for (Map.Entry<String, Set<String>> tool : accepted.entrySet()) {
+            for (Map.Entry<String, String> handle : handles.entrySet()) {
+                var args = objectMapper.readTree("{\"handle\":\"" + handle.getValue() + "\""
+                        + arguments.get(tool.getKey()) + "}");
+                if (tool.getValue().contains(handle.getKey())) {
+                    executor.validateReferences(tool.getKey(), args, resources);
+                } else {
+                    AiAssistantLoopException refused = assertThrows(
+                            AiAssistantLoopException.class,
+                            () -> executor.validateReferences(tool.getKey(), args, resources),
+                            tool.getKey() + " on a " + handle.getKey());
+                    assertEquals("wrong_handle_kind", refused.detailReason());
+                }
+            }
+        }
+    }
+
+    /**
+     * The executor holds no copy of a write tool's kinds: narrowing what the registered tool
+     * accepts narrows the handle check with it, so the check and the write path can never
+     * disagree.
+     */
+    @Test
+    void theHandleCheckReadsTheRegisteredToolRatherThanACopyOfItsKinds() throws Exception {
+        List<AiAssistantWriteTool> tools = new ArrayList<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            if ("add_tag".equals(tool.name())) {
+                AiAssistantWriteTool narrowed = spy(tool);
+                when(narrowed.acceptedTargetKinds()).thenReturn(Set.of("person"));
+                tools.add(narrowed);
+            } else {
+                tools.add(tool);
+            }
+        }
+        AiAssistantToolExecutor narrowedExecutor = executor(tools);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        String person = resources.register("person", 7);
+        String company = resources.register("company", 5);
+
+        narrowedExecutor.validateReferences(
+                "add_tag",
+                objectMapper.readTree("{\"handle\":\"" + person + "\",\"tag\":\"VIP\"}"),
+                resources);
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> narrowedExecutor.validateReferences(
+                        "add_tag",
+                        objectMapper.readTree(
+                                "{\"handle\":\"" + company + "\",\"tag\":\"VIP\"}"),
+                        resources));
+        assertEquals("wrong_handle_kind", refused.detailReason());
     }
 
     @Test

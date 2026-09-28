@@ -69,7 +69,8 @@ import tools.jackson.databind.ObjectMapper;
  * widening it a reviewed change. Only the framework constructs
  * the unit of work a tool applies, the framework asserts permissions from its locked snapshot and
  * nowhere else on the mutating path, and the lock-order document states the framework's order
- * where the assistant chat section ends.
+ * where the assistant chat section ends. The classes that serve every write tool spell no write
+ * tool's key, so a tool's declaration has no second copy for its author to miss.
  */
 class AiAssistantWriteToolSpiArchTest {
     private static final Path ASSISTANT_SOURCES =
@@ -78,6 +79,11 @@ class AiAssistantWriteToolSpiArchTest {
     private static final Path FRAMEWORK =
             ASSISTANT_SOURCES.resolve("AiAssistantWriteToolService.java");
     private static final Path LOCKING = Path.of("docs/backend/LOCKING.md");
+    private static final List<Path> TOOL_AGNOSTIC_SOURCES = List.of(
+            FRAMEWORK,
+            ASSISTANT_SOURCES.resolve("AiAssistantWriteToolRegistry.java"),
+            ASSISTANT_SOURCES.resolve("AiAssistantToolCallReadService.java"),
+            ASSISTANT_SOURCES.resolve("AiAssistantToolExecutor.java"));
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
@@ -221,13 +227,25 @@ class AiAssistantWriteToolSpiArchTest {
                 "every declared write tool needs exactly one bean, and every bean a declared tool");
     }
 
+    /**
+     * The classes that serve every write tool hold no per-tool arm: each reads the tool's own
+     * declaration through the registry, which refuses to start without a bean for every catalog
+     * write tool. A switch arm, a table entry or a ledger naming one tool would be a second
+     * declaration that nothing forces a new tool's author to find, so none of these sources may
+     * spell a write tool's key.
+     */
     @Test
-    void theLegacyLedgerIsEmpty() {
-        assertEquals(
-                Set.of(),
-                legacyTools(),
-                "every write tool is a bean; AiAssistantWriteToolRegistry.LEGACY_TOOLS takes no"
-                        + " name");
+    void noClassServingEveryWriteToolNamesOne() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Path source : TOOL_AGNOSTIC_SOURCES) {
+            String text = read(source);
+            for (String name : AiAssistantToolCatalog.writeToolNames()) {
+                if (text.contains("\"" + name + "\"")) {
+                    violations.add(source.getFileName() + " names " + name);
+                }
+            }
+        }
+        assertEquals(List.of(), violations);
     }
 
     @Test
@@ -535,22 +553,6 @@ class AiAssistantWriteToolSpiArchTest {
     private static Class<?> toolClass(Path source) throws ClassNotFoundException {
         String simpleName = source.getFileName().toString().replace(".java", "");
         return Class.forName(AiAssistantWriteTool.class.getPackageName() + "." + simpleName);
-    }
-
-    private static Set<String> legacyTools() {
-        try {
-            Field ledger = Class.forName(
-                    "ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRegistry")
-                    .getDeclaredField("LEGACY_TOOLS");
-            ledger.setAccessible(true);
-            Set<String> names = new TreeSet<>();
-            for (Object name : (Set<?>) ledger.get(null)) {
-                names.add(String.valueOf(name));
-            }
-            return names;
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("The legacy write-tool ledger is unreadable", exception);
-        }
     }
 
     private static List<Path> toolImplementations() throws IOException {
