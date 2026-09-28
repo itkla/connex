@@ -435,7 +435,8 @@ the write returned with the one resolved before the lock, recording any divergen
 `TaskService.create`, `ActivityService.create` and `NoteService.create` return the very bean the tool
 built, so its link cannot diverge from the target while that holds, and nothing is re-read from
 the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
-whether it created the association, so the tool compares the tag id it resolved with itself); and
+whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
+id it resolved with itself and verifying nothing); and
 writes the tool-call status fail-closed. The one
 read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
 `Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool

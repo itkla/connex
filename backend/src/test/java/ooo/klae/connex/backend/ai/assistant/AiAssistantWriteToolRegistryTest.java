@@ -34,11 +34,25 @@ import tools.jackson.databind.node.ObjectNode;
  *
  * <p>The registry-wide checks run over every production write-tool bean found on the classpath,
  * so a tool added later is held to them without editing this class: principal resolution touches
- * none of the tool's dependencies, and the model's view of an outcome carries no identifier and no
- * undo, approval or verification metadata.
+ * none of the tool's dependencies, the model's view of an outcome carries no identifier and no
+ * undo, approval or verification metadata, and a tool shares with a viewer who may not read its
+ * details only the outcome flags {@link #SHARED_OUTCOME_FLAGS} has reviewed.
  */
 class AiAssistantWriteToolRegistryTest {
     private static final ObjectMapper JSON = JsonMapper.builder().build();
+
+    /**
+     * The reviewed outcome flags each tool may share with a viewer who may not read its details.
+     *
+     * <p>Such a viewer is a shared participant, or a requester who has since lost sight of the
+     * target, and {@code detailsReadable} exists to withhold record state from them; a shared flag
+     * passes that gate. So a flag may say only how the write went — {@code add_tag}'s
+     * {@code changed}, whether this call created the association — and never a property of the
+     * record, such as whether it is archived or restricted. Adding a flag, or a tool with one, is a
+     * reviewed edit here.
+     */
+    private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS =
+            Map.of("add_tag", Set.of("changed"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -239,6 +253,17 @@ class AiAssistantWriteToolRegistryTest {
             assertFalse(model.containsValue(74), tool.name() + " tells the model an identifier");
             assertFalse(
                     model.containsValue("0f1e2d"), tool.name() + " tells the model a fingerprint");
+        }
+    }
+
+    @Test
+    void everyDeclaredToolSharesOnlyItsReviewedOutcomeFlags() {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            assertEquals(
+                    SHARED_OUTCOME_FLAGS.getOrDefault(tool.name(), Set.of()),
+                    tool.sharedOutcomeFlags(),
+                    tool.name() + " shares outcome flags nobody reviewed with a viewer who may"
+                            + " not read its details");
         }
     }
 

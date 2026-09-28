@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -70,6 +72,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class AiAssistantWriteToolServiceTest {
     private static final ValidatorFactory VALIDATORS =
@@ -94,6 +97,7 @@ class AiAssistantWriteToolServiceTest {
     private AiWorkspaceGovernanceService governanceService;
     private WorkspaceService.LockedPermissionSnapshot authority;
     private AiAssistantWriteToolService service;
+    private AiAssistantAddTagWriteTool addTagTool;
     private AiChatToolCall storedToolCall;
 
     @AfterAll
@@ -153,6 +157,8 @@ class AiAssistantWriteToolServiceTest {
                 mock(DealMapper.class),
                 dateResolver,
                 mock(AiAssistantScopeReadService.class));
+        addTagTool = spy(new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService));
         service = new AiAssistantWriteToolService(
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, List.of(
@@ -161,8 +167,7 @@ class AiAssistantWriteToolServiceTest {
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, dateResolver, objectMapper),
                         new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
-                        new AiAssistantAddTagWriteTool(
-                                tagService, personService, companyService, dealService))),
+                        addTagTool)),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -392,6 +397,45 @@ class AiAssistantWriteToolServiceTest {
         assertFalse(execution.toolCall().undoAvailable());
         assertThrows(ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
         verify(personService, never()).removeTagIfUnchanged(31, 9);
+    }
+
+    /**
+     * A durable tag row whose undo node was forged, or written by a future version, as available
+     * must still be refused by the framework's own inverse check, before the tool is asked to undo
+     * anything: {@code add_tag} declares no inverse, so no tag association it created may be removed.
+     */
+    @Test
+    void tagUndoRefusesAnAvailableUndoNodeBecauseTheToolDeclaresNoInverse() throws Exception {
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
+        when(personService.addTag(31, 9)).thenReturn(true);
+        AiAssistantPreparedWrite write = prepared(
+                "add_tag",
+                "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        ObjectNode envelope = (ObjectNode) objectMapper.readTree(capturedResultJson());
+        ObjectNode undo = (ObjectNode) envelope.get("undo");
+        undo.put("status", "available");
+        undo.put("expiresAt", CLOCK.instant().plusSeconds(300).toString());
+        assertEquals("tag", undo.get("entityKind").asString());
+        assertEquals(9, undo.get("tagId").intValue());
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(objectMapper.writeValueAsString(envelope));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool has no owned inverse", refused.getMessage());
+        verify(addTagTool, never()).undo(any(), any());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+        verify(personService, never()).removeTagIfUnchanged(anyInt(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(
+                anyInt(), anyInt(), anyString(), anyInt());
     }
 
     @Test

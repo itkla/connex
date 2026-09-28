@@ -29,9 +29,10 @@ import tools.jackson.databind.JsonNode;
  * service call then reports whether this invocation created the association or found it already
  * present; the outcome carries that as {@code changed} and the resolved tag's own name.
  *
- * <p>The read-back is structural: the record services report only whether they created the
- * association, never which tag they associated, so the tool compares the resolved tag's id with
- * itself. It cannot diverge and reads nothing back from the database.
+ * <p>The read-back is {@link ReadBack#structural structural} and verifies nothing: the record
+ * services report only whether they created the association, never which tag they associated, and
+ * the permitted-method allowlist grants this tool no read of the association, so there is no
+ * identifier to compare. It cannot diverge and reads nothing back from the database.
  *
  * <p>The write has no inverse. An association this call found already present was not this call's
  * to remove, and one it created may since have been relied on, so the recorded inverse — the target,
@@ -124,7 +125,7 @@ public class AiAssistantAddTagWriteTool implements AiAssistantWriteTool {
                         "present:" + tag.getId(),
                         false,
                         Map.of("tagId", tag.getId())),
-                new ReadBack("tagId", tag.getId(), tag.getId()));
+                ReadBack.structural("tagId", tag.getId()));
     }
 
     @Override

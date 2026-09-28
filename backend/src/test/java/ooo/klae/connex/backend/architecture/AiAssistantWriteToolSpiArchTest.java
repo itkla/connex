@@ -27,6 +27,11 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantAddTagWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
@@ -56,9 +61,10 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Behind those, a source scan refuses a tool that names a locking method, a permission read, or
  * a lifecycle, consent, restriction or authorization mutator — as a call or a method reference.
- * Holding an allowlisted domain service grants only its permitted methods: a tool may name the
- * service only as the receiver of one of them, so its unguarded mutators and its unfiltered
- * workspace-wide reads stay out of reach. The source scan is lexical; the allowlists are what make
+ * Holding an allowlisted domain service grants only the methods permitted to that tool, never
+ * those granted to another tool holding the same service: a tool may name the service only as the
+ * receiver of one of its own, so its unguarded mutators, its unfiltered workspace-wide reads and
+ * another tool's writes stay out of reach. The source scan is lexical; the allowlists are what make
  * widening it a reviewed change. Only the framework constructs
  * the unit of work a tool applies, the framework asserts permissions from its locked snapshot and
  * nowhere else on the mutating path, and the lock-order document states the framework's order
@@ -127,29 +133,54 @@ class AiAssistantWriteToolSpiArchTest {
             ObjectMapper.class);
 
     /**
-     * The only methods a write tool may call on each allowlisted domain service. Holding a service
-     * does not grant all of it: its unguarded {@code update} and {@code delete}, and its unfiltered
-     * workspace-wide reads, would bypass the framework's fingerprint-guarded inverse and its
-     * restriction-filtered, target-bound schedule read. A tool must name the service field only as
-     * the receiver of one of these methods, so it cannot hand the service to anything else.
-     * Widening an entry is a reviewed decision.
+     * The only methods each write tool may call on each allowlisted domain service it holds, keyed
+     * by tool so a grant to one tool is never a grant to another. Holding a service does not grant
+     * all of it: its unguarded {@code update} and {@code delete}, and its unfiltered workspace-wide
+     * reads, would bypass the framework's fingerprint-guarded inverse and its restriction-filtered,
+     * target-bound schedule read, and another tool's mutator would write a field this tool never
+     * declared — a confirm-tier stage change that also tags the deal, or an immediate tag write that
+     * also moves a stage. A tool must name the service field only as the receiver of one of its own
+     * granted methods, so it cannot hand the service to anything else, and a tool holding a service
+     * it has no grant for fails. Widening an entry, or granting a tool a service, is a reviewed
+     * decision.
      *
      * <p>{@code add_tag} is granted exactly the calls its legacy arm made: {@code getAllTags}, to
      * resolve the requested name against the workspace's tag vocabulary, which is workspace
      * configuration rather than record data, and each record service's {@code addTag}, which
      * refuses a record the workspace does not hold and a tag it does not hold. Neither
      * {@code removeTag} nor any record update or read is granted: the tool has no inverse, and the
-     * framework reads the target through its own scoped gate.
+     * framework reads the target through its own scoped gate. {@code change_deal_stage} holds the
+     * same {@code DealService} and is granted none of that.
      */
-    private static final Map<Class<?>, Set<String>> PERMITTED_SERVICE_METHODS = Map.of(
-            ActivityService.class, Set.of("create", "deleteIf"),
-            NoteService.class, Set.of("create", "deleteIf"),
-            TaskService.class, Set.of("create", "deleteIf"),
-            DealService.class, Set.of("changeStage", "getDealById", "addTag"),
-            PipelineService.class, Set.of("getAllStages"),
-            TagService.class, Set.of("getAllTags"),
-            PersonService.class, Set.of("addTag"),
-            CompanyService.class, Set.of("addTag"));
+    private static final Map<Class<? extends AiAssistantWriteTool>, Map<Class<?>, Set<String>>>
+            PERMITTED_SERVICE_METHODS = Map.of(
+                    AiAssistantCreateActivityWriteTool.class,
+                    Map.of(ActivityService.class, Set.of("create", "deleteIf")),
+                    AiAssistantCreateNoteWriteTool.class,
+                    Map.of(NoteService.class, Set.of("create", "deleteIf")),
+                    AiAssistantCreateTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("create", "deleteIf")),
+                    AiAssistantChangeDealStageWriteTool.class,
+                    Map.of(
+                            DealService.class, Set.of("changeStage", "getDealById"),
+                            PipelineService.class, Set.of("getAllStages")),
+                    AiAssistantAddTagWriteTool.class,
+                    Map.of(
+                            TagService.class, Set.of("getAllTags"),
+                            PersonService.class, Set.of("addTag"),
+                            CompanyService.class, Set.of("addTag"),
+                            DealService.class, Set.of("addTag")));
+
+    /**
+     * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved
+     * identifier with itself, which verifies nothing. {@code add_tag} is here because its record
+     * services report only whether they created the association, and it is granted no read of the
+     * association. Adding a tool is a reviewed decision to ship a write with no verify-after-write.
+     */
+    private static final Set<String> STRUCTURAL_READ_BACK = Set.of("AiAssistantAddTagWriteTool");
+
+    private static final Pattern SELF_COMPARED_READ_BACK = Pattern.compile(
+            "new\\s+ReadBack\\s*\\(\\s*[^,]+,\\s*([^,]+?)\\s*,\\s*\\1\\s*\\)");
 
     private static final List<String> FORBIDDEN_MUTATORS = List.of(
             "updateLifecycleStage",
@@ -251,31 +282,34 @@ class AiAssistantWriteToolSpiArchTest {
 
     @Test
     void everyDomainServiceAToolHoldsIsCalledOnlyThroughItsPermittedMethods() throws Exception {
+        Set<Class<?>> granted = PERMITTED_SERVICE_METHODS.values().stream()
+                .flatMap(grants -> grants.keySet().stream())
+                .collect(Collectors.toSet());
         assertEquals(
                 ALLOWED_DEPENDENCIES.stream()
-                        .filter(dependency -> dependency.getName().contains(".services."))
+                        .filter(AiAssistantWriteToolSpiArchTest::isDomainService)
                         .collect(Collectors.toSet()),
-                PERMITTED_SERVICE_METHODS.keySet(),
-                "every allowlisted domain service needs a permitted-method list");
+                granted,
+                "every allowlisted domain service needs a permitted-method list for some tool");
+        Set<Class<?>> tools = new HashSet<>();
         List<String> violations = new ArrayList<>();
         for (Path tool : toolImplementations()) {
             Class<?> type = toolClass(tool);
-            String source = read(tool);
-            for (Field field : type.getDeclaredFields()) {
-                Set<String> permitted = PERMITTED_SERVICE_METHODS.get(field.getType());
-                if (permitted != null && !Modifier.isStatic(field.getModifiers())) {
-                    for (String use : unpermittedServiceUses(source, field.getName(), permitted)) {
-                        violations.add(type.getSimpleName() + " " + use);
-                    }
-                }
-            }
+            tools.add(type);
+            violations.addAll(unpermittedToolUses(type, read(tool)));
         }
+        assertEquals(
+                tools,
+                PERMITTED_SERVICE_METHODS.keySet(),
+                "every write tool, and only a write tool, has its own permitted-method grants");
         assertEquals(List.of(), violations);
     }
 
     @Test
     void thePermittedMethodScanRefusesABypassOfTheFrameworkRead() {
-        Set<String> permitted = PERMITTED_SERVICE_METHODS.get(ActivityService.class);
+        Set<String> permitted = PERMITTED_SERVICE_METHODS
+                .get(AiAssistantCreateActivityWriteTool.class)
+                .get(ActivityService.class);
         String source = """
                 private final ActivityService activityService;
                 Object a = activityService.create(activity);
@@ -290,6 +324,59 @@ class AiAssistantWriteToolSpiArchTest {
                         "calls activityService.delete",
                         "passes activityService on"),
                 unpermittedServiceUses(source, "activityService", permitted));
+    }
+
+    @Test
+    void aGrantToOneToolIsNotAGrantToAnotherHoldingTheSameService() throws Exception {
+        String stageTool = read(ASSISTANT_SOURCES.resolve(
+                "AiAssistantChangeDealStageWriteTool.java"));
+        String tagTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAddTagWriteTool.java"));
+
+        assertEquals(
+                List.of("AiAssistantChangeDealStageWriteTool calls dealService.addTag"),
+                unpermittedToolUses(
+                        AiAssistantChangeDealStageWriteTool.class,
+                        stageTool + "\nboolean tagged = dealService.addTag(target.id(), 9);\n"));
+        assertEquals(
+                List.of(
+                        "AiAssistantAddTagWriteTool calls dealService.changeStage",
+                        "AiAssistantAddTagWriteTool calls dealService.getDealById"),
+                unpermittedToolUses(
+                        AiAssistantAddTagWriteTool.class,
+                        tagTool + "\nObject moved = dealService.changeStage(change);"
+                                + "\nObject deal = dealService.getDealById(target.id());\n"));
+        assertEquals(
+                List.of("TaskToolHoldingADealService holds " + DealService.class.getName()
+                        + " with no permitted-method grant"),
+                unpermittedToolUses(
+                        TaskToolHoldingADealService.class,
+                        "private final TaskService taskService;\n"
+                                + "private final DealService dealService;\n"
+                                + "Object created = taskService.create(task);\n",
+                        PERMITTED_SERVICE_METHODS.get(AiAssistantCreateTaskWriteTool.class)));
+    }
+
+    @Test
+    void aReadBackThatCannotDivergeIsDeclaredStructuralOnlyWhereReviewed() throws IOException {
+        Set<String> structural = new TreeSet<>();
+        List<String> disguised = new ArrayList<>();
+        for (Path tool : toolImplementations()) {
+            String source = read(tool);
+            String name = tool.getFileName().toString().replace(".java", "");
+            if (source.contains("ReadBack.structural(")) {
+                structural.add(name);
+            }
+            if (SELF_COMPARED_READ_BACK.matcher(source).find()) {
+                disguised.add(name);
+            }
+        }
+        assertEquals(List.of(), disguised, "a read-back compares an identifier with itself");
+        assertEquals(new TreeSet<>(STRUCTURAL_READ_BACK), structural);
+        assertTrue(SELF_COMPARED_READ_BACK
+                .matcher("new ReadBack(\"tagId\", tag.getId(), tag.getId())").find());
+        assertFalse(SELF_COMPARED_READ_BACK
+                .matcher("new ReadBack(\"stageId\", resolution.id(), changed.getStageId())")
+                .find());
     }
 
     @Test
@@ -362,6 +449,39 @@ class AiAssistantWriteToolSpiArchTest {
             assertTrue(section.contains(statement),
                     "LOCKING.md's assistant write-tool section must state: " + statement);
         }
+    }
+
+    /**
+     * Every use a tool's source makes of the domain services it holds that its own grants do not
+     * permit, including holding a domain service it has no grant for at all.
+     */
+    private static List<String> unpermittedToolUses(Class<?> type, String source) {
+        return unpermittedToolUses(
+                type, source, PERMITTED_SERVICE_METHODS.getOrDefault(type, Map.of()));
+    }
+
+    private static List<String> unpermittedToolUses(
+            Class<?> type, String source, Map<Class<?>, Set<String>> grants) {
+        List<String> violations = new ArrayList<>();
+        for (Field field : type.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) || !isDomainService(field.getType())) {
+                continue;
+            }
+            Set<String> permitted = grants.get(field.getType());
+            if (permitted == null) {
+                violations.add(type.getSimpleName() + " holds " + field.getType().getName()
+                        + " with no permitted-method grant");
+                continue;
+            }
+            for (String use : unpermittedServiceUses(source, field.getName(), permitted)) {
+                violations.add(type.getSimpleName() + " " + use);
+            }
+        }
+        return violations;
+    }
+
+    private static boolean isDomainService(Class<?> type) {
+        return type.getName().startsWith("ooo.klae.connex.backend.services.");
     }
 
     /**
@@ -450,5 +570,11 @@ class AiAssistantWriteToolSpiArchTest {
         }
         Path parent = cwd.getParent();
         return parent == null ? cwd : parent;
+    }
+
+    /** A task tool that also holds a deal service it was never granted. */
+    private static final class TaskToolHoldingADealService {
+        private TaskService taskService;
+        private DealService dealService;
     }
 }
