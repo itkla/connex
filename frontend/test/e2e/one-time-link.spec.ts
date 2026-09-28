@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -26,6 +26,48 @@ async function mockCsrf(page: Page) {
             }),
         });
     });
+}
+
+/**
+ * Installs a synthetic session cookie on the suite's own origin and records the cookie header of
+ * every document request to `path`. The cookie only drives the proxy's session-cookie-present
+ * routing; the backend never authenticates it, so the test proves routing, not a real session.
+ */
+async function installSyntheticSession(
+    context: BrowserContext,
+    page: Page,
+    testInfo: TestInfo,
+    path: string,
+): Promise<Promise<string | null>[]> {
+    const baseURL = testInfo.project.use.baseURL;
+    if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");
+    await context.addCookies([
+        {
+            name: "JSESSIONID",
+            value: "authenticated-browser-session",
+            url: baseURL,
+        },
+    ]);
+    const documentCookies: Promise<string | null>[] = [];
+    page.on("request", (request) => {
+        if (request.isNavigationRequest() && new URL(request.url()).pathname === path) {
+            documentCookies.push(request.headerValue("cookie"));
+        }
+    });
+    return documentCookies;
+}
+
+/**
+ * Proves every recorded document request to the public page carried a session cookie, which is all
+ * the proxy's session branch keys on.
+ */
+async function expectSessionCookieSent(documentCookies: Promise<string | null>[]) {
+    const sent = await Promise.all(documentCookies);
+    expect(sent.length, "the public page must have been requested as a document").toBeGreaterThan(0);
+    expect(
+        sent.every((cookie) => cookie?.split(/;\s*/).some((pair) => pair.startsWith("JSESSIONID=")) ?? false),
+        "every document request must carry the session cookie, or the session branch was never exercised",
+    ).toBe(true);
 }
 
 test("password reset removes its fragment bearer before exchange navigation", async ({ page }) => {
@@ -105,18 +147,12 @@ test("workspace invite removes its fragment bearer before rendering the preview"
     expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
 });
 
-test("email change remains reachable with a session and removes its fragment bearer", async ({ context, page }) => {
+test("email change remains reachable with a session cookie and removes its fragment bearer", async ({ context, page }, testInfo) => {
     const rawToken = "browser_only_email_change_bearer_123456789";
     const requestedUrls: string[] = [];
     page.on("request", (request) => requestedUrls.push(request.url()));
     await mockCsrf(page);
-    await context.addCookies([
-        {
-            name: "JSESSIONID",
-            value: "authenticated-browser-session",
-            url: "http://127.0.0.1:3000",
-        },
-    ]);
+    const documentCookies = await installSyntheticSession(context, page, testInfo, "/auth/verify-email");
 
     await page.route("**/api/auth/email-change/exchange", async (route) => {
         expect(route.request().postDataJSON()).toEqual({ token: rawToken });
@@ -140,6 +176,7 @@ test("email change remains reachable with a session and removes its fragment bea
     await expect(page).toHaveURL(/\/auth\/verify-email$/);
     await expect(page.getByRole("heading", { name: "Confirm your new email" })).toBeVisible();
     expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
+    await expectSessionCookieSent(documentCookies);
 });
 
 test("document acceptance removes its fragment bearer before exchange navigation", async ({ context, page }) => {
@@ -492,17 +529,11 @@ test("workspace invite link re-opens a second link that lands in the same tab", 
     expect(exchanged).toEqual([FIRST_LINK, SECOND_LINK]);
 });
 
-test("email change re-opens a second link that lands in the same tab", async ({ context, page }) => {
+test("email change re-opens a second link that lands in the same tab", async ({ context, page }, testInfo) => {
     const requestedUrls = recordRequestedUrls(page);
     const exchanged: string[] = [];
     await mockCsrf(page);
-    await context.addCookies([
-        {
-            name: "JSESSIONID",
-            value: "authenticated-browser-session",
-            url: "http://127.0.0.1:3000",
-        },
-    ]);
+    const documentCookies = await installSyntheticSession(context, page, testInfo, "/auth/verify-email");
     await routeGrantExchange(page, "/api/auth/email-change/exchange", {
         location: "/auth/verify-email",
         cookie: "connex_email_change_flow",
@@ -521,6 +552,7 @@ test("email change re-opens a second link that lands in the same tab", async ({ 
         second: INVALID_LINK_HEADING,
     }, requestedUrls);
     expect(exchanged).toEqual([FIRST_LINK, SECOND_LINK]);
+    await expectSessionCookieSent(documentCookies);
 });
 
 test("email verification re-opens a second link that lands in the same tab", async ({ page }) => {
