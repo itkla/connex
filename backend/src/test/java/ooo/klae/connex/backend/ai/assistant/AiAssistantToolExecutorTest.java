@@ -100,8 +100,10 @@ class AiAssistantToolExecutorTest {
     }
 
     /**
-     * A write tool's handle is refused before any proposal unless it names a kind the tool itself
-     * accepts, and a read tool keeps the kinds this executor names for it.
+     * A handle is refused before any proposal unless it names a kind its tool accepts, pinned here
+     * as a reviewed literal table rather than read back from the beans under test: widening a write
+     * tool's accepted kinds, or a read tool's, turns this red instead of widening the model-facing
+     * {@code wrong_handle_kind} contract silently.
      */
     @Test
     void aHandleIsCheckedAgainstTheKindsItsToolAccepts() throws Exception {
@@ -117,13 +119,26 @@ class AiAssistantToolExecutorTest {
                 "add_tag", ",\"tag\":\"VIP\"",
                 "change_deal_stage", ",\"stage\":\"Won\"",
                 "assign_owner", ",\"owner\":\"Ana\"",
-                "get_deal_brief", "");
-        Map<String, Set<String>> accepted = new HashMap<>();
-        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
-            accepted.put(tool.name(), tool.acceptedTargetKinds());
-        }
-        accepted.put("get_deal_brief", Set.of("deal"));
+                "get_deal_brief", "",
+                "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\"");
+        Map<String, Set<String>> accepted = Map.of(
+                "create_activity", Set.of("person", "deal"),
+                "create_task", Set.of("person", "deal"),
+                "create_note", Set.of("person", "deal"),
+                "change_deal_stage", Set.of("deal"),
+                "add_tag", Set.of("person", "company", "deal"),
+                "assign_owner", Set.of("person", "company", "deal"),
+                "get_deal_brief", Set.of("deal"),
+                "find_schedule_conflicts", Set.of("person"));
         assertEquals(arguments.keySet(), accepted.keySet());
+        Map<String, Set<String>> declared = new HashMap<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            declared.put(tool.name(), tool.acceptedTargetKinds());
+        }
+        assertEquals(Set.copyOf(AiAssistantToolCatalog.writeToolNames()), declared.keySet());
+        for (Map.Entry<String, Set<String>> tool : declared.entrySet()) {
+            assertEquals(accepted.get(tool.getKey()), tool.getValue(), tool.getKey());
+        }
         for (Map.Entry<String, Set<String>> tool : accepted.entrySet()) {
             for (Map.Entry<String, String> handle : handles.entrySet()) {
                 var args = objectMapper.readTree("{\"handle\":\"" + handle.getValue() + "\""
