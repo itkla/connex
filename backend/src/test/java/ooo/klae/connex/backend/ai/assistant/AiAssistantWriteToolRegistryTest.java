@@ -83,6 +83,14 @@ class AiAssistantWriteToolRegistryTest {
      * always said. Adding a tool here is a reviewed edit.
      */
     private static final Set<String> UNSCREENED_REQUEST_SUMMARIES = Set.of("assign_owner");
+
+    /**
+     * The reviewed request text each tool's card requires before it projects a stored row: the two
+     * confirm-tier tools name the value they propose, and a stored row without it is never shown.
+     */
+    private static final Map<String, Set<String>> REQUIRED_REQUEST_TEXT = Map.of(
+            "assign_owner", Set.of("owner"),
+            "change_deal_stage", Set.of("stage"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -149,12 +157,6 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
-    void refusesAcceptedKindsTheExecutorsHandleCheckWouldDisagreeWith() {
-        assertRefused("create_task accepts", List.of(
-                tool("create_task", ToolTier.AUTO, Set.of("person", "company", "deal"))));
-    }
-
-    @Test
     void refusesAKindWithNoRequiredPermission() {
         assertRefused("change_deal_stage requires no permission for deal", List.of(
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
@@ -189,8 +191,7 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
-    void theLegacyLedgerIsEmptySoEveryCatalogWriteToolNeedsItsBean() {
-        assertEquals(Set.of(), AiAssistantWriteToolRegistry.LEGACY_TOOLS);
+    void refusesEveryCatalogWriteToolThatHasNoBean() {
         assertRefused(
                 "assign_owner is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -199,10 +200,6 @@ class AiAssistantWriteToolRegistryTest {
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
-    }
-
-    @Test
-    void refusesADeclaredWriteToolWithNeitherABeanNorALedgerEntry() {
         assertRefused(
                 "change_deal_stage is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -382,6 +379,27 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
+    void everyDeclaredToolRequiresOnlyItsReviewedRequestText() {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            assertEquals(
+                    REQUIRED_REQUEST_TEXT.getOrDefault(tool.name(), Set.of()),
+                    tool.requiredRequestText(),
+                    tool.name() + " requires request text nobody reviewed");
+        }
+    }
+
+    @Test
+    void refusesRequiredRequestTextItsRequestTypeDoesNotDeclareAsAString() {
+        assertRefused(
+                "assign_owner requires request text ownerId that its request type does not"
+                        + " declare",
+                shippedToolsWithOwnerRequiredText(Set.of("ownerId")));
+        assertRefused(
+                "assign_owner declares no required request text",
+                shippedToolsWithOwnerRequiredText(null));
+    }
+
+    @Test
     void servesTheRequestFlagsItReadAtStartup() {
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(
                 catalog,
@@ -460,6 +478,23 @@ class AiAssistantWriteToolRegistryTest {
                     @Override
                     public Map<String, SharedRequestFlag> sharedRequestFlags() {
                         return flags;
+                    }
+                });
+    }
+
+    /** The tools this phase ships, the owner tool requiring {@code required} as request text. */
+    private static List<AiAssistantWriteTool> shippedToolsWithOwnerRequiredText(
+            Set<String> required) {
+        return List.of(
+                new AiAssistantCreateTaskWriteTool(null, null, null),
+                new AiAssistantChangeDealStageWriteTool(null, null),
+                new AiAssistantCreateActivityWriteTool(null, null, null),
+                new AiAssistantCreateNoteWriteTool(null, null),
+                new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantAssignOwnerWriteTool(null, null, null) {
+                    @Override
+                    public Set<String> requiredRequestText() {
+                        return required;
                     }
                 });
     }

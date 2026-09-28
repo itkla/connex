@@ -53,7 +53,14 @@ public interface AiAssistantWriteTool {
     /** @return the record of the sealed request vocabulary this tool's arguments bind to */
     Class<? extends AiAssistantWriteToolRequest> requestType();
 
-    /** @return the non-empty set of record kinds a target handle may name */
+    /**
+     * The record kinds this tool's target handle may name.
+     *
+     * <p>It is the only statement of them: the read-tool executor's handle check, the framework's
+     * proposal and revalidation, and the card projection all read it from here.
+     *
+     * @return the non-empty set of record kinds a target handle may name
+     */
     Set<String> acceptedTargetKinds();
 
     /**
@@ -176,6 +183,23 @@ public interface AiAssistantWriteTool {
      */
     default Map<String, SharedRequestFlag> sharedRequestFlags() {
         return Map.of();
+    }
+
+    /**
+     * The stored request fields a card requires to hold a non-blank string before it projects the
+     * row at all.
+     *
+     * <p>A row stored under this tool's name is not always a proposal {@code prepare} wrote: a call
+     * the loop refused keeps the model's raw arguments under the same name as a failed row, and
+     * those arguments can be shaped like a proposal. The card projection hides such a row unless
+     * every field named here holds a non-blank string, exactly as it hides a row whose target kind
+     * the tool does not accept. The registry refuses a name that is not a string component of
+     * {@link #requestType()}.
+     *
+     * @return the required request text fields, none by default
+     */
+    default Set<String> requiredRequestText() {
+        return Set.of();
     }
 
     /**

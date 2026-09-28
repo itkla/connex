@@ -124,6 +124,12 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
         return false;
     }
 
+    /** A card names the stage it proposes, so a stored row without one is never projected. */
+    @Override
+    public Set<String> requiredRequestText() {
+        return Set.of(STAGE_FIELD);
+    }
+
     @Override
     public Set<ReviewInput> reviewInputs() {
         return Set.of(ReviewInput.STAGES);

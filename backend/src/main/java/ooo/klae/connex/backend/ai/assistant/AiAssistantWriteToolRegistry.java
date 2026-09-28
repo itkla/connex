@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.lang.reflect.RecordComponent;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -23,10 +24,15 @@ import ooo.klae.connex.backend.tenant.Permission;
  * <p>The index follows {@link AiAssistantToolCatalog#writeToolNames()}, never the order Spring
  * discovered the beans in. Construction refuses a duplicate name, a name the catalog does not
  * declare as a write, a tier that disagrees with the catalog, an accepted kind outside the record
- * kinds or disagreeing with the executor's handle check, a kind with no required permission or no
- * lock, a shared person lock on a non-person target, a malformed or never-writable declared field,
- * a malformed shared request flag, and a catalog write tool that has neither a bean nor a place on
- * {@link #LEGACY_TOOLS}.
+ * kinds, a kind with no required permission or no lock, a shared person lock on a non-person
+ * target, a malformed or never-writable declared field, a malformed shared request flag, a
+ * required request text field its request type does not declare as a string, and a catalog write
+ * tool that has no bean.
+ *
+ * <p>So once the context has started, every name the catalog declares as a write has exactly one
+ * tool here, and {@link #find(String)} is empty only for a name that is not a declared write. The
+ * framework, the card projection and the read-tool executor's handle check therefore read every
+ * per-tool answer from the tool itself and keep no table of their own.
  *
  * <p>Each tool's {@link AiAssistantWriteTool#sharedRequestFlags()} declaration is read once, here,
  * and served from {@link #sharedRequestFlags(String)} thereafter, so the read path never asks a
@@ -34,15 +40,6 @@ import ooo.klae.connex.backend.tenant.Permission;
  */
 @Component
 public class AiAssistantWriteToolRegistry {
-    /**
-     * Write tools served by the framework's own per-tool arms instead of a bean.
-     *
-     * <p>It is empty: every catalog write tool is a declared bean. Construction refuses a bean whose
-     * name is on it, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to it, so
-     * the bijection between catalog write tools and beans stays total.
-     */
-    static final Set<String> LEGACY_TOOLS = Set.of();
-
     private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");
     private static final Pattern FLAG_NAME = Pattern.compile("[a-z][A-Za-z]*");
@@ -71,7 +68,7 @@ public class AiAssistantWriteToolRegistry {
             if (tool != null) {
                 ordered.put(name, tool);
                 flags.put(name, declaredRequestFlags(tool));
-            } else if (!LEGACY_TOOLS.contains(name)) {
+            } else {
                 throw refused(name, "is declared in the catalog but has no write-tool bean");
             }
         }
@@ -81,7 +78,7 @@ public class AiAssistantWriteToolRegistry {
 
     /**
      * @param name a tool key
-     * @return the tool's declared implementation, or empty while it is still a legacy arm
+     * @return the tool's declared implementation, or empty when the name is not a declared write
      */
     public Optional<AiAssistantWriteTool> find(String name) {
         return Optional.ofNullable(name == null ? null : tools.get(name));
@@ -128,19 +125,12 @@ public class AiAssistantWriteToolRegistry {
             throw refused(name, "declares tier " + tool.tier()
                     + " but the catalog declares " + catalog.tier(name));
         }
-        if (LEGACY_TOOLS.contains(name)) {
-            throw refused(name, "has a write-tool bean and must leave the legacy ledger");
-        }
         if (tool.requestType() == null) {
             throw refused(name, "declares no request type");
         }
         Set<String> kinds = tool.acceptedTargetKinds();
         if (kinds == null || kinds.isEmpty() || !RECORD_KINDS.containsAll(kinds)) {
             throw refused(name, "must accept a non-empty subset of " + RECORD_KINDS);
-        }
-        if (!kinds.equals(AiAssistantToolExecutor.handleKinds(name))) {
-            throw refused(name, "accepts " + kinds + " but the executor's handle check accepts "
-                    + AiAssistantToolExecutor.handleKinds(name));
         }
         for (String kind : kinds) {
             Set<Permission> permissions = tool.requiredPermissions(kind);
@@ -155,6 +145,7 @@ public class AiAssistantWriteToolRegistry {
                 throw refused(name, "declares a shared person lock for " + kind);
             }
         }
+        requireRequestText(tool);
         Set<String> fields = tool.declaredWritableFields();
         if (fields == null) {
             throw refused(name, "declares no writable fields");
@@ -168,6 +159,28 @@ public class AiAssistantWriteToolRegistry {
         forbidden.retainAll(AiAssistantWriteFieldPolicy.NEVER_WRITABLE);
         if (!forbidden.isEmpty()) {
             throw refused(name, "declares never-writable fields " + forbidden);
+        }
+    }
+
+    private static void requireRequestText(AiAssistantWriteTool tool) {
+        Set<String> required = tool.requiredRequestText();
+        if (required == null) {
+            throw refused(tool.name(), "declares no required request text");
+        }
+        Set<String> textComponents = new HashSet<>();
+        RecordComponent[] components = tool.requestType().getRecordComponents();
+        if (components != null) {
+            for (RecordComponent component : components) {
+                if (component.getType() == String.class) {
+                    textComponents.add(component.getName());
+                }
+            }
+        }
+        for (String field : required) {
+            if (!textComponents.contains(field)) {
+                throw refused(tool.name(), "requires request text " + field
+                        + " that its request type does not declare");
+            }
         }
     }
 

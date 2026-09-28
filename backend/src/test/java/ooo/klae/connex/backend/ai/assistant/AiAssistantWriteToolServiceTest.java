@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -141,8 +142,18 @@ class AiAssistantWriteToolServiceTest {
                 .thenReturn(person(31));
         when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
+        addTagTool = spy(new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService));
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
+                new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
+                new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                addTagTool,
+                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
+                registry,
                 mock(SearchService.class),
                 personService,
                 companyService,
@@ -157,27 +168,13 @@ class AiAssistantWriteToolServiceTest {
                 mock(DealMapper.class),
                 dateResolver,
                 mock(AiAssistantScopeReadService.class));
-        addTagTool = spy(new AiAssistantAddTagWriteTool(
-                tagService, personService, companyService, dealService));
         service = new AiAssistantWriteToolService(
                 catalog,
-                new AiAssistantWriteToolRegistry(catalog, List.of(
-                        new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
-                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
-                        new AiAssistantCreateActivityWriteTool(
-                                activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
-                        addTagTool,
-                        new AiAssistantAssignOwnerWriteTool(
-                                personService, companyService, dealService))),
+                registry,
                 readExecutor,
-                dateResolver,
                 chatMapper,
                 workspaceService,
-                activityService,
                 taskService,
-                noteService,
-                tagService,
                 personService,
                 companyService,
                 dealService,
@@ -1071,6 +1068,57 @@ class AiAssistantWriteToolServiceTest {
         assertEquals("rejected", service.reject(TURN.sessionId(), 29).status());
         assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
         verify(governanceService, times(2)).isEnabled(TURN.workspaceId());
+    }
+
+    /**
+     * A stored row whose name is not a registered write — a read tool's, one forged with a write
+     * tier, or a name the catalog no longer declares — is refused as an invalid proposal by every
+     * decision: approval before any authority lock, and rejection and undo before any status write
+     * or domain call.
+     */
+    @Test
+    void aStoredRowNamingNoRegisteredWriteToolIsRefusedByEveryDecision() {
+        for (String[] row : List.of(
+                new String[] {"list_tasks", "read"},
+                new String[] {"list_tasks", "auto"},
+                new String[] {"update_record_fields", "confirm"})) {
+            storedToolCall.setId(29);
+            storedToolCall.setToolName(row[0]);
+            storedToolCall.setArgumentsJson("{\"tool\":\"" + row[0] + "\",\"tier\":\"" + row[1]
+                    + "\",\"restrictionEpoch\":23,\"target\":{\"kind\":\"person\",\"id\":31},"
+                    + "\"request\":{\"handle\":\"r1\"}}");
+            storedToolCall.setStatus("proposed");
+            storedToolCall.setResultJson(null);
+
+            IllegalStateException approved = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.approve(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", approved.getMessage(), row[0]);
+            verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+
+            IllegalStateException rejected = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.reject(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", rejected.getMessage(), row[0]);
+
+            storedToolCall.setStatus("executed");
+            storedToolCall.setResultJson("{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"},"
+                    + "\"undo\":{\"status\":\"available\",\"expiresAt\":\"2026-03-06T15:10:00Z\","
+                    + "\"entityKind\":\"task\",\"entityId\":74,\"fingerprint\":\"0f1e2d\"}}");
+            IllegalStateException undone = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.undo(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", undone.getMessage(), row[0]);
+            clearInvocations(workspaceService);
+        }
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(
+                anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
+        verify(taskService, never()).create(any(Task.class));
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(personService, never()).getPersonById(anyInt());
     }
 
     private void grantAllExcept(Permission... revoked) {
