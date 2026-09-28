@@ -2447,13 +2447,13 @@ class ImportServiceTest extends AbstractServiceTest {
         Map<String, Object> before = personSnapshot(workspace.getId(), personId);
         ImportState stateBefore = importState();
 
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(duplicate));
         ForbiddenException denied = assertThrows(
             ForbiddenException.class, () -> importService.commitPersons(duplicate));
 
         assertEquals("Requires the PERSON_UPDATE permission in this workspace", denied.getMessage());
         assertEquals(before, personSnapshot(workspace.getId(), personId));
         assertEquals(stateBefore, importState());
-        assertThrows(ForbiddenException.class, () -> importService.previewPersons(duplicate));
     }
 
     @Test

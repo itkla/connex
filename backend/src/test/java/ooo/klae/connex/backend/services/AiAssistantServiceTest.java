@@ -390,6 +390,9 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
     @Test
     void authorRejoiningDuringTheReadFailsClosedRatherThanDisclosingTheTranscript() {
+        workspace = newWorkspace();
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
         User author = newUser();
         AiChatSession session = privateSession(author, "Rejoin race");
         workspaceMapper.removeMember(workspace.getId(), author.getId());
@@ -415,6 +418,9 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
     @Test
     void authorRejoiningDuringListingIsExcludedWhileDepartedSessionsRemainAudited() {
+        workspace = newWorkspace();
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
         User rejoiningAuthor = newUser();
         User departedAuthor = newUser();
         AiChatSession rejoining = privateSession(rejoiningAuthor, "Rejoining during listing");
