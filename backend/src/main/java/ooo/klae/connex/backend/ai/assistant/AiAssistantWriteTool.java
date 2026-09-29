@@ -134,6 +134,24 @@ public interface AiAssistantWriteTool {
     }
 
     /**
+     * Whether this write may be made only to a record the current workspace owns, not to one it
+     * sees through a share from another workspace of its organization.
+     *
+     * <p>A contact shared into the workspace is visible to its members but not writable by them
+     * through a delegate that asserts ownership, and the owning workspace's own columns are masked
+     * on the shared-in row, so a card could state neither its before-value nor an approval that
+     * can succeed. The framework therefore refuses such a target recoverably, with
+     * {@code unresolved_reference}, when the proposal is prepared, so no card is ever stored for
+     * it. The check is made for a person only; the registry refuses a declaration that asks for it
+     * on any other kind.
+     *
+     * @return {@code true} when the target must be owned by the current workspace
+     */
+    default boolean requiresOwnedTarget() {
+        return false;
+    }
+
+    /**
      * Performs the write through domain services only.
      *
      * @param execution the locked, authorized unit of work
@@ -602,7 +620,12 @@ public interface AiAssistantWriteTool {
      * and an empty map otherwise. A person carries {@code firstResponseDueAt}, the UTC deadline of
      * a running first-response clock as an ISO local date-time.
      *
+     * <p>{@code sharedIn} is set when the viewer's workspace sees the row only through a share
+     * from another workspace of its organization. The row's own lifecycle columns are masked for
+     * such a viewer, so a missing field there is not a statement that the record holds none.
+     *
      * @param fields the target's reviewable field values, never {@code null}
+     * @param sharedIn whether the row is owned by another workspace and shared into this one
      */
     record RecordSnapshot(
             String label,
@@ -610,7 +633,8 @@ public interface AiAssistantWriteTool {
             Integer ownerId,
             Integer stageId,
             String updatedAt,
-            Map<String, String> fields) {
+            Map<String, String> fields,
+            boolean sharedIn) {
 
         public RecordSnapshot {
             fields = fields == null
@@ -629,7 +653,8 @@ public interface AiAssistantWriteTool {
 
         /** @return this snapshot with no reviewable field values, for a tool that read none */
         public RecordSnapshot withoutFields() {
-            return new RecordSnapshot(label, pipelineId, ownerId, stageId, updatedAt, Map.of());
+            return new RecordSnapshot(
+                    label, pipelineId, ownerId, stageId, updatedAt, Map.of(), sharedIn);
         }
     }
 

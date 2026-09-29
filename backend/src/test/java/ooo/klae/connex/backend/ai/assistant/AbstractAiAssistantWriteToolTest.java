@@ -99,6 +99,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         activityService = mock(ActivityService.class);
         noteService = mock(NoteService.class);
         personService = mock(PersonService.class);
+        when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);

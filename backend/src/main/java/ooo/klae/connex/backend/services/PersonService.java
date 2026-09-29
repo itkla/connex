@@ -212,6 +212,17 @@ public class PersonService {
         return personMapper.distinctTitles(workspaceService.getCurrentWorkspaceId());
     }
 
+    /**
+     * Whether the current workspace owns the active contact, rather than seeing it through a share
+     * from another workspace of its organization.
+     *
+     * @param id the contact's id
+     * @return {@code true} only for an unarchived contact this workspace owns
+     */
+    public boolean isOwnedByCurrentWorkspace(int id) {
+        return personMapper.existsOwned(workspaceService.getCurrentWorkspaceId(), id);
+    }
+
     public boolean hasPersonWithoutCompany() {
         return personMapper.hasPersonWithoutCompany(workspaceService.getCurrentWorkspaceId());
     }

@@ -1576,6 +1576,34 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * A contact shared in from another workspace arrives with its own deadline column masked, so a
+     * missing deadline there says nothing, and the clock service would refuse the approval: the
+     * card states the current deadline as one it cannot show and offers no apply, rather than
+     * "not set" with an armed apply.
+     */
+    @Test
+    void aResponseDeadlineCardOnAContactSharedInFromAnotherWorkspaceIsUnresolved() {
+        AiChatToolCall proposal = pinned(
+                toolCall(94, USER_ID, "set_response_due", "confirm", "proposed", "person", 31,
+                        94, null),
+                ",\"principals\":[]");
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(proposal));
+        Person sharedIn = person(31, "Ada Lovelace");
+        sharedIn.setWorkspaceId(WORKSPACE_ID + 1);
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(sharedIn));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Ada Lovelace", card.target().label());
+        assertEquals("responseDue", card.change().field());
+        assertNull(card.change().currentValue());
+        assertTrue(card.change().currentValueUnresolved());
+        assertEquals("48", card.change().proposedValue());
+        assertEquals("unresolved", card.change().state());
+    }
+
+    /**
      * A contact's own field values reach only a tool that declared it reads them: every other
      * tool's review of the same contact carries a snapshot with no field values at all.
      */
@@ -2193,6 +2221,7 @@ class AiAssistantToolCallReadServiceTest {
     private static Person person(int id, String name) {
         Person person = new Person();
         person.setId(id);
+        person.setWorkspaceId(WORKSPACE_ID);
         person.setName(name);
         return person;
     }

@@ -132,6 +132,9 @@ public class AiAssistantWriteToolRegistry {
         if (kinds == null || kinds.isEmpty() || !RECORD_KINDS.containsAll(kinds)) {
             throw refused(name, "must accept a non-empty subset of " + RECORD_KINDS);
         }
+        if (tool.requiresOwnedTarget() && !kinds.equals(Set.of("person"))) {
+            throw refused(name, "requires an owned target, which is checked only for a person");
+        }
         for (String kind : kinds) {
             Set<Permission> permissions = tool.requiredPermissions(kind);
             if (permissions == null || permissions.isEmpty()) {

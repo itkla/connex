@@ -95,6 +95,16 @@ public class AiAssistantSetResponseDueWriteTool implements AiAssistantWriteTool 
         return Set.of(Permission.PERSON_UPDATE);
     }
 
+    /**
+     * The clock service refuses a contact the workspace does not own, so a contact shared in from
+     * another workspace is refused recoverably when the proposal is prepared, before any card
+     * could offer an approval that can only fail.
+     */
+    @Override
+    public boolean requiresOwnedTarget() {
+        return true;
+    }
+
     @Override
     public Lock lock(String targetKind) {
         return new Lock(false, TargetLock.RECORD_UPDATE);
@@ -144,12 +154,21 @@ public class AiAssistantSetResponseDueWriteTool implements AiAssistantWriteTool 
      * contact that already holds one would be left exactly as it is, so the change is unchanged and
      * the card offers no apply. The proposed value is the whole number of hours from the approval,
      * which the client states in the member's own words.
+     *
+     * <p>A contact shared in from another workspace is unresolved: its deadline column is masked
+     * here, so a missing one does not mean no clock runs, and the clock service refuses a contact
+     * this workspace does not own, so the card offers no apply. The framework already refuses such
+     * a target when the proposal is prepared; this keeps the card honest regardless.
      */
     @Override
     public Diff diff(Review review) {
         Integer hours = requestedHours(review.request());
         if (hours == null) {
             return null;
+        }
+        if (review.target() != null && review.target().sharedIn()) {
+            return new Diff(
+                    RESPONSE_DUE_FIELD, null, true, Integer.toString(hours), DiffState.UNRESOLVED);
         }
         String current = review.target() == null
                 ? null

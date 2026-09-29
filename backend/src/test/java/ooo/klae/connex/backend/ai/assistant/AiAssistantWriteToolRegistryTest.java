@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -57,6 +59,14 @@ class AiAssistantWriteToolRegistryTest {
      * this call removed it, and {@code set_response_due}'s, whether this call started a clock —
      * and never a property of the record, such as whether it is archived or restricted, or when
      * its deadline falls. Adding a flag, or a tool with one, is a reviewed edit here.
+     *
+     * <p>A {@code changed} flag that is false does imply what the record held when the write ran:
+     * the tag was already there, was already gone, or the contact already carried a first-response
+     * clock. That is a reviewed, accepted disclosure, not an oversight. The card names its target
+     * only to a viewer who can currently see the record, and the same fact is on the record itself
+     * for that viewer — its tags, and the contact's {@code firstResponseDueAt} on the ordinary
+     * contact read; a viewer who cannot see the record learns it of no named record. No flag may
+     * carry a value the record holds, such as the deadline itself.
      */
     private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS = Map.of(
             "add_tag", Set.of("changed"),
@@ -171,6 +181,21 @@ class AiAssistantWriteToolRegistryTest {
                 new FakeTool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"),
                         Set.of(), new Lock(false, TargetLock.DEAL_STAGE_CHANGE),
                         Set.of("deal.stageId"))));
+    }
+
+    /**
+     * The framework can tell an owned target from a shared-in one only for a person, so a tool
+     * that asks for an owned target on any other kind would be refused at every proposal.
+     */
+    @Test
+    void refusesAnOwnedTargetOnAnythingButAPerson() {
+        AiAssistantWriteTool owning =
+                spy(tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")));
+        doReturn(true).when(owning).requiresOwnedTarget();
+
+        assertRefused(
+                "change_deal_stage requires an owned target, which is checked only for a person",
+                List.of(owning));
     }
 
     @Test

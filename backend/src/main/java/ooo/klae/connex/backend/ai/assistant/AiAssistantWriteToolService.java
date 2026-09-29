@@ -157,6 +157,9 @@ public class AiAssistantWriteToolService {
                 .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
         AiAssistantWriteToolRequest request = readRequest(tool, args);
         ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
+        if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
+            requireOwnedTarget(target);
+        }
         AiAssistantProposalPins pins = toolCatalog.tier(name) != ToolTier.CONFIRM
                 ? null
                 : storedArgumentsJson.isPresent()
@@ -203,6 +206,25 @@ public class AiAssistantWriteToolService {
                     tool.principals(
                             request, memberDirectory(workspaceService.getCurrentWorkspaceId())));
         } catch (ResourceNotFoundException exception) {
+            throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+        }
+    }
+
+    /**
+     * Refuses, recoverably and before anything is stored, a target the current workspace sees only
+     * through a share, for a tool whose delegate writes only a record the workspace owns.
+     *
+     * <p>The reason names no row, as for any unresolved reference: the model may pick another
+     * record, and no card is ever shown for an approval the delegate could only refuse. A record's
+     * owning workspace never changes, so a replayed proposal is not checked again.
+     */
+    private void requireOwnedTarget(ResourceRef target) {
+        boolean owned = switch (target.kind()) {
+            case "person" -> personService.isOwnedByCurrentWorkspace(target.id());
+            default -> throw new IllegalStateException(
+                    "Assistant ownership is checked only for a person");
+        };
+        if (!owned) {
             throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
         }
     }

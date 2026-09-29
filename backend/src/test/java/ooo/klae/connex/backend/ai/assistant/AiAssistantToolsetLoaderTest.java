@@ -194,16 +194,22 @@ class AiAssistantToolsetLoaderTest {
     /**
      * A routed turn is offered only the families its skill may hold, so a read-only skill asking
      * for a write family is refused recoverably and the model can still answer. Reverting the
-     * offer check would hand it a write family whose first use ends the turn.
+     * offer check would hand it a write family whose first use ends the turn. Every write family
+     * the catalog declares is asserted, so a family a later slice adds is held to it too.
      */
     @Test
     void aToolsetOutsideTheTurnsOfferIsARecoverableRefusalThatLeavesTheSetAlone()
             throws Exception {
         Set<Toolset> loaded = turnSet();
         Set<Toolset> readOnlyOffer = Set.of(Toolset.ANALYTICS, Toolset.SCHEDULE);
+        List<Toolset> writeFamilies = AiAssistantToolCatalog.LOADABLE.stream()
+                .filter(toolset -> !AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty())
+                .toList();
+        assertTrue(writeFamilies.containsAll(List.of(
+                Toolset.WRITE_ACTIVITY, Toolset.WRITE_CONTENT, Toolset.WRITE_PIPELINE,
+                Toolset.WRITE_FOLLOWUP)), writeFamilies.toString());
 
-        for (Toolset refusedSet : List.of(
-                Toolset.WRITE_ACTIVITY, Toolset.WRITE_CONTENT, Toolset.WRITE_PIPELINE)) {
+        for (Toolset refusedSet : writeFamilies) {
             AiAssistantLoopException refused = assertThrows(
                     AiAssistantLoopException.class,
                     () -> loader.load(args(refusedSet.key()), loaded, readOnlyOffer));

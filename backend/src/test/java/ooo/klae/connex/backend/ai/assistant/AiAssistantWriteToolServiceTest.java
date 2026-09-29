@@ -115,6 +115,7 @@ class AiAssistantWriteToolServiceTest {
         workspaceService = mock(WorkspaceService.class);
         activityService = mock(ActivityService.class);
         personService = mock(PersonService.class);
+        when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
@@ -1535,6 +1536,42 @@ class AiAssistantWriteToolServiceTest {
                 "Requires the PERSON_UPDATE permission in this workspace", refused.getMessage());
         verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+    }
+
+    /**
+     * A contact shared in from another workspace is visible here but never writable through the
+     * clock service, so its deadline is refused recoverably when proposed: nothing is stored, no
+     * card can offer an approval that could only fail, and the reason names no row.
+     */
+    @Test
+    void aResponseDeadlineOnAContactSharedInFromAnotherWorkspaceIsRefusedRecoverably() {
+        when(personService.isOwnedByCurrentWorkspace(31)).thenReturn(false);
+
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":24}",
+                        "person", 31));
+
+        assertTrue(refusal.recoverable());
+        assertEquals("unresolved_reference", refusal.detailReason());
+        verify(personService).isOwnedByCurrentWorkspace(31);
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+    }
+
+    /**
+     * Ownership is asked only of a tool whose delegate writes an owned record: a tag on the same
+     * shared-in contact is proposed as before, because its service accepts a visible contact.
+     */
+    @Test
+    void onlyAToolThatRequiresAnOwnedTargetAsksWhetherTheContactIsOwned() throws Exception {
+        when(personService.isOwnedByCurrentWorkspace(31)).thenReturn(false);
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
+
+        prepared("remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31);
+
+        verify(personService, never()).isOwnedByCurrentWorkspace(anyInt());
     }
 
     /**

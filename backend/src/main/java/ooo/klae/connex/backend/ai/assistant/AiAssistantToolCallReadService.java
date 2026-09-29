@@ -314,7 +314,8 @@ public class AiAssistantToolCallReadService {
                 if (isProcessable(person)) {
                     putVisible(visible, "person", person.getId(), new RecordSnapshot(
                             person.getName(), null, person.getOwnerId(), null,
-                            person.getUpdatedAt(), personFields(person)));
+                            person.getUpdatedAt(), personFields(person),
+                            person.getWorkspaceId() != workspaceId));
                 }
             }
         }
@@ -322,14 +323,16 @@ public class AiAssistantToolCallReadService {
             for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
                 putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
-                        company.getUpdatedAt(), Map.of()));
+                        company.getUpdatedAt(), Map.of(),
+                        company.getWorkspaceId() != workspaceId));
             }
         }
         if (!dealIds.isEmpty()) {
             for (Deal deal : dealMapper.getByIds(workspaceId, dealIds)) {
                 putVisible(visible, "deal", deal.getId(), new RecordSnapshot(
                         deal.getName(), deal.getPipelineId(), deal.getOwnerId(),
-                        deal.getStageId(), deal.getUpdatedAt(), Map.of()));
+                        deal.getStageId(), deal.getUpdatedAt(), Map.of(),
+                        deal.getWorkspaceId() != workspaceId));
             }
         }
         return Map.copyOf(visible);
@@ -337,7 +340,9 @@ public class AiAssistantToolCallReadService {
 
     /**
      * The person's reviewable column values, read off the row the snapshot was already built from,
-     * so a card that states them as its before-value costs no read of its own.
+     * so a card that states them as its before-value costs no read of its own. A row shared in from
+     * another workspace arrives with these columns masked, which its snapshot's {@code sharedIn}
+     * says.
      */
     private static Map<String, String> personFields(Person person) {
         Map<String, String> fields = new LinkedHashMap<>();
