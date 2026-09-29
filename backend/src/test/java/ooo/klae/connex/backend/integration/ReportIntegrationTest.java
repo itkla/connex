@@ -755,34 +755,29 @@ class ReportIntegrationTest {
     }
 
     /**
-     * Pins #1763 over HTTP. A delivery schedule is a standing export channel that later runs with no
-     * session to step up, so a privileged account opens or redirects one only with a fresh WebAuthn
-     * assertion, while an already-created schedule keeps delivering unattended.
+     * Pins the satisfied half of #1763 over HTTP: a privileged account carrying a fresh WebAuthn
+     * step-up opens and redirects a delivery schedule, and the schedule then keeps delivering with no
+     * session at all.
      *
-     * <p>This class runs with {@code privileged-mfa.enforced=false}, so neither unenrolled
-     * confinement nor the path-based export filter can produce this refusal: it comes from the
-     * schedule gate alone.
+     * <p>It is therefore a guard against over-gating rather than a proof of the gate: it fails if the
+     * gate ever refuses a satisfied privileged session, or if delivery itself acquires a step-up
+     * requirement it cannot meet.
+     *
+     * <p>The refused half is not asserted here. Its refusal audit is an independent
+     * {@code REQUIRES_NEW} append that re-takes the actor's {@code app_user} row {@code FOR SHARE},
+     * and this class is {@code @Transactional}, so that append would wait out
+     * {@code innodb_lock_wait_timeout} on the fixture's own uncommitted actor row. The refusal is
+     * covered by {@code ScheduleStepUpTest}, and its 403 wire shape by
+     * {@code GlobalExceptionHandlerTest}.
      */
     @Test
-    void aPrivilegedAccountNeedsAFreshStepUpToScheduleButNotToKeepDelivering() throws Exception {
+    void aPrivilegedAccountWithAFreshStepUpSchedulesAndKeepsDeliveringUnattended() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
         User owner = newMember(workspace, "owner");
         MockHttpSession session = login(owner.getUsername());
         int reportId = createReport(session, workspace);
         assertTrue(userMapper.isPrivilegedAccount(owner.getId()));
-
-        mockMvc.perform(post("/api/reports/{id}/schedule", reportId)
-                .header("X-Workspace-Id", workspace.getId())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(scheduleBody(owner.getId(), "weekly", 9))
-                .session(session)
-                .with(csrf().asHeader()))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("RECENT_AUTHENTICATION_REQUIRED"));
-        assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM report_schedule WHERE workspace_id = ?",
-                Integer.class, workspace.getId()));
 
         markRecentlyAuthenticated(session, owner.getId());
         int scheduleId = createSchedule(session, workspace, reportId, owner.getId());
