@@ -535,10 +535,9 @@ public class AiAssistantToolCallReadService {
      * no summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
      * outcome only for an executed call, the members, stages and tags only when the tool declared
-     * them,
-     * and the resolution and principals pinned when the proposal was prepared, which a proposal
-     * stored before pinning does not carry; the tool never reads anything this service did not
-     * already load for the page of cards.
+     * them, and the resolution and principals pinned when the proposal was prepared, which a
+     * proposal stored before pinning does not carry; the tool never reads anything this service
+     * did not already load for the page of cards.
      */
     private Review review(
             AiAssistantWriteTool tool,
