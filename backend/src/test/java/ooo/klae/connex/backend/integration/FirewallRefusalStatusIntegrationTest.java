@@ -33,10 +33,13 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Every spelling below is one Tomcat accepts and the firewall then refuses, so the JSON envelope
  * in the response is the evidence that the application's own handler wrote the refusal rather than
- * the container rejecting the request line itself. An encoded percent, separator, backslash or null
- * ({@code %25}, {@code %2F}, {@code %5C}, {@code %00}) cannot be used here: Tomcat refuses those
- * request lines with its own 400 and no filter ever runs, which is why
- * {@code AbstractEncodedSecurityPathIntegrationTest} pins them by status alone.
+ * the container rejecting the request line itself. An encoded separator, backslash or null
+ * ({@code %2F}, {@code %5C}, {@code %00}) cannot be used here: Tomcat refuses those request lines
+ * with its own 400 and no filter ever runs, which is why
+ * {@code AbstractEncodedSecurityPathIntegrationTest} pins them by status alone. A double-encoded
+ * percent ({@code /api/%2565xports/persons}) behaves the same way in practice: it was measured here
+ * returning 400 with no JSON envelope, so it too is refused before this handler and is pinned by
+ * status alone rather than added to the cases below.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"server.address=127.0.0.1"})

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,6 +34,23 @@ class ErrorDispatchArchTest {
     private static final Pattern SEND_ERROR_FIREWALL_HANDLER = Pattern.compile(
             "\\bnew\\s+HttpStatusRequestRejectedHandler\\b"
                     + "|\\bimport\\s+[\\w.]*HttpStatusRequestRejectedHandler\\s*;");
+
+    /**
+     * The absence checks below cannot see the likelier regression: {@code FilterChainProxy} defaults
+     * its own handler to {@code HttpStatusRequestRejectedHandler}, so deleting the wiring restores
+     * the anonymous 401 with no {@code new}, no import and no {@code sendError} anywhere (#1780).
+     * A fully qualified inline construction would also slip past the pattern, and this file already
+     * uses that idiom elsewhere.
+     */
+    @Test
+    void theFirewallRefusalHandlerStaysWired() throws IOException {
+        String config = Files.readString(SOURCE_ROOT.resolve(
+                "ooo/klae/connex/backend/config/PublicApiSecurityConfig.java"));
+        assertTrue(config.contains("new FirewallRefusalHandler"),
+                "the browser plane must keep building its own refusal handler");
+        assertTrue(config.contains("requestRejectedHandler("),
+                "the handler must stay registered on the web security customizer");
+    }
 
     @Test
     void mainSourcesNeverRefuseWithSendError() throws IOException {

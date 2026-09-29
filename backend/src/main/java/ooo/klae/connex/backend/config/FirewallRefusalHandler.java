@@ -26,6 +26,12 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
  * rejection's reason and never any part of the request, because the caller that triggered the
  * firewall must learn nothing about which spelling was refused. Response headers are applied here
  * because the firewall runs ahead of the chain's header writers.
+ *
+ * <p>An already-committed response is left alone. This is the terminal handler for every
+ * {@code RequestRejectedException} in the chain, not only the entry-time firewall check —
+ * {@code RequestPathNormalizer} throws it from several filters as well — and on a committed response
+ * the status is ignored while a write would append JSON to a body that has already gone out. No
+ * reachable path was found; the guard is parity with {@code PublicApiErrorAdvice}, not a fix.
  */
 public class FirewallRefusalHandler implements RequestRejectedHandler {
 
@@ -37,6 +43,9 @@ public class FirewallRefusalHandler implements RequestRejectedHandler {
             HttpServletRequest request,
             HttpServletResponse response,
             RequestRejectedException rejection) throws IOException {
+        if (response.isCommitted()) {
+            return;
+        }
         SecurityResponseHeaders.apply(request, response);
         response.setStatus(HttpStatus.BAD_REQUEST.value());
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
