@@ -9,20 +9,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -34,16 +30,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
-import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
@@ -54,51 +45,25 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
  * mailbox is unreachable. Such an account has never enrolled, so recovery has no credential to
  * remove, and refusing it there left the route unexecutable.
  */
-@SpringBootTest
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class NeverEnrolledBreakGlassIntegrationTest {
+class NeverEnrolledBreakGlassIntegrationTest extends AbstractPrivilegedMfaRecoveryIntegrationTest {
     private static final String PASSWORD = "correct-horse-battery-staple";
-
-    /**
-     * Startup needs a complete recovery configuration; each test then issues its own
-     * account-bound token through {@link #issueRecoveryToken(User)}.
-     */
-    @DynamicPropertySource
-    static void recoveryProperties(DynamicPropertyRegistry registry) {
-        registry.add("connex.security.privileged-mfa.recovery-token-sha256",
-                () -> sha256Hex("unused-startup-recovery-token"));
-        registry.add("connex.security.privileged-mfa.recovery-expires-at",
-                () -> Instant.now().plus(Duration.ofMinutes(55)).toString());
-        registry.add("connex.security.privileged-mfa.recovery-actor",
-                () -> "integration-break-glass-operator");
-    }
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private AuthService authService;
     @Autowired private WebAuthnService webAuthnService;
-    @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
-    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
 
     private MockMvc mockMvc;
-    private String startupDigest;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
-        startupDigest = privilegedMfaProperties.getRecoveryTokenSha256();
-    }
-
-    @AfterEach
-    void clearSecurityContext() {
-        privilegedMfaProperties.setRecoveryTokenSha256(startupDigest);
-        SecurityContextHolder.clearContext();
     }
 
     /**

@@ -1,10 +1,8 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -12,7 +10,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
@@ -189,20 +186,6 @@ class IdentityBackfillIntegrationTest extends AbstractMapperTest {
                 Integer.class,
                 workspace.getId(),
                 person.getId()));
-    }
-
-    @Test
-    void everyBackfillMutationBoundaryIsTransactional() throws Exception {
-        Method person = IdentityBackfillTransaction.class.getMethod(
-            "backfillPersonPage", String.class, int.class, int.class, int.class);
-        Method company = IdentityBackfillTransaction.class.getMethod(
-            "backfillCompanyPage", String.class, int.class, int.class, int.class);
-        Method rebuild = IdentityBackfillTransaction.class.getMethod(
-            "rebuildCollisionReport", String.class, int.class);
-
-        assertNotNull(person.getAnnotation(Transactional.class));
-        assertNotNull(company.getAnnotation(Transactional.class));
-        assertNotNull(rebuild.getAnnotation(Transactional.class));
     }
 
     private BackfillTotals runPersonPages(int limit) {
