@@ -70,6 +70,7 @@ class ReportServiceTest {
     void setUp() {
         service = new ReportService(
                 sessionSecurityService,
+                mock(PrivilegedAccountService.class),
                 reportMapper,
                 mock(ScheduleMapper.class),
                 mock(GoalMapper.class),

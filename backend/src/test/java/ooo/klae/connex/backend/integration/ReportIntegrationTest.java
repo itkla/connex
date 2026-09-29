@@ -56,6 +56,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -507,6 +508,7 @@ class ReportIntegrationTest {
         """;
 
     @Autowired private WebApplicationContext context;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -1109,6 +1111,16 @@ class ReportIntegrationTest {
                 .session(creatorSession)
                 .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(adminSession);
+        sessionSecurityService.markStepUp(stepUpRequest, admin.getId());
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)

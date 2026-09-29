@@ -185,6 +185,7 @@ public class ReportService {
             "commercial-documents", "lead-lifecycle");
 
     private final SessionSecurityService sessionSecurityService;
+    private final PrivilegedAccountService privilegedAccountService;
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
     private final GoalMapper goalMapper;
@@ -397,11 +398,28 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Deletes a report definition and its snapshots. */
+    /**
+     * Deletes a report definition, its snapshots and its delivery schedule.
+     *
+     * <p>When the report carries a delivery schedule, a privileged account must first carry a fresh
+     * WebAuthn step-up. {@code report_schedule} cascades from {@code report_definition}, so deleting
+     * the report silently removes the standing delivery channel and its retained scheduled
+     * snapshots — exactly what {@code ScheduleService.delete} is gated for, and the gate would
+     * otherwise be bypassable through this endpoint (#1763). A report with no schedule is ordinary
+     * report deletion and stays on its permission check alone, so the prompt appears only where the
+     * cascade would destroy a gated object.
+     *
+     * @param id the report to delete
+     */
     @Transactional
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
+        if (scheduleMapper.getByReport(workspaceId, id) != null
+                && privilegedAccountService.isPrivileged(actorId)) {
+            sessionSecurityService.requireRecentAuthentication(actorId);
+        }
         int currentUserId = workspaceService.getCurrentUserId();
         boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
             workspaceId, currentUserId);

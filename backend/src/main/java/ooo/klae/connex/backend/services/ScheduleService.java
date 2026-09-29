@@ -306,12 +306,15 @@ public class ScheduleService {
      *
      * <p>Accounts that administer no other principal are unaffected. A schedule may only name
      * active members who already hold the report's own read permissions, so an ordinary member
-     * reaches nobody new by scheduling. An administrator can admit a member and then name them,
-     * which is the ongoing channel this refuses to open on a single factor. The check is
+     * reaches nobody new by scheduling. Admitting a new member is itself step-up gated upstream, so
+     * what this refuses on a single factor is redirecting a standing channel to an existing member
+     * the report's owner never chose, and the transfer of run-as that comes with it. The check is
      * independent of {@code CONNEX_PRIVILEGED_MFA_ENFORCED}, matching the other high-risk service
      * boundaries rather than the staged-rollout export filter.
      *
-     * <p>Deletion is not gated: it closes a channel rather than opening one, and it is audited.
+     * <p>Deletion is gated too, and so is {@code ReportService.delete}: {@code report_schedule}
+     * cascades from {@code report_definition}, so deleting the parent report would otherwise remove
+     * the schedule and its snapshots without a step-up and make this gate bypassable.
      *
      * <p>The refusal audit commits in an independent transaction that re-takes the actor's
      * {@code app_user} row {@code FOR SHARE}, so this runs before the mutation takes any lock.

@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.dto.ReportConfig;
 import ooo.klae.connex.backend.dto.ReportDefinitionDto;
 import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.dto.ReportFilters;
 import ooo.klae.connex.backend.dto.ReportLayoutItem;
 import ooo.klae.connex.backend.dto.ReportScheduleDto;
@@ -251,6 +252,23 @@ class ScheduleServiceTest extends AbstractServiceTest {
                 "monthly",
                 scheduleService.update(reportId, request("monthly", List.of(manager.getId()), 10, true))
                         .cadence());
+    }
+
+    /**
+     * The schedule gate is worth nothing if the parent report can be deleted without one:
+     * {@code report_schedule} and {@code report_snapshot} both cascade from
+     * {@code report_definition}, so deleting the report removes the standing channel and its
+     * retained snapshots (#1763).
+     */
+    @Test
+    void deletingTheParentReportNeedsTheSameFreshStepUp() {
+        int reportId = createReport("count").id();
+        scheduleService.create(reportId, request("weekly", List.of(currentUser.getId()), 9, true));
+        clearStepUp();
+
+        assertTrue(privilegedAccountService.isPrivileged(currentUser.getId()));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> reportService.delete(reportId));
+        assertNotNull(scheduleService.get(reportId), "the cascade must not have run");
     }
 
     /**
