@@ -138,10 +138,20 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Deletes a report's delivery schedule. */
+    /**
+     * Deletes a report's delivery schedule and the scheduled snapshots it left behind.
+     *
+     * <p>Gated like {@link #create} and {@link #update}: leaving it open would make the gate on the
+     * enabled flag pointless, since deleting is a strict superset of disabling, and it also hard
+     * deletes the report's retained scheduled snapshots. A privileged account must therefore carry a
+     * fresh WebAuthn step-up; see {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the scheduled report
+     */
     @Transactional
     @RequirePermission(Permission.REPORT_UPDATE)
     public void delete(int reportDefinitionId) {
+        requireScheduleStepUp(authService.getCurrentUser().getId());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);

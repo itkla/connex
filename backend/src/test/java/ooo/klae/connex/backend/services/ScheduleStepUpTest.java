@@ -136,19 +136,31 @@ class ScheduleStepUpTest {
     }
 
     /**
-     * Deletion closes a delivery channel instead of opening one, so it stays ungated by decision
-     * rather than by omission. This fails if a future change gates it without revisiting that.
+     * Deleting is a strict superset of disabling and also hard deletes the report's retained
+     * scheduled snapshots, so leaving it ungated would have made the gate on the enabled flag
+     * pointless. Owner decision 2026-09-29 (#1763).
      */
     @ParameterizedTest
     @CsvSource({"true", "false"})
-    void deletingAScheduleStaysUngated(String enforced) {
+    void deletingAScheduleNeedsAFreshStepUp(String enforced) {
         ScheduleService service = service(enforced);
         when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+
+        verifyNoInteractions(scheduleMapper, reportMapper, workspaceService);
+    }
+
+    /** An ordinary member deleting their own report's schedule must not be prompted. */
+    @ParameterizedTest
+    @CsvSource({"true", "false"})
+    void anUnprivilegedAccountNeedsNoStepUpToDeleteASchedule(String enforced) {
+        ScheduleService service = service(enforced);
+        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class, () -> service.delete(REPORT_ID));
 
         verify(reportMapper).getDefinition(anyInt(), anyInt());
-        verify(auditService, never()).recordExportStepUpRefused();
     }
 
     private static void invoke(ScheduleService service, String operation) {

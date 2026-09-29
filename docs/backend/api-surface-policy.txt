@@ -524,7 +524,7 @@ src/main/java/ooo/klae/connex/backend/services/RuleTriggerEvent.java	045ce696528
 src/main/java/ooo/klae/connex/backend/services/RuleTriggerListener.java	957b26f133690c23157c3a5f346c8f67fbe2beea6a7c521f9184cfed6aa1eb76
 src/main/java/ooo/klae/connex/backend/services/RuleTriggerPublisher.java	8795bc0596d2a602f6a6cc507402dbb859214927d72e30039581981fc73ae65b
 src/main/java/ooo/klae/connex/backend/services/SavedViewService.java	509086d005c41a3c3abb3e4ad62b09e7a6bea0a3ca4e9c35730708cb7570da1c
-src/main/java/ooo/klae/connex/backend/services/ScheduleService.java	86d7409e29ef300ff7c3b1fd5f0ece76a1bd3f530f296f6fb1f3d69fe05f9219
+src/main/java/ooo/klae/connex/backend/services/ScheduleService.java	d9ce8715167294d3d6788732e576f84550839e1a6c9a53a7f870c82d2d6ed4f1
 src/main/java/ooo/klae/connex/backend/services/ScoringService.java	145d9cee1b5e6ce513afbc3588c0239e34374a89af64b34067d7f53ba634e0eb
 src/main/java/ooo/klae/connex/backend/services/SearchService.java	c43ffb2b494384adecba8b65561b236ea4d9890602c3eb4da7d93c08457b39da
 src/main/java/ooo/klae/connex/backend/services/SegmentCatalog.java	8ab11cfeab370615a8eab1b4d84e650e411623b7d88fdf02bd7c5225bd933d7e
