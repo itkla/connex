@@ -18,34 +18,46 @@ import org.junit.jupiter.api.Test;
  * to {@code /error}. That dispatch re-enters the security chain, where {@code /error} has no rule
  * and falls to {@code anyRequest().authenticated()}, so an anonymous caller receives the entry
  * point's 401 in place of the intended status; MockMvc never performs the dispatch, so only a live
- * container shows it. Until the chain itself admits ERROR dispatches (#1780), application code
- * writes every refusal with {@code setStatus} and no main source may call {@code sendError}.
+ * container shows it. Until the chain itself admits ERROR dispatches, application code writes every
+ * refusal with {@code setStatus} and no main source may call {@code sendError}.
+ *
+ * <p>The one library refusal that used to escape this rule is the firewall boundary: Spring's
+ * {@code HttpStatusRequestRejectedHandler} calls {@code sendError}, so it was replaced with
+ * {@code FirewallRefusalHandler} and must not be delegated to again (#1780).
  */
 class ErrorDispatchArchTest {
 
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
     private static final Pattern SEND_ERROR_CALL =
             Pattern.compile("\\bsendError\\s*\\(|::\\s*sendError\\b");
+    private static final Pattern SEND_ERROR_FIREWALL_HANDLER = Pattern.compile(
+            "\\bnew\\s+HttpStatusRequestRejectedHandler\\b"
+                    + "|\\bimport\\s+[\\w.]*HttpStatusRequestRejectedHandler\\s*;");
 
     @Test
     void mainSourcesNeverRefuseWithSendError() throws IOException {
-        assertEquals(List.of(), sourcesCallingSendError());
+        assertEquals(List.of(), sourcesMatching(SEND_ERROR_CALL));
     }
 
-    private static List<Path> sourcesCallingSendError() throws IOException {
+    @Test
+    void mainSourcesNeverDelegateAFirewallRefusalToTheSendErrorHandler() throws IOException {
+        assertEquals(List.of(), sourcesMatching(SEND_ERROR_FIREWALL_HANDLER));
+    }
+
+    private static List<Path> sourcesMatching(Pattern pattern) throws IOException {
         try (Stream<Path> files = Files.walk(SOURCE_ROOT)) {
             return files
                     .filter(path -> path.toString().endsWith(".java"))
-                    .filter(ErrorDispatchArchTest::callsSendError)
+                    .filter(path -> matches(path, pattern))
                     .map(SOURCE_ROOT::relativize)
                     .sorted()
                     .toList();
         }
     }
 
-    private static boolean callsSendError(Path path) {
+    private static boolean matches(Path path, Pattern pattern) {
         try {
-            return SEND_ERROR_CALL.matcher(Files.readString(path)).find();
+            return pattern.matcher(Files.readString(path)).find();
         } catch (IOException exception) {
             throw new IllegalStateException("Could not inspect the error dispatch boundary");
         }

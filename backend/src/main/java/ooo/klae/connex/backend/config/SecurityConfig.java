@@ -225,7 +225,18 @@ public class SecurityConfig {
      * On a real servlet container {@code sendError} performs an ERROR dispatch to {@code /error},
      * which has no rule here and so falls to {@code anyRequest().authenticated()}; an anonymous
      * caller would receive the entry point's 401 instead of the intended status. MockMvc never
-     * performs that dispatch, so only a real-container test observes the difference.
+     * performs that dispatch, so only a real-container test observes the difference. Library code
+     * that refuses ahead of this chain is covered the same way by replacing its handler:
+     * {@link FirewallRefusalHandler} stands in for Spring's {@code HttpStatusRequestRejectedHandler}
+     * so a firewall rejection keeps its own status (#1780).
+     *
+     * <p>Residual, by construction: this chain still admits no ERROR dispatch, so any refusal that
+     * reaches {@code sendError} outside application code and outside the firewall handler — an MVC
+     * default resolver for a failure {@link ooo.klae.connex.backend.exceptions.GlobalExceptionHandler}
+     * does not map, or a container-level error page — answers an anonymous caller 401 rather than the
+     * status it chose. Closing that class would mean permitting the ERROR dispatch here, which widens
+     * anonymous access to {@code /error}; until that is decided, every new refusal must write its own
+     * status and body.
      *
      * @return the configured filter chain
      */

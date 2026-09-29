@@ -22,7 +22,6 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
-import org.springframework.security.web.firewall.HttpStatusRequestRejectedHandler;
 import org.springframework.security.web.firewall.RequestRejectedHandler;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -192,15 +191,22 @@ class PublicApiFirewallConfig {
     private static final Set<String> FIREWALL_ALLOWED_METHODS = Set.of(
         "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT");
 
-    /** Handles firewall refusals without relaxing the strict firewall. */
+    /**
+     * Handles firewall refusals without relaxing the strict firewall.
+     *
+     * <p>Browser-plane refusals go to {@link FirewallRefusalHandler} rather than Spring's
+     * {@code HttpStatusRequestRejectedHandler}, whose {@code sendError} makes a real container
+     * ERROR-dispatch the refusal to {@code /error}, where an anonymous caller is answered 401
+     * instead of the firewall's 400 (#1780).
+     */
     @Bean
     RequestRejectedHandler publicApiRequestRejectedHandler(
             ObjectMapper objectMapper,
             @Value("${connex.public-api.enabled:false}") boolean publicApiEnabled) {
-        HttpStatusRequestRejectedHandler defaultHandler = new HttpStatusRequestRejectedHandler();
+        FirewallRefusalHandler browserPlaneHandler = new FirewallRefusalHandler();
         return (request, response, rejection) -> {
             if (!PublicApiPaths.isPublicRequest(request)) {
-                defaultHandler.handle(request, response, rejection);
+                browserPlaneHandler.handle(request, response, rejection);
                 return;
             }
             if (!publicApiEnabled) {
