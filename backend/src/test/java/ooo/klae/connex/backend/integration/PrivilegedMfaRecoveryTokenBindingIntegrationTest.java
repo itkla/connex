@@ -14,7 +14,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -23,12 +22,10 @@ import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -45,10 +42,6 @@ import org.springframework.security.web.webauthn.api.PublicKeyCredentialType;
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -56,7 +49,6 @@ import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
-import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -70,25 +62,12 @@ import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
  * and configured on the live properties bean just before the request. That mirrors the operator
  * runbook: one token per account, one digest configured at a time.
  */
-@SpringBootTest
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
+class PrivilegedMfaRecoveryTokenBindingIntegrationTest extends AbstractPrivilegedMfaRecoveryIntegrationTest {
     private static final String PASSWORD = "correct-horse-battery-staple";
-
-    @DynamicPropertySource
-    static void recoveryProperties(DynamicPropertyRegistry registry) {
-        registry.add("connex.security.privileged-mfa.recovery-token-sha256",
-                () -> sha256Hex("unused-startup-recovery-token".getBytes(StandardCharsets.UTF_8)));
-        registry.add("connex.security.privileged-mfa.recovery-expires-at",
-                () -> Instant.now().plus(Duration.ofMinutes(55)).toString());
-        registry.add("connex.security.privileged-mfa.recovery-actor",
-                () -> "integration-token-binding-operator");
-    }
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private AuthService authService;
-    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private WebauthnUserEntityMapper userEntityMapper;
     @Autowired private WebauthnCredentialMapper credentialMapper;
@@ -96,23 +75,14 @@ class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
-    @MockitoSpyBean private UserMapper userMapper;
 
     private MockMvc mockMvc;
-    private String startupDigest;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
-        startupDigest = privilegedMfaProperties.getRecoveryTokenSha256();
-    }
-
-    @AfterEach
-    void restore() {
-        privilegedMfaProperties.setRecoveryTokenSha256(startupDigest);
-        SecurityContextHolder.clearContext();
     }
 
     /**
