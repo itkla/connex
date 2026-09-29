@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Component;
 
@@ -30,12 +31,20 @@ import tools.jackson.databind.JsonNode;
  * <p>Removing a tag changes an existing record, and {@code docs/PRODUCT.md} enumerates only the
  * immediate writes an assistant may make; a removal is not one of them, so this tool is
  * confirm-tier. The tag is resolved by exactly one case-insensitive name match over the
- * workspace's tags, and the tag id it resolved to when the proposal was prepared is pinned: a tag
- * deleted and re-created under the same name between the proposal and the approval is another
- * tag, and the approval is refused rather than removing an association the member never
- * reviewed. The framework holds the target {@code FOR UPDATE}, refuses the approval if the record
- * was written after the proposal, and runs the owner-scope gate before this tool removes the
- * association through the record's own service, which records the audit row when it removed one.
+ * workspace's tags — a name as stored first, surrounding whitespace included, and only when no tag
+ * has that name, a name matched with the whitespace around both sides stripped — and the tag id it
+ * resolved to when the proposal was prepared is pinned: a tag deleted and re-created under the
+ * same name between the proposal and the approval is another tag, and the approval is refused
+ * rather than removing an association the member never reviewed. The framework holds the target
+ * {@code FOR UPDATE}, refuses the approval if the record was written after the proposal, and runs
+ * the owner-scope gate before this tool removes the association through the record's own service,
+ * which records the audit row when it removed one.
+ *
+ * <p>The tag row itself is never locked. The pin compares ids, so a rename of the reviewed tag
+ * that commits after the approval resolved it still removes exactly the association the member
+ * reviewed. Its label is not trusted from that resolution: the outcome names the tag as it reads
+ * after the record lock, just before the record service reads it for its audit row, so the stored
+ * outcome never carries a name the tag had already lost when it was removed.
  *
  * <p>The read-back is {@link ReadBack#structural structural} and verifies nothing: the record
  * services report only whether they removed the association, never which tag they removed, and
@@ -109,9 +118,12 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
     /**
      * The one workspace tag the requested name matches case-insensitively.
      *
-     * <p>A name matching no tag, or more than one, refuses: when the proposal is prepared the
-     * framework turns that into a recoverable {@code unresolved_reference}, so no card is ever
-     * shown for a tag its approval could only refuse.
+     * <p>A tag whose stored name equals the request is matched first, so a name stored with
+     * surrounding whitespace resolves when the request carries it; only when none does are names
+     * compared with that whitespace stripped from both sides. A name matching no tag, or more than
+     * one at the tier that matched, refuses: when the proposal is prepared the framework turns
+     * that into a recoverable {@code unresolved_reference}, so no card is ever shown for a tag its
+     * approval could only refuse.
      */
     @Override
     public Resolution resolve(Target target, AiAssistantWriteToolRequest request) {
@@ -132,6 +144,7 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
             throw new ConflictException("Prepared tag removal is unavailable");
         }
         Target target = execution.row().target();
+        String label = currentName(resolution);
         boolean changed = switch (target.kind()) {
             case "person" -> personService.removeTag(target.id(), resolution.id());
             case "company" -> companyService.removeTag(target.id(), resolution.id());
@@ -141,9 +154,25 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", "executed");
         outcome.put("recordType", target.kind());
-        outcome.put(TAG_FIELD, resolution.label());
+        outcome.put(TAG_FIELD, label);
         outcome.put(CHANGED, changed);
         return new Outcome(outcome, null, ReadBack.structural("tagId", resolution.id()));
+    }
+
+    /**
+     * The resolved tag's name as it reads now, after the framework's record lock, or the name it
+     * was resolved under when it no longer exists.
+     *
+     * <p>It reads the one id already resolved and never picks another. The record lock statement
+     * clears the transaction's first-level cache, so this reads committed state rather than the
+     * resolution's own pre-lock read.
+     */
+    private String currentName(Resolution resolution) {
+        return tagService.getAllTags().stream()
+                .filter(tag -> tag.getId() == resolution.id() && tag.getName() != null)
+                .map(Tag::getName)
+                .findFirst()
+                .orElse(resolution.label());
     }
 
     @Override
@@ -251,20 +280,42 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
     }
 
     private static Tag requestedTag(String requested, List<Tag> tags) {
-        if (requested == null) {
-            return null;
-        }
-        List<Tag> matches = tags.stream()
-                .filter(tag -> tag.getName() != null
-                        && tag.getName().equalsIgnoreCase(requested.trim()))
-                .toList();
+        List<Tag> matches = nameMatches(requested, tags, Tag::getName);
         return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    /**
+     * The candidates whose name equals the requested one case-insensitively as stored, or, only
+     * when none does, those equal once the whitespace around both is stripped.
+     *
+     * <p>Tag names are stored as members typed them, surrounding whitespace included, so the
+     * request is never trimmed on its own: a stored {@code " Priority "} is reachable by its exact
+     * name, and a request that differs from a stored name only in that whitespace still matches
+     * it, but only while no other tag also matches that way.
+     */
+    private static <T> List<T> nameMatches(
+            String requested, List<T> candidates, Function<T, String> name) {
+        if (requested == null) {
+            return List.of();
+        }
+        List<T> exact = candidates.stream()
+                .filter(candidate -> name.apply(candidate) != null
+                        && name.apply(candidate).equalsIgnoreCase(requested))
+                .toList();
+        if (!exact.isEmpty()) {
+            return exact;
+        }
+        String stripped = requested.strip();
+        return candidates.stream()
+                .filter(candidate -> name.apply(candidate) != null
+                        && name.apply(candidate).strip().equalsIgnoreCase(stripped))
+                .toList();
     }
 
     /**
      * What the record holds in place of an unresolved tag: the pinned tag under whatever name it
      * carries now, so a renamed tag is still shown as held, and otherwise the record's own tag
-     * under the requested name.
+     * under the requested name, matched as the request itself is.
      */
     private static String heldName(Review review) {
         Integer pinned = review.pinnedResolutionId();
@@ -278,13 +329,9 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
                 return pinnedName;
             }
         }
-        String requested = review.requestText(TAG_FIELD);
-        if (requested == null) {
-            return null;
-        }
-        return review.targetTags().stream()
+        return nameMatches(review.requestText(TAG_FIELD), review.targetTags(), RecordTag::name)
+                .stream()
                 .map(RecordTag::name)
-                .filter(name -> name != null && name.equalsIgnoreCase(requested.trim()))
                 .findFirst()
                 .orElse(null);
     }

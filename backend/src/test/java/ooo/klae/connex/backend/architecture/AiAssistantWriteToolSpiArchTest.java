@@ -156,10 +156,11 @@ class AiAssistantWriteToolSpiArchTest {
      * same {@code DealService} and is granted none of that.
      *
      * <p>{@code remove_tag} is granted {@code getAllTags}, to resolve and pin the requested name
-     * against the workspace's tag vocabulary exactly as {@code add_tag} does, and each record
-     * service's {@code removeTag}, the method the workflow engine's remove-tag action already calls,
-     * which refuses a record the workspace does not hold, records its audit row and reports whether
-     * it removed the association. Neither {@code addTag} nor any record read is granted: the tool
+     * against the workspace's tag vocabulary exactly as {@code add_tag} does and to name the pinned
+     * tag as it reads after the record lock, and each record service's {@code removeTag}, the
+     * method the workflow engine's remove-tag action already calls, which refuses a record the
+     * workspace does not hold, records its audit row and reports whether it removed the
+     * association. Neither {@code addTag} nor any record read is granted: the tool
      * has no inverse, and the framework reads the target through its own scoped gate. {@code
      * add_tag} holds the same services and is granted no {@code removeTag}.
      *

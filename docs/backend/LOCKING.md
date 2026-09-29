@@ -419,8 +419,11 @@ step 5, before any board or target lock — and refuses any difference with `Ass
 target changed`, so a rename or an offboarding between the proposal and the approval can never hand
 a record to a member, move a deal to a stage, or remove a tag, that the card did not name — a tag
 deleted and re-created under the reviewed name is another row, and `remove_tag` refuses it. The comparison reads
-no row and takes no lock. The card resolves the stored name exactly as the approval does and names
-only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
+no row and takes no lock. The resolved row itself is never locked either: a rename of the reviewed
+tag that commits after the approval resolved it still removes exactly the reviewed association,
+because the pin compares ids, and `remove_tag` names the tag in its stored outcome as it reads after
+the record lock, as the record service's audit row does, never by the name it was resolved under.
+The card resolves the stored name exactly as the approval does and names only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
 the card and refused at approval with the same 404 as before pinning, rather than labelled by its
 id.
 

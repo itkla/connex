@@ -1376,6 +1376,81 @@ class AiAssistantWriteToolServiceTest {
     }
 
     /**
+     * The tag row is never locked, so a rename can commit after the approval resolved the reviewed
+     * tag and before the record lock is held. The same association is removed, because the pin
+     * compares ids, and the stored outcome names the tag as it reads after the record lock, which
+     * is the name the record service's audit row records, not the one it had lost by then.
+     */
+    @Test
+    void aTagRenamedWhileItsRemovalIsApprovedIsNamedInTheOutcomeAsItReadsAfterTheRecordLock()
+            throws Exception {
+        AtomicBoolean recordLocked = new AtomicBoolean();
+        when(tagService.getAllTags()).thenAnswer(invocation -> recordLocked.get()
+                ? List.of(tag(9, "Urgent"))
+                : List.of(tag(9, "Priority")));
+        stored(prepared(
+                "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31), 29);
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
+        Person unchanged = person(31);
+        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenAnswer(invocation -> {
+            recordLocked.set(true);
+            return unchanged;
+        });
+        when(personService.getPersonById(31)).thenReturn(unchanged);
+        when(personService.removeTag(31, 9)).thenReturn(true);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(personService).removeTag(31, 9);
+        assertEquals(
+                "{\"status\":\"executed\",\"recordType\":\"person\",\"tag\":\"Urgent\","
+                        + "\"changed\":true}",
+                objectMapper.readTree(capturedResultJson()).get("outcome").toString());
+    }
+
+    /**
+     * Tag names are stored as members typed them, so a name with surrounding whitespace is a
+     * valid tag the model can name exactly; it resolves and is pinned, and an exact match beats a
+     * tag that equals the request only once the whitespace is stripped.
+     */
+    @Test
+    void aTagRemovalResolvesATagStoredWithSurroundingWhitespaceByItsExactName() throws Exception {
+        when(tagService.getAllTags()).thenReturn(
+                List.of(tag(8, "Priority"), tag(9, " Priority ")));
+
+        AiAssistantPreparedWrite spaced = prepared(
+                "remove_tag", "{\"handle\":\"r1\",\"tag\":\" priority \"}", "person", 31);
+        AiAssistantPreparedWrite bare = prepared(
+                "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31);
+
+        assertEquals(9, objectMapper.readTree(spaced.argumentsJson())
+                .path("resolution").path("id").asInt());
+        assertEquals(8, objectMapper.readTree(bare.argumentsJson())
+                .path("resolution").path("id").asInt());
+    }
+
+    /**
+     * A name that equals no tag as stored and more than one once the whitespace around both sides
+     * is stripped is ambiguous, and is refused recoverably rather than guessed.
+     */
+    @Test
+    void aTagRemovalMatchingTwoTagsOnlyOnceWhitespaceIsStrippedIsRefusedAsAmbiguous() {
+        when(tagService.getAllTags()).thenReturn(
+                List.of(tag(8, "Priority"), tag(9, " Priority ")));
+
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "remove_tag", "{\"handle\":\"r1\",\"tag\":\"priority \"}",
+                        "person", 31));
+
+        assertTrue(refusal.recoverable());
+        assertEquals("unresolved_reference", refusal.detailReason());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+    }
+
+    /**
      * A proposal stored before pinning carries neither pin and is approved exactly as it always
      * was: its names are resolved again before the lock and whatever they resolve to is written.
      */

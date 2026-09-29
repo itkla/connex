@@ -1525,6 +1525,43 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * A tag removal card resolves its stored name exactly as the approval does: a tag stored with
+     * surrounding whitespace is reviewed by that exact name, and a name that equals two tags only
+     * once the whitespace is stripped is unresolved, as its approval would refuse it.
+     */
+    @Test
+    void aTagRemovalCardResolvesATagNameStoredWithSurroundingWhitespaceAsTheApprovalDoes() {
+        AiChatToolCall spaced = pinned(
+                toolCall(87, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 87, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":9},\"principals\":[]");
+        spaced.setArgumentsJson(spaced.getArgumentsJson()
+                .replace("\"tag\":\"priority\"", "\"tag\":\" Priority \""));
+        AiChatToolCall stripped = pinned(
+                toolCall(88, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 88, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":8},\"principals\":[]");
+        stripped.setArgumentsJson(stripped.getArgumentsJson()
+                .replace("\"tag\":\"priority\"", "\"tag\":\"priority \""));
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(spaced, stripped));
+        when(tagMapper.getAllTags(WORKSPACE_ID))
+                .thenReturn(List.of(tag(8, "Priority"), tag(9, " Priority ")));
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(
+                        new RecordTag(41, 8, "Priority"), new RecordTag(41, 9, " Priority ")));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        AiAssistantToolCallReadDto exact = cards.getFirst();
+        assertEquals("Remove tag:  Priority ", exact.requestSummary());
+        assertEquals(" Priority ", exact.change().currentValue());
+        assertEquals("ready", exact.change().state());
+        AiAssistantToolCallReadDto ambiguous = cards.get(1);
+        assertEquals("Remove a tag", ambiguous.requestSummary());
+        assertEquals("unresolved", ambiguous.change().state());
+    }
+
+    /**
      * A tag whose name the special-care screen excludes is withheld from the whole card: the
      * request summary falls back to the generic one and no change row states the name, so the
      * card offers no apply, while an ordinary tag on the same page is still shown.
