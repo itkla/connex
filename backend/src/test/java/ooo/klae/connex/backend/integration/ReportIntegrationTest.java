@@ -61,7 +61,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -516,6 +520,7 @@ class ReportIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ReportDeliveryScheduler reportDeliveryScheduler;
     @Autowired private ApprovalPolicyService approvalPolicyService;
+    @Autowired private PlatformTransactionManager fixtureTransactionManager;
 
     @Autowired private Clock clock;
 
@@ -870,23 +875,48 @@ class ReportIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void scheduledDeliveryAuditsFailureAndSendsNothingWhenCapacityCannotBeReclaimed() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User member = newMember(workspace, "member");
-        MockHttpSession session = login(member.getUsername());
-        int archiveReportId = createReport(session, workspace);
-        int deliveryReportId = createReport(session, workspace);
-        fillWorkspaceSnapshotQuota(workspace.getId(), archiveReportId, member.getId(), 0);
-        int scheduleId = createSchedule(session, workspace, deliveryReportId, member.getId());
+        try {
+            MockHttpSession session = login(member.getUsername());
+            int archiveReportId = createReport(session, workspace);
+            int deliveryReportId = createReport(session, workspace);
+            TransactionTemplate fixtureTransaction = new TransactionTemplate(fixtureTransactionManager);
+            fixtureTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            fixtureTransaction.executeWithoutResult(transaction ->
+                fillWorkspaceSnapshotQuota(workspace.getId(), archiveReportId, member.getId(), 0));
+            int scheduleId = createSchedule(session, workspace, deliveryReportId, member.getId());
 
-        forceScheduledDelivery(workspace.getId(), scheduleId);
+            forceScheduledDelivery(workspace.getId(), scheduleId);
 
-        assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM report_snapshot "
-                        + "WHERE workspace_id = ? AND report_schedule_id = ? AND origin = 'scheduled'",
-                Integer.class, workspace.getId(), scheduleId));
-        verify(mailService, never()).sendForWorkspace(anyInt(), any());
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'report.schedule.delivery' "
+                    + "AND outcome = 'failure' AND actor_id = ? AND workspace_id = ? "
+                    + "AND entity_type = 'report_schedule' AND entity_id = ? "
+                    + "AND JSON_UNQUOTE(JSON_EXTRACT(context, '$.error')) = ?",
+                Integer.class, member.getId(), workspace.getId(), scheduleId,
+                "report snapshot persistence failed"));
+            assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM report_snapshot "
+                            + "WHERE workspace_id = ? AND report_schedule_id = ? AND origin = 'scheduled'",
+                    Integer.class, workspace.getId(), scheduleId));
+            verify(mailService, never()).sendForWorkspace(anyInt(), any());
+        } finally {
+            cleanCommittedDeliveryFixture(workspace.getId(), member.getId());
+        }
+    }
+
+    /** Retains audited workspace/user roots and reclaims the quota, schedules and memberships. */
+    private void cleanCommittedDeliveryFixture(int workspaceId, int userId) {
+        jdbcTemplate.update("DELETE FROM report_snapshot WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM report_schedule WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM report_definition WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            workspaceId, userId);
     }
 
     @Test

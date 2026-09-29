@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,9 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.Organization;
@@ -57,6 +61,26 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private int orgId;
+    private Integer enforcingOrgId;
+    private Integer enforcingUserId;
+
+    /** The refusal's actor remains for its audit FK; unaudited enforcing fixtures are removable. */
+    @AfterEach
+    void cleanCommittedFixtures() {
+        if (TestTransaction.isActive()) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", currentUser.getId());
+        if (enforcingOrgId != null) {
+            jdbcTemplate.update("DELETE FROM sso_connection WHERE org_id = ?", enforcingOrgId);
+            jdbcTemplate.update("DELETE FROM workspace WHERE org_id = ?", enforcingOrgId);
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", enforcingOrgId);
+        }
+        if (enforcingUserId != null) {
+            jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", enforcingUserId);
+            userMapper.delete(enforcingUserId);
+        }
+    }
 
     @BeforeEach
     void resolveOrg() {
@@ -194,6 +218,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void login_enforcedUser_isForbidden() {
         User enforced = enrolledInEnforcingOrg();
 
@@ -201,6 +226,11 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
                 authService.login(new LoginDto(enforced.getUsername(), "irrelevant"),
                         new MockHttpServletRequest(), new MockHttpServletResponse()),
                 "password login must be refused for an SSO-enforced account before authentication");
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.login_sso_enforced' "
+                + "AND outcome = 'failure' AND actor_id = ? AND workspace_id = ? "
+                + "AND entity_type = 'user' AND entity_id = ?",
+            Integer.class, currentUser.getId(), workspace.getId(), enforced.getId()));
     }
 
     private SsoLoginResult.LinkRequired linkRequired(int userId, String subject) {
@@ -222,6 +252,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         org.setName("Enforced " + unique());
         org.setSlug("enforced-" + unique());
         organizationMapper.insert(org);
+        enforcingOrgId = org.getId();
 
         Workspace ws = new Workspace();
         ws.setName("Enforced WS " + unique());
@@ -230,6 +261,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         workspaceMapper.insert(ws);
 
         User member = newUser();
+        enforcingUserId = member.getId();
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
 
         SsoConnection connection = new SsoConnection();

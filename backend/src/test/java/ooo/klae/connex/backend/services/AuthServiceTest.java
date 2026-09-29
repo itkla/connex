@@ -8,14 +8,22 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -31,6 +39,23 @@ class AuthServiceTest extends AbstractServiceTest {
 
     @Autowired private AuthService authService;
     @Autowired private SessionSecurityService sessionSecurityService;
+    @Autowired private JdbcTemplate jdbcTemplate;
+
+    private final List<Integer> registeredFixtureIds = new ArrayList<>();
+
+    /** Audited users and workspaces remain; their test-only memberships can be reclaimed. */
+    @AfterEach
+    void cleanCommittedMemberships() {
+        if (TestTransaction.isActive()) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", currentUser.getId());
+        for (int userId : registeredFixtureIds) {
+            jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM org_member WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM notification_recipient_state WHERE recipient_id = ?", userId);
+        }
+    }
 
     private RegisterDto registration(String username, String email) {
         RegisterDto dto = new RegisterDto();
@@ -43,25 +68,32 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void register_duplicateUsername_throwsFieldlessGenericConflict() {
         String username = "taken_" + unique();
-        authService.register(registration(username, unique() + "@example.com"), null);
+        registeredFixtureIds.add(authService.register(
+            registration(username, unique() + "@example.com"), null).getId());
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
             () -> authService.register(registration(username, unique() + "@example.com"), null));
         assertNull(ex.getField(), "a duplicate username must not be revealed via the error field");
         assertEquals("Registration could not be completed", ex.getMessage());
+        assertRegistrationFailureAudit(username);
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void register_duplicateEmail_throwsIdenticalFieldlessConflict() {
         String email = "taken_" + unique() + "@example.com";
-        authService.register(registration("user_" + unique(), email), null);
+        registeredFixtureIds.add(authService.register(
+            registration("user_" + unique(), email), null).getId());
+        RegisterDto duplicate = registration("user_" + unique(), email);
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
-            () -> authService.register(registration("user_" + unique(), email), null));
+            () -> authService.register(duplicate, null));
         assertNull(ex.getField(), "a duplicate email must not be revealed via the error field");
         assertEquals("Registration could not be completed", ex.getMessage());
+        assertRegistrationFailureAudit(duplicate.getUsername());
     }
 
     @Test
@@ -74,6 +106,7 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void selfServiceRegistration_rejectsKnownBreachedPassword() {
         RegisterDto request = registration("breached_" + unique(), unique() + "@example.com");
         request.setPassword("Password1!");
@@ -83,15 +116,18 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertEquals("password", exception.getField());
         assertFalse(exception.getMessage().contains(request.getPassword()));
+        assertRegistrationFailureAudit(request.getUsername());
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void administratorRegistration_rejectsKnownBreachedPassword() {
         RegisterDto request = registration("admin_breached_" + unique(), unique() + "@example.com");
         request.setPassword("Password1!");
 
         assertThrows(BreachedPasswordException.class,
                 () -> authService.register(request, null));
+        assertRegistrationFailureAudit(request.getUsername());
     }
 
     @Test
@@ -244,6 +280,14 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertThrows(AuthenticationException.class,
             () -> authService.hasPasswordCredential(member.getId()));
+    }
+
+    private void assertRegistrationFailureAudit(String username) {
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.register' "
+                + "AND outcome = 'failure' AND actor_id = ? AND workspace_id = ? "
+                + "AND entity_type = 'user' AND entity_id IS NULL AND target_label = ?",
+            Integer.class, currentUser.getId(), workspace.getId(), username));
     }
 
     private User passwordlessUser() {

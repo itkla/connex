@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +21,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
@@ -86,6 +90,31 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         when(runtimeProperties.maxTriggerFanout()).thenReturn(128);
     }
 
+    /** Reclaims only the isolated workspace committed by the canonical claim tests. */
+    @AfterEach
+    void cleanCommittedCanonicalFixtures() {
+        if (TestTransaction.isActive() || workspace == null) {
+            return;
+        }
+        int workspaceId = workspace.getId();
+        jdbcTemplate.update(
+            "UPDATE workflow SET enabled = FALSE, active_version_id = NULL WHERE workspace_id = ?",
+            workspaceId);
+        for (String table : List.of(
+                "workflow_intervention", "workflow_invocation_record", "workflow_invocation",
+                "workflow_recipe_origin", "workflow_step_attempt", "workflow_step_run",
+                "workflow_run", "workflow_trigger_outbox", "workflow_runtime_workspace",
+                "rule_execution", "job_run", "workflow_version", "workflow", "rule",
+                "workflow_trigger_admission", "company", "tag")) {
+            jdbcTemplate.update("DELETE FROM " + table + " WHERE workspace_id = ?", workspaceId);
+        }
+        workspaceMapper.removeMember(workspaceId, currentUser.getId());
+        jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+        userMapper.delete(currentUser.getId());
+        jdbcTemplate.update("DELETE FROM organization WHERE id = ?", workspace.getOrgId());
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void zeroCapacityFixtureRejectsLegacyCreationBeforePersistence(boolean scheduled) {
@@ -139,6 +168,7 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void canonicalOwnedScheduleDoesNotRepeatAPreUpgradeBucketEffect() {
         Company company = newCompany();
         RuleDto rule = scheduleRule(newTag().getId());
@@ -146,10 +176,12 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         seedLegacyExecution(rule.getId(), company.getId(), company.getId() + ":20260803");
         clearInvocations(actionExecutor);
 
-        workflowRuntimeService.dispatch(
+        WorkflowDispatchResult result = workflowRuntimeService.dispatch(
             new WorkflowTriggerDispatch.ScheduleTick(
                 workspace.getId(), "daily", "20260803"));
 
+        assertEquals(new WorkflowDispatchResult(1, 0, 1, 0), result,
+            "canonical dispatch must recognize the historical effect without rejecting the claim");
         assertSingleHistoricalEffect(rule.getId());
         verifyNoInteractions(actionExecutor);
     }
@@ -173,6 +205,7 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void canonicalOwnedThrottleDoesNotRepeatAPreUpgradeWindowEffect() {
         Company company = newCompany();
         RuleDto rule = throttledRule(newTag().getId());
@@ -185,8 +218,11 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
             company.getId() + ":company.updated:t60:" + window);
         clearInvocations(actionExecutor);
 
-        workflowRuntimeService.dispatch(entityDispatch(company.getId(), occurredAt));
+        WorkflowDispatchResult result = workflowRuntimeService.dispatch(
+            entityDispatch(company.getId(), occurredAt));
 
+        assertEquals(new WorkflowDispatchResult(1, 0, 1, 0), result,
+            "canonical dispatch must recognize the historical effect without rejecting the claim");
         assertSingleHistoricalEffect(rule.getId());
         verifyNoInteractions(actionExecutor);
     }
