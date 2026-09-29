@@ -213,12 +213,16 @@ sudo systemctl enable --now connex-staging-prune.timer
 # Confirm the host now runs the intended schedule and script, not the previous ones.
 systemctl cat connex-staging-prune.service | grep ExecStart
 systemctl list-timers connex-staging-prune.timer
-sudo /usr/local/bin/connex-staging-prune --dry-run
+# Run the dry run as the unit's own user (User=dev, Group=dev), not as root: state-file
+# permissions and /proc visibility differ, so a root check can report a clean scan while the
+# timer's own runs refuse or make different reference decisions.
+sudo -u dev /usr/local/bin/connex-staging-prune --dry-run
 ```
 
 The dry run is the check that matters: it reports what the installed copy would reclaim without
 removing anything, so a mismatch between the repository and the host shows up as a difference in
-that output rather than as silence.
+that output rather than as silence — and running it as `dev` is what makes that output represent
+what the timer will actually do.
 
 It removes an entry only when every one of these holds:
 

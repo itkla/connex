@@ -71,6 +71,14 @@ log() { printf '[%s] %s\n' "$LOG_TAG" "$*"; }
 
 is_git_sha() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 
+# A name the deploy script actually creates: one of its mktemp templates, a 40-character sha, and
+# the six characters mktemp substitutes for XXXXXX. The globs alone match any directory sharing a
+# prefix -- `.target-release-manual-backup` would qualify -- and scratch reclamation now runs before
+# every marker and quarantine check, so a mistaken match would be deleted with nothing to stop it.
+is_deploy_scratch() {
+    [[ "$1" =~ ^\.(target-release|previous-release|previous-frontend)-[0-9a-f]{40}\.[A-Za-z0-9]{6}$ ]]
+}
+
 read_sha_file() {
     local file="$1" value
     [ -f "$file" ] || return 1
@@ -152,6 +160,10 @@ reap_orphaned_scratch() {
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         if [ ! -d "$path" ] || [ -L "$path" ]; then
+            continue
+        fi
+        if ! is_deploy_scratch "$(basename -- "$path")"; then
+            log "Skipped $(basename -- "$path"): not a name the deploy script creates"
             continue
         fi
         created="$(stat -c %Z -- "$path")" || continue
