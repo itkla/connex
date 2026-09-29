@@ -66,7 +66,8 @@ public class AiAssistantToolCatalog {
         SCHEDULE("schedule", "Meeting conflict and availability reads for one record"),
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
         WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
-        WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments");
+        WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments"),
+        WRITE_FOLLOWUP("write_followup", "Set a contact's first-response deadline");
 
         private final String key;
         private final String summary;
@@ -519,6 +520,9 @@ public class AiAssistantToolCatalog {
         add(tools, confirm(Toolset.WRITE_PIPELINE, "assign_owner",
                 handle(),
                 string("owner", true, 1, 255, Set.of())));
+        add(tools, confirm(Toolset.WRITE_FOLLOWUP, "set_response_due",
+                handle(),
+                integer("due_in_hours", true, 1, 8_760)));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
@@ -564,6 +568,8 @@ public class AiAssistantToolCatalog {
             case "remove_tag" -> "Propose a tag removal that requires human confirmation.";
             case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
+            case "set_response_due" -> "Propose a contact's first-response deadline, in hours "
+                    + "from approval, that requires human confirmation.";
             default -> throw new IllegalStateException("Assistant native tool description is missing");
         };
     }

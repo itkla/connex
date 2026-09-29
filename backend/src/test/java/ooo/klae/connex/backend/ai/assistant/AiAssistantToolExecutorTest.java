@@ -118,6 +118,7 @@ class AiAssistantToolExecutorTest {
                 "create_note", ",\"content\":\"Met\"",
                 "add_tag", ",\"tag\":\"VIP\"",
                 "remove_tag", ",\"tag\":\"VIP\"",
+                "set_response_due", ",\"due_in_hours\":24",
                 "change_deal_stage", ",\"stage\":\"Won\"",
                 "assign_owner", ",\"owner\":\"Ana\"",
                 "get_deal_brief", "",
@@ -129,6 +130,7 @@ class AiAssistantToolExecutorTest {
                 "change_deal_stage", Set.of("deal"),
                 "add_tag", Set.of("person", "company", "deal"),
                 "remove_tag", Set.of("person", "company", "deal"),
+                "set_response_due", Set.of("person"),
                 "assign_owner", Set.of("person", "company", "deal"),
                 "get_deal_brief", Set.of("deal"),
                 "find_schedule_conflicts", Set.of("person"));

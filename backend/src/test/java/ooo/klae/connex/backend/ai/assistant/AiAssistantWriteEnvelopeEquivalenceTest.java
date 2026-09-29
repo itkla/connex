@@ -69,6 +69,7 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -214,6 +215,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         tagService, personService, companyService, dealService),
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
+                new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -509,6 +511,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -929,6 +932,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1171,6 +1175,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1458,6 +1463,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1609,6 +1615,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,

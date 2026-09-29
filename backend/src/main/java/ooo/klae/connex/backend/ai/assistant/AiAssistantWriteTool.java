@@ -593,13 +593,44 @@ public interface AiAssistantWriteTool {
         }
     }
 
-    /** The target values a card may compare against, as the viewer can currently see them. */
+    /**
+     * The target values a card may compare against, as the viewer can currently see them.
+     *
+     * <p>{@code fields} holds the target's own reviewable column values, keyed by field name and
+     * read off the same row the snapshot is built from; a column that holds no value has no key.
+     * The framework hands a tool these values only when it declared {@link ReviewInput#FIELDS},
+     * and an empty map otherwise. A person carries {@code firstResponseDueAt}, the UTC deadline of
+     * a running first-response clock as an ISO local date-time.
+     *
+     * @param fields the target's reviewable field values, never {@code null}
+     */
     record RecordSnapshot(
             String label,
             Integer pipelineId,
             Integer ownerId,
             Integer stageId,
-            String updatedAt) {
+            String updatedAt,
+            Map<String, String> fields) {
+
+        public RecordSnapshot {
+            fields = fields == null
+                    ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(fields));
+        }
+
+        /**
+         * @param field a reviewable field name
+         * @return the field's current value, or {@code null} when the target holds none or the
+         *     tool did not declare {@link ReviewInput#FIELDS}
+         */
+        public String field(String field) {
+            return fields.get(field);
+        }
+
+        /** @return this snapshot with no reviewable field values, for a tool that read none */
+        public RecordSnapshot withoutFields() {
+            return new RecordSnapshot(label, pipelineId, ownerId, stageId, updatedAt, Map.of());
+        }
     }
 
     /**
@@ -679,7 +710,12 @@ public interface AiAssistantWriteTool {
          * The workspace's tags and the tags the target currently holds, for a tool that reviews a
          * tag association.
          */
-        TAGS
+        TAGS,
+        /**
+         * The target's own reviewable column values, carried on its {@link RecordSnapshot}, for a
+         * tool whose card states what the record holds now as its before-value.
+         */
+        FIELDS
     }
 
     /** Whether a reviewed value resolved and whether the record already holds it. */

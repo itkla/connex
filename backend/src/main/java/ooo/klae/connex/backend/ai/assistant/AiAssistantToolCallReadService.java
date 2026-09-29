@@ -314,7 +314,7 @@ public class AiAssistantToolCallReadService {
                 if (isProcessable(person)) {
                     putVisible(visible, "person", person.getId(), new RecordSnapshot(
                             person.getName(), null, person.getOwnerId(), null,
-                            person.getUpdatedAt()));
+                            person.getUpdatedAt(), personFields(person)));
                 }
             }
         }
@@ -322,17 +322,29 @@ public class AiAssistantToolCallReadService {
             for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
                 putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
-                        company.getUpdatedAt()));
+                        company.getUpdatedAt(), Map.of()));
             }
         }
         if (!dealIds.isEmpty()) {
             for (Deal deal : dealMapper.getByIds(workspaceId, dealIds)) {
                 putVisible(visible, "deal", deal.getId(), new RecordSnapshot(
                         deal.getName(), deal.getPipelineId(), deal.getOwnerId(),
-                        deal.getStageId(), deal.getUpdatedAt()));
+                        deal.getStageId(), deal.getUpdatedAt(), Map.of()));
             }
         }
         return Map.copyOf(visible);
+    }
+
+    /**
+     * The person's reviewable column values, read off the row the snapshot was already built from,
+     * so a card that states them as its before-value costs no read of its own.
+     */
+    private static Map<String, String> personFields(Person person) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        if (person.getFirstResponseDueAt() != null) {
+            fields.put("firstResponseDueAt", person.getFirstResponseDueAt().toString());
+        }
+        return fields;
     }
 
     /**
@@ -534,10 +546,10 @@ public class AiAssistantToolCallReadService {
      * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
      * no summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
-     * outcome only for an executed call, the members, stages and tags only when the tool declared
-     * them, and the resolution and principals pinned when the proposal was prepared, which a
-     * proposal stored before pinning does not carry; the tool never reads anything this service
-     * did not already load for the page of cards.
+     * outcome only for an executed call, the members, stages and tags, and the target's own
+     * field values, only when the tool declared them, and the resolution and principals pinned
+     * when the proposal was prepared, which a proposal stored before pinning does not carry; the
+     * tool never reads anything this service did not already load for the page of cards.
      */
     private Review review(
             AiAssistantWriteTool tool,
@@ -558,7 +570,7 @@ public class AiAssistantToolCallReadService {
                 call.targetKind(),
                 call.targetId(),
                 true,
-                target,
+                inputs.contains(ReviewInput.FIELDS) ? target : target.withoutFields(),
                 call.request(),
                 EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
                 inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),

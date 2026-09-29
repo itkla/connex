@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -76,6 +77,7 @@ abstract class AbstractAiAssistantWriteToolTest {
     TaskService taskService;
     TagService tagService;
     PipelineService pipelineService;
+    LeadResponseSlaService leadResponseSlaService;
     PersonMapper executorPersonMapper;
     AiRestrictionEpoch restrictionEpoch;
     AiWorkspaceGovernanceService governanceService;
@@ -102,6 +104,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         taskService = mock(TaskService.class);
         tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
+        leadResponseSlaService = mock(LeadResponseSlaService.class);
         executorPersonMapper = mock(PersonMapper.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -165,7 +168,8 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     /**
      * @param tools the task and stage tools under test, possibly overridden
-     * @return the framework over those tools plus the activity, note, both tag and the owner tools
+     * @return the framework over those tools plus the activity, note, both tag, the owner and the
+     *     response deadline tools
      */
     AiAssistantWriteToolService service(List<AiAssistantWriteTool> tools) {
         List<AiAssistantWriteTool> declared = new ArrayList<>(tools);
@@ -174,6 +178,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         declared.add(addTagTool());
         declared.add(removeTagTool());
         declared.add(assignOwnerTool());
+        declared.add(setResponseDueTool());
         return framework(declared);
     }
 
@@ -245,6 +250,10 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     AiAssistantAssignOwnerWriteTool assignOwnerTool() {
         return new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService);
+    }
+
+    AiAssistantSetResponseDueWriteTool setResponseDueTool() {
+        return new AiAssistantSetResponseDueWriteTool(leadResponseSlaService);
     }
 
     /** Prepares and stores one proposal as tool call 29. */

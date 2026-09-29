@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +51,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -123,6 +125,7 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 ownerTool()));
     }
 
@@ -172,6 +175,10 @@ class AiAssistantToolCallReadServiceTest {
                 mock(PersonService.class),
                 mock(CompanyService.class),
                 mock(DealService.class));
+    }
+
+    private static AiAssistantSetResponseDueWriteTool setResponseDueTool() {
+        return new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class));
     }
 
     private static AiAssistantAssignOwnerWriteTool ownerTool() {
@@ -1246,6 +1253,7 @@ class AiAssistantToolCallReadServiceTest {
                 .map(tool -> (AiAssistantWriteTool) new EchoingTool(tool, seen))
                 .toList());
         stubVisibleDeal();
+        stubVisiblePerson();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(99));
         List<AiAssistantToolCallReadDto> participant = echoing.list(SESSION_ID, false);
@@ -1308,6 +1316,7 @@ class AiAssistantToolCallReadServiceTest {
                     }
                 },
                 removeTagTool(),
+                setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
         String flagged = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
@@ -1343,6 +1352,7 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1414,11 +1424,16 @@ class AiAssistantToolCallReadServiceTest {
                 .map(tool -> (AiAssistantWriteTool) new EchoingTool(tool, seen))
                 .toList());
         stubVisibleDeal();
+        stubVisiblePerson();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(USER_ID));
 
-        for (AiAssistantToolCallReadDto card : echoing.list(SESSION_ID, false)) {
-            assertTrue(card.requestSummary().contains("Acme renewal"), card.toolName());
+        List<AiAssistantToolCallReadDto> cards = echoing.list(SESSION_ID, false);
+        assertEquals(2 * AiAssistantDeclaredWriteTools.tools().size(), cards.size());
+        for (AiAssistantToolCallReadDto card : cards) {
+            assertTrue(card.requestSummary().contains(
+                    "deal".equals(card.target().kind()) ? "Acme renewal" : "Ada Lovelace"),
+                    card.toolName());
             assertTrue(card.requestSummary().contains("secret request"), card.toolName());
         }
         assertFalse(seen.isEmpty());
@@ -1522,6 +1537,74 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("Inactive", renamed.change().currentValue(),
                 "a renamed pinned tag the record still holds must be shown as held");
         assertEquals("unresolved", renamed.change().state());
+    }
+
+    /**
+     * A response deadline card states the deadline the contact holds now as its before-value, read
+     * off the row the page already loaded: with no clock running the proposed hours are ready to
+     * apply, and a contact whose clock already runs would be left exactly as it is, so the card is
+     * unchanged and offers no apply.
+     */
+    @Test
+    void aResponseDeadlineCardReviewsTheDeadlineTheContactHoldsNow() {
+        AiChatToolCall proposal = pinned(
+                toolCall(91, USER_ID, "set_response_due", "confirm", "proposed", "person", 31,
+                        91, null),
+                ",\"principals\":[]");
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(proposal));
+        Person unclocked = person(31, "Ada Lovelace");
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(unclocked));
+
+        AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Set first-response deadline in hours: 48", ready.requestSummary());
+        assertEquals("responseDue", ready.change().field());
+        assertNull(ready.change().currentValue());
+        assertEquals("48", ready.change().proposedValue());
+        assertEquals("ready", ready.change().state());
+
+        Person clocked = person(31, "Ada Lovelace");
+        clocked.setFirstResponseDueAt(LocalDateTime.of(2026, 8, 13, 9, 30));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(clocked));
+
+        AiAssistantToolCallReadDto running = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("2026-08-13T09:30", running.change().currentValue());
+        assertEquals("48", running.change().proposedValue());
+        assertEquals("unchanged", running.change().state());
+    }
+
+    /**
+     * A contact's own field values reach only a tool that declared it reads them: every other
+     * tool's review of the same contact carries a snapshot with no field values at all.
+     */
+    @Test
+    void aToolThatDidNotDeclareFieldsIsHandedNoFieldValues() {
+        List<Review> seen = new ArrayList<>();
+        AiAssistantToolCallReadService echoing = service(AiAssistantDeclaredWriteTools.tools()
+                .stream()
+                .map(tool -> (AiAssistantWriteTool) new EchoingTool(tool, seen))
+                .toList());
+        Person clocked = person(31, "Ada Lovelace");
+        clocked.setFirstResponseDueAt(LocalDateTime.of(2026, 8, 13, 9, 30));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(clocked));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        toolCall(92, USER_ID, "set_response_due", "confirm", "proposed",
+                                "person", 31, 92, null),
+                        toolCall(93, USER_ID, "assign_owner", "confirm", "proposed",
+                                "person", 31, 93, null)));
+
+        assertEquals(2, echoing.list(SESSION_ID, false).size());
+
+        assertFalse(seen.isEmpty());
+        for (Review review : seen) {
+            assertTrue(review.detailsReadable());
+            assertEquals("Ada Lovelace", review.target().label());
+            assertEquals(Map.of(), review.target().fields());
+            assertNull(review.target().field("firstResponseDueAt"));
+        }
     }
 
     /**
@@ -1726,6 +1809,7 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1758,6 +1842,7 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1804,6 +1889,7 @@ class AiAssistantToolCallReadServiceTest {
                 },
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -1837,6 +1923,7 @@ class AiAssistantToolCallReadServiceTest {
                 },
                 tagTool(),
                 removeTagTool(),
+                setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -1854,6 +1941,11 @@ class AiAssistantToolCallReadServiceTest {
         verify(workspaceService, never()).getMembers(WORKSPACE_ID);
     }
 
+    private void stubVisiblePerson() {
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+    }
+
     private void stubVisibleDeal() {
         Deal deal = new Deal();
         deal.setId(41);
@@ -1865,17 +1957,20 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
-     * A proposed and an executed card for every declared tool, all on deal 41 and carrying record
-     * values a viewer who may not read the details must never be shown.
+     * A proposed and an executed card for every declared tool, on deal 41 when the tool accepts a
+     * deal and on person 31 otherwise, carrying record values a viewer who may not read the
+     * details must never be shown.
      */
     private static List<AiChatToolCall> declaredToolCards(int requestedByUserId) {
         List<AiChatToolCall> cards = new ArrayList<>();
         int id = 70;
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
             String tier = tool.tier().name().toLowerCase();
+            String kind = tool.acceptedTargetKinds().contains("deal") ? "deal" : "person";
+            int targetId = "deal".equals(kind) ? 41 : 31;
             for (String status : List.of("proposed", "executed")) {
                 AiChatToolCall card = toolCall(
-                        id, requestedByUserId, tool.name(), tier, status, "deal", 41, id,
+                        id, requestedByUserId, tool.name(), tier, status, kind, targetId, id,
                         "executed".equals(status)
                                 ? "{\"tier\":\"" + tier + "\",\"outcome\":{\"status\":\"executed\","
                                         + "\"recordType\":\"deal\","
@@ -1883,7 +1978,8 @@ class AiAssistantToolCallReadServiceTest {
                                         + "\"stage\":\"secret outcome\"}}"
                                 : null);
                 card.setArgumentsJson("{\"tool\":\"" + tool.name() + "\",\"tier\":\"" + tier
-                        + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"deal\",\"id\":41},"
+                        + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"" + kind
+                        + "\",\"id\":" + targetId + "},"
                         + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
                         + "\"description\":\"secret request\",\"owner\":\"secret request\","
                         + "\"tag\":\"secret request\"},"
@@ -2071,6 +2167,7 @@ class AiAssistantToolCallReadServiceTest {
             case "assign_owner" -> "{\"handle\":\"r1\",\"owner\":\" Ada Owner \"}";
             case "change_deal_stage" -> "{\"handle\":\"r1\",\"stage\":\"Won\"}";
             case "remove_tag" -> "{\"handle\":\"r1\",\"tag\":\"priority\"}";
+            case "set_response_due" -> "{\"handle\":\"r1\",\"due_in_hours\":48}";
             default -> "{\"handle\":\"r1\"}";
         };
         toolCall.setArgumentsJson("{\"tool\":\"" + tool + "\",\"tier\":\"" + tier

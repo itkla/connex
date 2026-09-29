@@ -28,8 +28,10 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -57,6 +59,13 @@ import tools.jackson.databind.ObjectMapper;
  * proposal leaves the association alone until the member approves it, and a tag deleted and
  * re-created under the reviewed name between the proposal and the approval is another tag: only
  * the pin refuses it, because the company stays backdated and the freshness refusal cannot fire.
+ *
+ * <p>The {@code set_response_due} goldens pin the first tool of the {@code write_followup} set.
+ * Its proposal starts no clock until the member approves it, and nothing is pinned, so what
+ * refuses a stale or unauthorized approval is the framework alone: a contact written after the
+ * proposal is refused on the framework's freshness rule, and an approver who lost the contact
+ * update permission is refused from the framework's locked permission snapshot with the
+ * framework's own message, before the clock service is reached and so with no audit row.
  */
 class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTrajectoryTest {
 
@@ -80,6 +89,18 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     @AfterEach
     void removeTags() {
         jdbcTemplate.update("DELETE FROM tag WHERE workspace_id = ?", workspaceId());
+    }
+
+    @AfterEach
+    void removeCustomRoles() {
+        jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update(
+                "DELETE wrp FROM workspace_role_permission wrp"
+                        + " JOIN workspace_role wr ON wr.id = wrp.workspace_role_id"
+                        + " WHERE wr.workspace_id = ?",
+                workspaceId());
+        jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId());
     }
 
     @AfterEach
@@ -424,6 +445,138 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         assertEquals(List.of(), tagsOf(customer));
         assertEquals(0, auditRows("company.removeTag"),
                 "a removal that removed nothing must not be audited as one");
+    }
+
+    /**
+     * A first-response deadline is only proposed: the contact carries no clock and no audit row
+     * until the member approves, and the approval then starts the clock the reviewed number of
+     * hours out through the lead-response service and its audit row.
+     */
+    @Test
+    void aResponseDeadlineStartsNoClockUntilApprovedAndThenStartsItTheReviewedHoursOut() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "set_response_due"),
+                trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals(48, stored.path("request").path("due_in_hours").asInt());
+        assertEquals("person", stored.path("target").path("kind").asString());
+        assertEquals(lead.getId(), stored.path("target").path("id").asInt());
+        assertNull(responseDueAt(lead),
+                "a confirm-tier deadline must start no clock until the member approves");
+        assertEquals(0, auditRows("person.first_response_sla"));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(48 * 60, jdbcTemplate.queryForObject(
+                "SELECT TIMESTAMPDIFF(MINUTE, first_response_started_at, first_response_due_at)"
+                        + " FROM person WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspaceId(), lead.getId()));
+        assertEquals(1, auditRows("person.first_response_sla"));
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals(48, outcome.path("dueInHours").asInt());
+        assertTrue(outcome.path("changed").asBoolean());
+    }
+
+    /**
+     * The contact is edited after the deadline was proposed. Nothing is pinned, so only the
+     * framework's freshness rule can refuse the approval, and it does: no clock starts and the
+     * proposal stays pending.
+     */
+    @Test
+    void approvingAResponseDeadlineOnAContactEditedSinceTheProposalIsRefused() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        touch("person", lead.getId());
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a contact written after the proposal must refuse rather than start a clock"
+                            + " the member reviewed against another version of the record");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertNull(responseDueAt(lead), "the refused approval must start no clock");
+        assertEquals(0, auditRows("person.first_response_sla"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The approver loses the contact update permission after the proposal. The framework refuses
+     * the approval from its locked permission snapshot with its own message, before the clock
+     * service is reached, so no clock starts and no audit row is written.
+     */
+    @Test
+    void approvingAResponseDeadlineAfterLosingContactUpdateIsRefusedByTheFramework() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        customRoleWithout(Permission.PERSON_UPDATE);
+
+        authenticate();
+        try {
+            ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(
+                    "Requires the PERSON_UPDATE permission in this workspace",
+                    refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertNull(responseDueAt(lead), "the refused approval must start no clock");
+        assertEquals(0, auditRows("person.first_response_sla"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    private Object responseDueAt(Person person) {
+        return jdbcTemplate.queryForObject(
+                "SELECT first_response_due_at FROM person WHERE workspace_id = ? AND id = ?",
+                Object.class, workspaceId(), person.getId());
+    }
+
+    /** Moves the member onto a custom role holding every permission except {@code revoked}. */
+    private void customRoleWithout(Permission revoked) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)",
+                workspaceId(), "Without " + revoked.name()));
+        Integer roleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workspace_role WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId(), "Without " + revoked.name());
+        for (Permission permission : Permission.values()) {
+            if (permission != revoked) {
+                jdbcTemplate.update(
+                        "INSERT INTO workspace_role_permission (workspace_role_id, permission)"
+                                + " VALUES (?, ?)",
+                        roleId, permission.name());
+            }
+        }
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+                roleId, workspaceId(), member().getId()));
     }
 
     private int tag(String name) {

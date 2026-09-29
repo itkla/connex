@@ -35,11 +35,13 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -122,6 +124,11 @@ class AiAssistantWriteToolSpiArchTest {
      * tool resolves the requested name against, and the person, company and deal services are the
      * record services {@code add_tag} already associated the tag through, each of which records its
      * own audit row and asserts its own update permission.
+     *
+     * <p>{@code LeadResponseSlaService} joined with {@code set_response_due}: it is the domain
+     * service the workflow engine's {@code set_response_due} action already starts a contact's
+     * first-response clock through, and it asserts the contact update permission, refuses a
+     * contact the workspace does not own or may no longer process, and records its own audit row.
      */
     private static final Set<Class<?>> ALLOWED_DEPENDENCIES = Set.of(
             ActivityService.class,
@@ -132,6 +139,7 @@ class AiAssistantWriteToolSpiArchTest {
             TagService.class,
             PersonService.class,
             CompanyService.class,
+            LeadResponseSlaService.class,
             AiAssistantDateResolver.class,
             ObjectMapper.class);
 
@@ -163,6 +171,15 @@ class AiAssistantWriteToolSpiArchTest {
      * association. Neither {@code addTag} nor any record read is granted: the tool
      * has no inverse, and the framework reads the target through its own scoped gate. {@code
      * add_tag} holds the same services and is granted no {@code removeTag}.
+     *
+     * <p>{@code set_response_due} is granted exactly one method, {@code startFirstResponseClock},
+     * the call the workflow engine's {@code set_response_due} action makes: it asserts the contact
+     * update permission, refuses a contact the workspace does not own or may no longer process,
+     * never extends a running clock, records its audit row and reports whether it started one.
+     * Neither {@code clearFirstResponseClock}, which withdraws a clock, nor {@code
+     * recordFirstResponse}, {@code recordBreach} or the unfiltered {@code findBreaches} read is
+     * granted: the tool has no inverse, and the framework reads the contact through its own scoped
+     * gate.
      *
      * <p>{@code assign_owner} is granted exactly the call its legacy arm made: each record service's
      * {@code updateOwner}, which asserts its own update permission, locks the named owner's
@@ -198,17 +215,22 @@ class AiAssistantWriteToolSpiArchTest {
                     Map.of(
                             PersonService.class, Set.of("updateOwner"),
                             CompanyService.class, Set.of("updateOwner"),
-                            DealService.class, Set.of("updateOwner")));
+                            DealService.class, Set.of("updateOwner")),
+                    AiAssistantSetResponseDueWriteTool.class,
+                    Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock")));
 
     /**
      * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved
      * identifier with itself, which verifies nothing. {@code add_tag} is here because its record
      * services report only whether they created the association, and {@code remove_tag} because
      * they report only whether they removed it; neither is granted a read of the association.
-     * Adding a tool is a reviewed decision to ship a write with no verify-after-write.
+     * {@code set_response_due} is here because {@code startFirstResponseClock} reports only whether
+     * it started a clock, never the deadline it wrote, and the tool is granted no read of the
+     * contact. Adding a tool is a reviewed decision to ship a write with no verify-after-write.
      */
     private static final Set<String> STRUCTURAL_READ_BACK = Set.of(
-            "AiAssistantAddTagWriteTool", "AiAssistantRemoveTagWriteTool");
+            "AiAssistantAddTagWriteTool", "AiAssistantRemoveTagWriteTool",
+            "AiAssistantSetResponseDueWriteTool");
 
     private static final Pattern SELF_COMPARED_READ_BACK = Pattern.compile(
             "new\\s+ReadBack\\s*\\(\\s*[^,]+,\\s*([^,]+?)\\s*,\\s*\\1\\s*\\)");
@@ -401,6 +423,15 @@ class AiAssistantWriteToolSpiArchTest {
                 unpermittedToolUses(
                         AiAssistantRemoveTagWriteTool.class,
                         removeTagTool + "\nboolean added = dealService.addTag(target.id(), 9);\n"));
+        String responseDueTool = read(ASSISTANT_SOURCES.resolve(
+                "AiAssistantSetResponseDueWriteTool.java"));
+        assertEquals(
+                List.of("AiAssistantSetResponseDueWriteTool calls "
+                        + "leadResponseSlaService.clearFirstResponseClock"),
+                unpermittedToolUses(
+                        AiAssistantSetResponseDueWriteTool.class,
+                        responseDueTool
+                                + "\nleadResponseSlaService.clearFirstResponseClock(7, 31);\n"));
         String ownerTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAssignOwnerWriteTool.java"));
         assertEquals(
                 List.of("AiAssistantAssignOwnerWriteTool calls companyService.addTag"),

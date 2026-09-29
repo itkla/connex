@@ -103,7 +103,8 @@ class AiAssistantPromptEnvelopeTest {
      * <p>Each literal is the core as measured when it was pinned (issue #1817) plus an itemized
      * allowance for everything the action surface adds to the core, JSON-ReAct / native:
      * <ul>
-     *   <li>Declaring {@link #PLANNED_TOOLSET_KEYS}, 410 / 350 (403 / 346 itemized below). Every loadable
+     *   <li>Declaring the four action-surface toolsets, {@code write_followup} (declared since)
+     *       and {@link #PLANNED_TOOLSET_KEYS}, 410 / 350 (403 / 346 itemized below). Every loadable
      *       toolset costs the core whether or not it is loaded: a directory line
      *       ({@code "\n" + key + " - " + summary + " - available"}, JSON-escaped) on both
      *       protocols, and a value in the closed {@code find_tools} enum, which JSON-ReAct
@@ -135,7 +136,7 @@ class AiAssistantPromptEnvelopeTest {
      * planned.
      */
     private static final Set<String> PLANNED_TOOLSET_KEYS =
-            Set.of("write_followup", "write_fields", "write_create", "write_workspace");
+            Set.of("write_fields", "write_create", "write_workspace");
 
     /**
      * The most each loadable toolset may add over the core envelope, per protocol.
@@ -143,8 +144,11 @@ class AiAssistantPromptEnvelopeTest {
      * <p>Declared toolsets are pinned at their bytes as measured for issue #1817, plus the
      * allocation the action surface commits to the tools it adds to them: 900 and 700 bytes for
      * {@code log_activities}, 450 and 350 for {@code remove_tag} and for {@code draft_document}.
-     * The last four entries are {@link #PLANNED_TOOLSET_KEYS}; their allocations are committed here
-     * so each is proven to fit the floor before its first tool exists. A toolset's cost to the core
+     * {@code write_followup} was declared with {@code set_response_due} against the allocation
+     * committed before its first tool existed, which also funds {@code complete_task} and
+     * {@code reschedule_task}. The last three entries are {@link #PLANNED_TOOLSET_KEYS}; their
+     * allocations are committed here so each is proven to fit the floor before its first tool
+     * exists. A toolset's cost to the core
      * (its directory line and {@code find_tools} value) is not part of its entry here; it is
      * funded by {@link #CORE_CEILING}. Raising any entry is a budget decision, not a
      * re-measurement.

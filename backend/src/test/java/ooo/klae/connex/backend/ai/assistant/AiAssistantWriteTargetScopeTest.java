@@ -181,6 +181,26 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
+    void anApprovedResponseDeadlineOnAContactThatLeftTheActorsScopeStartsNoClock()
+            throws Exception {
+        when(personService.getPersonById(31))
+                .thenThrow(new ResourceNotFoundException("Person not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":24}",
+                "person", 31);
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
+
+        assertEquals("Person not found", refused.getMessage());
+        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
     void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
             throws Exception {
         AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
@@ -195,7 +215,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         };
         AiAssistantWriteToolService service = framework(List.of(
                 createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool(),
-                removeTagTool(), assignOwnerTool()));
+                removeTagTool(), assignOwnerTool(), setResponseDueTool()));
         propose(service, "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
                         + "\"start\":\"9:00am next Thursday\"}",
