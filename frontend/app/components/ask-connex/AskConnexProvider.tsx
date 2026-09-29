@@ -165,6 +165,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     AiAssistantCreatedRecordKind,
+    AiAssistantToolCallChangeField,
     AiChatCitation,
     AiChatAttachment,
     AiChatDeltaFrame,
@@ -2485,6 +2486,27 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
         return value;
     }, [locale, t]);
+    /**
+     * States one value a pending proposal reviews, in the reader's own language and time zone.
+     *
+     * A first-response deadline the contact already holds arrives as the UTC date-time the
+     * database stores, and the deadline a proposal would start as the whole hours from the
+     * approval the server will count them from; the reader gets a date in their own zone and a
+     * number of hours in their own words. Every other reviewed value is a name the workspace
+     * already wrote in its own words, and stands as it is.
+     */
+    const changeValueText = useCallback((
+        field: AiAssistantToolCallChangeField,
+        value: string,
+        side: 'current' | 'proposed',
+    ): string => {
+        if (field !== 'responseDue') return value;
+        if (side === 'current') return formatUtcDateTime(value, locale, value);
+        const hours = Number(value);
+        return Number.isInteger(hours) && hours > 0
+            ? t('toolCards.change.responseDueInHours', { hours })
+            : value;
+    }, [locale, t]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2641,12 +2663,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 owner: t('toolCards.change.fieldOwner'),
                 stage: t('toolCards.change.fieldStage'),
                 tag: t('toolCards.change.fieldTag'),
+                responseDue: t('toolCards.change.fieldResponseDue'),
             },
+            changeValue: changeValueText,
             changeNotSet: t('toolCards.change.notSet'),
             changeCurrentUnresolved: {
                 owner: t('toolCards.change.currentUnresolvedOwner'),
                 stage: t('toolCards.change.currentUnresolvedStage'),
                 tag: t('toolCards.change.currentUnresolvedTag'),
+                responseDue: t('toolCards.change.currentUnresolvedResponseDue'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
@@ -2718,6 +2743,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 assignOwner: t('toolCards.summaries.assignOwner'),
                 assignOwnerTo: (value: string) => t('toolCards.summaries.assignOwnerTo', { value }),
                 removeOwner: t('toolCards.summaries.removeOwner'),
+                setResponseDue: t('toolCards.summaries.setResponseDue'),
+                setResponseDueIn: (hours: number) =>
+                    t('toolCards.summaries.setResponseDueIn', { hours }),
                 runWriteTool: t('toolCards.summaries.runWriteTool'),
                 requestRejected: t('toolCards.summaries.requestRejected'),
                 requestFailed: t('toolCards.summaries.requestFailed'),
@@ -2732,10 +2760,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 dealStageChanged: t('toolCards.summaries.dealStageChanged'),
                 ownerRemoved: t('toolCards.summaries.ownerRemoved'),
                 ownerAssigned: t('toolCards.summaries.ownerAssigned'),
+                responseDueSet: t('toolCards.summaries.responseDueSet'),
+                responseDueAlreadySet: t('toolCards.summaries.responseDueAlreadySet'),
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
+    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({

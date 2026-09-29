@@ -37,6 +37,7 @@ import {
 import type {
     AiAssistantCreatedRecordKind,
     AiAssistantToolCallChange,
+    AiAssistantToolCallChangeField,
     AiAssistantToolCallChangeState,
 } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -56,6 +57,7 @@ export type AskConnexChangeFieldLabels = {
     owner: string;
     stage: string;
     tag: string;
+    responseDue: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -69,6 +71,7 @@ export type AskConnexUnresolvedValueLabels = {
     owner: string;
     stage: string;
     tag: string;
+    responseDue: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
@@ -78,6 +81,15 @@ export type AskConnexToolCardLabels = {
     applyAria: (target: string) => string;
     applying: string;
     changeField: AskConnexChangeFieldLabels;
+    /**
+     * States one reviewed value in the reader's own language and time zone, by the field it
+     * belongs to and whether it is what the record holds now or what the proposal would write.
+     */
+    changeValue: (
+        field: AiAssistantToolCallChangeField,
+        value: string,
+        side: 'current' | 'proposed',
+    ) => string;
     changeNotSet: string;
     /** What the record currently holds, when this workspace can no longer name who or what it is. */
     changeCurrentUnresolved: AskConnexUnresolvedValueLabels;
@@ -242,6 +254,10 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  * A removal is the exception on the proposed side: its empty after-value is exactly what it
  * proposed, and when it can no longer be made it is what it would remove that changed, so the
  * after-value stays "not set" and its notice says why.
+ *
+ * Every value that is there is written through `changeValue`, because the server states what the
+ * record stores rather than what a member reads: a first-response deadline arrives as a UTC
+ * date-time and its proposal as a count of hours, and neither is quoted back as it stands.
  */
 export function AskConnexChangeRow({
     change,
@@ -264,14 +280,18 @@ export function AskConnexChangeRow({
                 <span className="break-words text-sm text-muted-foreground line-through decoration-muted-foreground/70">
                     {change.currentValueUnresolved
                         ? labels.changeCurrentUnresolved[change.field]
-                        : change.currentValue ?? <NotSetValue labels={labels} />}
+                        : change.currentValue !== null
+                            ? labels.changeValue(change.field, change.currentValue, 'current')
+                            : <NotSetValue labels={labels} />}
                 </span>
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
                     {change.state === 'unresolved' && !removal
                         ? labels.changeProposedUnresolved
-                        : change.proposedValue ?? <NotSetValue labels={labels} />}
+                        : change.proposedValue !== null
+                            ? labels.changeValue(change.field, change.proposedValue, 'proposed')
+                            : <NotSetValue labels={labels} />}
                 </span>
             </div>
         </div>

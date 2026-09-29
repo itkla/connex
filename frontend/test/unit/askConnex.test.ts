@@ -70,6 +70,8 @@ const TOOL_SUMMARY_LABELS = {
     assignOwner: '担当者を割り当て',
     assignOwnerTo: (value: string) => `担当者: ${value}`,
     removeOwner: '担当者を解除',
+    setResponseDue: '初回応答期限を設定',
+    setResponseDueIn: (hours: number) => `初回応答期限: ${hours}時間後`,
     runWriteTool: '書き込み操作',
     requestRejected: '却下',
     requestFailed: '失敗',
@@ -84,6 +86,8 @@ const TOOL_SUMMARY_LABELS = {
     dealStageChanged: 'ステージ変更済み',
     ownerRemoved: '担当者解除済み',
     ownerAssigned: '担当者割り当て済み',
+    responseDueSet: '期限設定済み',
+    responseDueAlreadySet: '期限設定済みでした',
     requestCompleted: '完了',
 };
 
@@ -937,6 +941,38 @@ describe('Ask Connex tool-call cards', () => {
         )).toBe('タグなし');
         expect(askConnexToolOutcomeSummary(
             { ...removeCall, outcomeSummary: 'Request completed' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('完了');
+    });
+
+    it('localizes a response deadline by its hours and by whether it started a clock', () => {
+        const deadlineCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'set_response_due',
+            tier: 'confirm',
+            requestSummary: 'Set first-response deadline in hours: 48',
+            outcomeSummary: 'First-response deadline set',
+        };
+
+        expect(askConnexToolRequestSummary(deadlineCall, TOOL_SUMMARY_LABELS))
+            .toBe('初回応答期限: 48時間後');
+        for (const requestSummary of [
+            'Set a first-response deadline',
+            'Set first-response deadline in hours: soon',
+            'Set first-response deadline in hours: 0',
+        ]) {
+            expect(askConnexToolRequestSummary(
+                { ...deadlineCall, requestSummary },
+                TOOL_SUMMARY_LABELS,
+            )).toBe('初回応答期限を設定');
+        }
+        expect(askConnexToolOutcomeSummary(deadlineCall, TOOL_SUMMARY_LABELS)).toBe('期限設定済み');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'A first-response deadline was already set' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('期限設定済みでした');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'Request completed' },
             TOOL_SUMMARY_LABELS,
         )).toBe('完了');
     });

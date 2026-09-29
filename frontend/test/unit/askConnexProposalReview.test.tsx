@@ -99,6 +99,37 @@ describe("assistant proposal review", () => {
         expect(markup).toContain("Apply the proposed change to Acme renewal");
     });
 
+    it("states a response deadline in the reader's words rather than the stored tokens", () => {
+        const first = renderCard(card({
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({ field: "responseDue", currentValue: null, proposedValue: "48" }),
+        }));
+        const running = renderCard(card({
+            id: 33,
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({
+                field: "responseDue",
+                currentValue: "2026-08-13T09:30",
+                proposedValue: "48",
+                state: "unchanged",
+            }),
+        }));
+
+        expect(first).toContain("Set a first-response deadline 48 hours out");
+        expect(first).toContain(cardLabels.changeField.responseDue);
+        expect(first).toContain("Not set");
+        expect(first).toContain("48 hours after it&#x27;s applied");
+        expect(first).toContain("Apply the proposed change to Ada Lovelace");
+        expect(running).toContain("Due 2026-08-13T09:30 UTC");
+        expect(running).toContain("48 hours after it&#x27;s applied");
+        expect(running).toContain(cardLabels.changeState.unchanged);
+        expect(running).not.toContain("Apply the proposed change to Ada Lovelace");
+    });
+
     it("reads without colour: every review state carries its own sentence", () => {
         const states: Exclude<AiAssistantToolCallChangeState, "ready">[] = [
             "unchanged",

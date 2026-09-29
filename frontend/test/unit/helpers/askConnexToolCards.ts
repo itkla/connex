@@ -15,12 +15,22 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
     apply: "Apply",
     applyAria: (target) => `Apply the proposed change to ${target}`,
     applying: "Applying…",
-    changeField: { owner: "Owner", stage: "Stage", tag: "Tag" },
+    changeField: {
+        owner: "Owner",
+        stage: "Stage",
+        tag: "Tag",
+        responseDue: "First-response deadline",
+    },
+    changeValue: (field, value, side) => {
+        if (field !== "responseDue") return value;
+        return side === "current" ? `Due ${value} UTC` : `${value} hours after it's applied`;
+    },
     changeNotSet: "Not set",
     changeCurrentUnresolved: {
         owner: "Someone no longer in this workspace",
         stage: "A stage that no longer exists",
         tag: "A tag that no longer exists",
+        responseDue: "A deadline that can't be shown",
     },
     changeProposedUnresolved: "No longer exists",
     changeStateUnresolvedRemoval: "What this would remove has changed since it was proposed.",
@@ -89,6 +99,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         assignOwner: "Assign an owner",
         assignOwnerTo: (value) => `Assign owner: ${value}`,
         removeOwner: "Remove the current owner",
+        setResponseDue: "Set a first-response deadline",
+        setResponseDueIn: (hours) => `Set a first-response deadline ${hours} hours out`,
         runWriteTool: "Run a write action",
         requestRejected: "Request rejected",
         requestFailed: "Request failed",
@@ -103,6 +115,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         dealStageChanged: "Deal stage changed",
         ownerRemoved: "Owner removed",
         ownerAssigned: "Owner assigned",
+        responseDueSet: "First-response deadline set",
+        responseDueAlreadySet: "A first-response deadline was already set",
         requestCompleted: "Request completed",
     },
 };

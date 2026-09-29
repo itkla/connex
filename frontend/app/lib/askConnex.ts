@@ -338,6 +338,8 @@ export type AskConnexToolSummaryLabels = {
     assignOwner: string;
     assignOwnerTo: (value: string) => string;
     removeOwner: string;
+    setResponseDue: string;
+    setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
     requestRejected: string;
     requestFailed: string;
@@ -352,6 +354,8 @@ export type AskConnexToolSummaryLabels = {
     dealStageChanged: string;
     ownerRemoved: string;
     ownerAssigned: string;
+    responseDueSet: string;
+    responseDueAlreadySet: string;
     requestCompleted: string;
 };
 
@@ -808,6 +812,13 @@ export function askConnexToolRequestSummary(
         const owner = summaryValue(toolCall.requestSummary, 'Assign owner:');
         return owner === null ? labels.assignOwner : labels.assignOwnerTo(owner);
     }
+    if (toolCall.toolName === 'set_response_due') {
+        const hours = Number(summaryValue(
+            toolCall.requestSummary, 'Set first-response deadline in hours:'));
+        return Number.isInteger(hours) && hours > 0
+            ? labels.setResponseDueIn(hours)
+            : labels.setResponseDue;
+    }
     return labels.runWriteTool;
 }
 
@@ -838,6 +849,13 @@ export function askConnexToolOutcomeSummary(
         return toolCall.outcomeSummary === 'Owner removed'
             ? labels.ownerRemoved
             : labels.ownerAssigned;
+    }
+    if (toolCall.toolName === 'set_response_due') {
+        if (toolCall.outcomeSummary === 'First-response deadline set') return labels.responseDueSet;
+        if (toolCall.outcomeSummary === 'A first-response deadline was already set') {
+            return labels.responseDueAlreadySet;
+        }
+        return labels.requestCompleted;
     }
     return labels.requestCompleted;
 }
