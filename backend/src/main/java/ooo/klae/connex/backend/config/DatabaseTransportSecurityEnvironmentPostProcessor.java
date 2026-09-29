@@ -1,14 +1,19 @@
 package ooo.klae.connex.backend.config;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import org.springframework.boot.EnvironmentPostProcessor;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.EnumerablePropertySource;
@@ -32,10 +37,6 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
     private static final String SYSTEMD_INVOCATION_ID_PROPERTY = "INVOCATION_ID";
     private static final String LOCAL_SYSTEMD_STAGING_PROPERTY_SOURCE = "connexLocalSystemdStaging";
     private static final Map<String, Object> LOCAL_SYSTEMD_STAGING_DEFAULTS = Map.of(
-        "CONNEX_SESSION_COOKIE_SECURE",
-        "false",
-        "CONNEX_WORKSPACE_COOKIE_SECURE",
-        "false",
         "CONNEX_CORS_ALLOWED_ORIGINS",
         "http://localhost:3001",
         "CONNEX_WEBAUTHN_ALLOWED_ORIGINS",
@@ -95,6 +96,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         applyLocalSystemdStagingDefaults(environment);
+        applyExplicitLocalHttpCookies(environment);
 
         if (isLocalSystemdStaging(environment) && environment.acceptsProfiles(Profiles.of("dev", "test"))) {
             throw new IllegalStateException("Local systemd staging must not run with dev or test profiles active");
@@ -287,6 +289,63 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         String userDir = optionalProperty(environment, "user.dir");
         String invocationId = optionalProperty(environment, SYSTEMD_INVOCATION_ID_PROPERTY);
         return LOCAL_SYSTEMD_STAGING_WORKING_DIRECTORY.equals(userDir) && StringUtils.hasText(invocationId);
+    }
+
+    private static void applyExplicitLocalHttpCookies(ConfigurableEnvironment environment) {
+        String enabled = environment.getProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "false");
+        if (!Set.of("true", "false").contains(enabled)) {
+            throw new IllegalStateException("CONNEX_LOCAL_HTTP_COOKIES_ENABLED must be true or false");
+        }
+        if ("true".equals(enabled)) {
+            String corsOrigins = environment.getProperty("connex.cors.allowed-origins",
+                environment.getProperty("CONNEX_CORS_ALLOWED_ORIGINS", ""));
+            List<String> webAuthnOrigins = Binder.get(environment)
+                .bind("connex.webauthn.allowed-origins", Bindable.listOf(String.class))
+                .orElseGet(() -> List.of(environment.getProperty("CONNEX_WEBAUTHN_ALLOWED_ORIGINS", "").split(",", -1)));
+            if (!isLocalSystemdStaging(environment)
+                || !hasOnlyLoopbackHttpOrigins(List.of(corsOrigins.split(",", -1)))
+                || !hasOnlyLoopbackHttpOrigins(webAuthnOrigins)) {
+                throw new IllegalStateException("Local HTTP cookies require systemd staging and only loopback HTTP origins");
+            }
+            environment.getPropertySources().addLast(new MapPropertySource("connexExplicitLocalHttpCookies", Map.of(
+                "CONNEX_SESSION_COOKIE_SECURE", "false",
+                "CONNEX_WORKSPACE_COOKIE_SECURE", "false"
+            )));
+        } else if (isLocalSystemdStaging(environment)
+            && (!hasSecureCookieSetting(environment, "server.servlet.session.cookie.secure", "CONNEX_SESSION_COOKIE_SECURE")
+                || !hasSecureCookieSetting(environment, "connex.workspace-cookie.secure", "CONNEX_WORKSPACE_COOKIE_SECURE"))) {
+            throw new IllegalStateException("Insecure staging cookies require CONNEX_LOCAL_HTTP_COOKIES_ENABLED=true");
+        }
+    }
+
+    private static boolean hasSecureCookieSetting(ConfigurableEnvironment environment, String propertyName, String envName) {
+        String value = Binder.get(environment).bind(propertyName, String.class)
+            .orElseGet(() -> environment.getProperty(envName, "true"));
+        return Boolean.parseBoolean(value);
+    }
+
+    private static boolean hasOnlyLoopbackHttpOrigins(List<String> origins) {
+        if (origins.isEmpty()) {
+            return false;
+        }
+        for (String origin : origins) {
+            if (!StringUtils.hasText(origin)) {
+                return false;
+            }
+            try {
+                URI uri = new URI(origin.strip());
+                String host = uri.getHost();
+                if (!"http".equals(uri.getScheme()) || host == null
+                    || !Set.of("localhost", "127.0.0.1", "[::1]").contains(host)
+                    || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
+                    || !uri.getRawPath().isEmpty() || uri.getPort() < -1 || uri.getPort() > 65535) {
+                    return false;
+                }
+            } catch (URISyntaxException ex) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean hasAllowedSslMode(String url, Set<String> allowedSslModes) {

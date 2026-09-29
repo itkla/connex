@@ -24,13 +24,16 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * not the population a stolen password endangers; requiring mail from it would add lockout risk
  * for no gain.
  *
- * <p>The requirement itself is evaluated independently of {@code privileged-mfa.enforced}, because
- * a first enrollment stamps the session as stepped-up whether or not confinement is on. Its
- * <em>strength</em>, however, is not independent of that flag: the confirmation is delivered to
- * the account address, and {@code EmailChangeService.requestChange} re-points that address behind
- * the current password alone. Confinement is what refuses email-change for an unenrolled
- * privileged account, so with {@code enforced=false} a stolen password can redirect the delivery
- * address and reduce this control back to one factor. See docs/PRIVILEGED_MFA.md.
+ * <p>The requirement is evaluated independently of {@code privileged-mfa.enforced}, because a
+ * first enrollment stamps the session as stepped-up whether or not confinement is on. The
+ * confirmation is only as strong as the account address it is delivered to, so
+ * {@code EmailChangeService.requestChange} refuses to move a privileged account's address without
+ * an enrolled passkey and a fresh WebAuthn step-up, also independently of that flag. A stolen
+ * password therefore cannot request a new delivery address for an account that is privileged when
+ * the change is requested. Three routes remain open (#1506 Part B, #1534): privilege granted to an
+ * account that has never enrolled, a passkey enrolled before a promotion, and an email-change link
+ * requested before a promotion and confirmed after it, since confirmation does not re-check
+ * privilege. See docs/PRIVILEGED_MFA.md.
  */
 @Service
 @RequiredArgsConstructor

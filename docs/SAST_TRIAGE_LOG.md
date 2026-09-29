@@ -993,3 +993,128 @@ creates none.
 **Disposition: false positive.** Tracked on [#1591](https://github.com/itkla/connex/issues/1591)
 (same class); owner Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**,
 re-review **2027-01-14**. Dismissed on 2026-09-07 with a comment carrying that record.
+
+### `java/csrf-unprotected-request-type` — #186: deal collaborator listing, false positive
+
+Raised on the merge ref of PR [#1792](https://github.com/itkla/connex/pull/1792) (#819, deal
+collaborator control hydration) at `DealController.java:854`
+(`GET /api/deals/{id}/collaborators`), blocking that pull request. Same class as #67
+(`UserController`), #153 / #159 (`ReportController.widgetKpi`) and #164 / #165.
+
+**Runtime trace.** The handler reads only. `DealService.getCollaborators` runs exactly three
+statements, each a `<select>`: `DealMapper.getDealById` (`DealMapper.xml:1027-1031`, flat result
+map, no nested selects), `DealMapper.getCollaboratorIds` (`DealMapper.xml:1326-1332`, pinned
+verbatim by `DealMapperXmlTest.collaboratorLookupReadsOnlyTenantRelationshipIds`) and
+`UserMapper.getActiveWorkspaceMemberProfilesByIds` (`UserMapper.xml:68-82`). Nothing else executes:
+`DealCollaboratorControlAccess.loadProfiles` is `new ArrayList` / `addAll` / `sort` / `stream`, and
+`TenantWorkScope.unrouted` is a `ThreadLocal` override around `work.get()`. Independently checked
+and clean: no aspects; the `@RequirePermission` pointcut does not match this unannotated read;
+`TenantScopeInterceptor` (a MyBatis `Interceptor`, not the Spring one) is throw-or-proceed;
+`ControlCatalogRoutingInterceptor` only switches the connection catalog; no `ResponseBodyAdvice`; no
+mapper cache; no persisted counter, `last_*` timestamp or lazily created row **on the handler,
+service and mapper path**. The tenant journal is an SLF4J emission, not a database write.
+
+**Scope correction (2026-09-28).** The sentence above originally read "no persisted counter, `last_*`
+timestamp or lazily created row" without qualification, and cited `TenantScopeInterceptor` as though
+it were the Spring `HandlerInterceptor`. It is not: the only `HandlerInterceptor` is
+`TenantResolutionInterceptor`, and it writes `app_user.last_active_workspace_id` on GET **by
+design** (`TenantResolutionInterceptor:184`, and `:216` sets it NULL; `WORKSPACE_RECOVERY_METHODS`
+admits GET/HEAD/OPTIONS per #1108).
+
+The filter and interceptor layer reaches at least the following durable writes on a non-allowlisted
+`/api/**` GET. This list is the corrected inventory for future re-reviewers of this alert class:
+
+1. the workspace-pin heal above — value server-derived from the victim's own default workspace,
+   never request data;
+2. `PrivilegedMfaEnforcementFilter:93` — an `audit_log` insert plus a lazily created
+   `audit_log_integrity_head` row, for a privileged passkey-less caller. The session cookie is
+   `SameSite=Lax`, so a cross-site **top-level navigation** does trigger it. Content is fixed and
+   derived from the victim's identity, but repetition is unbounded, so this is tracked as a finding
+   in its own right on [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into
+   this false-positive rationale;
+3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
+   request (verified in spring-session-jdbc 4.1.0 bytecode);
+4. gated session-attribute writes — when an authenticated session lacks the legacy
+   `connex.authenticatedAt` or user stamp, `AbsoluteSessionTimeoutFilter` →
+   `SessionSecurityService.ensureAuthenticatedSessionStarted` calls `session.setAttribute`, which
+   persists to `SPRING_SESSION_ATTRIBUTES`; `SessionEpochFilter` → `repairSessionEpochFromGrant`
+   can stamp the epoch the same way when the grant matches; and past the absolute timeout
+   `session.invalidate()` deletes the session's JDBC rows.
+
+Items 1, 3 and 4 are route- and method-independent and not attacker-controlled beyond the trigger,
+so none of them differentiates an alert of this class; item 2 has its own disposition. The
+unqualified phrasing was wrong for the request path and is corrected here and in the alert's
+dismissal comment. **Every dismissal of this class must be scoped to the handler, service and
+mapper path.**
+
+**Why CodeQL fired.** The sink is `Supplier.get()` at `TenantWorkScope.java:233`. CodeQL resolves
+that functional-interface call context-insensitively to every `Supplier` lambda reaching
+`unrouted`, including `AiBudgetControlAccess`'s, which do write; all four of this result's code
+flows end at `AiBudgetControlOperations` writes. The flow is infeasible here because the supplier
+constructed at `DealCollaboratorControlAccess.java:59` is `() -> loadProfiles(…)`. This is the same
+systemic shape recorded for #164 / #165 above, now measured: **46 results of this rule on the
+current `main` analysis, 33 of them ending at the same four AI-budget writes, none at an in-memory
+call.** The structural follow-up is tracked on
+[#1815](https://github.com/itkla/connex/issues/1815).
+
+**Correction of record.** The first dismissal comment on this alert (2026-09-20, written to unblock
+#1792) attributed the finding to `TransactionTemplate.setPropagationBehavior` and `List.addAll`.
+That attribution was wrong — no in-memory call is a sink in any result of this rule — and the
+independent reproduction required by
+[STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) had not yet been performed when it was written. The alert
+was reopened and re-dismissed on 2026-09-20 with the corrected rationale and a link to its tracking
+issue. Both the pull request comment and the issue carry the correction.
+
+**Note for re-reviewers.** The 100 `relatedLocations` on an alert of this rule are a global, capped,
+result-independent list — byte-identical between #67 and #186. Only `codeFlows` carry per-result
+truth. Cite methods plus a commit sha rather than bare line numbers: #67's record cites
+`UserService (:91)`, which on current `main` is a different method.
+
+**Disposition: false positive.** Tracking issue
+[#1814](https://github.com/itkla/connex/issues/1814), which is the canonical exception record for
+this alert class and also carries alert #189 (below); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Re-evaluation triggers: any write added to the `getCollaborators` path,
+`DealCollaboratorControlAccess` gaining a mutating statement, or a material update to the query.
+
+### `java/csrf-unprotected-request-type` — #189: share listing, false positive (third of the class)
+
+Raised on the merge ref of PR [#1844](https://github.com/itkla/connex/pull/1844) (#811, share
+control-plane hydration) at `ShareController.java:35` (`GET /api/shares/{type}/{id}`), blocking that
+pull request. Third instance of the structural shape recorded for #67 and #186.
+
+**Runtime trace.** `ShareService.listShares` reaches six statements, every one a `<select>`:
+`getUserById`; the permission reads (`getMemberRoleId`, then `findPermissions` or `getRole`); one of
+`ownsCompany` / `ownsPerson` / `ownsPipeline` (`SELECT EXISTS`); one of the three `listXShares`
+(flat three-column result, no nested selects); and `findOrganizationWorkspacesForShare`. No
+`<insert>`, `<update>` or `<delete>` exists in controller → service → mapper. Permission denial is a
+pure static factory returning `ForbiddenException`. The empty-listing short circuit returns before
+the snapshot query. `ShareWorkspaceControlAccess`'s three `IllegalStateException` guards throw from
+already-materialised locals with no transaction pending, so a failing anchor check writes nothing.
+
+**Why CodeQL fired.** Analysis `1849401074` (ref `refs/pull/1844/merge`, commit `dfb4272e0`, 72
+results) carries exactly one result on `ShareController`, with four code flows sharing a twelve-step
+prefix that ends at `TenantWorkScope.java:233` (`return work.get();`) and then fans out to four
+confirmed writes in `AiBudgetControlOperations` — `ensureUsage`, `insertReservation`,
+`markReservationDispatched`, `deleteSettledReservationsBefore`. The supplier actually constructed on
+this path is `() -> snapshot(workspaceId)`, which reaches one `<select>`. The alert is introduced by
+the helper call rather than by any write: `ShareWorkspaceControlAccess` does not exist on `main`, and
+`main`'s `listShares` returns the mapper result directly.
+
+**Scope of the rationale.** As corrected above for #186, the claim is that the **handler, service and
+mapper path** performs no write. Three route-independent writes reach any non-allowlisted `/api/**`
+GET in the filter and interceptor layer (workspace-pin heal, the privileged-MFA denial audit insert,
+and the Spring Session last-access update); none is attacker-controlled beyond the trigger and none
+differentiates this alert.
+
+**Disposition: false positive.** Per `STATIC_ANALYSIS.md` and `VULNERABILITY_MANAGEMENT.md`, a
+duplicate alert links to the **oldest** open finding issue and keeps its own identifier, so #189's
+canonical exception record sits with #186's on
+[#1814](https://github.com/itkla/connex/issues/1814); the structural remediation for the whole class
+is cross-linked on [#1815](https://github.com/itkla/connex/issues/1815). Owner Hunter Nakagawa;
+approver Security Owner role
+([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Re-evaluation triggers: any write added to the `listShares` path,
+`ShareWorkspaceControlAccess` gaining a mutating statement, a structural split of
+`TenantWorkScope.unrouted` that separates read and write suppliers, or a material update to the
+query.

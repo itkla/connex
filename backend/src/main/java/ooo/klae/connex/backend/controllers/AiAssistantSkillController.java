@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiSkillDirectoryService;
 import ooo.klae.connex.backend.dto.AiAssistantSkillDto;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
+import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /**
  * The declared assistant capabilities the current member can run on the current surface.
@@ -20,10 +22,18 @@ import ooo.klae.connex.backend.dto.AiAssistantSkillDto;
 @RestController
 @RequestMapping("/api/ai/assistant/skills")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class AiAssistantSkillController {
     private final AiSkillDirectoryService skillDirectoryService;
 
-    /** Lists runnable skills, optionally filtered to one declared context kind. */
+    /**
+     * Lists runnable skills, optionally filtered to one declared context kind.
+     *
+     * <p>A client-scheduled read: the directory is refetched whenever the surface's page context
+     * changes rather than on a member action. The {@code context} query parameter never reaches the
+     * journal, which records the mapping template and never the query string.
+     */
+    @TenantJournalClientDriven
     @GetMapping
     public List<AiAssistantSkillDto> list(@RequestParam(required = false) String context) {
         return skillDirectoryService.list(context);

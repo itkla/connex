@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.CampaignDispatchClaimBoundary;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
@@ -78,6 +79,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private RuleActionExecutor ruleActionExecutor;
     @Autowired private CampaignTriggeredSendService triggeredSendService;
     @Autowired private CampaignDispatchService campaignDispatchService;
+    @Autowired private CampaignFrequencyAdmissionService frequencyAdmissionService;
     @Autowired private CampaignSendWorker campaignSendWorker;
     @Autowired private SuppressionService suppressionService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
@@ -442,7 +444,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void webhookRotationPreservesRecoveryIdentityWhileEgressChangesDoNot() {
+    void onlyOutboundConfigurationChangesAdvanceGenerationAndStopExpiredClaimReplay() {
         String prefix = "webhook-generation-" + unique();
         Person person = person(prefix, prefix + "@example.com");
         CampaignMessageDto message = message(prefix);
@@ -473,16 +475,15 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
 
         assertEquals(original.getConfigGeneration(), rotated.getConfigGeneration());
         assertEquals(originalFingerprint, deliveryTargetFingerprint(rotated));
+        deliveryProviderConfigMapper.upsert(rotated, false);
+        assertEquals(rotated.getConfigGeneration(), deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token()).getConfigGeneration());
         assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
         assertEquals("pending", campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId()).getStatus());
 
-        assertEquals(1, campaignDeliveryMapper.claimTriggered(
-                workspace.getId(), result.deliveryId(), "changed-target-worker", 1_000_000L,
-                rotated.getProvider(), deliveryTargetFingerprint(rotated)));
-        expireClaim(result.deliveryId());
         String rotatedFingerprint = deliveryTargetFingerprint(rotated);
-        rotated.setEndpoint("https://account-b.example.test/send");
+        rotated.setEndpoint("https://account-a.example.test/Send");
         deliveryProviderConfigMapper.upsert(rotated, false);
         DeliveryProviderConfig endpointChanged = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
@@ -497,7 +498,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
 
         assertEquals(endpointChanged.getConfigGeneration() + 1, credentialChanged.getConfigGeneration());
         assertFalse(endpointFingerprint.equals(deliveryTargetFingerprint(credentialChanged)));
-        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        assertTrue(dispatchService(true).processSend(workspace.getId(), result.sendId()));
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId());
         assertEquals("failed", delivery.getStatus());
@@ -872,7 +873,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 capabilityRegistry,
                 new WorkflowTriggeredSendGate(enabled, 200, 200),
                 workflowRunMapper,
-                new CampaignDispatchClaimBoundary());
+                new CampaignDispatchClaimBoundary(),
+                frequencyAdmissionService);
     }
 
     private DeliveryProviderConfig deliveryConfig(String endpoint, String credentialRef) {

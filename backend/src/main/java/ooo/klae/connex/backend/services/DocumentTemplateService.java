@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.DocumentBodySchema;
 
 /**
  * Manages workspace-scoped commercial-document templates. Reads are workspace-scoped; mutations
@@ -30,8 +31,6 @@ public class DocumentTemplateService {
 
     private static final Set<String> AUDIT_FIELDS = Set.of(
         "name", "type", "locale", "title", "intro", "terms", "footer", "active");
-    private static final int MAX_BODY_DEPTH = 50;
-    private static final int MAX_BODY_NODES = 5000;
 
     public List<DocumentTemplate> getAll() {
         return templateMapper.getAll(workspaceService.getCurrentWorkspaceId());
@@ -89,31 +88,6 @@ public class DocumentTemplateService {
         } catch (RuntimeException invalid) {
             throw new BadRequestException("Document template body must be valid document content");
         }
-        JsonNode type = root.get("type");
-        if (!root.isObject() || type == null || !type.isString() || !"doc".equals(type.asString())) {
-            throw new BadRequestException("Document template body must be a document");
-        }
-        checkStructure(root, 0, new int[] { 0 });
-    }
-
-    /**
-     * Rejects a body that would be un-generatable server-side: the depth cap mirrors the resolver's,
-     * so any body that saves is guaranteed to resolve, and the node budget bounds resolution cost.
-     */
-    private void checkStructure(JsonNode node, int depth, int[] count) {
-        if (depth > MAX_BODY_DEPTH) {
-            throw new BadRequestException("Document template body is nested too deeply");
-        }
-        if (++count[0] > MAX_BODY_NODES) {
-            throw new BadRequestException("Document template body is too large");
-        }
-        JsonNode content = node.get("content");
-        if (content != null && content.isArray()) {
-            for (JsonNode child : content) {
-                if (child.isObject()) {
-                    checkStructure(child, depth + 1, count);
-                }
-            }
-        }
+        DocumentBodySchema.validate(root);
     }
 }

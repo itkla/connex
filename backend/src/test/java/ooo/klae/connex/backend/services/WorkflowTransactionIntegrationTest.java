@@ -145,7 +145,8 @@ class WorkflowTransactionIntegrationTest extends AbstractServiceTest {
             eq(workspace.getId()),
             eq(currentUser.getId()),
             eq(Set.of(currentUser.getId())),
-            eq(Set.of(currentUser.getId())));
+            eq(Set.of(currentUser.getId())),
+            eq(true));
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {

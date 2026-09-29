@@ -9,7 +9,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
 import lombok.Data;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 
 /**
  * Instance-wide AI configuration, bound from {@code connex.ai.*} /
@@ -55,6 +58,10 @@ public class AiProperties {
 
     /** Whether this deployment permits currently attested organizations to send unmasked data. */
     private boolean unmaskedModeEnabled = false;
+
+    /** Fixture-driven provider used to rehearse agent trajectories without a provider credential. */
+    @Valid
+    private ScriptedProvider scriptedProvider = new ScriptedProvider();
 
     /**
      * Comma-separated RFC 6052 network-specific prefixes used by this deployment's IPv4/IPv6
@@ -159,6 +166,42 @@ public class AiProperties {
     /** Recommended client poll cadence and abandoned-handle cleanup cadence. */
     private Duration generationPollInterval = Duration.ofSeconds(2);
 
+    /** Lifetime of one run lease, applied by the database on every acquire and renewal. */
+    private Duration runLeaseTtl = Duration.ofSeconds(45);
+
+    /** Interval between run-lease renewals; three beats per lifetime tolerates two misses. */
+    private Duration runLeaseHeartbeatInterval = Duration.ofSeconds(15);
+
+    /** Fixed heartbeat thread count; must cover the generation worker count. */
+    private int runLeaseHeartbeatThreads = 4;
+
+    /** Whether this instance sweeps expired run leases. */
+    private boolean runLeaseSweepEnabled = true;
+
+    /** Delay between run-lease sweep passes. */
+    private Duration runLeaseSweepDelay = Duration.ofSeconds(30);
+
+    /** Delay before this instance's first run-lease sweep pass. */
+    private Duration runLeaseSweepInitialDelay = Duration.ofSeconds(60);
+
+    /** Maximum workspaces one run-lease sweep pass visits per catalog. */
+    @Min(1)
+    private int runLeaseSweepMaxWorkspaces = 50;
+
+    /** Maximum expired leases one run-lease sweep pass reads per workspace. */
+    @Min(1)
+    private int runLeaseSweepBatch = 50;
+
+    /** Maximum orphan settlements one run-lease sweep pass performs. */
+    @Min(1)
+    private int runLeaseSweepMaxSettlements = 200;
+
+    /** Lifetime of the lease a settler takes an orphaned run over with. */
+    private Duration runLeaseSettlementTtl = Duration.ofSeconds(30);
+
+    /** How long a released run lease is retained before the reap pass deletes it. */
+    private Duration runLeaseTombstoneRetention = Duration.ofHours(1);
+
     /**
      * Deployment patches applied over {@link ooo.klae.connex.backend.ai.provider.AiModelCatalog}
      * declarations. Vendor limits and prices drift between Connex releases and an
@@ -229,8 +272,30 @@ public class AiProperties {
         private Boolean thoughts;
 
         /**
-         * Exact provider endpoint the {@link #streaming} and {@link #thoughts} declarations apply
-         * to.
+         * How many function calls this endpoint may emit in one assistant message.
+         *
+         * <p>Declared only after a recorded probe, never assumed. The request field that permits
+         * several calls is already sent on every request as {@code false}, so flipping it cannot
+         * fail loudly; what has to be established first is behavioural — that the endpoint really
+         * emits several calls with distinct ids and a per-call replay signature, and that it
+         * accepts a replayed assistant message carrying several of them. There is no provider
+         * credential in any development or CI environment, so the probe is an operator step and the
+         * checklist lives in {@code docs/backend/AI_SECURITY.md}.
+         *
+         * <p>Only honoured together with {@link #endpoint}, on the same reasoning as
+         * {@link #streaming}: the same model id served by two gateways is two different answers.
+         * Unlike streaming, {@link #modelId} must also name the configured model id exactly,
+         * namespace included — {@code google/gemini-2.5-pro} covers neither the bare
+         * {@code gemini-2.5-pro} nor {@code somemirror/gemini-2.5-pro} on the same router, because
+         * the probe answered for one upstream model only.
+         */
+        @Min(1)
+        @Max(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS)
+        private Integer parallelReadCalls;
+
+        /**
+         * Exact provider endpoint the {@link #streaming}, {@link #thoughts} and
+         * {@link #parallelReadCalls} declarations apply to.
          *
          * <p>Scopes an endpoint-specific capability to the endpoint that was actually verified.
          * The token, modality, and pricing fields are properties of the model itself and ignore
@@ -281,8 +346,23 @@ public class AiProperties {
                     candidateEndpoint);
         }
 
-        private Boolean endpointScoped(
-                Boolean declared,
+        /**
+         * How many parallel calls this override declares for one exact configured endpoint.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId configured model id, trimmed and lower-cased with its namespace
+         *     kept, because this declaration speaks for one probed upstream model only
+         * @param candidateEndpoint configured provider endpoint
+         * @return the declared ceiling, or {@code null} when the override says nothing
+         */
+        public Integer parallelReadCallsFor(
+                String candidateProvider, String normalizedModelId, String candidateEndpoint) {
+            return endpointScoped(parallelReadCalls, candidateProvider, normalizedModelId,
+                    candidateEndpoint);
+        }
+
+        private <T> T endpointScoped(
+                T declared,
                 String candidateProvider,
                 String normalizedModelId,
                 String candidateEndpoint) {
@@ -313,6 +393,30 @@ public class AiProperties {
     }
 
     /**
+     * Activation settings for the fixture-driven scripted AI provider.
+     *
+     * <p>Both fields are inert outside the {@code ai-scripted-provider} Spring profile, and a
+     * deployed edition refuses to start with {@link ScriptedProvider#enabled} true: the key sits on
+     * every edition's forbidden list, and {@code DeploymentProfileValidator} additionally refuses
+     * the flag without the profile and the profile without the flag. They are declared here so the
+     * keys have a real binding rather than travelling as loose properties nothing validates.
+     */
+    @Data
+    public static class ScriptedProvider {
+
+        /** Second activation gate, read by the scripted configuration's conditional. */
+        private boolean enabled = false;
+
+        /**
+         * Directory of script files.
+         *
+         * <p>Empty by default and never satisfied from the classpath: no script ships in the
+         * artifact, so an activated instance with no directory loads nothing and fails to start.
+         */
+        private String fixtureDir = "";
+    }
+
+    /**
      * Returns whether the master switch and the selected feature switch permit the feature.
      * @param feature feature to evaluate
      * @return true unless the master switch is off or the feature is explicitly disabled
@@ -320,5 +424,57 @@ public class AiProperties {
     public boolean isFeatureEnabled(AiFeature feature) {
         return enabled && feature != null
                 && (features == null || !Boolean.FALSE.equals(features.get(feature)));
+    }
+
+    /**
+     * Refuses a run-lease configuration in which the mechanism could not hold its own guarantees.
+     *
+     * <p>Each rule closes a concrete failure rather than expressing a preference. A heartbeat
+     * interval above half the lease lifetime means one missed beat expires a live lease. Fewer
+     * heartbeat threads than generation workers means one slow renewal head-of-line-blocks another
+     * run's tick until its lease expires under it. A lease lifetime at or above the generation
+     * lifetime means a dead owner is never detected before the generation gives up anyway. A
+     * tombstone retention at or below the generation lifetime means a released lease can be deleted
+     * while its former owner could still be acting, which would restart the fencing epoch at 1.
+     *
+     * <p>Every lease lifetime is also required to be a whole number of seconds, at least one.
+     * Lease deadlines are computed by the database as {@code INTERVAL n SECOND}, so a sub-second or
+     * fractional setting would be truncated on its way into SQL: {@code 900ms} would mint a lease
+     * whose deadline equals its acquisition instant — expired on arrival, silently taken over by
+     * the next claimant and handed to the settler while the run is still executing.
+     */
+    @PostConstruct
+    void validateRunLeaseTimings() {
+        requireWholeSeconds("run-lease-ttl", runLeaseTtl);
+        requireWholeSeconds("run-lease-settlement-ttl", runLeaseSettlementTtl);
+        requireWholeSeconds("run-lease-tombstone-retention", runLeaseTombstoneRetention);
+        if (runLeaseHeartbeatInterval.toMillis() < 1) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-interval must be at least one millisecond");
+        }
+        if (runLeaseHeartbeatInterval.multipliedBy(2).compareTo(runLeaseTtl) > 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-interval must not exceed half of run-lease-ttl");
+        }
+        if (runLeaseHeartbeatThreads < generationWorkerThreads) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-threads must cover generation-worker-threads");
+        }
+        if (runLeaseTtl.compareTo(generationMaxLifetime) >= 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-ttl must be shorter than generation-max-lifetime");
+        }
+        if (runLeaseTombstoneRetention.compareTo(generationMaxLifetime) <= 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-tombstone-retention must exceed generation-max-lifetime");
+        }
+    }
+
+    private static void requireWholeSeconds(String key, Duration value) {
+        if (value.toSeconds() < 1L || value.getNano() != 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai." + key + " must be a whole number of seconds, at least one, because"
+                            + " lease deadlines are computed as INTERVAL n SECOND; got " + value);
+        }
     }
 }

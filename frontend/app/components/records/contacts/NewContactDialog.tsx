@@ -691,6 +691,7 @@ export function NewContactForm({
                             <input
                                 id="imageUrl"
                                 type="file"
+                                aria-label={t('profilePhotoAria')}
                                 accept={MANAGED_IMAGE_ACCEPT}
                                 disabled={formPending
                                     || recoveryBlocked

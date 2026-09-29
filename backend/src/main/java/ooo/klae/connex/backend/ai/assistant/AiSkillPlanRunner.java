@@ -114,7 +114,8 @@ public class AiSkillPlanRunner {
             guard.run();
             String toolName = step.kind().toolName();
             int toolCallId = persistenceService.proposeTool(
-                    turn, stepNumber, toolName, planArguments(step, routing, scope));
+                    turn, stepNumber, AiAssistantToolCallRef.SOLE_CALL, toolName,
+                    planArguments(step, routing, scope));
             publish(turn, stepNumber, toolName, "proposed", null);
             try {
                 AiAssistantToolResult result = execute(

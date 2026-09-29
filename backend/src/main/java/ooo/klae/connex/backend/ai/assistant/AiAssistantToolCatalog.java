@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -21,6 +24,14 @@ public class AiAssistantToolCatalog {
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
     /** Longest single free-text list entry, sized for one plan step rather than prose. */
     static final int MAX_TEXT_LIST_ITEM_CHARS = 120;
+
+    /**
+     * The meta-tool a turn calls to widen its own vocabulary.
+     *
+     * <p>It is the one declared-executable tool the agent loop handles itself, because it mutates
+     * per-turn state the stateless executor deliberately does not hold.
+     */
+    public static final String FIND_TOOLS = "find_tools";
 
     /** Supported JSON argument kinds. */
     public enum ArgumentKind { STRING, INTEGER, STRING_LIST, TEXT_LIST }
@@ -42,33 +53,286 @@ public class AiAssistantToolCatalog {
         }
     }
 
-    /** One stable tool key and its execution availability. */
+    /**
+     * Named group of declared tools a turn holds together.
+     *
+     * <p>Grouping is by object family rather than by tier, so a family can grow without dragging
+     * every other write tool into the same load. {@link #CORE} is always held; the rest are
+     * loadable, and their keys are the stable wire vocabulary.
+     */
+    public enum Toolset {
+        CORE("core", "Record, activity, task, and plan reads always available"),
+        ANALYTICS("analytics", "Workspace pipeline, activity, and warmth metric aggregates"),
+        SCHEDULE("schedule", "Meeting conflict and availability reads for one record"),
+        WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
+        WRITE_CONTENT("write_content", "Write notes and add tags to one record"),
+        WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments");
+
+        private final String key;
+        private final String summary;
+
+        Toolset(String key, String summary) {
+            this.key = key;
+            this.summary = summary;
+        }
+
+        /** @return the stable lowercase wire key for this toolset */
+        public String key() {
+            return key;
+        }
+
+        /** @return the server-authored one-line summary rendered in the toolset directory */
+        public String summary() {
+            return summary;
+        }
+    }
+
+    /** The toolset every turn holds from its first step and can never release. */
+    public static final Set<Toolset> CORE = Set.of(Toolset.CORE);
+
+    /** Every non-core toolset, in declaration order. */
+    public static final List<Toolset> LOADABLE = EnumSet.complementOf(EnumSet.of(Toolset.CORE))
+            .stream()
+            .toList();
+
+    /** Every declared toolset, the widest vocabulary the catalog can serialize. */
+    public static final Set<Toolset> ALL = Collections.unmodifiableSet(
+            EnumSet.allOf(Toolset.class));
+
+    /**
+     * The total non-core toolsets one turn may ever hold, whether seeded by a routed skill or
+     * loaded during the turn.
+     *
+     * <p>It is one budget rather than two counters, so {@link #reservationToolsets()} is a strict
+     * upper bound on the vocabulary any reachable turn can send.
+     */
+    public static final int MAX_ACTIVE_TOOLSETS_PER_TURN = 2;
+
+    /**
+     * Resolves a wire key onto the loadable toolset that declares it.
+     *
+     * <p>The one lookup every caller that accepts a key uses — a skill declaration, the turn's
+     * seed, the {@code find_tools} loader — so no caller can string-match its way to a toolset the
+     * catalog does not declare, and {@code core} is never reachable from a key: it is always held
+     * and is never something a declaration or a model may ask for.
+     *
+     * @param key a declared lowercase toolset key
+     * @return the loadable toolset with that key, or {@code null} when no declaration owns it
+     */
+    public static Toolset loadableByKey(String key) {
+        for (Toolset toolset : LOADABLE) {
+            if (toolset.key().equals(key)) {
+                return toolset;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extra loadable toolsets the reservation carries beyond {@link #MAX_ACTIVE_TOOLSETS_PER_TURN}.
+     *
+     * <p>The weight proxy below is not a byte count, and it cannot be: the two protocols serialize
+     * different things. A reserved, non-executable tool costs the JSON-ReAct vocabulary but never
+     * reaches the native definitions, and a closed enum costs the proxy one unit per value while
+     * costing a prompt only a short string. Measured on the current catalog the two protocols rank
+     * the families differently — JSON-ReAct is heaviest on {@code analytics} with
+     * {@code write_activity}, native on {@code write_activity} with {@code write_content} — so no
+     * single choice of {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} toolsets dominates both. One toolset
+     * of headroom does, and {@code AiAssistantPromptEnvelopeTest} measures every reachable
+     * combination on both protocols to prove it rather than assume it.
+     */
+    public static final int RESERVATION_HEADROOM_TOOLSETS = 1;
+
+    /**
+     * One stable tool key, its toolset, and its execution availability.
+     *
+     * <p>The toolset is required: every catalog view filters on it, so a declaration without one
+     * would vanish from the vocabulary, the native definitions and {@code isLoaded} for
+     * {@link #ALL} while still passing {@code isKnown}, and would throw from
+     * {@link #CORE}'s immutable {@code contains}. Failing at class initialisation keeps the
+     * partition an invariant rather than a silently enforced filter.
+     */
     public record ToolSpec(
             String name,
+            Toolset toolset,
             ToolTier tier,
             boolean executable,
             String unavailableReason,
             List<ArgumentSpec> arguments) {
 
         public ToolSpec {
+            Objects.requireNonNull(toolset, name + " declares no toolset");
             arguments = List.copyOf(arguments);
         }
     }
 
     private static final Map<String, ToolSpec> TOOLS = buildTools();
 
-    /** @return every declared tool in stable catalog order */
-    public List<ToolSpec> tools() {
-        return List.copyOf(TOOLS.values());
+    /**
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return the declared tools of those toolsets in stable catalog order
+     */
+    public List<ToolSpec> tools(Set<Toolset> loadedToolsets) {
+        return TOOLS.values().stream()
+                .filter(spec -> loadedToolsets.contains(spec.toolset()))
+                .toList();
     }
 
-    /** @return executable static tool definitions for native provider function calling */
-    public List<AiToolDefinition> nativeDefinitions(ObjectMapper objectMapper) {
+    /**
+     * @param objectMapper mapper building the parameter schemas
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return executable native function definitions for those toolsets in stable catalog order
+     */
+    public List<AiToolDefinition> nativeDefinitions(
+            ObjectMapper objectMapper, Set<Toolset> loadedToolsets) {
         return TOOLS.values().stream()
                 .filter(ToolSpec::executable)
+                .filter(spec -> loadedToolsets.contains(spec.toolset()))
                 .map(spec -> new AiToolDefinition(
                         spec.name(), description(spec.name()), parametersSchema(objectMapper, spec)))
                 .toList();
+    }
+
+    /** @return the toolset owning a declared key, or {@code null} when the key is unknown */
+    public Toolset toolsetOf(String name) {
+        ToolSpec spec = TOOLS.get(name);
+        return spec == null ? null : spec.toolset();
+    }
+
+    /**
+     * Names the write-tier tools a toolset puts in front of the model the moment it is held.
+     *
+     * <p>Holding a family is all-or-nothing — the vocabulary filters on the toolset, never on one
+     * member — so a caller deciding whether a declaration may hold a family has to know which of
+     * its members are writes. {@code requireSkillAuthority} refuses a write tool a skill's
+     * authority or {@code allowedTools} does not admit, and that refusal is turn-terminal and
+     * outside every recoverable branch, so a declaration seeding a write family it cannot call
+     * would arm a hard failure on a tool the server itself offered. {@code AiSkillCatalog.SkillSpec}
+     * refuses that declaration where it is written, and this is the lookup it refuses it with.
+     *
+     * @param toolset a declared toolset
+     * @return the declared write-tier tool keys of that toolset, in stable catalog order
+     */
+    public static List<String> writeToolsOf(Toolset toolset) {
+        return TOOLS.values().stream()
+                .filter(spec -> spec.toolset() == toolset)
+                .filter(spec -> spec.tier() != ToolTier.READ)
+                .map(ToolSpec::name)
+                .toList();
+    }
+
+    /**
+     * Names every declared write-tier tool, the set {@link AiAssistantWriteToolRegistry} must cover.
+     *
+     * <p>The registry orders its index by this list rather than by bean discovery, so the order a
+     * write tool is reached in is the catalog's and never depends on how Spring found its bean.
+     *
+     * @return the declared non-read tool keys, in stable catalog order
+     */
+    public static List<String> writeToolNames() {
+        return TOOLS.values().stream()
+                .filter(spec -> spec.tier() != ToolTier.READ)
+                .map(ToolSpec::name)
+                .toList();
+    }
+
+    /**
+     * @param name declared tool key
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return whether the key is declared and its toolset is held
+     */
+    public boolean isLoaded(String name, Set<Toolset> loadedToolsets) {
+        ToolSpec spec = TOOLS.get(name);
+        return spec != null && loadedToolsets.contains(spec.toolset());
+    }
+
+    /**
+     * The worst-case loaded set a turn can reach, used to size the one prompt budget a turn gets.
+     *
+     * <p>It is {@link #CORE} plus the {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} weightiest loadable
+     * toolsets and {@link #RESERVATION_HEADROOM_TOOLSETS} more. Weight is a pure-catalog proxy —
+     * per tool, one for the declaration plus one per argument plus one per closed enum value —
+     * because the catalog cannot serialize a prompt, which is why the headroom exists.
+     * {@code AiAssistantPromptEnvelopeTest} measures the true envelope for every reachable
+     * combination on both protocols and fails loudly, with the numbers printed, if this ever stops
+     * dominating them.
+     *
+     * <p>It still grows with the largest declared families rather than with the catalog, which is
+     * the point: reserving for every tool would fail the context floor as soon as the write
+     * vocabulary grows, even though no turn would ever send those bytes.
+     *
+     * @return the toolsets the fixed envelope must be measured against
+     */
+    public Set<Toolset> reservationToolsets() {
+        EnumSet<Toolset> reservation = EnumSet.copyOf(CORE);
+        LOADABLE.stream()
+                .sorted(Comparator.comparingInt(this::toolsetWeight).reversed()
+                        .thenComparing(Comparator.comparingInt(Toolset::ordinal)))
+                .limit(MAX_ACTIVE_TOOLSETS_PER_TURN + RESERVATION_HEADROOM_TOOLSETS)
+                .forEach(reservation::add);
+        return Collections.unmodifiableSet(reservation);
+    }
+
+    /**
+     * The one model-visible statement of the enforced per-turn toolset cap.
+     *
+     * <p>Rendered from {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} rather than written out, because the
+     * {@code find_tools} description and the system-prompt directive are the only places a model
+     * learns the limit: a hard-coded numeral beside a changed constant would tell every turn a
+     * number the loader does not enforce, and no assertion over a literal can catch that drift.
+     *
+     * @return the sentence both the tool description and the prompt directive end with
+     */
+    public static String capSentence() {
+        return "a request may hold at most " + MAX_ACTIVE_TOOLSETS_PER_TURN
+                + " sets beyond the core set.";
+    }
+
+    /**
+     * Whether a string is server-authored catalog vocabulary rather than tenant or model text.
+     *
+     * <p>Exists so the one tool result the server writes itself — {@code find_tools} — can be
+     * replayed verbatim instead of through the tenant-data masking pass, while still failing
+     * closed if that result ever gains a value the catalog did not author.
+     *
+     * @param value one string from a server-authored tool result
+     * @return whether the catalog declares it as a tool name or a toolset key
+     */
+    public boolean isDeclaredVocabulary(String value) {
+        if (value == null) {
+            return false;
+        }
+        if (TOOLS.containsKey(value)) {
+            return true;
+        }
+        for (Toolset toolset : Toolset.values()) {
+            if (toolset.key().equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return every loadable toolset paired with its server-authored summary, in declaration order */
+    public List<Map.Entry<Toolset, String>> directory() {
+        return LOADABLE.stream()
+                .map(toolset -> Map.entry(toolset, toolset.summary()))
+                .toList();
+    }
+
+    private int toolsetWeight(Toolset toolset) {
+        return TOOLS.values().stream()
+                .filter(spec -> spec.toolset() == toolset)
+                .mapToInt(AiAssistantToolCatalog::declarationWeight)
+                .sum();
+    }
+
+    private static int declarationWeight(ToolSpec spec) {
+        int weight = 1 + spec.arguments().size();
+        for (ArgumentSpec argument : spec.arguments()) {
+            weight += argument.values().size();
+        }
+        return weight;
     }
 
     /** @return whether the key is declared, including reserved replay-stable keys */
@@ -195,60 +459,82 @@ public class AiAssistantToolCatalog {
 
     private static Map<String, ToolSpec> buildTools() {
         Map<String, ToolSpec> tools = new LinkedHashMap<>();
-        add(tools, executable("search_records",
+        add(tools, executable(Toolset.CORE, "search_records",
                 string("query", true, 1, 200, Set.of()),
                 stringList("kinds", false, 1, 3, Set.of("person", "company", "deal"))));
-        add(tools, executable("get_record", handle()));
-        add(tools, executable("get_records",
+        add(tools, executable(Toolset.CORE, "get_record", handle()));
+        add(tools, executable(Toolset.CORE, "get_records",
                 stringList("handles", true, 1, 12, Set.of())));
-        add(tools, executable("set_todos",
+        add(tools, executable(Toolset.CORE, "set_todos",
                 textList("items", true, 1, 12),
                 stringList("statuses", false, 1, 12,
                         Set.of("pending", "active", "done"))));
-        add(tools, executable("list_activities", handle(), integer("limit", false, 1, 20)));
-        add(tools, executable("list_tasks", handle(), integer("limit", false, 1, 20)));
-        add(tools, executable("list_scope_activities",
+        add(tools, executable(Toolset.CORE, "list_activities",
+                handle(), integer("limit", false, 1, 20)));
+        add(tools, executable(Toolset.CORE, "list_tasks",
+                handle(), integer("limit", false, 1, 20)));
+        add(tools, executable(Toolset.CORE, "list_scope_activities",
                 string("records", false, 4, 7, Set.of("person", "company", "deal")),
                 stringList("warmth", false, 1, 4, Set.of("hot", "warm", "cool", "cold")),
                 integer("days", false, 1, 365)));
-        add(tools, executable("aggregate_metric",
+        add(tools, executable(Toolset.CORE, FIND_TOOLS,
+                string("toolset", true, 1, 32, loadableKeys())));
+        add(tools, executable(Toolset.ANALYTICS, "aggregate_metric",
                 string("metric", true, 1, 32, Set.of(
                         "deal_metrics", "deal_kpis", "activity_volume",
                         "task_summary", "warmth_summary")),
                 string("currency", false, 1, 8, Set.of()),
                 integer("days", false, 30, 365, Set.of("30", "90", "365")),
                 string("scope", false, 0, 10, Set.of("", "me", "unassigned"))));
-        add(tools, executable("find_schedule_conflicts",
+        add(tools, executable(Toolset.SCHEDULE, "find_schedule_conflicts",
                 handle(),
                 string("start", true, 1, 80, Set.of()),
                 string("end", true, 1, 80, Set.of())));
         add(tools, reservedDealBrief());
-        add(tools, auto("create_activity",
+        add(tools, auto(Toolset.WRITE_ACTIVITY, "create_activity",
                 handle(),
                 string("type", true, 1, 32, Set.of()),
                 string("subject", true, 1, 255, Set.of()),
                 string("notes", false, 0, 50_000, Set.of()),
                 string("start", true, 1, 80, Set.of()),
                 integer("duration_minutes", false, 1, 1_440)));
-        add(tools, auto("create_task",
+        add(tools, auto(Toolset.WRITE_ACTIVITY, "create_task",
                 handle(),
                 string("description", true, 1, 1_000, Set.of()),
                 string("due_date", false, 0, 32, Set.of())));
-        add(tools, auto("create_note",
+        add(tools, auto(Toolset.WRITE_CONTENT, "create_note",
                 handle(),
                 string("content", true, 1, 50_000, Set.of()),
                 string("title", false, 0, 255, Set.of()),
                 string("visibility", false, 1, 9, Set.of("private", "workspace"))));
-        add(tools, auto("add_tag",
+        add(tools, auto(Toolset.WRITE_CONTENT, "add_tag",
                 handle(),
                 string("tag", true, 1, 64, Set.of())));
-        add(tools, confirm("change_deal_stage",
+        add(tools, confirm(Toolset.WRITE_PIPELINE, "change_deal_stage",
                 handle(),
                 string("stage", true, 1, 128, Set.of())));
-        add(tools, confirm("assign_owner",
+        add(tools, confirm(Toolset.WRITE_PIPELINE, "assign_owner",
                 handle(),
                 string("owner", true, 1, 255, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
+    }
+
+    /**
+     * Derives the closed {@code find_tools} enum from the loadable toolset keys.
+     *
+     * <p>A static method rather than a constant on purpose: {@code buildTools()} runs inside this
+     * class's static initialiser, so a field declared after {@link #TOOLS} would still be null
+     * here and {@code ArgumentSpec}'s {@code Set.copyOf} would throw out of {@code <clinit>} as an
+     * {@code ExceptionInInitializerError} on first catalog use rather than where it was written.
+     * A nested enum initialises on first use independently of the outer class's field order.
+     *
+     * @return the stable wire keys of every non-core toolset
+     */
+    private static Set<String> loadableKeys() {
+        return java.util.Arrays.stream(Toolset.values())
+                .filter(toolset -> toolset != Toolset.CORE)
+                .map(Toolset::key)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private static String description(String name) {
@@ -264,6 +550,8 @@ public class AiAssistantToolCatalog {
             case "list_tasks" -> "List visible tasks for one record handle.";
             case "list_scope_activities" -> "List recent activity across a bounded set of records "
                     + "in one call instead of asking record by record.";
+            case FIND_TOOLS -> "Load one more named set of tools when the loaded sets cannot do "
+                    + "the job. A set can be loaded once; " + capSentence();
             case "aggregate_metric" -> "Calculate a supported workspace relationship or pipeline metric.";
             case "find_schedule_conflicts" -> "Find visible scheduling conflicts for one record and time range.";
             case "create_activity" -> "Create an immediately executed, undoable activity for one record.";
@@ -361,27 +649,33 @@ public class AiAssistantToolCatalog {
      * otherwise nest provider egress inside one assistant step.
      */
     private static ToolSpec reservedDealBrief() {
-        return reserved("get_deal_brief", "deal_brief_nested_generation_unavailable", handle());
+        return reserved(
+                Toolset.ANALYTICS,
+                "get_deal_brief",
+                "deal_brief_nested_generation_unavailable",
+                handle());
     }
 
     private static void add(Map<String, ToolSpec> tools, ToolSpec spec) {
         tools.put(spec.name(), spec);
     }
 
-    private static ToolSpec executable(String name, ArgumentSpec... arguments) {
-        return new ToolSpec(name, ToolTier.READ, true, null, List.of(arguments));
+    private static ToolSpec executable(
+            Toolset toolset, String name, ArgumentSpec... arguments) {
+        return new ToolSpec(name, toolset, ToolTier.READ, true, null, List.of(arguments));
     }
 
-    private static ToolSpec auto(String name, ArgumentSpec... arguments) {
-        return new ToolSpec(name, ToolTier.AUTO, true, null, List.of(arguments));
+    private static ToolSpec auto(Toolset toolset, String name, ArgumentSpec... arguments) {
+        return new ToolSpec(name, toolset, ToolTier.AUTO, true, null, List.of(arguments));
     }
 
-    private static ToolSpec confirm(String name, ArgumentSpec... arguments) {
-        return new ToolSpec(name, ToolTier.CONFIRM, true, null, List.of(arguments));
+    private static ToolSpec confirm(Toolset toolset, String name, ArgumentSpec... arguments) {
+        return new ToolSpec(name, toolset, ToolTier.CONFIRM, true, null, List.of(arguments));
     }
 
-    private static ToolSpec reserved(String name, String reason, ArgumentSpec... arguments) {
-        return new ToolSpec(name, ToolTier.READ, false, reason, List.of(arguments));
+    private static ToolSpec reserved(
+            Toolset toolset, String name, String reason, ArgumentSpec... arguments) {
+        return new ToolSpec(name, toolset, ToolTier.READ, false, reason, List.of(arguments));
     }
 
     private static ArgumentSpec handle() {

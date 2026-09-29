@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -72,6 +74,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -140,6 +143,8 @@ public class DealService {
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
+    private final DealCollaboratorControlAccess collaboratorControlAccess;
+    private final TransactionTemplate transactionTemplate;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -1267,7 +1272,7 @@ public class DealService {
      * @param actualValue optional realized value to record
      * @return the closed deal
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal close(int id, Boolean won, String reason, BigDecimal actualValue) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -1290,12 +1295,16 @@ public class DealService {
      * @param id
      * @return
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found");
+        int actorId = workspaceService.getCurrentUserId();
+        WorkspaceService.LockedPermissionSnapshot permissions =
+            workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.DEAL_UPDATE)));
+        Deal before = requireDealForUpdate(workspaceId, id);
+        permissions.revalidate();
         Boolean previousOutcome = before.getWon();
         Deal deal = mutableCopy(before);
         boolean wasClosed = previousOutcome != null;
@@ -1313,7 +1322,7 @@ public class DealService {
             deal.setStageId(normalStage);
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, normalStage));
         }
-        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null);
+        dealOutcomeWriter.writeOutcome(workspaceId, deal, previousOutcome);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon());
@@ -1378,10 +1387,12 @@ public class DealService {
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, workspaceService.getCurrentUserId());
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.requireLockedBuiltInAdministrator(builtInAdministrator);
         }
         for (DocumentDeliveryArtifact artifact
                 : documentDeliveryMapper.getArtifactsByDeal(workspaceId, id)) {
@@ -1647,9 +1658,19 @@ public class DealService {
      * @return
      */
     public List<Note> getNotesByDealId(int dealId) {
+        return getNotesByDealId(dealId, 25, 0);
+    }
+
+    /** Returns a bounded page of reader-redacted note previews for the record. */
+    public List<Note> getNotesByDealId(int dealId, int limit, int offset) {
+        return getNotesByDealId(dealId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByDealId(int dealId, int limit, int offset, NotePageCursor before) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByDealId(
+            workspaceId, dealId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
     }
 
     /**
@@ -1866,18 +1887,52 @@ public class DealService {
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
-    public List<User> getCollaborators(int dealId) {
+    /**
+     * Lists a deal's collaborators. The collaborator ids come from tenant data and the profiles
+     * from the control plane; collaborators who are no longer active workspace members are omitted.
+     *
+     * <p>Omitting non-active members is deliberately stricter than the catalog-joined query this
+     * replaced, which returned any existing account. Because {@link #replaceCollaborators} takes a
+     * whole set, a caller that re-sends only what this method showed it drops any collaborator
+     * hidden that way.
+     *
+     * @param dealId the deal in the current workspace
+     * @return display-safe collaborator profiles ordered by display name, then id
+     */
+    public List<UserDto> getCollaborators(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
             throw new ResourceNotFoundException("Deal not found");
         }
-        return dealMapper.getCollaborators(workspaceId, dealId);
+        return collaboratorControlAccess.getProfiles(workspaceId, dealMapper.getCollaboratorIds(workspaceId, dealId));
     }
 
-    @Transactional
+    /**
+     * Replaces a deal's collaborators with the given workspace members, excluding the owner. The
+     * audit entry records the raw collaborator ids before and after the change.
+     *
+     * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
+     * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
+     * transaction and borrow a second pooled connection while the deal's collaborator row locks and
+     * the workspace's audit-chain head lock are still held — see the connection-budget principle in
+     * {@code docs/backend/LOCKING.md}. Callers must therefore not wrap this method in their own
+     * transaction: the inner template would join it instead of committing, and the hydration would
+     * run inside the caller's routed transaction again.
+     *
+     * @param dealId the deal in the current workspace
+     * @param userIds the requested collaborator ids
+     * @return display-safe profiles of the resulting collaborators ordered by display name, then id
+     */
     @RequirePermission(Permission.DEAL_UPDATE)
-    public List<User> replaceCollaborators(int dealId, List<Integer> userIds) {
+    public List<UserDto> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> after = Objects.requireNonNull(
+            transactionTemplate.execute(status -> replaceCollaboratorIds(workspaceId, dealId, userIds)),
+            "deal collaborator replacement result");
+        return collaboratorControlAccess.getProfiles(workspaceId, after);
+    }
+
+    private List<Integer> replaceCollaboratorIds(int workspaceId, int dealId, List<Integer> userIds) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         List<Integer> normalized = userIds == null ? List.of() : userIds.stream().distinct().toList();
@@ -1888,17 +1943,15 @@ public class DealService {
         normalized = normalized.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
-        List<Integer> before = dealMapper.getCollaborators(workspaceId, dealId).stream()
-            .map(User::getId)
-            .toList();
+        List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);
         dealMapper.clearCollaborators(workspaceId, dealId);
         if (!normalized.isEmpty()) {
             dealMapper.insertCollaborators(workspaceId, dealId, normalized);
         }
-        List<User> after = dealMapper.getCollaborators(workspaceId, dealId);
+        List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, dealId);
         auditService.record("deal.updateCollaborators", "deal", dealId, deal.getName(),
             "Updated collaborators on " + deal.getName(),
-            auditService.singleChange("collaboratorIds", before, after.stream().map(User::getId).toList()));
+            auditService.singleChange("collaboratorIds", before, after));
         notificationChanges.publish(workspaceId, "deal", dealId);
         return after;
     }

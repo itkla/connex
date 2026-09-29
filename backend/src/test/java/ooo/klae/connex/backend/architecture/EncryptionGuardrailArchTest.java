@@ -269,7 +269,8 @@ class EncryptionGuardrailArchTest {
     private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.ofEntries(
         Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3),
         Map.entry("ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 3),
-        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL", 3),
+        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_EMAIL", 1),
+        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_SMS", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3),
         Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3),
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_OIDC_CLIENT_SECRET", 3),
@@ -281,7 +282,8 @@ class EncryptionGuardrailArchTest {
 
     private static final Set<String> APPROVED_SECRET_PURPOSES = Set.of(
         "WORKSPACE_SMTP_PASSWORD",
-        "WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL",
+        "WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_EMAIL",
+        "WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_SMS",
         "WORKSPACE_DELIVERY_WEBHOOK_SECRET",
         "WORKSPACE_CONNECTOR_CREDENTIAL",
         "ORG_SSO_OIDC_CLIENT_SECRET",

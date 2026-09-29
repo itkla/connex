@@ -757,7 +757,7 @@ public class DocumentApprovalService {
         chainOfForUpdate(workspaceId, approval);
         requireApprovalMutationRecipientsUnchanged(locks, workspaceId, documentId);
         if (approval.getRequestedBy() == null) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.lockedRequireBuiltInAdministrator(workspaceId, currentUserId);
         } else if (approval.getRequestedBy() != currentUserId) {
             throw new ForbiddenException("Only the requester can cancel an approval request");
         }

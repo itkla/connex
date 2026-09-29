@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createElement, isValidElement } from "react";
+import { createElement, Fragment, isValidElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AppLayout from "@/app/(app)/layout";
 import TasksPage from "@/app/(app)/activity/tasks/page";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
+import BrowserAccountBridge from "@/app/components/BrowserAccountBridge";
 import OnboardingForm from "@/app/onboarding/OnboardingForm";
 import OnboardingPage from "@/app/onboarding/page";
 import {
@@ -38,10 +39,6 @@ type AuthenticationResponse = "authenticated" | "network" | 401 | 403 | 503;
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
-}
-
-function hasChildren(value: unknown): value is { children?: unknown } {
-    return typeof value === "object" && value !== null && "children" in value;
 }
 
 function json(body: unknown): Response {
@@ -311,10 +308,10 @@ describe("the app shell distinguishes workspace membership from lookup availabil
 
         const rendered = await AppLayout({ children: workspaceScopedContent });
 
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
-        expect(isValidElement(rendered) && hasChildren(rendered.props)
-            ? rendered.props.children
-            : undefined).toBeUndefined();
+        expect(rendered).toEqual(createElement(Fragment, null,
+            createElement(BrowserAccountBridge, { userId: 9 }),
+            createElement(WorkspaceUnavailablePage),
+        ));
         expect(redirectMock).not.toHaveBeenCalled();
         expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/permissions/effective")))
             .toBe(false);
@@ -404,8 +401,10 @@ describe("onboarding only claims a user has no workspaces after a resolved looku
 
         const rendered = await OnboardingPage();
 
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
-        expect(isValidElement(rendered) ? rendered.type : null).not.toBe(OnboardingForm);
+        expect(rendered).toEqual(createElement(Fragment, null,
+            createElement(BrowserAccountBridge, { userId: 9 }),
+            createElement(WorkspaceUnavailablePage),
+        ));
         expect(redirectMock).not.toHaveBeenCalled();
     });
 
@@ -414,7 +413,10 @@ describe("onboarding only claims a user has no workspaces after a resolved looku
 
         const rendered = await OnboardingPage();
 
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(OnboardingForm);
+        expect(rendered).toEqual(createElement(Fragment, null,
+            createElement(BrowserAccountBridge, { userId: 9 }),
+            createElement(OnboardingForm),
+        ));
         expect(redirectMock).not.toHaveBeenCalled();
     });
 

@@ -5,6 +5,7 @@ import java.time.LocalDate;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -17,7 +18,8 @@ import ooo.klae.connex.backend.beans.Deal;
 
 public record GuidedDealRecordDto(
     @NotBlank @Size(max = 255) String name,
-    @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) BigDecimal value,
+    @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) @DecimalMax("9999999999999.99")
+    BigDecimal value,
     @NotBlank @Size(max = 8) String currency,
     @NotNull @Positive Integer pipeline,
     @NotNull @Positive Integer stage,

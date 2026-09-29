@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
@@ -35,7 +36,7 @@ import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Bounds API request bodies before Spring MVC or Jackson materializes them.
+ * Rejects ambiguous paths and bounds API request bodies before Spring MVC or Jackson parses them.
  */
 public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
     private static final Set<String> BODY_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
@@ -58,15 +59,20 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !apiPath(request).startsWith("/api/")
-            || !BODY_METHODS.contains(request.getMethod());
-    }
-
-    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        long limitBytes = limitFor(request);
+        String path;
+        try {
+            path = RequestPathNormalizer.apiPath(request);
+        } catch (RequestRejectedException exception) {
+            reject(request, response, HttpServletResponse.SC_BAD_REQUEST);
+            return;
+        }
+        if (!path.startsWith("/api/") || !BODY_METHODS.contains(request.getMethod())) {
+            chain.doFilter(request, response);
+            return;
+        }
+        long limitBytes = limitFor(path, request);
         if (request.getContentLengthLong() > limitBytes) {
             reject(request, response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             return;
@@ -116,7 +122,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
                 objectMapper,
                 request,
                 response,
-                tooLarge ? org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE
+                tooLarge ? org.springframework.http.HttpStatus.CONTENT_TOO_LARGE
                     : org.springframework.http.HttpStatus.BAD_REQUEST,
                 tooLarge ? "request_too_large" : "invalid_request",
                 tooLarge ? "Request body exceeds the allowed size" : "Invalid request");
@@ -126,8 +132,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
         }
     }
 
-    private long limitFor(HttpServletRequest request) {
-        String path = apiPath(request);
+    private long limitFor(String path, HttpServletRequest request) {
         long routeLimit;
         if (path.equals("/api/imports") || path.startsWith("/api/imports/")) {
             routeLimit = properties.getImportMaxBodyBytes();
@@ -158,21 +163,6 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             || path.equals("/api/users/me/profile-picture")
             || path.matches("^/api/persons/\\d+/profile-picture$")
             || path.matches("^/api/companies/\\d+/logo$");
-    }
-
-    private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            uri = uri.substring(contextPath.length());
-        }
-        if (uri.startsWith("/api/")) {
-            return uri;
-        }
-        String servletPath = request.getServletPath();
-        String pathInfo = request.getPathInfo();
-        String path = (servletPath == null ? "" : servletPath) + (pathInfo == null ? "" : pathInfo);
-        return path.isBlank() ? uri : path;
     }
 
     private static boolean hasRequestBodyTooLargeCause(Throwable throwable) {

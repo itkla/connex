@@ -105,22 +105,44 @@ public abstract class AbstractServiceTest {
     @Autowired protected WorkspaceMapper workspaceMapper;
     @Autowired protected NotificationMapper notificationMapper;
     @Autowired protected TenantContext tenantContext;
+    @Autowired private PlatformTransactionManager fixtureTransactionManager;
 
     protected Workspace workspace;
     protected User currentUser;
 
     @BeforeEach
     protected void setUpWorkspaceAndAuthentication() {
-        workspace = workspaceMapper.getDefaultWorkspace();
-        if (workspace == null) {
-            workspace = new Workspace();
-            workspace.setName("Test Workspace");
-            workspace.setSlug("default");
-            workspaceMapper.insert(workspace);
-        }
+        workspace = resolveDefaultWorkspace();
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+    }
+
+    /**
+     * Resolves the shared default workspace, creating it in its own committed transaction when the
+     * schema has none yet. Control-catalog reads suspend the caller's transaction
+     * ({@code OrganizationWorkspaceScopeControlAccess} runs them {@code NOT_SUPPORTED}), so a
+     * workspace inserted inside the rolled-back test transaction is invisible to the code under
+     * test and every route that resolves an organization scope fails. Resolving it before the test
+     * transaction issues any read also keeps the committed row inside that transaction's snapshot.
+     *
+     * @return the default workspace, visible to reads on any connection
+     */
+    private Workspace resolveDefaultWorkspace() {
+        TransactionTemplate template = new TransactionTemplate(fixtureTransactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return Objects.requireNonNull(template.execute(status -> {
+            Workspace existing = workspaceMapper.getDefaultWorkspace();
+            if (existing != null) {
+                return existing;
+            }
+            Workspace created = new Workspace();
+            created.setName("Test Workspace");
+            created.setSlug("default");
+            workspaceMapper.insert(created);
+            Workspace reloaded = workspaceMapper.getDefaultWorkspace();
+            return reloaded == null ? created : reloaded;
+        }), "default workspace");
     }
 
     protected void authenticateAs(User user, int workspaceId) {

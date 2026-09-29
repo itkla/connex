@@ -16,10 +16,13 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import ooo.klae.connex.backend.beans.EmailChangeToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
+import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Exercises the forgot-password service: enumeration safety, single active token,
@@ -31,6 +34,7 @@ class PasswordResetServiceTest extends AbstractServiceTest {
 
     @Autowired private PasswordResetService passwordResetService;
     @Autowired private PasswordResetTokenMapper passwordResetTokenMapper;
+    @Autowired private EmailChangeTokenMapper emailChangeTokenMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private CapturingEmailService email;
 
@@ -81,6 +85,30 @@ class PasswordResetServiceTest extends AbstractServiceTest {
         String storedHash = userMapper.getUserById(user.getId()).getPasswordHash();
         assertTrue(passwordEncoder.matches(NEW_PASSWORD, storedHash));
         assertFalse(passwordResetService.validateToken(token), "a consumed token must not be reusable");
+    }
+
+    @Test
+    void resetPassword_invalidatesPendingEmailChangeTokens() {
+        User user = newUser();
+        String pendingEmailChange = OneTimeTokenDigest.generate();
+        String tokenHash = OneTimeTokenDigest.sha256(pendingEmailChange);
+        emailChangeTokenMapper.insert(user.getId(), "moved_" + unique() + "@example.com",
+                tokenHash, "1.2.3.4", 30,
+                userMapper.currentSessionEpoch(user.getId()));
+        passwordResetService.requestReset(user.getEmail(), unique());
+        assertTrue(emailChangeTokenMapper.existsRedeemableByHash(tokenHash));
+        EmailChangeToken pending = emailChangeTokenMapper.findByHash(tokenHash);
+        assertNotNull(pending);
+        assertNull(pending.getConsumedAt());
+
+        passwordResetService.resetPassword(email.lastToken, NEW_PASSWORD);
+
+        EmailChangeToken invalidated = emailChangeTokenMapper.findByHash(tokenHash);
+        assertNotNull(invalidated);
+        assertNotNull(invalidated.getConsumedAt(), "recovery must explicitly consume the other token family");
+        assertFalse(
+                emailChangeTokenMapper.existsRedeemableByHash(tokenHash),
+                "recovery must evict an email-change token a prior holder pre-positioned");
     }
 
     @Test

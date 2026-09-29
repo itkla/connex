@@ -12,14 +12,19 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Diff;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.DiffState;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReviewInput;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -45,6 +50,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Projects durable assistant write-tool state through the current viewer's live authority. */
 @Service
@@ -55,14 +61,15 @@ public class AiAssistantToolCallReadService {
     private static final String ACTIVE = "active";
     private static final String PROPOSED = "proposed";
     private static final String EXECUTED = "executed";
-    private static final String UNASSIGNED = "unassigned";
-    private static final String OWNER_FIELD = "owner";
-    private static final String STAGE_FIELD = "stage";
+    /**
+     * The entity kinds a durable inverse may name as a record it created, keyed by entity kind
+     * rather than by tool: exactly the kinds {@link #liveCreatedRecordKeys} checks against the
+     * workspace's live rows. An inverse naming its target instead, as a tag association does, names
+     * no created record.
+     */
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
-    private static final Pattern TURN_STEP_KEY = Pattern.compile(
-            "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)$");
-
     private final AiAssistantToolCatalog toolCatalog;
+    private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final PersonMapper personMapper;
@@ -156,15 +163,15 @@ public class AiAssistantToolCallReadService {
             boolean mutationsAvailable) {
         Set<Permission> viewerPermissions = workspaceService.permissionsFor(
                 viewer.workspaceId(), viewer.userId());
-        Map<RecordKey, VisibleTarget> visibleTargets = visibleTargets(
+        Map<RecordKey, RecordSnapshot> visibleTargets = visibleTargets(
                 viewer.workspaceId(), stored);
         List<User> assignableOwners = stored.stream().anyMatch(call ->
-                "assign_owner".equals(call.toolCall().getToolName())
+                readsInput(call, ReviewInput.MEMBERS)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? workspaceService.getMembers(viewer.workspaceId())
                 : List.of();
         List<Stage> stages = stored.stream().anyMatch(call ->
-                "change_deal_stage".equals(call.toolCall().getToolName())
+                readsInput(call, ReviewInput.STAGES)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? pipelineMapper.getAllStages(viewer.workspaceId())
                 : List.of();
@@ -185,26 +192,30 @@ public class AiAssistantToolCallReadService {
                 status = "undone";
             }
             RecordKey targetKey = new RecordKey(call.targetKind(), call.targetId());
-            VisibleTarget visibleTarget = visibleTargets.get(targetKey);
+            RecordSnapshot visibleTarget = visibleTargets.get(targetKey);
             AiAssistantToolCallReadDto.Target target = visibleTarget == null
                     ? new AiAssistantToolCallReadDto.Target(call.targetKind(), null, null)
                     : new AiAssistantToolCallReadDto.Target(
                             call.targetKind(), call.targetId(), visibleTarget.label());
             Integer messageId = assistantMessages.get(call.turnId());
             boolean readable = detailsReadable(call, viewer.userId(), visibleTargets);
+            AiAssistantWriteTool tool = call.tool();
+            Review withheld = withheld(tool, call, status, viewerPermissions);
+            Review review = review(
+                    tool, call, status, readable, visibleTarget, assignableOwners, stages,
+                    withheld);
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
                     call.tier().name().toLowerCase(),
                     status,
                     target,
-                    requestSummary(
-                            call, readable, visibleTarget, assignableOwners, stages),
-                    outcomeSummary(call, status),
+                    summary(
+                            review, withheld, tool::requestSummary,
+                            tool.screensDetailedRequestSummary()),
+                    outcomeSummary(status, tool, review, withheld),
                     readable
-                            ? change(
-                                    call, status, visibleTarget, assignableOwners,
-                                    stages, viewerPermissions)
+                            ? change(call, status, visibleTarget, viewerPermissions, review)
                             : null,
                     readable
                             ? outcomeValues(call, status)
@@ -237,7 +248,7 @@ public class AiAssistantToolCallReadService {
     private static boolean detailsReadable(
             StoredToolCall call,
             int viewerUserId,
-            Map<RecordKey, VisibleTarget> visibleTargets) {
+            Map<RecordKey, RecordSnapshot> visibleTargets) {
         return visibleTargets.get(new RecordKey(call.targetKind(), call.targetId())) != null
                 && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId);
     }
@@ -256,41 +267,39 @@ public class AiAssistantToolCallReadService {
             JsonNode target = root.get("target");
             String targetKind = text(target, "kind");
             int targetId = positiveInteger(target, "id");
-            String requestValue = switch (toolName) {
-                case "assign_owner" -> text(root.get("request"), "owner");
-                case "change_deal_stage" -> text(root.get("request"), "stage");
-                default -> null;
-            };
             int turnId = turnId(toolCall.getIdempotencyKey());
+            AiAssistantWriteTool tool = writeToolRegistry.find(toolName).orElse(null);
             if (!toolCall.getToolName().equals(toolName)
                     || !toolCatalog.isExecutable(toolName)
-                    || !toolCatalog.isWrite(toolName)
+                    || tool == null
                     || tier != toolCatalog.tier(toolName)
                     || (tier != ToolTier.AUTO && tier != ToolTier.CONFIRM)
-                    || !acceptsTarget(toolName, targetKind)) {
+                    || !tool.acceptedTargetKinds().contains(targetKind)
+                    || !holdsRequiredText(tool, root.get("request"))) {
                 return null;
             }
             return new StoredToolCall(
-                    toolCall, tier, targetKind, targetId, turnId, requestValue);
+                    toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"),
+                    AiAssistantProposalPins.read(root));
         } catch (JacksonException | IllegalArgumentException exception) {
             return null;
         }
     }
 
-    private Map<RecordKey, VisibleTarget> visibleTargets(
+    private Map<RecordKey, RecordSnapshot> visibleTargets(
             int workspaceId, List<StoredToolCall> stored) {
         Set<RecordKey> requested = new LinkedHashSet<>();
         stored.stream()
                 .map(call -> new RecordKey(call.targetKind(), call.targetId()))
                 .forEach(requested::add);
-        Map<RecordKey, VisibleTarget> visible = new LinkedHashMap<>();
+        Map<RecordKey, RecordSnapshot> visible = new LinkedHashMap<>();
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
         if (!personIds.isEmpty()) {
             for (Person person : personMapper.getByIds(workspaceId, personIds)) {
                 if (isProcessable(person)) {
-                    putVisible(visible, "person", person.getId(), new VisibleTarget(
+                    putVisible(visible, "person", person.getId(), new RecordSnapshot(
                             person.getName(), null, person.getOwnerId(), null,
                             person.getUpdatedAt()));
                 }
@@ -298,14 +307,14 @@ public class AiAssistantToolCallReadService {
         }
         if (!companyIds.isEmpty()) {
             for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
-                putVisible(visible, "company", company.getId(), new VisibleTarget(
+                putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
                         company.getUpdatedAt()));
             }
         }
         if (!dealIds.isEmpty()) {
             for (Deal deal : dealMapper.getByIds(workspaceId, dealIds)) {
-                putVisible(visible, "deal", deal.getId(), new VisibleTarget(
+                putVisible(visible, "deal", deal.getId(), new RecordSnapshot(
                         deal.getName(), deal.getPipelineId(), deal.getOwnerId(),
                         deal.getStageId(), deal.getUpdatedAt()));
             }
@@ -381,7 +390,7 @@ public class AiAssistantToolCallReadService {
             boolean available = mutationsAvailable
                     && expiresAt != null
                     && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId)
-                    && hasUndoPermissions(call.toolCall().getToolName(), viewerPermissions)
+                    && hasUndoPermissions(call, viewerPermissions)
                     && !clock.instant().isAfter(Instant.parse(expiresAt));
             return new UndoProjection(available, expiresAt, false);
         } catch (JacksonException exception) {
@@ -400,17 +409,19 @@ public class AiAssistantToolCallReadService {
         }
     }
 
+    /**
+     * Whether the viewer could apply this call's inverse.
+     *
+     * <p>A tool is offered undo only when it can ever be undone and the viewer holds the
+     * permissions its write requires on that target — the same set the undo itself asserts. A tool
+     * that records an inverse it cannot apply, such as a tag association it may not have created,
+     * is therefore never offered one.
+     */
     private static boolean hasUndoPermissions(
-            String toolName, Set<Permission> viewerPermissions) {
-        return switch (toolName) {
-            case "create_activity" -> viewerPermissions.containsAll(
-                    Set.of(Permission.ACTIVITY_CREATE, Permission.ACTIVITY_DELETE));
-            case "create_task" -> viewerPermissions.containsAll(
-                    Set.of(Permission.TASK_CREATE, Permission.TASK_DELETE));
-            case "create_note" -> viewerPermissions.containsAll(
-                    Set.of(Permission.NOTE_CREATE, Permission.NOTE_DELETE));
-            default -> false;
-        };
+            StoredToolCall call, Set<Permission> viewerPermissions) {
+        return call.tool().inverseAvailable()
+                && viewerPermissions.containsAll(
+                        call.tool().requiredPermissions(call.targetKind()));
     }
 
     private static String publicStatus(AiChatToolCall toolCall) {
@@ -420,104 +431,17 @@ public class AiAssistantToolCallReadService {
         };
     }
 
-    private static String requestSummary(
-            StoredToolCall call,
-            boolean detailsReadable,
-            VisibleTarget visibleTarget,
-            List<User> assignableOwners,
-            List<Stage> stages) {
-        String toolName = call.toolCall().getToolName();
-        if (detailsReadable) {
-            String resolved = switch (toolName) {
-                case "assign_owner" -> ownerSummary(call.requestValue(), assignableOwners);
-                case "change_deal_stage" -> stageSummary(
-                        call.requestValue(), visibleTarget.pipelineId(), stages);
-                default -> null;
-            };
-            if (resolved != null) {
-                return resolved;
-            }
-        }
-        return switch (toolName) {
-            case "create_activity" -> "Create an activity";
-            case "create_task" -> "Create a task";
-            case "create_note" -> "Create a note";
-            case "add_tag" -> "Add an existing tag";
-            case "change_deal_stage" -> "Change the deal stage";
-            case "assign_owner" -> "Assign an owner";
-            default -> "Run a write tool";
-        };
-    }
-
-    private static String ownerSummary(String requestedOwner, List<User> assignableOwners) {
-        if (UNASSIGNED.equalsIgnoreCase(requestedOwner.trim())) {
-            return "Remove the current owner";
-        }
-        String label = requestedOwnerName(requestedOwner, assignableOwners);
-        return label == null ? null : "Assign owner: " + label;
-    }
-
-    private static String requestedOwnerName(
-            String requestedOwner, List<User> assignableOwners) {
-        User matched = requestedOwner(requestedOwner, assignableOwners);
-        return matched == null ? null : memberName(matched);
-    }
-
-    private static User requestedOwner(String requestedOwner, List<User> assignableOwners) {
-        String normalizedOwner = requestedOwner.trim();
-        List<User> matches = assignableOwners.stream()
-                .filter(user -> user.getDisplayName() != null
-                        && user.getDisplayName().equalsIgnoreCase(normalizedOwner)
-                        || user.getUsername() != null
-                        && user.getUsername().equalsIgnoreCase(normalizedOwner))
-                .toList();
-        return matches.size() == 1 ? matches.getFirst() : null;
-    }
-
-    private static String stageSummary(
-            String requestedStage, Integer pipelineId, List<Stage> stages) {
-        String name = requestedStageName(requestedStage, pipelineId, stages);
-        return name == null ? null : "Change deal stage to: " + name;
-    }
-
-    private static String requestedStageName(
-            String requestedStage, Integer pipelineId, List<Stage> stages) {
-        Stage matched = requestedStage(requestedStage, pipelineId, stages);
-        return matched == null ? null : matched.getName();
-    }
-
-    private static Stage requestedStage(
-            String requestedStage, Integer pipelineId, List<Stage> stages) {
-        if (pipelineId == null) {
-            return null;
-        }
-        List<Stage> matches = stages.stream()
-                .filter(stage -> stage.getPipeline() != null
-                        && stage.getPipeline().getId() == pipelineId)
-                .filter(stage -> stage.getName() != null
-                        && stage.getName().equalsIgnoreCase(requestedStage.trim()))
-                .toList();
-        return matches.size() == 1 ? matches.getFirst() : null;
-    }
-
-    private String outcomeSummary(StoredToolCall call, String status) {
-        AiChatToolCall toolCall = call.toolCall();
+    private static String outcomeSummary(
+            String status,
+            AiAssistantWriteTool tool,
+            Review review,
+            Review withheld) {
         return switch (status) {
             case "proposed" -> null;
             case "rejected" -> "Request rejected";
             case "failed" -> "Request failed";
             case "undone" -> "Created record removed";
-            case "executed" -> switch (toolCall.getToolName()) {
-                case "create_activity" -> "Activity created";
-                case "create_task" -> "Task created";
-                case "create_note" -> "Note created";
-                case "add_tag" -> addTagOutcomeSummary(toolCall.getResultJson());
-                case "change_deal_stage" -> "Deal stage changed";
-                case "assign_owner" -> "unassigned".equalsIgnoreCase(call.requestValue().trim())
-                        ? "Owner removed"
-                        : "Owner assigned";
-                default -> "Request completed";
-            };
+            case "executed" -> summary(review, withheld, tool::outcomeSummary, true);
             default -> null;
         };
     }
@@ -527,87 +451,163 @@ public class AiAssistantToolCallReadService {
      * such change to state.
      *
      * <p>Every value here is workspace record data resolved server-side, never a value the model
-     * chose: the proposed owner and stage are matched against the workspace's own members and
-     * stages, and an unmatched one is reported as unresolved rather than echoed back. The caller has
+     * chose: each tool matches its proposed value against the workspace's own data, and an
+     * unmatched one is reported as unresolved rather than echoed back. The caller has
      * already established that the viewer requested this proposal and can currently read its target,
      * which is what keeps a before-value out of a shared participant's transcript.
      */
     private AiAssistantToolCallReadDto.Change change(
             StoredToolCall call,
             String status,
-            VisibleTarget target,
-            List<User> assignableOwners,
-            List<Stage> stages,
-            Set<Permission> viewerPermissions) {
+            RecordSnapshot target,
+            Set<Permission> viewerPermissions,
+            Review review) {
         if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status)) {
             return null;
         }
-        return switch (call.toolCall().getToolName()) {
-            case "assign_owner" -> ownerChange(
-                    call, target, assignableOwners, viewerPermissions);
-            case "change_deal_stage" -> stageChange(call, target, stages, viewerPermissions);
-            default -> null;
-        };
+        Diff diff = call.tool().diff(review);
+        if (diff == null) {
+            return null;
+        }
+        return new AiAssistantToolCallReadDto.Change(
+                diff.field(),
+                diff.currentValue(),
+                diff.currentValueUnresolved(),
+                diff.proposedValue(),
+                diff.state() == DiffState.UNRESOLVED
+                        ? "unresolved"
+                        : changeState(
+                                call, target, diff.state() == DiffState.UNCHANGED,
+                                viewerPermissions,
+                                call.tool().requiredPermissions(call.targetKind())));
     }
 
     /**
-     * An owner proposal's before and after values, compared as the record itself stores them.
+     * The batched, viewer-authorized read state a declared tool projects one card from.
      *
-     * <p>Whether the change would do anything is decided on owner ids, never on the names this
-     * workspace can print for them. A record owned by someone who has left cannot be named here, and
-     * comparing that absent name against an unassign proposal's absent name would call a real
-     * removal "already the current value" and withhold the control — refusing exactly the cleanup
-     * the member came to do. The name is for reading; the id is what decides.
+     * <p>{@link #detailsReadable} is applied here, for every tool, rather than trusted to
+     * each tool: a viewer who may not read the details gets the withheld review, holding no target,
+     * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
+     * no summary a tool writes can carry a record value to them.
+     * Otherwise the target snapshot is present while the viewer can currently see it, the stored
+     * outcome only for an executed call, the members and stages only when the tool declared them,
+     * and the resolution and principals pinned when the proposal was prepared, which a proposal
+     * stored before pinning does not carry; the tool never reads anything this service did not
+     * already load for the page of cards.
      */
-    private AiAssistantToolCallReadDto.Change ownerChange(
+    private Review review(
+            AiAssistantWriteTool tool,
             StoredToolCall call,
-            VisibleTarget target,
+            String status,
+            boolean readable,
+            RecordSnapshot target,
             List<User> assignableOwners,
-            Set<Permission> viewerPermissions) {
-        String current = currentOwnerName(assignableOwners, target.ownerId());
-        boolean currentUnresolved = target.ownerId() != null && current == null;
-        String requested = call.requestValue().trim();
-        if (UNASSIGNED.equalsIgnoreCase(requested)) {
-            return new AiAssistantToolCallReadDto.Change(
-                    OWNER_FIELD, current, currentUnresolved, null,
-                    changeState(
-                            call, target, target.ownerId() == null, viewerPermissions));
+            List<Stage> stages,
+            Review withheld) {
+        if (!readable) {
+            return withheld;
         }
-        User proposed = requestedOwner(requested, assignableOwners);
-        String proposedName = proposed == null ? null : memberName(proposed);
-        if (proposedName == null) {
-            return new AiAssistantToolCallReadDto.Change(
-                    OWNER_FIELD, current, currentUnresolved, null, "unresolved");
-        }
-        return new AiAssistantToolCallReadDto.Change(
-                OWNER_FIELD, current, currentUnresolved, proposedName,
-                changeState(
-                        call,
-                        target,
-                        target.ownerId() != null && target.ownerId() == proposed.getId(),
-                        viewerPermissions));
+        Set<ReviewInput> inputs = tool.reviewInputs();
+        return new Review(
+                call.targetKind(),
+                call.targetId(),
+                true,
+                target,
+                call.request(),
+                EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
+                inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),
+                inputs.contains(ReviewInput.STAGES) ? stages : List.of(),
+                withheld.viewerPermissions(),
+                call.pins() == null ? null : call.pins().resolutionId(),
+                call.pins() == null ? null : call.pins().principalIds());
     }
 
-    /** A stage proposal's before and after values, compared on stage ids for the same reason. */
-    private AiAssistantToolCallReadDto.Change stageChange(
+    /**
+     * The review of one card for a viewer who may not read its details.
+     *
+     * <p>It holds no record value. Its request carries just the boolean value of each
+     * {@link AiAssistantWriteTool#sharedRequestFlags()} the registry read at startup, evaluated here
+     * rather than by the tool, and is {@code null} when there are none, and
+     * its outcome, for an executed call only, carries just the tool's declared
+     * {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean and is {@code null}
+     * when none does, so a summary can say what kind of write was asked for and whether it changed
+     * anything but never a workspace string or an identifier. It carries neither pin.
+     */
+    private Review withheld(
+            AiAssistantWriteTool tool,
             StoredToolCall call,
-            VisibleTarget target,
-            List<Stage> stages,
+            String status,
             Set<Permission> viewerPermissions) {
-        String current = currentStageName(stages, target.stageId());
-        boolean currentUnresolved = target.stageId() != null && current == null;
-        Stage proposed = requestedStage(call.requestValue(), target.pipelineId(), stages);
-        if (proposed == null) {
-            return new AiAssistantToolCallReadDto.Change(
-                    STAGE_FIELD, current, currentUnresolved, null, "unresolved");
+        return new Review(
+                call.targetKind(), call.targetId(), false, null,
+                sharedRequestFlags(tool, call.request()),
+                EXECUTED.equals(status)
+                        ? sharedFlags(tool, storedOutcome(call.toolCall()))
+                        : null,
+                List.of(), List.of(), viewerPermissions, null, null);
+    }
+
+    private JsonNode sharedRequestFlags(AiAssistantWriteTool tool, JsonNode request) {
+        if (request == null) {
+            return null;
         }
-        return new AiAssistantToolCallReadDto.Change(
-                STAGE_FIELD, current, currentUnresolved, proposed.getName(),
-                changeState(
-                        call,
-                        target,
-                        target.stageId() != null && target.stageId() == proposed.getId(),
-                        viewerPermissions));
+        ObjectNode flags = objectMapper.createObjectNode();
+        for (Map.Entry<String, SharedRequestFlag> flag
+                : writeToolRegistry.sharedRequestFlags(tool.name()).entrySet()) {
+            flags.put(flag.getKey(), flag.getValue().holds(request));
+        }
+        return flags.isEmpty() ? null : flags;
+    }
+
+    private JsonNode sharedFlags(AiAssistantWriteTool tool, JsonNode outcome) {
+        if (outcome == null) {
+            return null;
+        }
+        ObjectNode flags = objectMapper.createObjectNode();
+        for (String field : tool.sharedOutcomeFlags()) {
+            JsonNode value = outcome.get(field);
+            if (value != null && value.isBoolean()) {
+                flags.put(field, value.booleanValue());
+            }
+        }
+        return flags.isEmpty() ? null : flags;
+    }
+
+    /**
+     * A declared tool's summary, screened like every other member-visible value.
+     *
+     * <p>A detailed summary the special-care screen excludes, or one the tool declines to give, is
+     * replaced by the summary the tool gives a viewer who may not read the details. The screen is
+     * skipped only for a request summary whose tool declined it under
+     * {@link AiAssistantWriteTool#screensDetailedRequestSummary()}.
+     */
+    private static String summary(
+            Review review, Review withheld, Function<Review, String> summarize, boolean screened) {
+        String summary = summarize.apply(review);
+        if (review.detailsReadable()
+                && (summary == null
+                        || screened && SpecialCareTextScreen.screen(summary).excluded())) {
+            return summarize.apply(withheld);
+        }
+        return summary;
+    }
+
+    /** Whether one card's projection reads a batched input its tool asked for. */
+    private static boolean readsInput(StoredToolCall call, ReviewInput input) {
+        return call.tool().reviewInputs().contains(input);
+    }
+
+    private JsonNode storedOutcome(AiChatToolCall toolCall) {
+        if (toolCall.getResultJson() == null) {
+            return null;
+        }
+        try {
+            JsonNode result = objectMapper.readTree(toolCall.getResultJson());
+            JsonNode outcome = result == null ? null : result.get("outcome");
+            return outcome != null && outcome.isObject() ? outcome : null;
+        } catch (JacksonException exception) {
+            return null;
+        }
     }
 
     /**
@@ -624,14 +624,16 @@ public class AiAssistantToolCallReadService {
      *
      * @param unchanged whether the record already holds the proposed value, decided by the callers
      *     on the ids the record stores rather than on the names this workspace can print for them
+     * @param required the permissions the approval itself asserts: the declared tool's
+     *     {@code requiredPermissions} for the target kind
      */
     private String changeState(
             StoredToolCall call,
-            VisibleTarget target,
+            RecordSnapshot target,
             boolean unchanged,
-            Set<Permission> viewerPermissions) {
-        Permission required = updatePermission(call.targetKind());
-        if (required == null || !viewerPermissions.contains(required)) {
+            Set<Permission> viewerPermissions,
+            Set<Permission> required) {
+        if (required.isEmpty() || !viewerPermissions.containsAll(required)) {
             return "permissionLost";
         }
         if (unchanged) {
@@ -641,53 +643,6 @@ public class AiAssistantToolCallReadService {
                 target.updatedAt(), call.toolCall().getCreatedAt())
                 ? "recordChanged"
                 : "ready";
-    }
-
-    private static Permission updatePermission(String kind) {
-        return switch (kind) {
-            case "person" -> Permission.PERSON_UPDATE;
-            case "company" -> Permission.COMPANY_UPDATE;
-            case "deal" -> Permission.DEAL_UPDATE;
-            default -> null;
-        };
-    }
-
-    /**
-     * The record's owner as this workspace can currently name them.
-     *
-     * <p>A record owned by someone who is no longer an active member has no name to state here, and
-     * is reported the same way an unowned record is: nothing is claimed about a person the
-     * workspace's own member list no longer contains.
-     */
-    private static String currentOwnerName(List<User> members, Integer userId) {
-        if (userId == null) {
-            return null;
-        }
-        for (User member : members) {
-            if (member.getId() == userId) {
-                return memberName(member);
-            }
-        }
-        return null;
-    }
-
-    private static String memberName(User member) {
-        String label = member.getDisplayName() == null || member.getDisplayName().isBlank()
-                ? member.getUsername()
-                : member.getDisplayName();
-        return label == null || label.isBlank() ? null : label;
-    }
-
-    private static String currentStageName(List<Stage> stages, Integer stageId) {
-        if (stageId == null) {
-            return null;
-        }
-        for (Stage stage : stages) {
-            if (stage.getId() == stageId && stage.getName() != null && !stage.getName().isBlank()) {
-                return stage.getName();
-            }
-        }
-        return null;
     }
 
     /**
@@ -715,7 +670,7 @@ public class AiAssistantToolCallReadService {
             return List.of();
         }
         List<AiAssistantToolCallReadDto.OutcomeValue> values = new ArrayList<>();
-        for (String field : outcomeFields(call.toolCall().getToolName())) {
+        for (String field : call.tool().memberOutcomeFields()) {
             JsonNode value = outcome.get(field);
             if (value == null || !value.isString()) {
                 continue;
@@ -749,7 +704,7 @@ public class AiAssistantToolCallReadService {
     private Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> liveCreatedRecords(
             Viewer viewer,
             List<StoredToolCall> stored,
-            Map<RecordKey, VisibleTarget> visibleTargets) {
+            Map<RecordKey, RecordSnapshot> visibleTargets) {
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> candidates = new LinkedHashMap<>();
         for (StoredToolCall call : stored) {
             if (!detailsReadable(call, viewer.userId(), visibleTargets)) {
@@ -838,58 +793,24 @@ public class AiAssistantToolCallReadService {
         }
     }
 
-    private static List<String> outcomeFields(String toolName) {
-        return switch (toolName) {
-            case "create_activity" -> List.of("type", "subject", "start");
-            case "create_task" -> List.of("description", "dueDate");
-            case "create_note" -> List.of("title", "visibility");
-            case "add_tag" -> List.of("tag");
-            case "change_deal_stage" -> List.of(STAGE_FIELD);
-            case "assign_owner" -> List.of(OWNER_FIELD);
-            default -> List.of();
-        };
-    }
-
-    private String addTagOutcomeSummary(String resultJson) {
-        if (resultJson == null) {
-            return "Request completed";
-        }
-        try {
-            JsonNode result = objectMapper.readTree(resultJson);
-            JsonNode outcome = result == null ? null : result.get("outcome");
-            JsonNode changed = outcome == null ? null : outcome.get("changed");
-            if (changed == null || !changed.isBoolean()) {
-                return "Request completed";
-            }
-            return changed.asBoolean() ? "Tag added" : "Tag was already present";
-        } catch (JacksonException exception) {
-            return "Request completed";
-        }
-    }
-
-    private static boolean acceptsTarget(String toolName, String kind) {
-        return switch (toolName) {
-            case "create_activity", "create_task", "create_note" ->
-                    "person".equals(kind) || "deal".equals(kind);
-            case "add_tag", "assign_owner" ->
-                    "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
-            case "change_deal_stage" -> "deal".equals(kind);
-            default -> false;
-        };
-    }
-
+    /**
+     * Resolves the turn a stored row's idempotency key names.
+     *
+     * <p>A malformed key, or one claiming a position no step could have produced, is rejected
+     * rather than read. An executed or proposed write is always the sole call of its step and never
+     * carries the suffix. A write refused whole with its batch does — its failed row is keyed by its
+     * ordinal — but it holds the model's raw arguments rather than a prepared write's tool, tier and
+     * target, so the stored-row checks drop it however its key parses. The suffix still parses so a
+     * suffixed row is never dropped silently for its key alone.
+     *
+     * @param idempotencyKey the durable row's idempotency key
+     * @return the durable turn id the key names
+     */
     private static int turnId(String idempotencyKey) {
-        Matcher matcher = TURN_STEP_KEY.matcher(
-                idempotencyKey == null ? "" : idempotencyKey);
-        if (!matcher.matches()) {
-            throw new IllegalArgumentException("Assistant tool association is invalid");
-        }
-        int turnId = Integer.parseInt(matcher.group(1));
-        int stepNumber = Integer.parseInt(matcher.group(2));
-        if (stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
-            throw new IllegalArgumentException("Assistant tool association is invalid");
-        }
-        return turnId;
+        return AiAssistantToolCallKey.parse(idempotencyKey)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Assistant tool association is invalid"))
+                .turnId();
     }
 
     private static String text(JsonNode node, String name) {
@@ -898,6 +819,16 @@ public class AiAssistantToolCallReadService {
             throw new IllegalArgumentException("Assistant tool metadata is invalid");
         }
         return value.asString();
+    }
+
+    private static boolean holdsRequiredText(AiAssistantWriteTool tool, JsonNode request) {
+        for (String field : tool.requiredRequestText()) {
+            JsonNode value = request == null ? null : request.get(field);
+            if (value == null || !value.isString() || value.asString().isBlank()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static int positiveInteger(JsonNode node, String name) {
@@ -923,10 +854,10 @@ public class AiAssistantToolCallReadService {
     }
 
     private static void putVisible(
-            Map<RecordKey, VisibleTarget> visible,
+            Map<RecordKey, RecordSnapshot> visible,
             String kind,
             int id,
-            VisibleTarget target) {
+            RecordSnapshot target) {
         if (target.label() != null && !target.label().isBlank()) {
             visible.put(new RecordKey(kind, id), target);
         }
@@ -986,22 +917,16 @@ public class AiAssistantToolCallReadService {
 
     private record StoredToolCall(
             AiChatToolCall toolCall,
+            AiAssistantWriteTool tool,
             ToolTier tier,
             String targetKind,
             int targetId,
             int turnId,
-            String requestValue) {
+            JsonNode request,
+            AiAssistantProposalPins pins) {
     }
 
     private record RecordKey(String kind, int id) {
-    }
-
-    private record VisibleTarget(
-            String label,
-            Integer pipelineId,
-            Integer ownerId,
-            Integer stageId,
-            String updatedAt) {
     }
 
     private record UndoProjection(boolean available, String expiresAt, boolean undone) {

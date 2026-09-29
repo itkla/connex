@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
@@ -73,7 +74,12 @@ class IntroductionPlaneRoutingIntegrationTest {
                 Statement statement = connection.createStatement()) {
             assumeTrue(tableExists(connection, defaultCatalog, "workspace"),
                 "Default catalog is not migrated; skipping Introduction plane-routing integration test");
-            statement.execute("CREATE DATABASE " + scratchCatalog);
+            try {
+                statement.execute("CREATE DATABASE " + scratchCatalog);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + scratchCatalog + " ("
+                    + exception.getMessage() + ")");
+            }
             scratchCatalogCreated = true;
             statement.execute("CREATE TABLE " + scratchCatalog + ".company ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
@@ -87,9 +93,6 @@ class IntroductionPlaneRoutingIntegrationTest {
                 + "person_a_id INT NOT NULL, person_b_id INT NOT NULL, status VARCHAR(32) NOT NULL, "
                 + "note TEXT NULL, introduced_at DATETIME NOT NULL)");
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(false, "Cannot prepare scratch catalog " + scratchCatalog + " ("
-                + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -205,7 +208,7 @@ class IntroductionPlaneRoutingIntegrationTest {
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/UserMapper.xml")) {
             try (InputStream input = IntroductionPlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
             }
         }

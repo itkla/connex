@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -117,7 +118,8 @@ class SegmentMapperTest extends AbstractMapperTest {
         shared.setCompany(siblingCompany);
         personMapper.insert(shared);
         assertTrue(shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+            shared.getId(), sibling.getId(), workspace.getId(), actor.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())) > 0);
         Activity activity = new Activity();
         activity.setWorkspaceId(workspace.getId());
         activity.setType("call");
@@ -148,7 +150,8 @@ class SegmentMapperTest extends AbstractMapperTest {
         Workspace sibling = newSiblingWorkspace();
         workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
         assertTrue(shareMapper.sharePerson(
-            person.getId(), workspace.getId(), sibling.getId(), actor.getId(), false) > 0);
+            person.getId(), workspace.getId(), sibling.getId(), actor.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId())) > 0);
         noteMapper.insert(newNote(sibling.getId(), actor, person, null));
         attachmentMapper.insert(newAttachment(sibling.getId(), "person", person.getId(), actor));
 
@@ -188,7 +191,8 @@ class SegmentMapperTest extends AbstractMapperTest {
         Workspace sibling = newSiblingWorkspace();
         workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
         assertTrue(shareMapper.shareCompany(
-            company.getId(), workspace.getId(), sibling.getId(), actor.getId(), false) > 0);
+            company.getId(), workspace.getId(), sibling.getId(), actor.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId())) > 0);
         attachmentMapper.insert(newAttachment(sibling.getId(), "company", company.getId(), actor));
 
         assertFalse(segmentMapper.companyExistence(existenceParams("has_attachment")).contains(company.getId()));
@@ -207,7 +211,8 @@ class SegmentMapperTest extends AbstractMapperTest {
         Company sharedCompany = newCompany(sibling);
         workspaceMapper.addMember(sibling.getId(), actor.getId(), "member");
         assertTrue(shareMapper.shareCompany(
-            sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+            sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())) > 0);
         Person sharedCompanyPerson = newPerson(sharedCompany);
         Person restrictedSharedCompanyPerson = newPerson(sharedCompany);
         personMapper.updateProcessingRestrictions(

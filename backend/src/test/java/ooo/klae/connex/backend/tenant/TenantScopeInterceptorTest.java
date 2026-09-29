@@ -194,6 +194,23 @@ class TenantScopeInterceptorTest {
         assertDoesNotThrow(() -> interceptor.enforce(NS + "AuditLogMapper.insert"));
     }
 
+    /**
+     * Invitation and invite-link acceptance revalidate the grant creator's custom-role permissions
+     * while the recipient still has no membership to resolve, so both locking reads must pass the
+     * backstop on an unresolved request thread.
+     */
+    @Test
+    void allowsInviteGrantAuthorizationRoleLocksWhenUnresolved() {
+        bindRequest();
+        for (String id : new String[] {
+            NS + "RoleMapper.lockRole",
+            NS + "RoleMapper.lockPermissions",
+        }) {
+            assertFalse(interceptor.requiresResolvedContext(id), id);
+            assertDoesNotThrow(() -> interceptor.enforce(id), id);
+        }
+    }
+
     @Test
     void bothTenancyPluginsInterceptEveryStatementExecutingExecutorMethod() {
         for (String name : NON_EXECUTING_EXECUTOR_METHODS) {

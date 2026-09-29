@@ -47,7 +47,7 @@ class SecretModelRedactionTest {
         config.setAuth(true);
         config.setPasswordEnc("secret:v1:44");
 
-        MailConfigDto dto = MailConfigDto.from(config);
+        MailConfigDto dto = MailConfigDto.from(config, 587);
 
         assertFalse(dto.toString().contains("secret:v1:44"));
         assertFalse(dto.toString().contains("passwordEnc"));

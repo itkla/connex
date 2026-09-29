@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 import java.security.MessageDigest;
@@ -20,7 +22,6 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.LegacyControlUploadMigrationMapper;
 import ooo.klae.connex.backend.mappers.LegacyTenantUploadMigrationMapper;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
-import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
@@ -32,6 +33,8 @@ class LegacyUploadMigrationTransactionTest {
     @Mock private ManagedObjectService managedObjectService;
     @Mock private UploadContentInspector uploadContentInspector;
     @Mock private ImageUploadValidator imageUploadValidator;
+    @Mock private UploadMalwareScanner malwareScanner;
+    @Mock private LegacyAttachmentMigrationWriter attachmentWriter;
 
     private LegacyUploadMigrationTransaction migration;
 
@@ -42,36 +45,44 @@ class LegacyUploadMigrationTransactionTest {
             controlMapper,
             managedObjectService,
             uploadContentInspector,
-            imageUploadValidator);
+            imageUploadValidator, malwareScanner, attachmentWriter);
     }
 
     @Test
-    void migratesAndVerifiesAttachmentBeforeCompareAndSet() {
+    void scansLegacyAttachmentBeforeEnteringTheMetadataWriter() {
         LegacyUploadRecord record = record(7, 3, "/attachments/person/old.pdf");
-        record.setFileName("report.pdf");
-        record.setContentType("application/octet-stream");
         ResolvedLegacyUpload resolved = new ResolvedLegacyUpload("old.pdf", new byte[] {1, 2, 3});
-        byte[] canonical = {9, 8, 7, 6};
         InspectedUpload upload = inspected(
-            "report.pdf", "application/pdf", "pdf", UploadFormat.PDF, canonical);
-        StoredBinary stored = new StoredBinary(
-            "/api/attachments/content/550e8400-e29b-41d4-a716-446655440000.pdf",
-            "report.pdf",
-            "application/pdf",
-            canonical.length);
-        when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class)))
-            .thenReturn(upload);
-        when(managedObjectService.storeMigratedAttachment(
-                anyInt(), anyInt(), any(), any(InspectedUpload.class)))
-            .thenReturn(stored);
-        when(tenantMapper.updateAttachment(
-                3, 7, record.getUrl(), stored.url(), stored.fileName(), stored.contentType(), canonical.length))
-            .thenReturn(1);
+            "report.pdf", "application/pdf", "pdf", UploadFormat.PDF, new byte[] {9, 8, 7});
+        ScannedUpload scanned = new ScannedUpload(upload,
+            new ooo.klae.connex.backend.storage.malware.MalwareScanReport(
+                ooo.klae.connex.backend.storage.malware.MalwareScanVerdict.CLEAN,
+                null, null, "test", false));
+        when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class))).thenReturn(upload);
+        when(malwareScanner.scanInWorkspace(upload, 3)).thenReturn(scanned);
 
         migration.migrateAttachment(record, resolved);
 
-        verify(managedObjectService).verifyAttachment(
-            eq(3), eq(stored.url()), aryEq(canonical));
+        var order = inOrder(uploadContentInspector, malwareScanner, attachmentWriter);
+        order.verify(uploadContentInspector).inspectLegacyAttachment(any(UploadSource.class));
+        order.verify(malwareScanner).scanInWorkspace(upload, 3);
+        order.verify(attachmentWriter).migrate(record, scanned);
+    }
+
+    @Test
+    void infectedLegacyAttachmentNeverReachesStorageOrMetadata() {
+        LegacyUploadRecord record = record(7, 3, "/attachments/person/old.pdf");
+        ResolvedLegacyUpload resolved = new ResolvedLegacyUpload("old.pdf", new byte[] {1, 2, 3});
+        InspectedUpload upload = inspected(
+            "report.pdf", "application/pdf", "pdf", UploadFormat.PDF, new byte[] {9, 8, 7});
+        when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class))).thenReturn(upload);
+        when(malwareScanner.scanInWorkspace(upload, 3)).thenThrow(
+            new ooo.klae.connex.backend.exceptions.MalwareDetectedException());
+
+        assertThrows(ooo.klae.connex.backend.exceptions.MalwareDetectedException.class,
+            () -> migration.migrateAttachment(record, resolved));
+
+        verifyNoInteractions(attachmentWriter, managedObjectService, tenantMapper);
     }
 
     @Test

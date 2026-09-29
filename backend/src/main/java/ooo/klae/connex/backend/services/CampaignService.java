@@ -398,7 +398,7 @@ public class CampaignService {
             return;
         }
         if (amount.signum() < 0 || amount.scale() > 2
-                || amount.precision() - amount.scale() > 13) {
+                || (long) amount.precision() - amount.scale() > 13) {
             throw new BadRequestException("Campaign budget must be a non-negative DECIMAL(15,2) value");
         }
         if (!currency.trim().matches("[A-Za-z]{3}")) {

@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -253,6 +254,7 @@ class SupportBundleServiceTest {
     @Test
     void auditSliceFormatterEmitsActorIdAndNoPersonalName() {
         AuditService realAuditService = new AuditService(
+            mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
             new ClientIpResolver(""), correlationPseudonymizer);
         when(auditLogMapper.findOrgSupportSlice(
@@ -340,6 +342,7 @@ class SupportBundleServiceTest {
     @Test
     void sensitiveAuditContentCannotReachTheCsv() {
         AuditService realAuditService = new AuditService(
+            mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
             new ClientIpResolver(""), correlationPseudonymizer);
         when(auditLogMapper.findOrgSupportSlice(
@@ -368,6 +371,7 @@ class SupportBundleServiceTest {
         String rawCorrelation = "client-correlation-1";
         String storageHmac = correlationPseudonymizer.forStorage(ORG_ID, rawCorrelation);
         AuditService realAuditService = new AuditService(
+            mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
             new ClientIpResolver(""), correlationPseudonymizer);
         when(auditLogMapper.findOrgSupportSlice(
@@ -404,6 +408,7 @@ class SupportBundleServiceTest {
     @Test
     void auditSliceReportsTruncationWithoutDisclosingTheExtraRow() {
         AuditService realAuditService = new AuditService(
+            mock(SessionSecurityService.class),
             auditLogMapper, auditIntegrityService, new ObjectMapper(), tenantContext,
             new ClientIpResolver(""), correlationPseudonymizer);
         List<AuditSupportRowDto> rows = new ArrayList<>();

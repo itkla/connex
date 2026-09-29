@@ -198,6 +198,7 @@ public class AiAssistantScopeReadService {
             records.add(record);
             identifiers.add(new Identifier(kind, label.name()));
         }
+        identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rowData = new ArrayList<>();
         for (AiAssistantScopeActivity activity : activities) {
@@ -223,7 +224,6 @@ public class AiAssistantScopeReadService {
         data.put("records", List.copyOf(records));
         data.put("activities", List.copyOf(rowData));
         data.put("exclusions", List.copyOf(new LinkedHashSet<>(exclusions)));
-        identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
         return new AiAssistantToolResult(data, identifiers);
     }
 

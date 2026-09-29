@@ -357,15 +357,9 @@ public class DealRiskService {
         Map<Integer, Long> last = new HashMap<>();
         int id = deal.getId();
         merge(last, id, notFuture(epoch(deal.getCreatedAt()), nowMs));
-        for (Activity activity : activityMapper.getActivitiesByDealId(workspaceId, id)) {
-            merge(last, id, notFuture(epoch(activity.getTimestamp()), nowMs));
-        }
-        for (Note note : noteMapper.getNotesByDealId(workspaceId, id)) {
-            if (!isSharedNote(note)) continue;
-            merge(last, id, notFuture(epoch(note.getCreatedAt()), nowMs));
-        }
-        for (Task task : taskMapper.getTasksByDealId(workspaceId, id)) {
-            merge(last, id, notFuture(epoch(task.getCreatedAt()), nowMs));
+        for (DealTouchDto touch : dealMapper.getLatestDealTouches(
+                workspaceId, List.of(id), utc(Instant.ofEpochMilli(nowMs)))) {
+            merge(last, id, epoch(touch.touchedAt()));
         }
         return last;
     }
@@ -544,17 +538,23 @@ public class DealRiskService {
                 activity.getTimestamp(),
                 nowMs);
         }
-        for (Note note : noteMapper.getAllNotes(workspaceId)) {
-            if (!isSharedNote(note)) continue;
-            mergeTouchState(
-                effective,
-                sourceTouches,
-                dealId(note.getDeal()),
-                "note",
-                note.getId(),
-                epoch(note.getCreatedAt()),
-                note.getCreatedAt(),
-                nowMs);
+        int afterNoteId = 0;
+        while (true) {
+            List<Note> notes = noteMapper.getWorkspaceNoteMetadataPage(workspaceId, afterNoteId, 100);
+            for (Note note : notes) {
+                if (!isSharedNote(note)) continue;
+                mergeTouchState(
+                    effective,
+                    sourceTouches,
+                    dealId(note.getDeal()),
+                    "note",
+                    note.getId(),
+                    epoch(note.getCreatedAt()),
+                    note.getCreatedAt(),
+                    nowMs);
+            }
+            if (notes.size() < 100) break;
+            afterNoteId = notes.getLast().getId();
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
             mergeTouchState(

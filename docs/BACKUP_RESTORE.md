@@ -66,22 +66,71 @@ backup** (the full run logs `event=backup_summary status=success`).
    sudo deploy/backup/install.sh
    ```
 
-   This installs the scripts, systemd units, and timers (daily full dump, 15-minute binlog
-   archive, daily prune), and creates `/etc/connex-backup/backup.env` (mode 0600) from the example
-   on first run.
+   On first run this creates `/etc/connex-backup/backup.env` (mode 0600) from the example, then
+   exits 64 until the prerequisites below are configured. It validates the preserved configuration
+   before installing scripts, systemd units, or enabling timers (daily full dump, 15-minute binlog
+   archive, daily prune). Existing installations must complete the mandatory TLS and PITR image
+   migration in [UPGRADING.md](UPGRADING.md) before rerunning the installer.
 
 2. Edit `/etc/connex-backup/backup.env`: point it at your `db` container and
    credentials file, and set the backup root (a filesystem with room for ~35 daily dumps plus
    binlogs). Credentials go in a mode-0600 MySQL defaults file — never on a command line.
 
+   Source, verification, restore, and native remote-binlog connections require identity-verified
+   TLS by default. Configure each effective client defaults file's `[client]` section with an
+   absolute trusted `ssl-ca` file or `ssl-capath` directory, and ensure the server certificate's
+   identity matches the configured database host:
+
+   ```ini
+   [client]
+   password=REPLACE_WITH_OPERATOR_SECRET
+   ssl-mode=VERIFY_IDENTITY
+   ssl-ca=/etc/connex-backup/mysql-ca.pem
+   ```
+
+   The wrappers enforce `--ssl-mode=VERIFY_IDENTITY` after operator options. An incompatible
+   client, plaintext-only server, untrusted CA, or hostname mismatch fails closed before data
+   transfer; dumps also require a verified `SELECT 1` preflight. In default `exec` mode, CA paths
+   must exist inside the database container; only the credential defaults file is streamed in.
+   In `run` mode, mount the CA material read-only at its configured path. Verification and
+   restore inherit the source defaults file unless their profile specifies another file.
+
+   Plaintext requires an explicit, independent opt-in for each local profile:
+   `CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT=true`,
+   `CONNEX_BACKUP_VERIFY_ALLOW_LOOPBACK_PLAINTEXT=true`, or
+   `CONNEX_BACKUP_RESTORE_ALLOW_LOOPBACK_PLAINTEXT=true`. Each requires the literal host
+   `localhost`, `127.0.0.1`, or `::1`; remote/private addresses and the Compose hostname `db` are
+   refused. Default `exec` mode uses loopback inside the database container, so plaintext there
+   also requires the applicable opt-ins. All exceptions default to disabled. Before plaintext
+   is allowed, the actual client must expose its effective defaults with `--print-defaults`;
+   DNS SRV endpoint overrides in defaults or arguments, including loose and abbreviated forms,
+   are refused. Captured defaults are never logged.
+
    Dumps and binlog archiving work with the pinned `db` image alone — the official MySQL images
    ship no `mysqlbinlog`, so binlog archiving copies closed binlogs at the file level
    (byte-identical). **PITR replay does need a real `mysqlbinlog`**: either install the MySQL
-   community client tools on the restore host, or set `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE` to a
-   client-tools image that ships it (verified example: `percona/percona-server:8.4`). Do this at
-   install time and confirm the replay tool answers (`/usr/local/lib/connex-backup/shims/mysqlbinlog
-   --version`) — discover a missing replay tool during a drill, not during a disaster. Air-gapped deployments must mirror that image alongside
-   the release images.
+   community client tools on the restore host and set `MYSQLBINLOG` to that executable, or set
+   `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE` to an independently approved client-tools image containing
+   it, using `IMAGE@sha256:<64 lowercase hex digits>`. The release owner must review the image
+   and record its immutable registry digest before deployment. For the former Percona sample, use
+   `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server@sha256:<64 lowercase hex digits>`,
+   substituting the approved digest; this repository does not supply an approved Percona digest.
+   Preserved mutable tags such as `percona/percona-server:8.4` must be replaced before the installer
+   will enable timers. A mutable tag alone is also refused
+   with exit 64 before Docker runs, including for `--version`. Docker verifies downloaded
+   content against the digest; the digest does not establish publisher trust by itself.
+   After configuring these prerequisites, rerun the installer, then confirm the configured shim:
+
+   ```bash
+   sudo deploy/backup/install.sh
+   sudo CONNEX_BACKUP_ENV_FILE=/etc/connex-backup/backup.env \
+     /usr/local/lib/connex-backup/shims/mysqlbinlog --version
+   ```
+
+   If using a native client directly, check that configured executable with `--version` instead.
+   Air-gapped deployments must mirror the approved digest alongside the release images before
+   a disaster. The container decoder supports only local archived binlogs; native remote archive
+   mode requires a native `mysqlbinlog` client and the TLS configuration above.
 
    Schema selection defaults to "every schema the server has, minus the system ones".
    `CONNEX_BACKUP_SCHEMA_INCLUDE` is an **exclusive allowlist**: leave it empty unless you mean
@@ -92,7 +141,8 @@ backup** (the full run logs `event=backup_summary status=success`).
    `CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE`, which lifts only that prefix rule and leaves the rest
    of the backup scope alone.
 
-3. Verify the first run end-to-end:
+3. Verify the first run end-to-end. Installation checks the configuration offline; it does not
+   verify certificate files inside containers, TLS handshakes, or image/native-client availability:
 
    ```bash
    sudo systemctl start connex-backup.service

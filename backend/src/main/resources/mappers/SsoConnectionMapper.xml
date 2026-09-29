@@ -17,6 +17,13 @@
     WHERE org_id = #{orgId}
   </select>
 
+  <select id="findByOrgForUpdate" resultType="SsoConnection">
+    SELECT <include refid="columns"/>
+    FROM sso_connection
+    WHERE org_id = #{orgId}
+    FOR UPDATE
+  </select>
+
   <select id="findById" resultType="SsoConnection">
     SELECT <include refid="columns"/>
     FROM sso_connection

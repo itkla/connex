@@ -309,7 +309,7 @@ public final class OpenAiSseAccumulator {
                 throw invalidResponse();
             }
             ToolFragments fragments = tools.computeIfAbsent(index, ignored -> new ToolFragments());
-            fragments.append(call);
+            fragments.append(call, implied);
         }
     }
 
@@ -388,8 +388,27 @@ public final class OpenAiSseAccumulator {
         private final StringBuilder arguments = new StringBuilder();
         private final StringBuilder thoughtSignature = new StringBuilder();
 
-        private void append(JsonNode call) {
-            appendOptional(call.get("id"), id);
+        /**
+         * Folds one fragment into the call it belongs to.
+         *
+         * <p>A numbered fragment may split any field, so its values are concatenated. An unnumbered
+         * fragment was placed by the identifier it carries in full, so its identifier and its
+         * replay signature are whole values repeated rather than pieces: they are kept once, and a
+         * later fragment naming a different one is refused. Concatenating them would give every
+         * rejoined call a doubled identifier its {@code tool} message could never correlate with,
+         * and a signature the endpoint rejects on replay.
+         *
+         * @param call one tool-call fragment
+         * @param implied whether the fragment was placed by identifier rather than by index
+         */
+        private void append(JsonNode call, boolean implied) {
+            JsonNode signature = call.path("extra_content").path("google").get("thought_signature");
+            if (implied) {
+                keepWhole(call.get("id"), id);
+                keepWhole(signature, thoughtSignature);
+            } else {
+                appendOptional(call.get("id"), id);
+            }
             JsonNode function = call.get("function");
             if (function != null && !function.isNull()) {
                 if (!function.isObject()) {
@@ -398,9 +417,9 @@ public final class OpenAiSseAccumulator {
                 appendOptional(function.get("name"), name);
                 appendOptional(function.get("arguments"), arguments);
             }
-            appendOptional(
-                    call.path("extra_content").path("google").get("thought_signature"),
-                    thoughtSignature);
+            if (!implied) {
+                appendOptional(signature, thoughtSignature);
+            }
         }
 
         private AiToolCall build() {
@@ -421,6 +440,24 @@ public final class OpenAiSseAccumulator {
                 throw invalidResponse();
             }
             target.append(node.asString());
+        }
+
+        private static void keepWhole(JsonNode node, StringBuilder target) {
+            if (node == null || node.isNull()) {
+                return;
+            }
+            if (!node.isString()) {
+                throw invalidResponse();
+            }
+            String value = node.asString();
+            if (value.isEmpty()) {
+                return;
+            }
+            if (target.isEmpty()) {
+                target.append(value);
+            } else if (!target.toString().equals(value)) {
+                throw invalidResponse();
+            }
         }
 
         private static String required(StringBuilder value) {

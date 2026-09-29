@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.notifications;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -18,23 +19,32 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class SimpAiChatRealtimePublisherTest {
+
+    private final RealtimeRoutingIdentityResolver routingIdentities = new RealtimeRoutingIdentityResolver();
+
     @Test
     void explicitInitiatingUserIsResolvedToOnlyTheirUserQueue() {
         SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
         UserMapper userMapper = mock(UserMapper.class);
         User user = new User();
+        user.setId(17);
         user.setUsername("initiator");
         when(userMapper.getUserById(17)).thenReturn(user);
         var publisher = new SimpAiChatRealtimePublisher(
                 messagingTemplate,
                 userMapper,
                 mock(TenantWorkScope.class),
-                mock(AiChatRealtimeRecipientReader.class));
+                mock(AiChatRealtimeRecipientReader.class),
+                routingIdentities);
         var frame = new AiChatStepFrameDto(7, 13, 31, 2, "step", "get_record", "executed", null);
 
         publisher.sendUser(17, frame);
 
-        verify(messagingTemplate).convertAndSendToUser("initiator", "/queue/ai-chat", frame);
+        String destination = routingIdentities.destinationFor(17);
+        verify(messagingTemplate).convertAndSendToUser(destination, "/queue/ai-chat", frame);
+        assertNotEquals("initiator", destination);
+        assertNotEquals("uid:17", destination);
+        assertNotEquals("17", destination);
     }
 
     @Test
@@ -45,7 +55,8 @@ class SimpAiChatRealtimePublisherTest {
                 messagingTemplate,
                 userMapper,
                 mock(TenantWorkScope.class),
-                mock(AiChatRealtimeRecipientReader.class));
+                mock(AiChatRealtimeRecipientReader.class),
+                routingIdentities);
 
         publisher.sendUser(17, new AiChatStepFrameDto(
                 7, 13, 31, 0, "terminal", null, "failed", "provider_error"));
@@ -71,13 +82,15 @@ class SimpAiChatRealtimePublisherTest {
                 new AiChatRealtimeRecipientDto(17, "owner"),
                 new AiChatRealtimeRecipientDto(23, "participant")));
         var publisher = new SimpAiChatRealtimePublisher(
-                messagingTemplate, userMapper, tenantWorkScope, recipientReader);
+                messagingTemplate, userMapper, tenantWorkScope, recipientReader, routingIdentities);
         AiChatStepFrameDto frame = new AiChatStepFrameDto(
                 7, 13, 31, 0, "session", null, "updated", null);
 
         publisher.sendSession(7, 13, frame);
 
-        verify(messagingTemplate).convertAndSendToUser("owner", "/queue/ai-chat", frame);
-        verify(messagingTemplate).convertAndSendToUser("participant", "/queue/ai-chat", frame);
+        verify(messagingTemplate).convertAndSendToUser(
+                routingIdentities.destinationFor(17), "/queue/ai-chat", frame);
+        verify(messagingTemplate).convertAndSendToUser(
+                routingIdentities.destinationFor(23), "/queue/ai-chat", frame);
     }
 }

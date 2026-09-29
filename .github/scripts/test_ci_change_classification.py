@@ -27,6 +27,17 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify("README.md", "docs/CI_POLICY.md", "frontend/AGENTS.md")
         self.assertFalse(any(categories.values()))
 
+    def test_each_api_ledger_alone_runs_backend(self) -> None:
+        for path in (
+            "docs/backend/api-surface.tsv",
+            "docs/backend/api-lifecycle.tsv",
+            "docs/backend/api-surface-policy.txt",
+        ):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["backend"])
+                self.assertFalse(categories["full"])
+
     def test_runtime_mdx_is_frontend_code_not_documentation(self) -> None:
         categories = self.classify("frontend/app/help/page.mdx")
         self.assertTrue(categories["frontend"])
@@ -65,6 +76,35 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["cross_stack"])
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
+
+    def test_every_file_that_configures_a_pnpm_workspace_adds_the_audit(self) -> None:
+        for path in (
+            "frontend/pnpm-workspace.yaml",
+            "frontend/.pnpmfile.cjs",
+            "frontend/.pnpmfile.mjs",
+            "frontend/emails/pnpm-workspace.yaml",
+            "frontend/emails/.pnpmfile.cjs",
+            "frontend/emails/.pnpmfile.mjs",
+            "frontend/emails/.npmrc",
+            "frontend/emails/package.json",
+            "landing/pnpm-workspace.yaml",
+            "landing/.pnpmfile.cjs",
+            "landing/.pnpmfile.mjs",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
+    def test_a_pnpm_project_file_anywhere_adds_the_audit_that_discovers_it(self) -> None:
+        for path in (
+            "pnpm-workspace.yaml",
+            "frontend/tools/pnpm-lock.yaml",
+            "frontend/tools/package.json",
+            "frontend/tools/.pnpmfile.mjs",
+            "backend/src/test/resources/fixture/pnpm-lock.yaml",
+            "tools/codegen/package.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
 
     def test_ocr_dependencies_add_the_ocr_audit_only(self) -> None:
         categories = self.classify("ocr/requirements.lock")
@@ -163,6 +203,38 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(backend["backend_sast"])
         self.assertFalse(backend["frontend_sast"])
         self.assertFalse(backend["profile_boot"])
+
+    def test_browser_scripted_fixture_change_runs_the_backend_suite_that_loads_it(self) -> None:
+        """A change confined to the browser stack's scripted-provider fixtures must select `backend`.
+
+        `ScriptedAiScriptLoaderTest` loads that directory in the backend suite, so a bad script fails
+        there, naming the script, instead of as the e2e backend refusing to boot. The directory is
+        read from the `Frontend — unit & e2e` boot step, so moving it in the workflow without moving
+        the classifier fails here. The selection stays that narrow: the spec, its support code, and
+        any sibling fixture directory keep their frontend-only classification.
+        """
+        boot = next(
+            step
+            for step in self.workflow["jobs"]["frontend-tests"]["steps"]
+            if step.get("name") == "Boot backend (dev profile, fresh schema)"
+        )
+        fixture_dir = boot["env"]["CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR"].removeprefix(
+            "${{ github.workspace }}/"
+        )
+        categories = self.classify(f"{fixture_dir}/e2e_send_tools_answer.json")
+        self.assertTrue(categories["backend"])
+        self.assertTrue(categories["cross_stack"])
+        self.assertFalse(categories["profile_boot"])
+        self.assertFalse(categories["full"])
+
+        for path in (
+            "frontend/test/e2e/ask-connex-trajectory.spec.ts",
+            "frontend/test/e2e/support/api.ts",
+            "frontend/test/e2e/fixtures/other/fixture.json",
+            f"{fixture_dir}-archive/e2e_send_tools_answer.json",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(self.classify(path)["backend"])
 
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")

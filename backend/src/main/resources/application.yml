@@ -400,6 +400,20 @@ connex:
         generation-max-lifetime: ${CONNEX_AI_GENERATION_MAX_LIFETIME:190s}
         generation-poll-window: ${CONNEX_AI_GENERATION_POLL_WINDOW:4m}
         generation-poll-interval: ${CONNEX_AI_GENERATION_POLL_INTERVAL:2s}
+        # Run-lease timings are validated against each other at startup: the heartbeat interval must
+        # not exceed half the TTL, the heartbeat pool must cover generation-worker-threads, the TTL
+        # must stay under generation-max-lifetime, and the tombstone retention must exceed it.
+        run-lease-ttl: ${CONNEX_AI_RUN_LEASE_TTL:45s}
+        run-lease-heartbeat-interval: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_INTERVAL:15s}
+        run-lease-heartbeat-threads: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_THREADS:4}
+        run-lease-sweep-enabled: ${CONNEX_AI_RUN_LEASE_SWEEP_ENABLED:true}
+        run-lease-sweep-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_DELAY:30s}
+        run-lease-sweep-initial-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_INITIAL_DELAY:60s}
+        run-lease-sweep-max-workspaces: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_WORKSPACES:50}
+        run-lease-sweep-batch: ${CONNEX_AI_RUN_LEASE_SWEEP_BATCH:50}
+        run-lease-sweep-max-settlements: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_SETTLEMENTS:200}
+        run-lease-settlement-ttl: ${CONNEX_AI_RUN_LEASE_SETTLEMENT_TTL:30s}
+        run-lease-tombstone-retention: ${CONNEX_AI_RUN_LEASE_TOMBSTONE_RETENTION:1h}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

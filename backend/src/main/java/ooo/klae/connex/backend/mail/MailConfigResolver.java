@@ -4,11 +4,17 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.secrets.SecretReference;
 
 /**
@@ -16,7 +22,14 @@ import ooo.klae.connex.backend.secrets.SecretReference;
  * instance default ({@code connex.mail.*}); workspace-scoped mail uses that same
  * transport in managed mode, otherwise preferring the workspace's own enabled
  * config and falling back to the instance default. Returns {@code null} when no
- * usable config exists, which callers treat as "sending disabled".
+ * usable config exists, which callers treat as "sending disabled"; a workspace whose row is gone
+ * resolves to {@code null} for the same reason, so fire-and-forget senders keep that contract.
+ *
+ * <p>Workspace resolution locks the authenticated actor's {@code app_user} root for share when
+ * present, then the workspace root for share. Both roots remain held through configuration and
+ * secret reads so the endpoint and password come from one generation, and the secret store only
+ * reacquires roots already held in mutation order. Background resolution without an actor takes
+ * only the workspace root. Provider I/O follows after resolution. See {@code docs/backend/LOCKING.md}.
  */
 @Component
 @RequiredArgsConstructor
@@ -27,6 +40,8 @@ public class MailConfigResolver {
     private final MailProperties properties;
     private final MailConfigMapper mailConfigMapper;
     private final SecretCipher secretCipher;
+    private final WorkspaceMapper workspaceMapper;
+    private final UserMapper userMapper;
     private final String instanceConfigurationVersion = "instance:" + UUID.randomUUID();
 
     /**
@@ -47,9 +62,13 @@ public class MailConfigResolver {
      * @param workspaceId the workspace whose mail is being sent
      * @return the resolved config, or null when nothing usable is configured
      */
+    @Transactional
     public ResolvedMailConfig resolveForWorkspace(int workspaceId) {
         if (properties.isManaged()) {
             return resolveInstance();
+        }
+        if (!lockWorkspaceForResolution(workspaceId)) {
+            return null;
         }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
         if (ws != null && ws.isEnabled()) {
@@ -89,8 +108,12 @@ public class MailConfigResolver {
      * @param workspaceId the workspace
      * @return the workspace's resolved config, or null when it has none enabled/usable
      */
+    @Transactional
     public ResolvedMailConfig resolveWorkspaceOnly(int workspaceId) {
         if (properties.isManaged()) {
+            return null;
+        }
+        if (!lockWorkspaceForResolution(workspaceId)) {
             return null;
         }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
@@ -123,6 +146,23 @@ public class MailConfigResolver {
                 false,
                 instanceConfigurationVersion,
                 "instance-smtp:" + String.valueOf(properties.getUsername()));
+    }
+
+    private boolean lockWorkspaceForResolution(int workspaceId) {
+        Integer actorId = currentActorId();
+        if (actorId != null && userMapper.lockByIdForShare(actorId) == null) {
+            return false;
+        }
+        return workspaceMapper.lockWorkspaceForShare(workspaceId) != null;
+    }
+
+    private static Integer currentActorId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user) {
+            return user.getId();
+        }
+        return null;
     }
 
     private ResolvedMailConfig fromWorkspace(WorkspaceMailConfig ws) {

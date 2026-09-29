@@ -1,27 +1,9 @@
 import { headers } from "next/headers";
-import { getTranslations } from "next-intl/server";
-
 import { getMyWorkspacesFromCookie } from "@/app/lib/api";
-import { isProviderOwnedActivity } from "@/app/lib/connectedCapture";
 import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type Deal, type Note, type PersonCampaignTouch, type RecordComment, type Task, type UserReference } from "@/app/lib/types";
-import { buildTimeline, entryAuthorId, entryId } from "./timelineEntries";
-import TimelineDeepLinkFallback from "./TimelineDeepLinkFallback";
-import TimelineRow from "./TimelineRow";
+import TimelineContent from "./TimelineContent";
 
-export default async function Timeline({
-    tasks,
-    activities,
-    notes,
-    users = [],
-    persons = [],
-    deals = [],
-    lifecycleHistory = [],
-    comments = [],
-    campaignTouches = [],
-    currentUserId,
-    companyId,
-    limit,
-}: {
+export type TimelineProps = {
     tasks: Task[];
     activities: Activity[];
     notes: Note[];
@@ -34,54 +16,15 @@ export default async function Timeline({
     currentUserId?: number;
     companyId?: number | null;
     limit?: number;
-}) {
+    noteTarget?: { type: "person" | "deal" | "user"; id: number };
+};
+
+export default async function Timeline(props: TimelineProps) {
     const cookie = (await headers()).get("cookie");
-    const [t, workspaceState] = await Promise.all([
-        getTranslations("MeTimeline"),
-        getMyWorkspacesFromCookie(cookie),
-    ]);
-    const entries = buildTimeline({ tasks, activities, notes, lifecycleHistory, comments, campaignTouches });
-    const visible = limit ? entries.slice(0, limit) : entries;
-    const visibleIds = {
-        task: visible.flatMap((entry) => entry.kind === "task" ? [entry.task.id] : []),
-        activity: visible.flatMap((entry) => entry.kind === "activity" ? [entry.activity.id] : []),
-        note: visible.flatMap((entry) => entry.kind === "note" ? [entry.note.id] : []),
-    };
-    const knownIds = {
-        task: tasks.map((task) => task.id),
-        activity: activities.flatMap((activity) => isProviderOwnedActivity(activity) ? [] : [activity.id]),
-        note: notes.map((note) => note.id),
-    };
-
-    const userById = new Map(users.map((u) => [u.id, u]));
-
-    return (
-        <>
-            <TimelineDeepLinkFallback visible={visibleIds} known={knownIds} />
-            {visible.length === 0 ? (
-                <p className="px-6 py-12 text-center text-sm text-muted-foreground">
-                    {t("emptyState")}
-                </p>
-            ) : (
-                <ul className="divide-y divide-border">
-                    {visible.map((entry) => {
-                        const authorId = entryAuthorId(entry);
-                        const author = authorId != null ? userById.get(authorId) : undefined;
-                        return (
-                            <TimelineRow
-                                key={`${entry.kind}-${entryId(entry)}`}
-                                entry={entry}
-                                author={author}
-                                persons={persons}
-                                deals={deals}
-                                currentUserId={currentUserId}
-                                companyId={companyId ?? null}
-                                originWorkspaceId={workspaceState.activeWorkspaceId}
-                            />
-                        );
-                    })}
-                </ul>
-            )}
-        </>
-    );
+    const workspaceState = await getMyWorkspacesFromCookie(cookie);
+    return <TimelineContent
+        key={`${workspaceState.activeWorkspaceId}:${props.noteTarget?.type}:${props.noteTarget?.id}`}
+        {...props}
+        originWorkspaceId={workspaceState.activeWorkspaceId}
+    />;
 }

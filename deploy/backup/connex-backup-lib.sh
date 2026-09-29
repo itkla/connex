@@ -394,9 +394,68 @@ backup_profile_values() {
 backup_mysql() {
     local profile="$1"
     shift
-    local host port user defaults_file
+    backup_validate_client_arguments "$@" || return "$EXIT_CONFIG"
+    local host port user defaults_file ssl_mode
     IFS=$'\t' read -r host port user defaults_file < <(backup_profile_values "$profile")
-    "${MYSQL_COMMAND[@]}" "--defaults-extra-file=$defaults_file" --protocol=TCP --host="$host" --port="$port" --user="$user" "$@"
+    ssl_mode="$(backup_tls_mode "$profile" "$host")" || return "$EXIT_CONFIG"
+    backup_validate_loopback_client MYSQL_COMMAND "$defaults_file" "$ssl_mode" "$@" || return "$EXIT_CONFIG"
+    "${MYSQL_COMMAND[@]}" "--defaults-extra-file=$defaults_file" "$@" \
+        --protocol=TCP --host="$host" --port="$port" --user="$user" --ssl-mode="$ssl_mode"
+}
+
+backup_validate_client_arguments() {
+    local argument
+    for argument in "$@"; do
+        if [ "$argument" = -- ]; then
+            backup_log error config_error reason client_option_terminator >&2
+            return "$EXIT_CONFIG"
+        fi
+    done
+}
+
+backup_tls_mode() {
+    local profile="$1" host="$2" allow_plaintext
+    case "$profile" in
+        source) allow_plaintext="${CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT:-false}" ;;
+        verify) allow_plaintext="${CONNEX_BACKUP_VERIFY_ALLOW_LOOPBACK_PLAINTEXT:-false}" ;;
+        restore) allow_plaintext="${CONNEX_BACKUP_RESTORE_ALLOW_LOOPBACK_PLAINTEXT:-false}" ;;
+        *) return "$EXIT_CONFIG" ;;
+    esac
+    backup_validate_boolean "${profile}_allow_loopback_plaintext" "$allow_plaintext" >&2 || return "$EXIT_CONFIG"
+    if [ "$allow_plaintext" = true ]; then
+        case "$host" in
+            localhost|127.0.0.1|::1) printf 'DISABLED\n'; return 0 ;;
+            *)
+                backup_log error config_error reason plaintext_requires_loopback profile "$profile" >&2
+                return "$EXIT_CONFIG"
+                ;;
+        esac
+    fi
+    printf 'VERIFY_IDENTITY\n'
+}
+
+backup_validate_loopback_client() {
+    local -n client_command="$1"
+    local defaults_file="$2" ssl_mode="$3" effective_options option
+    local -a options=()
+    shift 3
+    [ "$ssl_mode" = DISABLED ] || return 0
+    if ! effective_options="$("${client_command[@]}" "--defaults-extra-file=$defaults_file" --print-defaults < /dev/null 2>/dev/null)"; then
+        backup_log error config_error reason client_defaults_unverifiable >&2
+        return "$EXIT_CONFIG"
+    fi
+    read -r -a options <<< "${effective_options//$'\n'/ }"
+    for option in "${options[@]}" "${client_command[@]:1}" "$@"; do
+        [[ "$option" == --* ]] || continue
+        option="${option%%=*}"
+        option="${option#--}"
+        option="${option//_/-}"
+        option="${option#loose-}"
+        if [ -n "$option" ] && [[ dns-srv-name == "$option"* ]]; then
+            backup_log error config_error reason plaintext_endpoint_override >&2
+            return "$EXIT_CONFIG"
+        fi
+    done
 }
 
 backup_profile_suppresses_binlog() {
@@ -441,17 +500,26 @@ backup_mysql_query() {
 backup_mysqldump() {
     local profile="$1"
     shift
-    local host port user defaults_file
+    backup_validate_client_arguments "$@" || return "$EXIT_CONFIG"
+    local host port user defaults_file ssl_mode
     IFS=$'\t' read -r host port user defaults_file < <(backup_profile_values "$profile")
-    "${MYSQLDUMP_COMMAND[@]}" "--defaults-extra-file=$defaults_file" --protocol=TCP --host="$host" --port="$port" --user="$user" "$@"
+    ssl_mode="$(backup_tls_mode "$profile" "$host")" || return "$EXIT_CONFIG"
+    backup_validate_loopback_client MYSQLDUMP_COMMAND "$defaults_file" "$ssl_mode" "$@" || return "$EXIT_CONFIG"
+    backup_mysql_query "$profile" 'SELECT 1;' >/dev/null || return "$EXIT_DB_PREFLIGHT"
+    "${MYSQLDUMP_COMMAND[@]}" "--defaults-extra-file=$defaults_file" "$@" \
+        --protocol=TCP --host="$host" --port="$port" --user="$user" --ssl-mode="$ssl_mode"
 }
 
 backup_mysqlbinlog_remote() {
     local profile="$1"
     shift
-    local host port user defaults_file
+    backup_validate_client_arguments "$@" || return "$EXIT_CONFIG"
+    local host port user defaults_file ssl_mode
     IFS=$'\t' read -r host port user defaults_file < <(backup_profile_values "$profile")
-    "${MYSQLBINLOG_COMMAND[@]}" "--defaults-extra-file=$defaults_file" --host="$host" --port="$port" --user="$user" "$@"
+    ssl_mode="$(backup_tls_mode "$profile" "$host")" || return "$EXIT_CONFIG"
+    backup_validate_loopback_client MYSQLBINLOG_COMMAND "$defaults_file" "$ssl_mode" "$@" || return "$EXIT_CONFIG"
+    "${MYSQLBINLOG_COMMAND[@]}" "--defaults-extra-file=$defaults_file" "$@" \
+        --host="$host" --port="$port" --user="$user" --ssl-mode="$ssl_mode"
 }
 
 backup_mysqlbinlog_local() {

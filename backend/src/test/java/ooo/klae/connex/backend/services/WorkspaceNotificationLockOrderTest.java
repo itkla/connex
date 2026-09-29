@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
@@ -22,11 +24,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -56,6 +60,8 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private AccountDeletionReservationRead accountDeletionReservationRead;
+    @Mock private RegistrationVerificationService registrationVerificationService;
 
     @InjectMocks private WorkspaceService service;
 
@@ -95,7 +101,8 @@ class WorkspaceNotificationLockOrderTest {
         when(userMapper.lockById(9)).thenReturn(9);
         when(workspaceMapper.getRole(7, 9)).thenReturn("owner");
         when(workspaceMapper.workspaceIdsOwnedBy(9)).thenReturn(List.of(3, 7));
-        when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(1, 9));
+        when(workspaceMapper.lockActiveOwnerMembers(7))
+            .thenReturn(List.of(membership(1, "owner", null, "active"), membership(9, "owner", null, "active")));
 
         service.leaveWorkspace(7, 9);
 
@@ -105,7 +112,7 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockWorkspace(3);
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(notificationMapper).lockRecipientMemberships(9);
-        order.verify(workspaceMapper).lockOwnerIds(7);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
         order.verify(userOffboardingService).detachMemberContent(7, 9);
         order.verify(workspaceMapper).removeMember(7, 9);
         order.verify(stateVersionService).markChanged(9);
@@ -116,7 +123,8 @@ class WorkspaceNotificationLockOrderTest {
         runMembershipRemovalWork();
         stubOwnerActor();
         stubRoleMutationTarget("owner");
-        when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(1, 9));
+        when(workspaceMapper.lockActiveOwnerMembers(7))
+            .thenReturn(List.of(membership(1, "owner", null, "active"), membership(9, "owner", null, "active")));
 
         service.removeMember(7, 1, 9);
 
@@ -132,7 +140,7 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
-        order.verify(workspaceMapper).lockOwnerIds(7);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
         order.verify(workspaceMapper).getMember(7, 9);
         order.verify(userOffboardingService).detachMemberContent(7, 9);
         order.verify(workspaceMapper).removeMember(7, 9);
@@ -180,8 +188,11 @@ class WorkspaceNotificationLockOrderTest {
     @Test
     void accountGuardLocksOwnedWorkspacesAndMembershipsBeforeOwnerRows() {
         when(workspaceMapper.workspaceIdsOwnedBy(9)).thenReturn(List.of(3, 7));
-        when(workspaceMapper.lockOwnerIds(3)).thenReturn(List.of(9, 11));
-        when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(9, 12));
+        WorkspaceMember otherOwner = membership(11, "owner", null, "active");
+        otherOwner.setWorkspaceId(3);
+        when(workspaceMapper.lockActiveOwnerMembers(3)).thenReturn(List.of(otherOwner));
+        when(workspaceMapper.lockActiveOwnerMembers(7))
+            .thenReturn(List.of(membership(12, "owner", null, "active")));
 
         service.assertNotSoleOwnerOfAnyWorkspace(9);
 
@@ -190,8 +201,8 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockWorkspace(3);
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(notificationMapper).lockRecipientMemberships(9);
-        order.verify(workspaceMapper).lockOwnerIds(3);
-        order.verify(workspaceMapper).lockOwnerIds(7);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(3);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
     }
 
     @Test
@@ -381,11 +392,11 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(userMapper).lockById(9);
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).lockRoleAssignees(7, 5);
         order.verify(roleMapper).lockRole(7, 5);
         order.verify(roleMapper).lockRole(7, 11);
         order.verify(roleMapper).lockPermissions(7, 5);
         order.verify(roleMapper).lockPermissions(7, 11);
-        order.verify(workspaceMapper).hasMembersWithCustomRole(7, 5);
     }
 
     @Test
@@ -396,7 +407,8 @@ class WorkspaceNotificationLockOrderTest {
         when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
         when(roleMapper.lockRole(7, 5)).thenReturn(5);
         when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of());
-        when(workspaceMapper.hasMembersWithCustomRole(7, 5)).thenReturn(true);
+        when(workspaceMapper.lockRoleAssignees(7, 5))
+            .thenReturn(List.of(membership(1, "member", 5, "active")));
 
         assertThrows(
             BadRequestException.class,
@@ -406,9 +418,30 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(userMapper).lockById(9);
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).lockRoleAssignees(7, 5);
         order.verify(roleMapper).lockRole(7, 5);
         order.verify(roleMapper).lockPermissions(7, 5);
-        order.verify(workspaceMapper).hasMembersWithCustomRole(7, 5);
+    }
+
+    @Test
+    void roleMembershipContentionMapsOnlyTheMySqlNowaitErrorToConflict() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership(9, "owner", null, "active"));
+        RuntimeException unrelated = new IllegalStateException(new SQLException("other", "HY000", 1205));
+        RuntimeException wrongState = new IllegalStateException(new SQLException("other", "42000", 3572));
+        when(workspaceMapper.lockRoleAssignees(7, 5))
+            .thenThrow(new IllegalStateException(new SQLException("busy", "HY000", 3572)))
+            .thenThrow(unrelated)
+            .thenThrow(wrongState);
+
+        assertThrows(ConflictException.class, () -> service.lockRoleDeletionAuthorization(7, 9, 5));
+        assertSame(unrelated,
+            assertThrows(IllegalStateException.class, () -> service.lockRoleDeletionAuthorization(7, 9, 5)));
+        assertSame(wrongState,
+            assertThrows(IllegalStateException.class, () -> service.lockRoleDeletionAuthorization(7, 9, 5)));
+        verifyNoInteractions(roleMapper);
     }
 
     @Test
@@ -446,7 +479,8 @@ class WorkspaceNotificationLockOrderTest {
     void ownerDemotionUsesExactUserWorkspaceMembershipOwnerOrder() {
         stubOwnerActor();
         stubRoleMutationTarget("owner");
-        when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(1, 9));
+        when(workspaceMapper.lockActiveOwnerMembers(7))
+            .thenReturn(List.of(membership(1, "owner", null, "active"), membership(9, "owner", null, "active")));
 
         service.changeMemberRole(7, 1, 9, "member");
 
@@ -456,7 +490,7 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
-        order.verify(workspaceMapper).lockOwnerIds(7);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
         order.verify(workspaceMapper).updateMemberRole(7, 9, "member");
         verify(workspaceMapper, never()).workspaceIdsOwnedBy(9);
         verifyNoInteractions(notificationMapper);
@@ -472,6 +506,7 @@ class WorkspaceNotificationLockOrderTest {
         stubActiveWorkspaceIdentity();
         when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(membership);
         when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
+        stubVerifiedPendingUser();
         when(orgAllowedDomainService.isJoinAllowed(3, "pending@example.com")).thenReturn(true);
         when(workspaceMapper.activateMember(7, 9)).thenReturn(1);
         when(workspaceMapper.getMembershipsForUser(9)).thenReturn(List.of(activated));
@@ -490,6 +525,7 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(organizationMapper).lockActiveByIdForShare(3);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(userMapper).getUserByIdForShare(9);
         order.verify(orgAllowedDomainService).isJoinAllowed(3, "pending@example.com");
         order.verify(workspaceMapper).activateMember(7, 9);
         order.verify(stateVersionService).markChanged(9);
@@ -519,6 +555,7 @@ class WorkspaceNotificationLockOrderTest {
         stubActiveWorkspaceIdentity();
         when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(membership);
         when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
+        stubVerifiedPendingUser();
         when(orgAllowedDomainService.isJoinAllowed(3, "pending@example.com")).thenReturn(true);
         when(workspaceMapper.activateMember(7, 9)).thenReturn(0);
 
@@ -539,6 +576,14 @@ class WorkspaceNotificationLockOrderTest {
 
         verifyNoInteractions(orgAllowedDomainService);
         verify(workspaceMapper, never()).activateMember(7, 9);
+    }
+
+    private void stubVerifiedPendingUser() {
+        User user = new User();
+        user.setId(9);
+        user.setEmail("pending@example.com");
+        user.setEmailVerified(true);
+        when(userMapper.getUserByIdForShare(9)).thenReturn(user);
     }
 
     @Test

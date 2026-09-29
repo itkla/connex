@@ -371,7 +371,7 @@ public class RecordCreationTemplateValidator {
 
     private void validateNumberDefault(String fieldKey, BigDecimal value) {
         int fractionalDigits = Math.max(value.scale(), 0);
-        int integerDigits = Math.max(value.precision() - value.scale(), 0);
+        long integerDigits = Math.max((long) value.precision() - value.scale(), 0L);
         boolean invalid = "value".equals(fieldKey)
             ? value.signum() < 0 || fractionalDigits > 2 || integerDigits > 13
             : fractionalDigits > 4 || integerDigits > 16;

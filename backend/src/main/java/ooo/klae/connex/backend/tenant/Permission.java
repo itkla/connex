@@ -33,6 +33,8 @@ public enum Permission {
     TASK_UPDATE,
     TASK_DELETE,
     ATTACHMENT_CREATE,
+    /** Manages workspace attachment quarantine without granting access to quarantined bytes. */
+    ATTACHMENT_QUARANTINE_MANAGE,
     ATTACHMENT_DELETE,
     REPORT_READ,
     REPORT_CREATE,

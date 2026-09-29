@@ -1,22 +1,49 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class LegacyUploadMigrationMapperTest extends AbstractMapperTest {
     @Autowired LegacyTenantUploadMigrationMapper tenantMigrationMapper;
     @Autowired LegacyControlUploadMigrationMapper controlMigrationMapper;
     @Autowired AttachmentMapper attachmentMapper;
+    @Autowired OrganizationMapper organizationMapper;
+
+    private final List<Integer> migrationWorkspaceIds = new ArrayList<>();
+
+    @BeforeEach
+    @Override
+    void setUpWorkspace() {
+        String suffix = unique();
+        Organization organization = new Organization();
+        organization.setName("Legacy upload mapper " + suffix);
+        organization.setSlug("legacy-upload-mapper-" + suffix);
+        organizationMapper.insert(organization);
+        for (int index = 0; index <= 100; index++) {
+            workspace = new Workspace();
+            workspace.setOrgId(organization.getId());
+            workspace.setName("Legacy upload mapper " + suffix + " " + index);
+            workspace.setSlug("legacy-upload-mapper-" + suffix + "-" + index);
+            workspaceMapper.insert(workspace);
+            migrationWorkspaceIds.add(workspace.getId());
+        }
+    }
 
     @Test
     void discoversKnownLegacyPrefixesAndRewritesWithCompareAndSet() {
@@ -55,9 +82,14 @@ class LegacyUploadMigrationMapperTest extends AbstractMapperTest {
             .anyMatch(record -> record.getId() == person.getId()));
         assertTrue(tenantMigrationMapper.findCompanyImages(workspace.getId(), 0, 100).stream()
             .anyMatch(record -> record.getId() == company.getId()));
-        assertTrue(controlMigrationMapper.findUserImages(0, 100).stream()
+        assertTrue(controlMigrationMapper.findUserImages(user.getId() - 1, 100).stream()
             .anyMatch(record -> record.getId() == user.getId()));
-        assertTrue(controlMigrationMapper.findWorkspaceIds(0, 100).contains(workspace.getId()));
+        assertFalse(controlMigrationMapper.findWorkspaceIds(0, 100).contains(workspace.getId()));
+        List<Integer> firstWorkspacePage = controlMigrationMapper.findWorkspaceIds(
+            migrationWorkspaceIds.getFirst() - 1, 100);
+        assertEquals(migrationWorkspaceIds.subList(0, 100), firstWorkspacePage);
+        assertEquals(List.of(workspace.getId()),
+            controlMigrationMapper.findWorkspaceIds(firstWorkspacePage.getLast(), 100));
         assertTrue(tenantMigrationMapper.countReferences(workspace.getId()) >= 3);
         assertTrue(controlMigrationMapper.countUserReferences() >= 1);
         assertTrue(tenantMigrationMapper.findAttachments(

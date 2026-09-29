@@ -1,0 +1,133 @@
+.hero {
+    position: relative;
+    isolation: isolate;
+}
+.copy { position: relative; z-index: 1; width: 100%; }
+.copy > div > p { color: color-mix(in oklab, var(--foreground) 75%, var(--background)); }
+.backdrop {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    --fuji-drift-far: calc(var(--motion-ambient-cloud) * 1.6);
+    --fuji-drift-near: calc(var(--motion-ambient-cloud) * 1.08);
+}
+.landscape {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+.outline { stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+.inkTone { stop-color: var(--color-brand-dark); }
+.mountainTint { stop-color: var(--color-brand-dark); }
+.ascentTrail { stroke: var(--color-brand); stroke-width: 2; stroke-linecap: round; }
+.ascentDot, .ascentPulse { fill: var(--color-brand); }
+.ascentPulse {
+    opacity: 0.3;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: ascentPulse var(--motion-ambient-twinkle) var(--ease-out) infinite;
+    animation-play-state: paused;
+}
+.cloudDrift {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 3%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 13%, var(--background));
+}
+.cloudBody { fill: var(--fuji-cloud-body); }
+.cloudShade { fill: var(--fuji-cloud-shade); }
+.sunGlow { stop-color: var(--chart-3); }
+.sunCore { stop-color: color-mix(in oklab, var(--chart-3) 22%, var(--background)); }
+.sunEdge { stop-color: color-mix(in oklab, var(--chart-3) 55%, var(--background)); }
+.sunBloom { fill: color-mix(in oklab, var(--chart-3) 45%, var(--background)); opacity: 0.6; }
+.stars { display: none; }
+.starTone { fill: color-mix(in oklab, var(--foreground) 90%, var(--background)); }
+.starStop { stop-color: color-mix(in oklab, var(--foreground) 90%, var(--background)); }
+.star {
+    animation: starTwinkle var(--motion-ambient-twinkle) ease-in-out infinite;
+    animation-play-state: paused;
+}
+.star:nth-child(3n + 1) { animation-duration: calc(var(--motion-ambient-twinkle) * 1.45); }
+.twinkleEarly { animation-delay: 0s; }
+.twinkleMid { animation-delay: calc(var(--motion-ambient-twinkle) * -0.45); }
+.twinkleLate { animation-delay: calc(var(--motion-ambient-twinkle) * -0.9); }
+.twinkleLast { animation-delay: calc(var(--motion-ambient-twinkle) * -1.25); }
+.star:nth-child(7n) { animation-duration: calc(var(--motion-ambient-twinkle) * 0.68); }
+.shootingStar {
+    opacity: 0;
+    animation: shootingStar var(--motion-ambient-meteor) var(--ease-out) infinite;
+    animation-play-state: paused;
+}
+.backdrop:not([data-fuji-motion="running"]) .shootingStar { visibility: hidden; }
+.shootingStarLate {
+    animation-duration: calc(var(--motion-ambient-meteor) * 1.62);
+    animation-delay: calc(var(--motion-ambient-meteor) * 0.55);
+}
+.cloudDrift {
+    animation: cloudPassing var(--fuji-drift-far) linear infinite;
+    animation-play-state: paused;
+}
+.farClouds {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 2%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 8%, var(--background));
+}
+.nearClouds { animation-duration: var(--fuji-drift-near); }
+.backdrop[data-fuji-motion="running"] :is(.cloudDrift, .star, .shootingStar, .ascentPulse) { animation-play-state: running; }
+.scenery {
+    position: absolute;
+    inset: 0;
+    mask-image: linear-gradient(90deg, transparent, rgb(0 0 0 / 0.06) 28%, rgb(0 0 0 / 0.45) 52%, black 76%);
+}
+.motionControl {
+    position: absolute;
+    right: max(1.25rem, calc((100vw - 76rem) / 2));
+    bottom: 1.5rem;
+    z-index: 2;
+    pointer-events: auto;
+}
+.motionControl button { background: color-mix(in oklab, var(--background) 85%, transparent); }
+@keyframes cloudPassing {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(1600px, 0, 0); }
+}
+@keyframes ascentPulse {
+    0% { transform: scale(0.9); opacity: 0.4; }
+    80%, 100% { transform: scale(1.8); opacity: 0; }
+}
+@keyframes starTwinkle {
+    0%, 100% { opacity: 0.95; }
+    50% { opacity: 0.25; }
+}
+@keyframes shootingStar {
+    0% { opacity: 0; transform: translate3d(0, 0, 0); }
+    1% { opacity: 1; }
+    6%, 100% { opacity: 0; transform: translate3d(-340px, 170px, 0); }
+}
+:global(.dark) .inkTone { stop-color: var(--color-brand); }
+:global(.dark) .cloudDrift {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 20%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 11%, var(--background));
+}
+:global(.dark) .farClouds {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 14%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 8%, var(--background));
+}
+:global(.dark) .sun { display: none; }
+:global(.dark) .stars { display: inline; }
+@media (min-aspect-ratio: 2 / 1) {
+    .landscape { inset: auto 0 0 auto; width: auto; height: 100%; aspect-ratio: 16 / 9; }
+}
+@media (max-width: 63.999rem) {
+    .landscape { inset: auto -12% 0 auto; width: 140%; height: 85%; }
+    .scenery { mask-image: linear-gradient(180deg, transparent, rgb(0 0 0 / 0.12) 30%, rgb(0 0 0 / 0.55) 60%, black); }
+}
+@media (max-width: 39.999rem) {
+    .landscape { right: -30%; width: 200%; height: 65%; }
+    .scenery { mask-image: linear-gradient(180deg, transparent 10%, rgb(0 0 0 / 0.08) 38%, rgb(0 0 0 / 0.55) 70%, black); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cloudDrift, .star, .ascentPulse { animation: none; }
+    .shootingStar { display: none; }
+    .landscape [data-fuji-depth] { transform: none !important; }
+}

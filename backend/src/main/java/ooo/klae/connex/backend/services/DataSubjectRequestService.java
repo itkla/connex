@@ -106,6 +106,10 @@ public class DataSubjectRequestService {
      * are listed as metadata only; binaries stay behind the attachment endpoints. The audit-trail
      * section is capped at {@link #DISCLOSURE_AUDIT_LIMIT} entries with the uncapped total exposed
      * for truncation detection.
+     *
+     * <p>The response is assembled in memory and has no size ceiling: a subject holding a very
+     * large corpus of notes produces a correspondingly large payload and a matching peak heap on
+     * the serving instance. Operators exporting such a subject should expect a slow response.
      */
     public DataSubjectDisclosureDto disclosure(int orgId, long requestId, int actorId) {
         DisclosureControlData control = tenantWorkScope.unrouted(

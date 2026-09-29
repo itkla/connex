@@ -74,6 +74,10 @@ class PersonRestrictionEpochTest {
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(duplicateDecisionLockService.lockCurrentOrganization()).thenReturn(ORG_ID);
+        when(duplicateDecisionLockService.lockCurrentOrganization(
+                ooo.klae.connex.backend.tenant.Permission.PERSON_UPDATE))
+            .thenReturn(new DuplicateDecisionLockService.LockedOrganization(
+                ORG_ID, mock(WorkspaceService.LockedPermissionSnapshot.class)));
         when(workspaceMapper.findByOrgId(ORG_ID)).thenReturn(List.of(
                 workspace(OTHER_WORKSPACE_ID), workspace(WORKSPACE_ID)));
     }

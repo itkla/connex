@@ -99,6 +99,10 @@ public class AiAssistantWorkBriefReadService {
                 bounded.stream().map(AiAssistantWorkCommitment::personId).toList(),
                 List.of(),
                 bounded.stream().map(AiAssistantWorkCommitment::dealId).toList());
+        labels.people().values().forEach(name ->
+                new Identifier("person", name).seed(resources.maskingContext()));
+        labels.deals().values().forEach(name ->
+                new Identifier("deal", name).seed(resources.maskingContext()));
         List<Identifier> identifiers = new ArrayList<>();
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -131,7 +135,6 @@ public class AiAssistantWorkBriefReadService {
         data.put("asOf", nowUtc());
         data.put("exclusions", truncated ? List.of("bounded_results") : List.of());
         data.put("commitments", List.copyOf(rows));
-        identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
         return new AiAssistantToolResult(data, identifiers);
     }
 
@@ -219,6 +222,10 @@ public class AiAssistantWorkBriefReadService {
                 bounded.stream().map(AiAssistantUpcomingMeeting::personId).toList(),
                 List.of(),
                 bounded.stream().map(AiAssistantUpcomingMeeting::dealId).toList());
+        labels.people().values().forEach(name ->
+                new Identifier("person", name).seed(resources.maskingContext()));
+        labels.deals().values().forEach(name ->
+                new Identifier("deal", name).seed(resources.maskingContext()));
         List<Identifier> identifiers = new ArrayList<>();
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -247,7 +254,6 @@ public class AiAssistantWorkBriefReadService {
         data.put("asOf", nowUtc());
         data.put("exclusions", truncated ? List.of("bounded_results") : List.of());
         data.put("meetings", List.copyOf(rows));
-        identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
         return new AiAssistantToolResult(data, identifiers);
     }
 

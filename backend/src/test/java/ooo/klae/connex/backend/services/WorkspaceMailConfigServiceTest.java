@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -15,6 +16,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -22,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
+import ooo.klae.connex.backend.dto.MailConfigDto;
 import ooo.klae.connex.backend.dto.MailConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -101,6 +105,31 @@ class WorkspaceMailConfigServiceTest {
     }
 
     @Test
+    void getConfig_reportsTheResolvedInstanceDefaultPortInsteadOfALiteral() {
+        mailProperties.setPort(2525);
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(null);
+
+        MailConfigDto unconfigured = service().getConfig(3, 9);
+
+        assertEquals(2525, unconfigured.getDefaultPort());
+        assertEquals(Integer.valueOf(2525), unconfigured.getPort());
+    }
+
+    @Test
+    void getConfig_reportsTheInstanceDefaultAlongsideAStoredNullPort() {
+        mailProperties.setPort(2525);
+        WorkspaceMailConfig existing = new WorkspaceMailConfig();
+        existing.setHost("smtp.test");
+        existing.setPort(null);
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+
+        MailConfigDto stored = service().getConfig(3, 9);
+
+        assertEquals(2525, stored.getDefaultPort());
+        assertNull(stored.getPort());
+    }
+
+    @Test
     void saveConfig_managed_rejectedWithoutWork() {
         mailProperties.setManaged(true);
 
@@ -148,11 +177,13 @@ class WorkspaceMailConfigServiceTest {
 
     @Test
     void saveConfig_blankPassword_preservesStoredPassword() {
-        WorkspaceMailConfig existing = new WorkspaceMailConfig();
-        existing.setPasswordEnc("OLD-ENC");
-        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        WorkspaceMailConfig existing = storedConfig();
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
+        MailConfigRequest request = enabledRequest();
+        request.setFromAddress("new-sender@test");
+        request.setFromName("New sender name");
 
-        service().saveConfig(3, 9, enabledRequest());
+        service().saveConfig(3, 9, request);
 
         ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
         verify(mailConfigMapper).upsert(captor.capture());
@@ -160,11 +191,101 @@ class WorkspaceMailConfigServiceTest {
         verify(secretCipher, never()).encryptForWorkspace(eq(3), any());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {587, 2525})
+    void saveConfig_inheritedPortMatchesResolvedDefaultForUnrelatedEdits(int defaultPort) {
+        mailProperties.setPort(defaultPort);
+        WorkspaceMailConfig existing = storedConfig();
+        existing.setPort(null);
+        existing.setUsername(" ");
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
+        MailConfigRequest request = enabledRequest();
+        request.setPort(defaultPort);
+        request.setFromName("Updated sender name");
+        request.setPassword("");
+
+        service().saveConfig(3, 9, request);
+
+        ArgumentCaptor<WorkspaceMailConfig> saved = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
+        verify(mailConfigMapper).upsert(saved.capture());
+        assertEquals("OLD-ENC", saved.getValue().getPasswordEnc());
+        assertEquals("Updated sender name", saved.getValue().getFromName());
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void saveConfig_actualChangeFromInheritedPortStillRequiresPassword() {
+        WorkspaceMailConfig existing = storedConfig();
+        existing.setPort(null);
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
+        MailConfigRequest request = enabledRequest();
+        request.setPort(465);
+
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, request));
+
+        verify(mailConfigMapper, never()).upsert(any());
+        verifyNoInteractions(secretCipher);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"host", "port", "username", "starttls", "ssl"})
+    void saveConfig_blankPasswordRejectsChangedCredentialBindingBeforePersistenceOrEgress(String field) {
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(storedConfig());
+        MailConfigRequest request = changedConnection(field);
+        request.setPassword(" ");
+
+        BadRequestException failure = assertThrows(BadRequestException.class,
+                () -> service().saveConfig(3, 9, request));
+
+        assertEquals("Re-enter the credential to change the endpoint", failure.getMessage());
+        verify(mailConfigMapper, never()).upsert(any());
+        verifyNoInteractions(secretCipher, mailConfigResolver, mailService, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"host", "port", "username", "starttls", "ssl"})
+    void saveConfig_reenteredPasswordAllowsChangedCredentialBinding(String field) {
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(storedConfig());
+        when(secretCipher.encryptForWorkspace(3, "replacement")).thenReturn("secret:v1:100");
+        MailConfigRequest request = changedConnection(field);
+        request.setPassword("replacement");
+
+        service().saveConfig(3, 9, request);
+
+        ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
+        verify(mailConfigMapper).upsert(captor.capture());
+        assertEquals("secret:v1:100", captor.getValue().getPasswordEnc());
+    }
+
+    private WorkspaceMailConfig storedConfig() {
+        WorkspaceMailConfig config = new WorkspaceMailConfig();
+        config.setEnabled(true);
+        config.setHost("smtp.test");
+        config.setPort(587);
+        config.setStarttls(true);
+        config.setAuth(true);
+        config.setPasswordEnc("OLD-ENC");
+        return config;
+    }
+
+    private MailConfigRequest changedConnection(String field) {
+        MailConfigRequest request = enabledRequest();
+        switch (field) {
+            case "host" -> request.setHost("smtp.attacker.example");
+            case "port" -> request.setPort(465);
+            case "username" -> request.setUsername("different-account");
+            case "starttls" -> request.setStarttls(false);
+            case "ssl" -> request.setSsl(true);
+            default -> throw new IllegalArgumentException("Unknown connection field");
+        }
+        return request;
+    }
+
     @Test
     void saveConfig_disabledClearsStoredPassword() {
         WorkspaceMailConfig existing = new WorkspaceMailConfig();
         existing.setPasswordEnc("secret:v1:88");
-        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
         MailConfigRequest req = enabledRequest();
         req.setEnabled(false);
 
@@ -180,7 +301,7 @@ class WorkspaceMailConfigServiceTest {
     void saveConfig_authDisabledClearsStoredPassword() {
         WorkspaceMailConfig existing = new WorkspaceMailConfig();
         existing.setPasswordEnc("secret:v1:89");
-        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
         MailConfigRequest req = enabledRequest();
         req.setAuth(false);
 
@@ -359,7 +480,7 @@ class WorkspaceMailConfigServiceTest {
     void deleteConfig_deletesAndRequiresPermission() {
         WorkspaceMailConfig existing = new WorkspaceMailConfig();
         existing.setPasswordEnc("secret:v1:44");
-        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        when(mailConfigMapper.findByWorkspaceForUpdate(3)).thenReturn(existing);
         service().deleteConfig(3, 9);
         verify(workspaceService).requirePermission(3, 9, Permission.WORKSPACE_SETTINGS);
         verify(sessionSecurityService).requireRecentAuthentication(9);

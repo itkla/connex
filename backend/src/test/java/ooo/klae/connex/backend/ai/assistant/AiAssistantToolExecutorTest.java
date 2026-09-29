@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -16,8 +17,11 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -81,12 +85,111 @@ class AiAssistantToolExecutorTest {
         companyMapper = mock(CompanyMapper.class);
         dealMapper = mock(DealMapper.class);
         dateResolver = mock(AiAssistantDateResolver.class);
-        executor = new AiAssistantToolExecutor(
-                new AiAssistantToolCatalog(), searchService, personService, companyService,
+        executor = executor(AiAssistantDeclaredWriteTools.tools());
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools) {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        return new AiAssistantToolExecutor(
+                catalog, new AiAssistantWriteToolRegistry(catalog, writeTools),
+                searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
                 mock(AiAssistantScopeReadService.class));
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    /**
+     * A handle is refused before any proposal unless it names a kind its tool accepts, pinned here
+     * as a reviewed literal table rather than read back from the beans under test: widening a write
+     * tool's accepted kinds, or a read tool's, turns this red instead of widening the model-facing
+     * {@code wrong_handle_kind} contract silently.
+     */
+    @Test
+    void aHandleIsCheckedAgainstTheKindsItsToolAccepts() throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        Map<String, String> handles = Map.of(
+                "person", resources.register("person", 7),
+                "company", resources.register("company", 5),
+                "deal", resources.register("deal", 8));
+        Map<String, String> arguments = Map.of(
+                "create_activity", ",\"type\":\"call\",\"subject\":\"Call\",\"start\":\"today\"",
+                "create_task", ",\"description\":\"Follow up\"",
+                "create_note", ",\"content\":\"Met\"",
+                "add_tag", ",\"tag\":\"VIP\"",
+                "change_deal_stage", ",\"stage\":\"Won\"",
+                "assign_owner", ",\"owner\":\"Ana\"",
+                "get_deal_brief", "",
+                "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\"");
+        Map<String, Set<String>> accepted = Map.of(
+                "create_activity", Set.of("person", "deal"),
+                "create_task", Set.of("person", "deal"),
+                "create_note", Set.of("person", "deal"),
+                "change_deal_stage", Set.of("deal"),
+                "add_tag", Set.of("person", "company", "deal"),
+                "assign_owner", Set.of("person", "company", "deal"),
+                "get_deal_brief", Set.of("deal"),
+                "find_schedule_conflicts", Set.of("person"));
+        assertEquals(arguments.keySet(), accepted.keySet());
+        Map<String, Set<String>> declared = new HashMap<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            declared.put(tool.name(), tool.acceptedTargetKinds());
+        }
+        assertEquals(Set.copyOf(AiAssistantToolCatalog.writeToolNames()), declared.keySet());
+        for (Map.Entry<String, Set<String>> tool : declared.entrySet()) {
+            assertEquals(accepted.get(tool.getKey()), tool.getValue(), tool.getKey());
+        }
+        for (Map.Entry<String, Set<String>> tool : accepted.entrySet()) {
+            for (Map.Entry<String, String> handle : handles.entrySet()) {
+                var args = objectMapper.readTree("{\"handle\":\"" + handle.getValue() + "\""
+                        + arguments.get(tool.getKey()) + "}");
+                if (tool.getValue().contains(handle.getKey())) {
+                    executor.validateReferences(tool.getKey(), args, resources);
+                } else {
+                    AiAssistantLoopException refused = assertThrows(
+                            AiAssistantLoopException.class,
+                            () -> executor.validateReferences(tool.getKey(), args, resources),
+                            tool.getKey() + " on a " + handle.getKey());
+                    assertEquals("wrong_handle_kind", refused.detailReason());
+                }
+            }
+        }
+    }
+
+    /**
+     * The executor holds no copy of a write tool's kinds: narrowing what the registered tool
+     * accepts narrows the handle check with it, so the check and the write path can never
+     * disagree.
+     */
+    @Test
+    void theHandleCheckReadsTheRegisteredToolRatherThanACopyOfItsKinds() throws Exception {
+        List<AiAssistantWriteTool> tools = new ArrayList<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            if ("add_tag".equals(tool.name())) {
+                AiAssistantWriteTool narrowed = spy(tool);
+                when(narrowed.acceptedTargetKinds()).thenReturn(Set.of("person"));
+                tools.add(narrowed);
+            } else {
+                tools.add(tool);
+            }
+        }
+        AiAssistantToolExecutor narrowedExecutor = executor(tools);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        String person = resources.register("person", 7);
+        String company = resources.register("company", 5);
+
+        narrowedExecutor.validateReferences(
+                "add_tag",
+                objectMapper.readTree("{\"handle\":\"" + person + "\",\"tag\":\"VIP\"}"),
+                resources);
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> narrowedExecutor.validateReferences(
+                        "add_tag",
+                        objectMapper.readTree(
+                                "{\"handle\":\"" + company + "\",\"tag\":\"VIP\"}"),
+                        resources));
+        assertEquals("wrong_handle_kind", refused.detailReason());
     }
 
     @Test
@@ -706,5 +809,27 @@ class AiAssistantToolExecutorTest {
                 LocalDateTime.parse("2026-08-22T07:00"),
                 LocalDateTime.parse("2026-08-23T06:59:59.999999999"),
                 5);
+    }
+
+    /**
+     * {@code find_tools} is declared executable so it reaches the native definitions and the step
+     * schema, but the agent loop handles it and never calls here: it mutates per-turn state this
+     * stateless tenant-read component deliberately does not hold.
+     *
+     * <p>Falling through to the closed switch's generic {@code unknown_tool} default would report
+     * a declared tool as undeclared, so the arm names the reason instead.
+     */
+    @Test
+    void findToolsNamesWhyItCannotExecuteHereRatherThanLookingUndeclared() throws Exception {
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> executor.execute(
+                        AiAssistantToolCatalog.FIND_TOOLS,
+                        objectMapper.readTree("{\"toolset\":\"analytics\"}"),
+                        new AiChatResourceRegistry(), true));
+
+        assertEquals("find_tools_requires_turn_state", refused.detailReason());
+        assertEquals("malformed_output", refused.terminalReason());
+        assertFalse(refused.recoverable());
     }
 }

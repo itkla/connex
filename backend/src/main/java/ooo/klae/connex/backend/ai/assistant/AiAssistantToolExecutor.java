@@ -61,6 +61,7 @@ public class AiAssistantToolExecutor {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AiAssistantToolCatalog toolCatalog;
+    private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final SearchService searchService;
     private final PersonService personService;
     private final CompanyService companyService;
@@ -123,6 +124,8 @@ public class AiAssistantToolExecutor {
                 case "list_scope_activities" -> listScopeActivities(args, resources, scope);
                 case "aggregate_metric" -> aggregateMetric(args);
                 case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
+                case AiAssistantToolCatalog.FIND_TOOLS -> throw AiAssistantLoopException.malformed(
+                        "find_tools_requires_turn_state");
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
         } catch (ResourceNotFoundException exception) {
@@ -142,7 +145,7 @@ public class AiAssistantToolExecutor {
         requireHandleKind(name, args, resources);
     }
 
-    private static void requireHandleKind(
+    private void requireHandleKind(
             String name, JsonNode args, AiChatResourceRegistry resources) {
         JsonNode handles = args.get("handles");
         if (handles != null && handles.isArray()) {
@@ -154,14 +157,28 @@ public class AiAssistantToolExecutor {
         if (handle == null || handle.isNull()) {
             return;
         }
-        Set<String> acceptedKinds = switch (name) {
+        resources.resolve(handle.asString(), handleKinds(name));
+    }
+
+    /**
+     * The record kinds one tool's {@code handle} argument may name, refused as a recoverable
+     * argument error before any proposal is stored.
+     *
+     * <p>A write tool's kinds are its own {@link AiAssistantWriteTool#acceptedTargetKinds()}, read
+     * from the registry, so this check and the write path resolve a handle against one declaration.
+     * A read tool names its kinds here.
+     *
+     * @param name declared tool key
+     * @return the accepted record kinds, every record kind by default
+     */
+    private Set<String> handleKinds(String name) {
+        return switch (name) {
             case "get_deal_brief" -> Set.of("deal");
             case "find_schedule_conflicts" -> Set.of("person");
-            case "create_activity", "create_task", "create_note" -> Set.of("person", "deal");
-            case "change_deal_stage" -> Set.of("deal");
-            default -> RECORD_KINDS;
+            default -> writeToolRegistry.find(name)
+                    .map(AiAssistantWriteTool::acceptedTargetKinds)
+                    .orElse(RECORD_KINDS);
         };
-        resources.resolve(handle.asString(), acceptedKinds);
     }
 
     /** Resolves authorized page context into handles without placing tenant-local ids in prompt data. */

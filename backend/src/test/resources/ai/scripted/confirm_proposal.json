@@ -1,0 +1,42 @@
+{
+  "id": "confirm_proposal",
+  "selector": "connex_script_confirm_proposal",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Halyard\",\"kinds\":[\"deal\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_pipeline\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "change_deal_stage",
+        "arguments": "{\"handle\":\"r1\",\"stage\":\"Negotiation\"}"
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I proposed the stage change on [the deal](record:r1) for you to confirm.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

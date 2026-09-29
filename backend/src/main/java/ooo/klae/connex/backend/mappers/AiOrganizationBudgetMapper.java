@@ -21,7 +21,7 @@ public interface AiOrganizationBudgetMapper {
             @Param("orgId") int orgId,
             @Param("usageDay") LocalDate usageDay);
     long getConsumedTokens(@Param("orgId") int orgId, @Param("usageDay") LocalDate usageDay);
-    int deleteExpiredReservations(@Param("now") LocalDateTime now);
+    List<String> listExpiredReservationIds(@Param("now") LocalDateTime now);
     long sumReservedTokens(@Param("orgId") int orgId, @Param("usageDay") LocalDate usageDay);
     int insertReservation(
             @Param("reservationId") String reservationId,
@@ -29,8 +29,14 @@ public interface AiOrganizationBudgetMapper {
             @Param("usageDay") LocalDate usageDay,
             @Param("reservedTokens") long reservedTokens,
             @Param("expiresAt") LocalDateTime expiresAt);
+    AiOrganizationBudgetReservation getReservation(@Param("reservationId") String reservationId);
+    int markReservationDispatched(@Param("reservationId") String reservationId);
+    int markReservationSettled(
+            @Param("reservationId") String reservationId,
+            @Param("consumedTokens") long consumedTokens);
     AiOrganizationBudgetReservation getReservationForUpdate(
             @Param("reservationId") String reservationId);
+    int deleteSettledReservationsBefore(@Param("cutoff") LocalDateTime cutoff);
     int deleteReservation(@Param("reservationId") String reservationId);
     int addConsumedTokens(
             @Param("orgId") int orgId,

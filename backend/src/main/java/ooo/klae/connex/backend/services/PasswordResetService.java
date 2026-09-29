@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.List;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -13,6 +11,7 @@ import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
+import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.password.PasswordCredentialService;
@@ -32,6 +31,7 @@ public class PasswordResetService {
 
     private final UserMapper userMapper;
     private final PasswordResetTokenMapper passwordResetTokenMapper;
+    private final EmailChangeTokenMapper emailChangeTokenMapper;
     private final PasswordCredentialService passwordCredentialService;
     private final PasswordResetEmailService passwordResetEmailService;
     private final PasswordResetRateLimiter rateLimiter;
@@ -51,7 +51,8 @@ public class PasswordResetService {
     /**
      * Issues a reset token for the account with the given email and emails the link.
      * Enumeration-safe: returns identically whether or not the email exists, and
-     * silently drops requests that exceed the per-account rate limit.
+     * silently drops requests that exceed the per-account rate limit. The shared
+     * account lock keeps the checked mailbox current through token issuance.
      * @param email the address that requested a reset
      * @param requestIp the requesting client IP, recorded for abuse audit
      */
@@ -67,6 +68,15 @@ public class PasswordResetService {
         if (user == null) {
             return;
         }
+        if (userMapper.lockByIdForShare(user.getId()) == null) {
+            return;
+        }
+        User lockedUser = userMapper.getUserByIdForShare(user.getId());
+        if (lockedUser == null || lockedUser.getSessionEpoch() == null || lockedUser.getId() != user.getId()
+                || lockedUser.getEmail() == null || !lockedUser.getEmail().equals(user.getEmail())) {
+            return;
+        }
+        user = lockedUser;
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             auditService.record("auth.password_reset_sso_enforced", "user", user.getId(), user.getDisplayName(),
                     "Password reset suppressed; SSO enforced", null);
@@ -82,7 +92,7 @@ public class PasswordResetService {
 
         String rawToken = OneTimeTokenDigest.generate();
         passwordResetTokenMapper.insert(
-            user.getId(), OneTimeTokenDigest.sha256(rawToken), requestIp, tokenExpiryMinutes);
+            user.getId(), OneTimeTokenDigest.sha256(rawToken), requestIp, tokenExpiryMinutes, user.getSessionEpoch());
         passwordResetEmailService.sendResetEmail(user, rawToken);
 
         auditService.record("auth.password_reset_requested", "user", user.getId(), user.getDisplayName(),
@@ -103,7 +113,8 @@ public class PasswordResetService {
 
     /**
      * Claims the raw emailed token for one browser and server-session lineage. A retry from that
-     * lineage remains valid until the source token expires; every other lineage is refused.
+     * lineage remains valid until the source token expires or its issuance generation differs
+     * from the locked account's session epoch; every other lineage is refused.
      * @param rawToken token carried in the fragment-to-body bootstrap request
      * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
      * @return persisted source-token digest for the purpose-bound flow session
@@ -116,9 +127,18 @@ public class PasswordResetService {
         if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
             throw invalidLink();
         }
+        PasswordResetToken token = passwordResetTokenMapper.findRedeemableByHash(tokenHash);
+        if (token == null || userMapper.lockById(token.getUserId()) == null) {
+            throw invalidLink();
+        }
+        User user = userMapper.getUserByIdForShare(token.getUserId());
+        if (user == null || token.getCredentialGeneration() == null
+                || !token.getCredentialGeneration().equals(user.getSessionEpoch())) {
+            throw invalidLink();
+        }
         int claimed = passwordResetTokenMapper.claimExchange(tokenHash, exchangeOwnerHash);
         if (claimed != 1
-                && !passwordResetTokenMapper.isExchangeOwnedBy(tokenHash, exchangeOwnerHash)) {
+                && passwordResetTokenMapper.lockExchangeOwnedBy(tokenHash, exchangeOwnerHash) == null) {
             throw invalidLink();
         }
         return tokenHash;
@@ -167,7 +187,8 @@ public class PasswordResetService {
     }
 
     /**
-     * Applies a new password using a screening the caller performed outside this transaction.
+     * Applies a new password using a screening the caller performed outside this transaction,
+     * only while the token's issuance generation matches the locked account's session epoch.
      *
      * @param tokenHash the exchanged source-token digest
      * @param newPassword the already policy-validated new password
@@ -193,6 +214,11 @@ public class PasswordResetService {
         if (userMapper.lockById(token.getUserId()) == null) {
             throw invalidLink();
         }
+        user = userMapper.getUserByIdForShare(token.getUserId());
+        if (user == null || token.getCredentialGeneration() == null
+                || !token.getCredentialGeneration().equals(user.getSessionEpoch())) {
+            throw invalidLink();
+        }
         userMapper.lockAssignedCustomRoleIds(token.getUserId());
         String passwordHash = passwordCredentialService.encodeScreened(
                 screening, newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET, user.getId());
@@ -202,6 +228,7 @@ public class PasswordResetService {
 
         userMapper.updatePasswordHash(user.getId(), passwordHash);
         passwordResetTokenMapper.invalidateForUser(user.getId());
+        emailChangeTokenMapper.invalidateForUser(user.getId());
         expireSessions(user);
 
         auditService.record("auth.password_reset_completed", "user", user.getId(), user.getDisplayName(),

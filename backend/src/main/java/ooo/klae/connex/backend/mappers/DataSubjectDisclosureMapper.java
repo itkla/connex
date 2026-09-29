@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ActivityDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AttachmentDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AudienceExportEvidenceDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ConsentHistoryDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ConsentStateDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.CustomFieldValueDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.DealAssociationDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.EmploymentDto;
@@ -56,9 +59,20 @@ public interface DataSubjectDisclosureMapper {
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 
-    List<NoteDto> findNotes(@Param("workspaceId") int workspaceId,
+    List<Integer> findNoteIds(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
+
+    /**
+     * Reads at most 100 subject notes. The statement applies no visibility filter, so a statutory
+     * disclosure carries every note held about the subject, private operator material included.
+     * Callers supply at most 100 preflight IDs; SQL reasserts subject and workspace scope.
+     * Each page flushes the session cache so earlier note bodies are not retained.
+     */
+    List<NoteDto> findNotePage(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds,
+        @Param("noteIds") List<Integer> noteIds);
 
     List<RecordCommentThreadDisclosureDto> findRecordCommentThreads(
         @Param("workspaceId") int workspaceId,
@@ -107,6 +121,18 @@ public interface DataSubjectDisclosureMapper {
         @Param("workspaceIds") List<Integer> workspaceIds);
 
     List<ThirdPartyProvisionDto> findProvisions(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<ConsentStateDto> findConsentState(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<ConsentHistoryDto> findConsentHistory(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<AudienceExportEvidenceDto> findAudienceExportEvidence(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 }

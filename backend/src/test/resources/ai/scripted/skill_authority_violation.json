@@ -1,0 +1,34 @@
+{
+  "id": "skill_authority_violation",
+  "selector": "connex_script_skill_authority",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_activity\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_task",
+        "arguments": "{\"handle\":\"r1\",\"description\":\"Send the renewal paperwork\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "onRepair": true,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"This brief can review the relationship, but it cannot create tasks, so nothing was added.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -33,6 +33,26 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 
 class ManagedObjectReadAdmissionServiceTest {
+    /**
+     * The production constructor resolves the per-user permit holder from the security context. A
+     * request that reaches admission with no authenticated principal is a signed-out caller, so it
+     * is refused as an authentication failure rather than reported as a missing resource — every
+     * other test here injects the identity supplier and never exercises that seam.
+     */
+    @Test
+    void admissionWithoutAnAuthenticatedPrincipalFailsAuthentication() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        ManagedObjectReadAdmissionService admission =
+            new ManagedObjectReadAdmissionService(properties(1));
+        try {
+            assertThrows(
+                org.springframework.security.core.AuthenticationException.class,
+                () -> admission.admit(() -> stored(new byte[] {1})));
+        } finally {
+            admission.shutdown();
+        }
+    }
+
     @Test
     void holdsPerUserAndGlobalAdmissionUntilTheStreamCloses() throws Exception {
         ObjectStorageProperties properties = properties(1);

@@ -88,7 +88,8 @@ class PasswordResetLinkExchangeIntegrationTest {
         User user = newUser();
         String rawToken = token("reset");
         passwordResetTokenMapper.insert(
-            user.getId(), OneTimeTokenDigest.sha256(rawToken), "198.51.100.40", 30);
+            user.getId(), OneTimeTokenDigest.sha256(rawToken), "198.51.100.40", 30,
+            userMapper.currentSessionEpoch(user.getId()));
 
         MvcResult missingBinding = mockMvc.perform(post("/api/auth/reset-password/exchange")
                 .with(csrf().asHeader())
@@ -140,7 +141,8 @@ class PasswordResetLinkExchangeIntegrationTest {
 
         String expiredToken = token("expired-reset");
         passwordResetTokenMapper.insert(
-            user.getId(), OneTimeTokenDigest.sha256(expiredToken), "198.51.100.41", -1);
+            user.getId(), OneTimeTokenDigest.sha256(expiredToken), "198.51.100.41", -1,
+            userMapper.currentSessionEpoch(user.getId()));
         MvcResult expired = exchange(
             "/api/auth/reset-password/exchange", expiredToken, 400, bootstrapBrowser());
         assertResponseSecretFree(expired, expiredToken);

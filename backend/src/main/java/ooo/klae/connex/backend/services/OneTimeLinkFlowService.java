@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
@@ -272,15 +273,45 @@ public class OneTimeLinkFlowService {
         consumeClaimed(request, Purpose.PASSWORD_RESET, rawGrant, operation);
     }
 
+    /**
+     * Runs email confirmation at READ COMMITTED so pending grants committed while waiting
+     * for the account lock are included in the atomic revocation of the old email's grants.
+     * @param <T> the confirmation result type
+     * @param request current browser request
+     * @param rawGrant email-change flow cookie value
+     * @param operation transactional confirmation receiving the source-token digest
+     * @return the non-null confirmation result
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public <T> T consumeEmailChange(
+            HttpServletRequest request,
+            String rawGrant,
+            Function<String, T> operation) {
+        return applyClaimed(request, Purpose.EMAIL_CHANGE, rawGrant, operation);
+    }
+
     private void consumeClaimed(
             HttpServletRequest request,
             Purpose purpose,
             String rawGrant,
             Consumer<String> operation) {
+        applyClaimed(request, purpose, rawGrant, sourceTokenHash -> {
+            operation.accept(sourceTokenHash);
+            return Boolean.TRUE;
+        });
+    }
+
+    private <T> T applyClaimed(
+            HttpServletRequest request,
+            Purpose purpose,
+            String rawGrant,
+            Function<String, T> operation) {
         Claim claim = claimService.claimInCurrentTransaction(
             grantHash(rawGrant), exchangeOwnerHash(request), purpose);
-        operation.accept(claim.sourceTokenHash());
+        T result = Objects.requireNonNull(
+            operation.apply(claim.sourceTokenHash()), "one-time-link claimed operation result");
         claimService.completeInCurrentTransaction(claim);
+        return result;
     }
 
     /**

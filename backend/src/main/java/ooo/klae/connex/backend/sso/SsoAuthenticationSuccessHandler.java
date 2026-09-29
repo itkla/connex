@@ -9,6 +9,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication;
 import org.springframework.security.saml2.provider.service.authentication.Saml2ResponseAssertionAccessor;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
@@ -158,10 +159,25 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             return;
         }
         boolean emailVerified = Boolean.TRUE.equals(user.getEmailVerified());
-        SsoLoginResult result = ssoLoginService.resolve("oidc", user.getIssuer().toString(), user.getSubject(),
-                user.getEmail(), emailVerified, orgId, user.getFullName());
+        OidcIdToken idToken = user.getIdToken();
+        if (idToken == null) {
+            failLogin(request, response, frontendBase);
+            return;
+        }
+        SsoLoginResult result = ssoLoginService.resolve("oidc", idToken.getClaimAsString("iss"), idToken.getSubject(),
+                user.getEmail(), emailVerified, orgId, user.getFullName(), authenticatedClientId(idToken));
         completeResolution(result, request, response, frontendBase, "auth.login.sso",
                 " logged in with SSO", loginContext("oidc", orgId));
+    }
+
+    /** Uses signed ID-token claims, never userinfo overrides, to bind completion to the authenticated client. */
+    private static String authenticatedClientId(OidcIdToken token) {
+        String authorizedParty = token.getAuthorizedParty();
+        List<String> audience = token.getAudience();
+        if (authorizedParty != null && !authorizedParty.isBlank()) {
+            return audience != null && audience.contains(authorizedParty) ? authorizedParty : null;
+        }
+        return audience != null && audience.size() == 1 ? audience.getFirst() : null;
     }
 
     private void handleSocial(String provider, OidcUser user, HttpServletRequest request,
@@ -226,7 +242,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         }
         String displayName = resolveSamlDisplayName(assertion, email);
         SsoLoginResult result = ssoLoginService.resolve("saml", connection.getSamlIdpEntityId(),
-                assertion.getNameId(), email, true, orgId, displayName);
+                assertion.getNameId(), email, true, orgId, displayName, null);
         completeResolution(result, request, response, frontendBase, "auth.login.sso",
                 " logged in with SSO", loginContext("saml", orgId));
     }

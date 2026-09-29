@@ -21,12 +21,14 @@ public class CompositeClientRegistrationRepository implements ClientRegistration
 
     private final SocialLoginClientRegistrations socialLoginClientRegistrations;
     private final DbClientRegistrationRepository dbClientRegistrationRepository;
+    private final SsoProperties ssoProperties;
 
     @Override
     public ClientRegistration findByRegistrationId(String registrationId) {
         if (socialLoginClientRegistrations.isSocialRegistration(registrationId)) {
             return socialLoginClientRegistrations.find(registrationId);
         }
-        return dbClientRegistrationRepository.findByRegistrationId(registrationId);
+        return ssoProperties.isEnabled()
+                ? dbClientRegistrationRepository.findByRegistrationId(registrationId) : null;
     }
 }

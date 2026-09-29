@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -1326,7 +1327,8 @@ class ImportServiceTest extends AbstractServiceTest {
         Company ownerCompany = companyInWorkspace(ownerWorkspace);
         Person shared = personInWorkspace(ownerWorkspace, ownerCompany);
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
         Company activeCompany = newCompany();
         Tag activeTag = newTag();
         CustomFieldDefinition custom = customDefinition("person");
@@ -1378,7 +1380,8 @@ class ImportServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company shared = companyInWorkspace(ownerWorkspace);
         assertEquals(1, shareMapper.shareCompany(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
         Tag activeTag = newTag();
         CustomFieldDefinition custom = customDefinition("company");
         List<ColumnMapping> mapping = List.of(
@@ -1991,6 +1994,58 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void dealImportBoundsDecimalExponentAndMagnitudeInPreviewAndCommit() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<String> unpersistable = List.of(
+            "1E100000000",
+            "1E-100000000",
+            "1E2147483647",
+            "1E-2147483647",
+            "10000000000000",
+            "9999999999999.995",
+            "-9999999999999.995",
+            "not-a-number",
+            "invalid".repeat(10),
+            "9".repeat(129));
+        ImportRequest request = req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Pipeline", "pipeline"),
+                map("Stage", "stage")),
+            unpersistable.stream()
+                .map(value -> Map.of(
+                    "Deal", "Bounded value " + unique(),
+                    "Value", value,
+                    "Pipeline", pipeline.getName(),
+                    "Stage", stage.getName()))
+                .toList(),
+            "skip");
+
+        assertTimeout(Duration.ofSeconds(30), () -> {
+            ImportPreviewResult preview = importService.previewDeals(request);
+            assertEquals(unpersistable.size(), preview.getInvalid());
+            assertEquals(0, preview.getToCreate());
+            request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+            ImportResult committed = importService.commitDeals(request);
+            assertEquals(0, committed.getCreated());
+            assertEquals(unpersistable.size(), committed.getFailed().size());
+            for (int index = 0; index < unpersistable.size(); index++) {
+                String value = unpersistable.get(index);
+                String cell = value.length() > 40 ? value.substring(0, 40) + "..." : value;
+                String prefix = value.startsWith("not-a-number") || value.startsWith("invalid")
+                    ? "Invalid deal value: " : "Deal value is out of range: ";
+                assertEquals(List.of(prefix + cell), preview.getRows().get(index).getErrors());
+                assertEquals(prefix + cell, committed.getFailed().get(index).getReason());
+            }
+        });
+
+        assertTrue(dealMapper.getAllDeals(workspace.getId()).stream()
+            .noneMatch(deal -> deal.getName().startsWith("Bounded value ")));
+    }
+
+    @Test
     void dealImportReplayUsesPersistedMoneyPrecision() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -2366,15 +2421,42 @@ class ImportServiceTest extends AbstractServiceTest {
 
     @Test
     void personImport_matchUpdateRequiresUpdatePermission() {
-        List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"));
+        List<ColumnMapping> mapping = List.of(
+            map("Name", "name"), map("Email", "email"), map("Phone", "phone"));
         reviewAndCommitPersons(req(mapping, List.of(Map.of("Name", "Fred", "Email", "fred@x.test")), "fill_empty"));
 
-        memberWithPermissions("PERSON_CREATE");
+        WorkspaceRole role = roleService.createRole(
+            workspace.getId(), currentUser.getId(), "Revoked update " + unique(),
+            List.of("PERSON_CREATE", "PERSON_UPDATE"));
+        User importer = newUser();
+        workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), importer.getId(), role.getId());
+        authenticateAs(importer, workspace.getId());
         ImportRequest duplicate = req(
-            mapping, List.of(Map.of("Name", "Fred Updated", "Email", "fred@x.test")), "fill_empty");
+            mapping, List.of(Map.of(
+                "Name", "Fred Updated", "Email", "fred@x.test", "Phone", "+819012345679")), "fill_empty");
+        ImportPreviewResult preview = importService.previewPersons(duplicate);
+        assertEquals(1, preview.getToUpdate());
+        assertNotNull(preview.getDuplicateReviewProof());
+        duplicate.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+
+        authenticateAs(currentUser, workspace.getId());
+        roleService.updateRole(
+            workspace.getId(), currentUser.getId(), role.getId(), role.getName(),
+            List.of("PERSON_CREATE"));
+        authenticateAs(importer, workspace.getId());
+        int personId = personMapper.findByEmails(
+            workspace.getId(), List.of("fred@x.test")).getFirst().getId();
+        Map<String, Object> before = personSnapshot(workspace.getId(), personId);
+        ImportState stateBefore = importState();
 
         assertThrows(ForbiddenException.class, () -> importService.previewPersons(duplicate));
-        assertThrows(ForbiddenException.class, () -> reviewAndCommitPersons(duplicate));
+        ForbiddenException denied = assertThrows(
+            ForbiddenException.class, () -> importService.commitPersons(duplicate));
+
+        assertEquals("Requires the PERSON_UPDATE permission in this workspace", denied.getMessage());
+        assertEquals(before, personSnapshot(workspace.getId(), personId));
+        assertEquals(stateBefore, importState());
     }
 
     @Test

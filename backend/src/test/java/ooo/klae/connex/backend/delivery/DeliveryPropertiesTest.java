@@ -31,6 +31,18 @@ class DeliveryPropertiesTest {
     }
 
     @Test
+    void reservationGraceIsTheLeaseSafetyMarginBeyondTheProviderDeadline() {
+        DeliveryProperties properties = new DeliveryProperties();
+
+        assertEquals(Duration.ofSeconds(30), properties.providerCallReservationGrace());
+
+        properties.setAudienceExportProviderDeadlineMs(25_000);
+        properties.setAudienceExportLeaseSafetyMarginMs(45_000);
+
+        assertEquals(Duration.ofSeconds(45), properties.providerCallReservationGrace());
+    }
+
+    @Test
     void startupRejectsALeaseSafetyMarginBelowThirtySeconds() {
         DeliveryProperties properties = new DeliveryProperties();
         properties.setAudienceExportLeaseSafetyMarginMs(29_999);

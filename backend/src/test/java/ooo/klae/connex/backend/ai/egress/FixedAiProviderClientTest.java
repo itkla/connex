@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,21 +15,27 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import com.sun.net.httpserver.HttpServer;
 import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
@@ -36,6 +43,64 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 class FixedAiProviderClientTest {
     private static final String HOST = "fixed-provider.example.test";
     private static final byte[] REQUEST_BODY = "{}".getBytes(StandardCharsets.UTF_8);
+
+    @Test
+    void bufferedAndStreamingPreSendFailuresPropagateUnchangedWithoutTransport() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/complete", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        FixedAiProviderClient client = new FixedAiProviderClient(
+                properties(5_000, 1024), host -> InetAddress.getLoopbackAddress());
+        AtomicInteger closed = new AtomicInteger();
+        AiProviderStreamObserver observer = new AiProviderStreamObserver() {
+            @Override
+            public void onContentDelta(String text) {
+                throw new AssertionError("Refused transport emitted content");
+            }
+
+            @Override
+            public void onTransportClosed() {
+                closed.incrementAndGet();
+            }
+        };
+        try {
+            URI endpoint = URI.create("http://" + HOST + ":" + server.getAddress().getPort() + "/complete");
+            for (RuntimeException refusal : List.of(
+                    new ForbiddenException("Permission revoked"),
+                    restrictionEpochRefusal())) {
+                Runnable beforeSend = () -> { throw refusal; };
+                assertSame(refusal, assertThrows(RuntimeException.class, () -> client.post(
+                        endpoint, Set.of(HOST), Map.of(), ContentType.APPLICATION_JSON,
+                        REQUEST_BODY, AiRequestDeadline.afterMillis(5_000), "Gate test", beforeSend)));
+                assertSame(refusal, assertThrows(RuntimeException.class, () -> client.postStream(
+                        endpoint, Set.of(HOST), Map.of(), ContentType.APPLICATION_JSON,
+                        REQUEST_BODY, AiRequestDeadline.afterMillis(5_000), "Gate test",
+                        observer, input -> input.readAllBytes(), beforeSend)));
+            }
+            assertEquals(0, requests.get());
+            assertEquals(2, closed.get());
+        } finally {
+            client.shutdown();
+            server.stop(0);
+        }
+    }
+
+    private RuntimeException restrictionEpochRefusal() {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expected = epoch.current(7);
+        epoch.bump(7);
+        Supplier<Boolean> provider = () -> Boolean.TRUE;
+        Runnable checkpoint = () -> ReflectionTestUtils.invokeMethod(epoch, "invokeAtEgress", 7, provider);
+        RuntimeException refusal = assertThrows(RuntimeException.class,
+                () -> ReflectionTestUtils.invokeMethod(epoch, "runWithExpectedEgressEpoch", 7, expected, checkpoint));
+        assertEquals("EgressRejectedException", refusal.getClass().getSimpleName());
+        return refusal;
+    }
 
     @Test
     void springSelectsTheProductionConstructor() {
@@ -159,22 +224,29 @@ class FixedAiProviderClientTest {
 
     @Test
     void hardDeadlineCancelsTwoSimultaneousSlowDripResponses() throws Exception {
+        Duration deadline = Duration.ofSeconds(10);
+        CountDownLatch callersReady = new CountDownLatch(2);
+        CountDownLatch startRequests = new CountDownLatch(1);
         CountDownLatch requestsStarted = new CountDownLatch(2);
+        CountDownLatch responsesCancelled = new CountDownLatch(2);
+        CountDownLatch stopDripping = new CountDownLatch(1);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         ExecutorService serverExecutor = Executors.newFixedThreadPool(2);
         server.setExecutor(serverExecutor);
         server.createContext("/slow", exchange -> {
-            requestsStarted.countDown();
             try {
                 exchange.sendResponseHeaders(200, 0);
                 try (OutputStream output = exchange.getResponseBody()) {
-                    for (int index = 0; index < 100; index += 1) {
+                    output.write(' ');
+                    output.flush();
+                    requestsStarted.countDown();
+                    while (!stopDripping.await(100, TimeUnit.MILLISECONDS)) {
                         output.write(' ');
                         output.flush();
-                        Thread.sleep(40);
                     }
                 }
             } catch (IOException ignored) {
+                responsesCancelled.countDown();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
             } finally {
@@ -183,21 +255,35 @@ class FixedAiProviderClientTest {
         });
         server.start();
         FixedAiProviderClient client = new FixedAiProviderClient(
-                properties(500, 1024), host -> InetAddress.getLoopbackAddress());
+                properties(30_000, 1024), host -> InetAddress.getLoopbackAddress());
         ExecutorService callers = Executors.newFixedThreadPool(2);
         URI endpoint = URI.create("http://" + HOST + ":" + server.getAddress().getPort() + "/slow");
-        long started = System.nanoTime();
         try {
-            Future<AiProviderException> first = callers.submit(() -> failedPost(client, endpoint, 500));
-            Future<AiProviderException> second = callers.submit(() -> failedPost(client, endpoint, 500));
-            assertTrue(requestsStarted.await(5, TimeUnit.SECONDS));
+            Callable<AiProviderException> call = () -> {
+                callersReady.countDown();
+                assertTrue(startRequests.await(15, TimeUnit.SECONDS));
+                return failedPost(client, endpoint, deadline.toMillis());
+            };
+            Future<AiProviderException> first = callers.submit(call);
+            Future<AiProviderException> second = callers.submit(call);
+            assertTrue(callersReady.await(15, TimeUnit.SECONDS));
+            long started = System.nanoTime();
+            startRequests.countDown();
+            assertTrue(requestsStarted.await(15, TimeUnit.SECONDS));
+            assertFalse(first.isDone());
+            assertFalse(second.isDone());
 
             assertEquals("Fixed provider test exceeded its deadline",
-                    first.get(5, TimeUnit.SECONDS).getMessage());
+                    first.get(15, TimeUnit.SECONDS).getMessage());
             assertEquals("Fixed provider test exceeded its deadline",
-                    second.get(5, TimeUnit.SECONDS).getMessage());
-            assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 5000);
+                    second.get(15, TimeUnit.SECONDS).getMessage());
+            assertTrue(responsesCancelled.await(5, TimeUnit.SECONDS));
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+            assertTrue(elapsed.compareTo(deadline) >= 0);
+            assertTrue(elapsed.compareTo(deadline.plusSeconds(5)) < 0);
         } finally {
+            startRequests.countDown();
+            stopDripping.countDown();
             callers.shutdownNow();
             client.shutdown();
             server.stop(0);

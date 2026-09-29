@@ -191,12 +191,17 @@ public class InviteLinkService {
             return membership(user.getId(), workspaceId);
         }
 
+        User fresh = userMapper.getUserByIdForShare(user.getId());
+        if (fresh == null) {
+            throw invalidLink();
+        }
+
         // Joining (or re-joining after removal): the link must currently be valid and the domain
         // allowed by both the org ceiling (#316) and the per-workspace list. A past redemption
         // record is history, not a standing grant.
         int orgId = workspaceService.getOrgId(workspaceId);
-        if (!orgAllowedDomainService.isJoinAllowed(orgId, user.getEmail())
-                || !allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
+        if (!orgAllowedDomainService.isJoinAllowed(orgId, fresh.getEmail())
+                || !allowedDomainService.isJoinAllowed(workspaceId, fresh.getEmail())) {
             throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
         }
 
@@ -205,8 +210,7 @@ public class InviteLinkService {
         // slip past the domain gate. Enforced only when registration verification is enabled.
         if (registrationVerificationService.isEnabled()
                 && (orgAllowedDomainService.hasRestrictions(orgId) || allowedDomainService.hasRestrictions(workspaceId))) {
-            User fresh = userMapper.getUserById(user.getId());
-            if (fresh == null || !fresh.isEmailVerified()) {
+            if (!fresh.isEmailVerified()) {
                 throw new ForbiddenException("Verify your email address before joining this workspace");
             }
         }

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -34,7 +35,8 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             "Comment Grantee " + unique(), currentUser.getId());
         Person person = personIn(owner.getId());
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
 
         authenticateAs(currentUser, owner.getId());
         RecordCommentThread ownerThread = recordCommentService.createThread(
@@ -66,7 +68,8 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             "Unshare Grantee " + unique(), currentUser.getId());
         Person person = personIn(owner.getId());
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
 
         authenticateAs(currentUser, grantee.getId());
         RecordCommentThread thread = recordCommentService.createThread(
@@ -97,7 +100,8 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             "Reaction Grantee " + unique(), currentUser.getId());
         Person person = personIn(owner.getId());
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         RecordCommentThread ownerThread = recordCommentService.createThread(
             "person", person.getId(), "Owner reaction", token());
         long ownerCommentId = ownerThread.getComments().getFirst().getId();
@@ -131,7 +135,8 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             "Indicator Isolation Grantee " + unique(), currentUser.getId());
         Person person = personIn(owner.getId());
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         recordCommentService.createThread("person", person.getId(), "Owner one", token());
         recordCommentService.createThread("person", person.getId(), "Owner two", token());
 

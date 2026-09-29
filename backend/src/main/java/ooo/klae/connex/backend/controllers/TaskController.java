@@ -103,7 +103,7 @@ public class TaskController {
     private MemberScope analyticsMemberScope(String scope, List<Integer> memberIds) {
         MemberScope resolved = resolveMemberScope(scope, memberIds);
         if (resolved.mode() != MemberScope.Mode.ALL_TEAM) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.requireBuiltInAdministrator();
         }
         return resolved;
     }

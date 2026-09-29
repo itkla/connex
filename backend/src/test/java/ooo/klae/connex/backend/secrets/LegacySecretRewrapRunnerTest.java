@@ -2,12 +2,17 @@ package ooo.klae.connex.backend.secrets;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -17,6 +22,8 @@ import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.mail.SecretCipher;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 
 @ExtendWith(MockitoExtension.class)
@@ -26,6 +33,15 @@ class LegacySecretRewrapRunnerTest {
     @Mock private SsoConnectionMapper ssoConnectionMapper;
     @Mock private SecretCipher secretCipher;
     @Mock private SsoSecretCipher ssoSecretCipher;
+    @Mock private UserMapper userMapper;
+    @Mock private WorkspaceMapper workspaceMapper;
+    @Mock private PlatformTransactionManager transactionManager;
+
+    @BeforeEach
+    void configureWorkspaceTransactions() {
+        lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        lenient().when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+    }
 
     @Test
     void run_rewrapsLegacyWorkspaceMailSecrets() {
@@ -35,6 +51,7 @@ class LegacySecretRewrapRunnerTest {
         config.setAuth(true);
         config.setPasswordEnc("legacy-mail-blob");
         when(mailConfigMapper.listLegacySecretConfigs()).thenReturn(List.of(config));
+        when(mailConfigMapper.findByWorkspaceForUpdate(7)).thenReturn(config);
         when(ssoConnectionMapper.listLegacySecretConnections()).thenReturn(List.of());
         when(secretCipher.hasLegacyKey()).thenReturn(true);
         when(secretCipher.decryptForWorkspace(7, "legacy-mail-blob")).thenReturn("plain-mail");
@@ -53,11 +70,34 @@ class LegacySecretRewrapRunnerTest {
         config.setAuth(true);
         config.setPasswordEnc("legacy-mail-blob");
         when(mailConfigMapper.listLegacySecretConfigs()).thenReturn(List.of(config));
+        when(mailConfigMapper.findByWorkspaceForUpdate(7)).thenReturn(config);
         when(secretCipher.hasLegacyKey()).thenReturn(false);
 
         assertThrows(IllegalStateException.class, () -> runner().run(null));
 
         verify(secretCipher, never()).decryptForWorkspace(7, "legacy-mail-blob");
+    }
+
+    @Test
+    void run_doesNotOverwriteASecretReplacedAfterTheCandidateSnapshot() {
+        WorkspaceMailConfig candidate = new WorkspaceMailConfig();
+        candidate.setWorkspaceId(7);
+        candidate.setEnabled(true);
+        candidate.setAuth(true);
+        candidate.setPasswordEnc("legacy-mail-blob");
+        WorkspaceMailConfig current = new WorkspaceMailConfig();
+        current.setWorkspaceId(7);
+        current.setEnabled(true);
+        current.setAuth(true);
+        current.setPasswordEnc("secret:v1:77");
+        when(mailConfigMapper.listLegacySecretConfigs()).thenReturn(List.of(candidate));
+        when(mailConfigMapper.findByWorkspaceForUpdate(7)).thenReturn(current);
+        when(ssoConnectionMapper.listLegacySecretConnections()).thenReturn(List.of());
+
+        runner().run(null);
+
+        verify(secretCipher, never()).decryptForWorkspace(7, "legacy-mail-blob");
+        verify(mailConfigMapper, never()).updatePasswordReference(org.mockito.ArgumentMatchers.eq(7), any());
     }
 
     @Test
@@ -92,6 +132,7 @@ class LegacySecretRewrapRunnerTest {
         config.setAuth(false);
         config.setPasswordEnc("legacy-mail-blob");
         when(mailConfigMapper.listLegacySecretConfigs()).thenReturn(List.of(config));
+        when(mailConfigMapper.findByWorkspaceForUpdate(7)).thenReturn(config);
         when(ssoConnectionMapper.listLegacySecretConnections()).thenReturn(List.of());
 
         runner().run(null);
@@ -117,6 +158,6 @@ class LegacySecretRewrapRunnerTest {
 
     private LegacySecretRewrapRunner runner() {
         return new LegacySecretRewrapRunner(mailConfigMapper, ssoConnectionMapper,
-                secretCipher, ssoSecretCipher);
+                secretCipher, ssoSecretCipher, userMapper, workspaceMapper, transactionManager);
     }
 }

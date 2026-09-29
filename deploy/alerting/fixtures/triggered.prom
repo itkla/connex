@@ -1,0 +1,9 @@
+# TYPE connex_security_authentication_failures_total counter
+connex_security_authentication_failures_total{scope="workspace:7"} 20.0
+connex_security_authentication_failures_total{scope="workspace:8"} 0.0
+connex_security_authentication_failures_total{scope="unattributed"} 100.0
+# TYPE connex_security_permission_change_timestamp gauge
+connex_security_permission_change_timestamp{scope="workspace:7"} 2.0E9
+connex_security_permission_change_timestamp{scope="workspace:8"} 2.0E9
+# TYPE connex_security_audit_integrity_anomaly_timestamp gauge
+connex_security_audit_integrity_anomaly_timestamp{scope="workspace:7"} 2.0E9

@@ -1,13 +1,17 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -17,6 +21,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -24,9 +30,11 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AttachmentWriteOperations;
 import ooo.klae.connex.backend.services.AuditService;
@@ -44,6 +52,9 @@ class AiChatAttachmentServiceTest {
     private static final int WORKSPACE_ID = 7;
     private static final int USER_ID = 11;
     private static final int SESSION_ID = 13;
+    private static final int ATTACHMENT_ID = 31;
+    private static final String MANAGED_URL =
+            "/api/attachments/content/0f8fad5b-d9cb-469f-a165-70867728950e.txt";
 
     private AiChatMapper chatMapper;
     private AttachmentMapper attachmentMapper;
@@ -53,6 +64,9 @@ class AiChatAttachmentServiceTest {
     private WorkspaceService workspaceService;
     private AuthService authService;
     private AiChatRealtimeDispatcher realtimeDispatcher;
+    private AttachmentScanMapper scanMapper;
+    private ManagedObjectService managedObjectService;
+    private AuditService auditService;
     private AiChatAttachmentService service;
 
     @BeforeEach
@@ -65,17 +79,21 @@ class AiChatAttachmentServiceTest {
         workspaceService = mock(WorkspaceService.class);
         authService = mock(AuthService.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
+        scanMapper = mock(AttachmentScanMapper.class);
+        managedObjectService = mock(ManagedObjectService.class);
+        auditService = mock(AuditService.class);
         service = new AiChatAttachmentService(
                 chatMapper,
                 attachmentMapper,
+                scanMapper,
                 writeOperations,
                 attachmentPolicy,
                 uploadMalwareScanner,
                 new AiChatAttachmentTransactions(),
-                mock(ManagedObjectService.class),
+                managedObjectService,
                 workspaceService,
                 authService,
-                mock(AuditService.class),
+                auditService,
                 mock(AiAssistantSessionReadAudit.class),
                 realtimeDispatcher);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
@@ -193,6 +211,116 @@ class AiChatAttachmentServiceTest {
         verify(writeOperations, never()).uploadAssistantSession(
                 anyInt(), anyInt(), any(), any());
         verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"quarantined", "infected", "unscannable", "suspicious"})
+    void deniedAttachmentWithoutQuarantineAuthorityIsRefusedBeforeMutation(String state) {
+        stubDeletableSession(state, state);
+        doThrow(new ForbiddenException("Requires the ATTACHMENT_QUARANTINE_MANAGE permission"))
+                .when(workspaceService)
+                .requirePermission(WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+
+        assertThrows(ForbiddenException.class, () -> service.delete(SESSION_ID, ATTACHMENT_ID));
+
+        InOrder order = inOrder(attachmentMapper, scanMapper, workspaceService);
+        order.verify(attachmentMapper).lockIdsByUrl(WORKSPACE_ID, MANAGED_URL);
+        order.verify(scanMapper).lockById(WORKSPACE_ID, ATTACHMENT_ID);
+        order.verify(workspaceService).requirePermission(
+                WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+        verify(managedObjectService, never()).deleteAttachmentAfterCommit(anyInt(), any());
+        verify(attachmentMapper, never()).delete(anyInt(), anyInt());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void securityStateIsTakenFromTheLockedRowNotTheDiscoveryRead() {
+        stubDeletableSession("clean", "quarantined");
+        doThrow(new ForbiddenException("Requires the ATTACHMENT_QUARANTINE_MANAGE permission"))
+                .when(workspaceService)
+                .requirePermission(WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+
+        assertThrows(ForbiddenException.class, () -> service.delete(SESSION_ID, ATTACHMENT_ID));
+
+        verify(attachmentMapper, never()).delete(anyInt(), anyInt());
+        verify(managedObjectService, never()).deleteAttachmentAfterCommit(anyInt(), any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void quarantineAuthorityDeletionIsAuditedStrictly() {
+        stubDeletableSession("quarantined", "quarantined");
+
+        service.delete(SESSION_ID, ATTACHMENT_ID);
+
+        InOrder order = inOrder(workspaceService, managedObjectService, attachmentMapper, auditService);
+        order.verify(workspaceService).requirePermission(
+                WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+        order.verify(managedObjectService).deleteAttachmentAfterCommit(WORKSPACE_ID, MANAGED_URL);
+        order.verify(attachmentMapper).delete(WORKSPACE_ID, ATTACHMENT_ID);
+        order.verify(auditService).recordStrict("malware.quarantine_deleted", "attachment",
+                ATTACHMENT_ID, null, "Deleted quarantined assistant attachment", null);
+        verify(auditService, never()).record(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void strictAuditFailurePropagatesSoTheDeletionCannotCommit() {
+        stubDeletableSession("infected", "infected");
+        IllegalStateException failure = new IllegalStateException("audit append failed");
+        doThrow(failure).when(auditService).recordStrict(
+                eq("malware.quarantine_deleted"), any(), any(), any(), any(), any());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.delete(SESSION_ID, ATTACHMENT_ID));
+
+        assertSame(failure, thrown);
+        verify(auditService, never()).record(any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"clean", "pending", "scanning", "error"})
+    void ordinaryAssistantDeletionIsUnchanged(String state) {
+        stubDeletableSession(state, state);
+
+        service.delete(SESSION_ID, ATTACHMENT_ID);
+
+        verify(workspaceService).requirePermission(
+                WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_DELETE);
+        verify(workspaceService, never()).requirePermission(
+                WORKSPACE_ID, USER_ID, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+        verify(managedObjectService).deleteAttachmentAfterCommit(WORKSPACE_ID, MANAGED_URL);
+        verify(attachmentMapper).delete(WORKSPACE_ID, ATTACHMENT_ID);
+        verify(auditService).record(eq("attachment.delete"), eq("attachment"), eq(ATTACHMENT_ID),
+                eq("notes.txt"), eq("Deleted assistant attachment notes.txt"), any());
+        verify(auditService, never()).recordStrict(any(), any(), any(), any(), any(), any());
+    }
+
+    private void stubDeletableSession(String discoveredState, String lockedState) {
+        AiChatSession session = activeSession();
+        User actor = mock(User.class);
+        when(actor.getId()).thenReturn(USER_ID);
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(actor));
+        when(chatMapper.getSessionByIdForUpdate(WORKSPACE_ID, USER_ID, SESSION_ID))
+                .thenReturn(session);
+        when(attachmentMapper.getAssistantSessionAttachment(WORKSPACE_ID, SESSION_ID, ATTACHMENT_ID))
+                .thenReturn(sessionAttachment(discoveredState));
+        when(attachmentMapper.lockIdsByUrl(WORKSPACE_ID, MANAGED_URL))
+                .thenReturn(List.of(ATTACHMENT_ID));
+        when(scanMapper.lockById(WORKSPACE_ID, ATTACHMENT_ID))
+                .thenReturn(sessionAttachment(lockedState));
+        when(managedObjectService.isManagedAttachmentUrl(MANAGED_URL)).thenReturn(true);
+    }
+
+    private static Attachment sessionAttachment(String state) {
+        Attachment attachment = new Attachment();
+        attachment.setId(ATTACHMENT_ID);
+        attachment.setWorkspaceId(WORKSPACE_ID);
+        attachment.setEntityType("ai_chat_session");
+        attachment.setEntityId(SESSION_ID);
+        attachment.setFileName("notes.txt");
+        attachment.setUrl(MANAGED_URL);
+        attachment.setScanState(state);
+        return attachment;
     }
 
     private static AiChatSession activeSession() {

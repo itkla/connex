@@ -1,14 +1,19 @@
 package ooo.klae.connex.backend.delivery;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,6 +22,8 @@ import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
@@ -53,6 +60,9 @@ public class CampaignDispatchService {
             "AMBIGUOUS: Worker claim expired after the delivery target changed";
     private static final String RECOVERED_CHANGED_TARGET_CLAIM =
             "AMBIGUOUS: Delivery target changed before a recovered attempt could resume";
+    private static final String EXPIRED_AUDIENCE_RESERVATION =
+            "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
+    private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
 
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDeliveryMapper campaignDeliveryMapper;
@@ -65,15 +75,22 @@ public class CampaignDispatchService {
     private final WorkflowTriggeredSendGate triggeredSendGate;
     private final WorkflowRunMapper workflowRunMapper;
     private final CampaignDispatchClaimBoundary claimBoundary;
+    private final CampaignFrequencyAdmissionService frequencyAdmissionService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
-    /** Processes every queued send in the workspace. Never throws. */
+    /**
+     * Runs the workspace's recovery sweeps, then processes every queued send in it. Never throws: a
+     * failed recovery sweep is counted and logged but never starves the queued sends that follow it.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of queued sends and recovery sweeps that failed
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return 0;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
-        int failed = 0;
+        int failed = recoverAbandonedAttempts(workspaceId);
         for (int sendId : campaignSendMapper.queuedSendIds(
                 workspaceId, triggeredSendGate.enabled())) {
             try {
@@ -90,7 +107,8 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Dispatches the pending deliveries of one send, claim-first. Never throws.
+     * Dispatches the pending deliveries of one send, claim-first, after the workspace's recovery
+     * sweeps. Never throws; a failed recovery sweep is logged and does not block the dispatch.
      *
      * @param workspaceId owning workspace
      * @param sendId send to dispatch
@@ -100,12 +118,39 @@ public class CampaignDispatchService {
      *         diagnostics derive their run status from this, so a silently undeliverable send is
      *         never reported as a healthy sweep.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean processSend(int workspaceId, int sendId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return true;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
+        recoverAbandonedAttempts(workspaceId);
         return processSendReady(workspaceId, sendId);
+    }
+
+    /**
+     * Runs the expired triggered-claim and audience-reservation sweeps, isolating each one so a
+     * recovery fault is retried on the next pass instead of aborting the dispatch that follows.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of sweeps that failed
+     */
+    private int recoverAbandonedAttempts(int workspaceId) {
+        int failed = 0;
+        try {
+            recoverExpiredTriggeredClaims(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired triggered claim recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        try {
+            recoverExpiredAudienceReservations(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired audience reservation recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        return failed;
     }
 
     private boolean processSendReady(int workspaceId, int sendId) {
@@ -150,14 +195,44 @@ public class CampaignDispatchService {
             }
             dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
         }
+        settle(workspaceId, sendId);
+        return true;
+    }
+
+    /**
+     * Refreshes a send's counters and completes a running audience send with no pending delivery
+     * left.
+     */
+    private void settle(int workspaceId, int sendId) {
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-        CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
-        if (settled != null && "running".equals(settled.getStatus())
-                && "audience".equals(settled.getOrigin())
+        if (runningAudienceSend(workspaceId, sendId)
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
-        return true;
+    }
+
+    /**
+     * Settles a send found by the recovery sweep: it completes a running audience send with no pending
+     * or dispatching delivery left, then refreshes that send's counters. One compare-and-set proves the
+     * absence of outstanding work and completes the send, so a live worker's terminal write cannot land
+     * between the proof and the completion, and the refresh that follows a completion reads every
+     * delivery in its final state. The sweep can run beside a live worker whose unleased attempt is
+     * still in flight: the send is not selected at all until that attempt is terminal, and the
+     * worker's own {@link #settle} completes the send after its terminal write. An attempt the worker
+     * abandons after reserving is marked and settled by a later sweep, one abandoned before reserving
+     * is left to the dispatch loop's {@link #settle}, and a send left running by a worker that died
+     * between its terminal write and its settlement is found again by the durable selector. Settling
+     * needs no provider, so a send whose remaining work was recovered settles even while its provider
+     * is unusable.
+     */
+    private void settleRecovered(int workspaceId, int sendId) {
+        campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId);
+        campaignSendMapper.refreshCounters(workspaceId, sendId);
+    }
+
+    private boolean runningAudienceSend(int workspaceId, int sendId) {
+        CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
+        return send != null && "running".equals(send.getStatus()) && "audience".equals(send.getOrigin());
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
@@ -218,12 +293,13 @@ public class CampaignDispatchService {
     private void dispatchClaimed(int workspaceId, CampaignSend send, DeliveryChannel channel,
             ResolvedDeliveryProvider target, MessageDispatcher dispatcher,
             CampaignMessageRevision revision, int deliveryId, String leaseOwner) {
-        if (leaseOwner != null && !triggeredSendGate.enabled()) {
-            campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
-            return;
-        }
         CampaignDelivery identity = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
         if (identity == null) {
+            return;
+        }
+        if (leaseOwner != null && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseTriggeredClaim(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
             return;
         }
         Integer personId = identity.getPersonId();
@@ -254,7 +330,8 @@ public class CampaignDispatchService {
                 return;
             }
             if (!triggeredSendGate.enabled()) {
-                campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
+                campaignDeliveryMapper.releaseTriggeredClaim(
+                        workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
                 return;
             }
         }
@@ -262,6 +339,55 @@ public class CampaignDispatchService {
             markFailed(workspaceId, deliveryId, leaseOwner,
                     "Provider deadline expired before egress",
                     CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
+            return;
+        }
+        if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
+            CampaignFrequencyAdmissionService.Admission admission = frequencyAdmissionService.reserve(
+                    workspaceId, deliveryId, personId, channel.token(), leaseOwner, FREQUENCY_WINDOW_HOURS);
+            if (admission == CampaignFrequencyAdmissionService.Admission.CLAIM_LOST) {
+                return;
+            }
+            if (admission == CampaignFrequencyAdmissionService.Admission.REFUSED) {
+                markSkipped(workspaceId, deliveryId, leaseOwner, NOT_DISPATCHABLE_SKIP_REASON);
+                return;
+            }
+            if (admission == CampaignFrequencyAdmissionService.Admission.CAPPED) {
+                if (markSkipped(workspaceId, deliveryId, leaseOwner, "frequency_capped") == 1) {
+                    workflowRunMapper.markActionDeliveryCapped(workspaceId, deliveryId);
+                }
+                return;
+            }
+        }
+        if (leaseOwner != null && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseTriggeredClaim(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            return;
+        }
+        if (providerDeadlineNanos - nanoTimeSource.getAsLong() <= 0) {
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            markFailed(workspaceId, deliveryId, leaseOwner,
+                    "Provider deadline expired before egress",
+                    CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
+            return;
+        }
+        boolean currentTarget = true;
+        try {
+            if (HttpEspDeliveryProvider.PROVIDER_ID.equals(target.providerId())
+                    || SmsHttpDeliveryProvider.PROVIDER_ID.equals(target.providerId())) {
+                currentTarget = deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, leaseOwner);
+            }
+        } catch (RuntimeException exception) {
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            throw exception;
+        }
+        if (!currentTarget) {
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            markFailed(workspaceId, deliveryId, leaseOwner,
+                    "Delivery target changed before egress",
+                    CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token());
             return;
         }
         DeliveryRequest request = new DeliveryRequest(
@@ -288,6 +414,12 @@ public class CampaignDispatchService {
             }
             if (updated == 1) {
                 appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+            } else if (leaseOwner == null) {
+                attachLateAudienceProviderCorrelation(
+                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
+            } else {
+                attachLateTriggeredProviderCorrelation(
+                        workspaceId, deliveryId, target, receipt.providerMessageId());
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
@@ -295,6 +427,10 @@ public class CampaignDispatchService {
                     : receipt.detail();
             String failureCode = CampaignDeliveryFailureReason.classify(
                     failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
+            if (receipt.provenBeforeEgress()) {
+                releaseFrequencyWindowBeforeEgress(
+                        workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            }
             int updated = receipt.status() == DispatchStatus.AMBIGUOUS
                     ? markAmbiguousOrThrow(
                             workspaceId, deliveryId, leaseOwner, bounded(failure), failureCode)
@@ -306,8 +442,31 @@ public class CampaignDispatchService {
         }
     }
 
+    private void releaseFrequencyWindowBeforeEgress(
+            int workspaceId, int deliveryId, String leaseOwner, LocalDateTime priorFrequencyReservedAt) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history == null) {
+            return;
+        }
+        if (!hasEarlierSubmissionUncertainty(history)) {
+            campaignDeliveryMapper.releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+        } else if (priorFrequencyReservedAt != null) {
+            campaignDeliveryMapper.restoreFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, priorFrequencyReservedAt);
+        }
+    }
+
+    /** Returns one only for a persisted skip; earlier uncertainty remains an ambiguous failure. */
     private int markSkipped(
             int workspaceId, int deliveryId, String leaseOwner, String skipReason) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history == null) {
+            return 0;
+        }
+        if (hasEarlierSubmissionUncertainty(history)) {
+            markEarlierAttemptAmbiguous(workspaceId, deliveryId, leaseOwner, history);
+            return 0;
+        }
         return leaseOwner == null
                 ? campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason)
                 : campaignDeliveryMapper.markTriggeredSkipped(
@@ -320,11 +479,39 @@ public class CampaignDispatchService {
             String leaseOwner,
             String lastError,
             String lastErrorCode) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history == null) {
+            return 0;
+        }
+        if (hasEarlierSubmissionUncertainty(history)) {
+            return markEarlierAttemptAmbiguous(workspaceId, deliveryId, leaseOwner, history);
+        }
         return leaseOwner == null
             ? campaignDeliveryMapper.markFailed(
                     workspaceId, deliveryId, lastError, lastErrorCode)
             : campaignDeliveryMapper.markTriggeredFailed(
                     workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+    }
+
+    private boolean hasEarlierSubmissionUncertainty(CampaignDelivery history) {
+        return history.getReconciliationRequiredAt() != null
+                || CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token().equals(history.getLastErrorCode())
+                || (history.getLastError() != null && history.getLastError().startsWith("AMBIGUOUS:"))
+                || (history.getAttemptCount() > 1
+                    && !(history.getLastErrorCode() == null
+                        && "Claim released before provider egress".equals(history.getLastError())));
+    }
+
+    private int markEarlierAttemptAmbiguous(
+            int workspaceId, int deliveryId, String leaseOwner, CampaignDelivery history) {
+        String lastError = history.getLastError();
+        if (lastError == null || !lastError.startsWith("AMBIGUOUS:")) {
+            lastError = "AMBIGUOUS: An earlier provider attempt requires reconciliation";
+        }
+        String lastErrorCode = history.getLastErrorCode() == null
+                ? CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()
+                : history.getLastErrorCode();
+        return markAmbiguousOrThrow(workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
     }
 
     private int markAmbiguous(
@@ -426,6 +613,131 @@ public class CampaignDispatchService {
         }
     }
 
+    /**
+     * Turns abandoned audience attempts into terminal ambiguous rows that require reconciliation.
+     * An audience claim carries no owner fence or target fingerprint, and {@code submitted_at} is
+     * written only after the provider returns, so an abandoned attempt may already have been
+     * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
+     * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
+     * The owning sends are settled afterwards, even when a later row fails.
+     */
+    private void recoverExpiredAudienceReservations(int workspaceId) {
+        long graceMicros = audienceReservationGraceMicros();
+        Set<Integer> sweptSends = new TreeSet<>();
+        try {
+            for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
+                    workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
+                if (campaignDeliveryMapper.markExpiredAudienceReservationAmbiguous(
+                        workspaceId,
+                        abandoned.getId(),
+                        graceMicros,
+                        EXPIRED_AUDIENCE_RESERVATION,
+                        CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
+                    continue;
+                }
+                sweptSends.add(abandoned.getSendId());
+                try {
+                    appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
+                } catch (RuntimeException exception) {
+                    log.warn("Campaign delivery {} reservation-expiry event could not be appended",
+                            abandoned.getId());
+                }
+            }
+        } finally {
+            settleAudienceRecovery(workspaceId, sweptSends);
+        }
+    }
+
+    /**
+     * Settles every audience send the durable selector still owes a completion, then refreshes the
+     * counters of the sends this pass swept that the settlement did not already refresh. The
+     * selector is durable, so a send left running by a dead worker is found again on a later pass
+     * however the reconciliation row it owns is later resolved. A send that is no longer running
+     * owes only its counters, and those are refreshed from this pass's own sweep result rather than
+     * from a counter-disagreement scan, which would cost a dependent {@code COUNT(*)} over every
+     * audience send's failed deliveries on every tick. The bound that leaves: if this pass dies
+     * between the compare-and-set and the refresh, an already completed send under-reports
+     * {@code failed_count} until an operator resolves the reconciliation row the sweep created,
+     * which refreshes the counters itself.
+     */
+    private void settleAudienceRecovery(int workspaceId, Set<Integer> sweptSends) {
+        Set<Integer> countersOwed = new TreeSet<>(sweptSends);
+        try {
+            for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
+                    workspaceId, triggeredSendGate.dispatchPageSize())) {
+                countersOwed.remove(sendId);
+                settleRecovered(workspaceId, sendId);
+            }
+        } finally {
+            for (int sendId : countersOwed) {
+                campaignSendMapper.refreshCounters(workspaceId, sendId);
+            }
+        }
+    }
+
+    /**
+     * Records the provider correlation of an audience submission whose terminal write lost to the
+     * reservation sweep, so the provider's bounce and complaint webhooks still resolve to the row and
+     * record suppression and consent revocation. The swept row keeps its status, its reconciliation
+     * state, and its reservation, whether it is still awaiting reconciliation or an operator has
+     * already resolved it; a persistence fault is logged because the row is already reconcilable
+     * without it.
+     */
+    private void attachLateAudienceProviderCorrelation(
+            int workspaceId, int deliveryId, String providerId, String providerMessageId) {
+        try {
+            if (campaignDeliveryMapper.attachLateAudienceProviderCorrelation(
+                    workspaceId,
+                    deliveryId,
+                    providerId,
+                    providerMessageId,
+                    EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
+                log.warn("Campaign delivery {} was accepted after its reservation expired;"
+                        + " its reconciliation state is unchanged", deliveryId);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);
+        }
+    }
+
+    /**
+     * Records the provider correlation of a triggered submission whose owner-fenced terminal write
+     * lost to the expired-claim sweep, so the provider's bounce and complaint webhooks still resolve
+     * to the row and record suppression and consent revocation. The swept row keeps its status, its
+     * reconciliation state, and any operator decision; a row the sweep returned to the queue for an
+     * idempotent replay is refused here and correlated by that replay's own terminal write, unless
+     * that replay's receipt named no message id and settled the row correlation-free, in which case
+     * the shared idempotency key makes this submission's id the only one that names the message the
+     * connector kept. A receipt that names no message id, which the SMTP transport never does and an
+     * ESP response may omit, is skipped: no webhook could resolve to the row it would write, so
+     * reporting it as correlated would only mislead reconciliation. A persistence fault is logged
+     * because the row is already reconcilable without it.
+     */
+    private void attachLateTriggeredProviderCorrelation(
+            int workspaceId, int deliveryId, ResolvedDeliveryProvider target, String providerMessageId) {
+        if (providerMessageId == null || providerMessageId.isBlank()) {
+            return;
+        }
+        try {
+            if (campaignDeliveryMapper.attachLateTriggeredProviderCorrelation(
+                    workspaceId,
+                    deliveryId,
+                    target.providerId(),
+                    target.attemptTargetFingerprint(),
+                    providerMessageId) == 1) {
+                log.warn("Campaign delivery {} was accepted after its claim expired;"
+                        + " its reconciliation state is unchanged", deliveryId);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);
+        }
+    }
+
+    private long audienceReservationGraceMicros() {
+        return deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L;
+    }
+
     private long dispatchLeaseMicros() {
         return deliveryProperties.providerCallLeaseDuration().toNanos() / 1_000L;
     }
@@ -458,7 +770,7 @@ public class CampaignDispatchService {
             return AudienceEligibilityService.CONSENT_POLICY.exclusionReason();
         }
         if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
-            LocalDateTime since = LocalDateTime.now().minusHours(FREQUENCY_WINDOW_HOURS);
+            LocalDateTime since = LocalDateTime.now(ZoneOffset.UTC).minusHours(FREQUENCY_WINDOW_HOURS);
             if (campaignDeliveryMapper.recentDispatchCount(
                     workspaceId, personId, channelToken, send.getId(), since) > 0) {
                 return "frequency_capped";

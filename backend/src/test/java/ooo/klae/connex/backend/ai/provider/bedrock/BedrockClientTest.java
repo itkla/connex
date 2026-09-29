@@ -45,7 +45,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(
                         new FixedAiProviderClient.Response(503, new byte[0]),
                         new FixedAiProviderClient.Response(
@@ -65,7 +65,7 @@ class BedrockClientTest {
                 eq(ContentType.APPLICATION_JSON),
                 aryEq(REQUEST_BODY.getBytes(StandardCharsets.UTF_8)),
                 deadlines.capture(),
-                eq("Bedrock invocation"));
+                eq("Bedrock invocation"), any(Runnable.class));
         List<AiRequestDeadline> captured = deadlines.getAllValues();
         assertSame(captured.getFirst(), captured.getLast());
     }
@@ -75,7 +75,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenThrow(new FixedAiProviderClient.RetryableTransportException(
                         "Bedrock invocation failed during transport"))
                 .thenReturn(new FixedAiProviderClient.Response(
@@ -89,7 +89,7 @@ class BedrockClientTest {
         ArgumentCaptor<AiRequestDeadline> deadlines = ArgumentCaptor.forClass(AiRequestDeadline.class);
         verify(providerClient, times(2)).post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                deadlines.capture(), eq("Bedrock invocation"));
+                deadlines.capture(), eq("Bedrock invocation"), any(Runnable.class));
         assertSame(deadlines.getAllValues().getFirst(), deadlines.getAllValues().getLast());
     }
 
@@ -103,7 +103,7 @@ class BedrockClientTest {
             FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
             when(providerClient.post(
                     any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                    any(AiRequestDeadline.class), any()))
+                    any(AiRequestDeadline.class), any(), any(Runnable.class)))
                     .thenReturn(
                             new FixedAiProviderClient.Response(scenario.getKey(), new byte[0]),
                             new FixedAiProviderClient.Response(
@@ -119,7 +119,7 @@ class BedrockClientTest {
             assertEquals(scenario.getValue().longValue(), delayNanos.get());
             verify(providerClient, times(2)).post(
                     any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                    any(AiRequestDeadline.class), eq("Bedrock invocation"));
+                    any(AiRequestDeadline.class), eq("Bedrock invocation"), any(Runnable.class));
         }
     }
 
@@ -128,7 +128,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(500, new byte[0]));
         AtomicInteger sleeps = new AtomicInteger();
         BedrockClient client = new BedrockClient(
@@ -141,7 +141,7 @@ class BedrockClientTest {
         assertEquals(1, sleeps.get());
         verify(providerClient, times(2)).post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), eq("Bedrock invocation"));
+                any(AiRequestDeadline.class), eq("Bedrock invocation"), any(Runnable.class));
     }
 
     @Test
@@ -149,7 +149,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(400, new byte[0]));
         AtomicInteger sleeps = new AtomicInteger();
         BedrockClient client = new BedrockClient(
@@ -161,7 +161,7 @@ class BedrockClientTest {
         assertEquals(0, sleeps.get());
         verify(providerClient, times(1)).post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), eq("Bedrock invocation"));
+                any(AiRequestDeadline.class), eq("Bedrock invocation"), any(Runnable.class));
     }
 
     @Test
@@ -169,7 +169,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(429, new byte[0]));
         AiProperties properties = new AiProperties();
         properties.setRequestTimeoutMs(1);
@@ -183,7 +183,7 @@ class BedrockClientTest {
         assertEquals(0, sleeps.get());
         verify(providerClient, times(1)).post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), eq("Bedrock invocation"));
+                any(AiRequestDeadline.class), eq("Bedrock invocation"), any(Runnable.class));
     }
 
     @Test
@@ -191,7 +191,7 @@ class BedrockClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(503, new byte[0]));
         BedrockClient client = new BedrockClient(
                 new AiProperties(),
@@ -209,7 +209,7 @@ class BedrockClientTest {
             assertTrue(Thread.currentThread().isInterrupted());
             verify(providerClient, times(1)).post(
                     any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                    any(AiRequestDeadline.class), eq("Bedrock invocation"));
+                    any(AiRequestDeadline.class), eq("Bedrock invocation"), any(Runnable.class));
         } finally {
             Thread.interrupted();
         }

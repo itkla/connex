@@ -11,6 +11,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 ## Workflow lifecycle and account offboarding
@@ -20,12 +21,50 @@ Workflow lifecycle writes and permanent account offboarding share a hierarchy:
 1. Discover identity-bound keys without locks.
 2. Lock referenced `app_user` roots in ascending user id.
 3. Lock candidate workspace roots in ascending workspace id (`FOR SHARE` or the existing stronger owner lock as required).
+3b. Automation authoring that admits trigger capacity only: acquire the workspace's
+   `workflow_trigger_admission` row with the single `WorkflowMapper.acquireTriggerAdmissionMutex`
+   upsert. That `INSERT ... ON DUPLICATE KEY UPDATE` *is* the acquisition: it creates the row on
+   first use, and when it hits the existing primary key InnoDB takes an exclusive lock on the
+   duplicate row and holds it to commit, so a concurrent author blocks on that statement. No
+   trailing `SELECT ... FOR UPDATE` follows it — naming one would document a statement that never
+   contends. This is the mutex for aggregate trigger-capacity admission; nothing outside
+   `WorkflowPrincipalLockService` may take it, and the remediation paths (disable, pause, archive,
+   restore), standalone draft authoring, legacy delete, and runtime-owner cutover/rollback pass
+   `admitTriggerCapacity = false` so they neither wait on it nor write to it. Legacy-rule
+   replacements that disable the rule or strictly shrink its trigger events are exempt the same way
+   (`LegacyRuleWorkflowService.requiresTriggerAdmission`), and the aggregate lock revalidates the
+   discovered rule before the exemption is honoured.
+   Any transaction that will publish must take this mutex in its first principal-lock pass,
+   before membership or role locks, and hold it through publication. Recipe installation therefore
+   passes `true` during draft creation; its later publication reacquires the already-held mutex.
 4. Lock required `workspace_member` rows in ascending user id.
 5. Lock the actor's custom `workspace_role` root and exact permission row when current authorization depends on it.
 6. Lock exact workflow → workflow-version → rule point keys in that order.
 7. Revalidate locked state before writes.
 
 Version/rule key discovery is non-locking and Java-sorted before individual exact `getByIdForUpdate` calls. Final workflow authorization uses the locked membership's current role/role id, not an earlier `WorkspaceService` snapshot.
+
+The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes, and taking it
+exclusively there is a defect. Every audited transaction in the workspace takes that same row
+`FOR SHARE` at its end (`AuditIntegrityService.lockForeignKeyParents`), and membership-first record
+mutations — person owner change, deal, company, task, saved views, AI chat turn persistence — lock
+the `workspace_member` row before reaching the root in that trailing audit. An exclusive root at
+step 3 would therefore both barrier every audited write in the tenant for the duration of an
+authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
+class). Mutual exclusion for the trigger-capacity count comes from step 3b instead, which is scoped
+to the counter it protects because no other path locks that row.
+
+The activation entry points that perform trigger-capacity admission — `WorkflowService.publish`,
+`enable`, and `resume`, `RuleService.create` and `update`, and `WorkflowRecipeService.install` —
+declare `Isolation.READ_COMMITTED`. Without it the recount after waiting on the step-3b mutex would
+be served from the transaction's pre-lock snapshot and both contenders would be admitted. `install`
+carries the isolation because it wraps `publish` inside its own transaction, so the inner method's
+annotation never applies. `RbacEnforcementArchTest` pins all six.
+
+`LegacyWorkflowBackfillTransaction` is exempt from both step 3b and trigger-capacity admission: it
+runs at startup under the exclusive workspace root (`:62`) and only mirrors pre-existing legacy
+`enabled` state onto its canonical pair (`:321`), so it creates no new fan-out; a workspace already
+over the limit stays bounded by the retained intake backstop.
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
 
@@ -49,18 +88,67 @@ After preliminary authorization:
 2. Lock the exact workspace exclusively.
 3. Lock actor and target memberships in ascending user id.
 4. Revalidate actor active and target state.
-5. Lock distinct actor/requested custom `workspace_role` roots in ascending id, then their complete permission sets with ordered locking reads.
-6. Perform final authorization from the locked actor membership/role state.
+5. When a role is addressed (edit/delete), lock every assignee of that role through `lockRoleAssignees` (`FOR UPDATE NOWAIT`). When the mutation can affect an owner — the target is an owner, or the addressed role has an active-owner assignee — additionally lock the active owner memberships through `lockActiveOwnerMembers` (`FOR UPDATE NOWAIT`). Both phases precede every role root. Mutations that cannot touch an owner (role creation, and member-scoped changes against a non-owner target) take neither, so an unrelated `workspace_member` row lock — `NotificationService.markAllRead` holding an owner's membership, for example — cannot fail them.
+6. Lock distinct actor/requested/active-owner custom `workspace_role` roots in ascending role id, then their complete permission sets with ordered locking reads.
+7. Perform final authorization from the locked actor membership/role state.
 
-Owner demotion locks exact workspace owner rows while the workspace root is already held; do not reacquire broader owned-workspace roots.
+The owner/assignee snapshots abort contention with 409 instead of waiting: departure cleanup can already hold a membership before requesting the workspace root. Waiting while holding that root would close a cycle. Only MySQL NOWAIT error 3572 with SQLSTATE HY000 is translated; other failures propagate. There is no retry: the caller resubmits.
 
-Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
+An owner is a *recovery owner* when they are active, carry no live account-deletion reservation, and either hold no custom overlay or hold one that still grants the complete grantable catalog — reassigning oneself the built-in owner role clears the overlay and passes the grant ceiling, so both cases can restore full authority. Overlay assignment and role edits may not narrow any active owner's effective permissions unless a recovery owner remains afterwards; a change that takes nothing away is always allowed, so a no-op or repairing edit is never blocked by a workspace that already has no recovery path. Built-in owner demotion, member removal, departure, and account deletion must leave at least one active owner, and — when the departing user is an active owner — a recovery owner among the rest. Raw ownership still governs who may change another owner. Owner demotion uses the existing exact workspace root; it must not reacquire broader owned-workspace roots. Departure takes the NOWAIT owner snapshot after its existing ordered workspace and recipient-membership locks. Account deletion takes that snapshot after its workspace-root pass, once per owned workspace and in the same ascending order. Both exclude the departing account before any cleanup or deletion reservation.
+
+Recovery candidates come from locked memberships, and their overlays' permission sets from the role roots locked in step 6. `AccountDeletionReservationRead` reads only their reservation flags in a fresh read-only `REQUIRES_NEW` / `READ_COMMITTED` transaction, without acquiring user locks after workspace locks; account deletion collects the candidates across every owned workspace and issues that read once. Reservation creation and renewal take the user and ascending owned-workspace roots before updating the lease, retaining those roots through commit. This prevents an uncommitted renewal from extending a lease after another transaction has counted its old expiry as available. `AccountDeletionReservationFenceArchTest` is the rot alarm on that coupling. Renewal rejects expired leases; expiry/release only restore availability. The fresh read avoids an old repeatable-read snapshot counting a reserved owner as available.
+
+The built-in administrator exception (`WorkspaceService.requireBuiltInAdministrator`) is not a grantable permission, so any overlay denies it whatever that overlay contains. Transactions that act on the exception while holding record locks must take the exception's authorization snapshot — user root `FOR SHARE`, active workspace root `FOR SHARE`, exact membership `FOR UPDATE` — through `isLockedBuiltInAdministrator` **before** their first record lock, and assert it later with `requireLockedBuiltInAdministrator`. Report deletion, report-snapshot deletion, deal deletion, and deal-document deletion take it at the top of the transaction, ahead of `lockDefinitions`, the duplicate-decision mutex, and the deal/document row locks respectively; approval cancellation asserts it in place because `lockApprovalMutationRecipients` already holds those exact rows. The plain non-locking form remains correct for the read-only member-scope analytics gates, which take no lock afterwards.
+
+Custom-role creation uses `lockRoleCreationAuthorization`, which takes no role id and checks the grant ceiling after locking current role-management authority. Existing-role updates use `lockRoleMutationAuthorization` with a non-nullable role id and always enforce owner authority, retained recovery, and the grant ceiling after locking. Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
 
 Member removal/leave/invitation decline also lock the departing user root. The target user's globally ordered membership set is acquired at the documented point during removal so notification cleanup cannot invert membership lock order.
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
 
-Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation.
+Token-invite acceptance checks the current address under the recipient root and authorizes only that invitation. It does not write `app_user.email_verified` or emit a global email-verification audit event: the creator receives the token and can control the workspace SMTP sender. Global registration verification requires the separate instance-delivered token consumed by `RegistrationVerificationService`.
+
+Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation. Its mailbox-proof and organization-domain checks read the account through the locked `app_user` row, not the pre-transaction membership projection.
+
+#### Verified email change as a pending-grant writer
+
+Every account email-change mutation uses the same account-before-token order. Request validation
+and token lookup are preliminary, non-locking reads. `requestChange` then locks `app_user` exclusively
+before invalidating or inserting `email_change_token` rows; the token's foreign key must never cause
+a request to acquire its user lock after holding an old token row. After invalidation clears the
+MyBatis read cache, request validation repeats against the locked account and current uniqueness
+and rate-limit reads. A refusal rolls back the invalidation. `exchangeToken` likewise discovers the
+account without locks, locks that root, then conditionally claims the still-redeemable token; this
+also governs the self-claim in programmatic `confirmChange`. Browser `confirmChangeByHash` discovers
+the exchanged token without locks, locks the account, rechecks uniqueness, then conditionally
+consumes the still-redeemable token before applying the change. No request or confirmation may lock
+an email-change token and then acquire its account root.
+
+`EmailChangeService.confirmChangeByHash` is a second writer of `workspace_member` pending rows: a pending grant is an offer to one mailbox, so moving the account off that mailbox revokes it. It runs from the account side rather than a workspace path, and follows the same hierarchy:
+
+1. Lock the `app_user` root exclusively (already held for the email write).
+2. Discover the account's pending grants without locks and take them in ascending `workspace_id`.
+3. Lock each of those workspace roots exclusively in that order.
+4. Lock the recipient's globally ordered `workspace_member` set (`NotificationMapper.lockRecipientMemberships`) — the same point invitation decline takes it, so notification cleanup cannot invert membership lock order.
+5. Per workspace: delete the pending row, and only when that delete claimed it, delete the recipient's notification baselines and notifications and write the scoped audit event.
+6. Bump the recipient's notification state version once, after all deletions.
+
+Discovery is deliberately unfiltered by `lifecycle_state`, so a grant parked in a suspended or tearing-down tenant is revoked too. The account root is held throughout, and every invite-grant writer locks the recipient root first, so no new pending row can be committed behind the sweep.
+
+The sweep runs single-catalog: it issues each workspace's tenant-plane notification deletes on the request's own connection without installing that workspace's placement, which is inert while every workspace lives in one database. Before placement routing is enabled it must run each workspace's deletes inside `tenantWorkScope.withWorkspacePlacement`.
+
+The following boundaries run at `READ_COMMITTED` rather than the default isolation and must stay that way:
+
+- `EmailChangeService.requestChange` — after acquiring the account root and invalidating tokens,
+  repeated uniqueness and request-count reads must observe requests committed while it waited.
+- `EmailChangeService.exchangeToken` — when a conditional claim fails after waiting for the account
+  root, the same-browser retry check must observe a concurrent replacement's token invalidation.
+- `EmailChangeService.confirmChange` / `confirmChangeByHash` — the pending-grant discovery in step 2 happens after waiting for the account lock. Under `REPEATABLE_READ` it would read the transaction's opening snapshot and miss a grant another transaction committed while this one queued, leaving a revoked-address grant behind.
+- `OneTimeLinkFlowService.consumeEmailChange` — the browser-flow entry point that opens the surrounding transaction for the confirm operation. Its isolation is what the service method actually joins, so leaving it at the default would silently restore the stale snapshot.
+
+The request token only names a candidate address. Delivery is dispatched off-thread and best-effort
+by `MailService.sendInstance`; confirmation re-locks the account and rechecks address uniqueness
+before applying the change.
 
 ### Workspace teams
 
@@ -208,7 +296,7 @@ service-level cleanup.
   the organization-root inversion inside `removeMemberInTransaction`, which takes the workspace root
   exclusively first (`lockRoleMutation` → `lockWorkspaceMutationRoot`,
   `WorkspaceService.java:1296`) and therefore does not invert on the workspace root at all, but
-  reaches the organization root only after X-locking active owner rows (`lockOwnerIds`, `:1454`)
+  reaches the organization root only after X-locking active owner rows (`lockActiveOwnerMembers`, `:1509`)
   and entering credential cleanup, whose `lockWorkspaceOrgIdForShare` and `lockByIdForShare` pair
   consequently runs after those owner rows — the reverse of the erasure's
   organization-roots-then-owner-rows pass; the
@@ -266,10 +354,21 @@ execution and prevents offboarding's user-before-workflow order from forming a c
 
 Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
 
-- Create: membership → board root → insert.
-- Full update: membership → board root → exact task rows.
+- Create: membership → board root → linked people → exact visibility grants → insert.
+- Full update: membership → board root → exact task rows → linked people → exact visibility grants.
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
+
+Task-history imports retain their authorization and duplicate-decision roots first, then acquire
+that same board root before locking resolved people in ascending id order. Assistant task creation
+also acquires the board before its processable-record target and restriction fence. These callers
+must never enter task creation while holding a person lock acquired before the board. Existing
+task rows precede people on updates; imports and creates insert new task rows after people while
+holding the board mutex. Person visibility/processing locks use `FOR SHARE` for task links,
+history imports, and activity updates, which do not mutate the person. The exact share grant is
+retained through commit and permissions are rechecked after contention. Activity creation keeps
+`FOR UPDATE` because recording the first-response timestamp can update the person; taking a
+shared lock first would permit a concurrent lock-upgrade cycle.
 
 After the board root is held, discover workspace task ids without locks, add the requested root, Java-sort the union, and lock exact `(workspace_id,id)` rows individually. Skip siblings that vanished before lock; fail closed if the requested root vanished. Derive ordering only from locked rows.
 
@@ -289,6 +388,217 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+### Assistant write tools
+
+Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
+`READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one
+`AiAssistantWriteTool` bean, and every catalog write tool has exactly one —
+`AiAssistantWriteToolRegistry` refuses to start otherwise — so the order below is the only path a
+write takes: the framework keeps no per-tool arm and no fallback lock. The tool
+declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
+tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
+`AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
+dependencies to an explicit allowlist of domain services and helpers — no mapper, no
+`WorkspaceService`, no member or permission source — and lexically by refusing locking-method,
+permission-read and lifecycle-mutator names in tool source; a new dependency is a reviewed edit to
+that allowlist. Before any lock, an approval resolves the principals the write will name
+(`AiAssistantWriteTool.principals`, against the member directory the framework hands it — today
+only `assign_owner`'s owner), and those same objects reach the write: `Execution` carries no member
+lookup, so `assign_owner` writes exactly the owner id locked at step 1. A confirm-tier proposal
+also pins, when it is prepared in the turn, what its principals and its value resolved to: the
+`principals` ids and the `resolution` field and id are stored as additive siblings of the stored
+arguments, and a name that resolves to no single row is refused before any proposal is stored. A
+step that reaches the write again after its proposal was stored under the step's key resolves
+nothing: the loop first reads that stored row, without a lock, and the call carries its pins
+verbatim, so a rename or an offboarding in between cannot turn the replay into a reused-key or
+unresolved refusal, and only what the model asked for is compared with the stored row. The
+approval compares its own pre-lock resolution with the pins — the principals before step 1, on the
+proposal read unlocked, so a drifted member's authorization rows are never locked and its own 403
+never answers first, and again once step 3 has read the locked proposal; the value just before
+step 5, before any board or target lock — and refuses any difference with `Assistant proposal
+target changed`, so a rename or an offboarding between the proposal and the approval can never hand
+a record to a member, or move a deal to a stage, that the card did not name. The comparison reads
+no row and takes no lock. The card resolves the stored name exactly as the approval does and names
+only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
+the card and refused at approval with the same 404 as before pinning, rather than labelled by its
+id.
+
+The pins protect only the proposals that carry them, on a build that reads them:
+
+- A proposal stored before pinning carries neither sibling and is approved exactly as before.
+  Pending proposals never expire, so a confirm-tier proposal still pending from before this change
+  keeps resolving its names at approval — the #1865 drift stays possible for that row until it is
+  decided.
+- A build from before the pins reads only the stored `tool`, `tier`, `restrictionEpoch`, `target`
+  and `request` and ignores both siblings, so after a rollback to it a pinned proposal renders,
+  approves and rejects by name exactly as an unpinned one, without the pin's protection. That is
+  not safe equivalence: a rollback past this change must first reject (or have the member
+  re-propose) every pending proposal whose stored arguments carry `principals` —
+  `status = 'proposed'` and `JSON_CONTAINS_PATH(arguments_json, 'one', '$.principals')` on
+  `ai_chat_tool_call` — before approvals are served by the older build. Failing closed on rollback
+  instead would need a pin-aware reader shipped before this writer.
+- The staging deployment's automatic rollback does not run that rejection. When
+  `post_deploy_smoke` fails after the target backend and frontend are live, `deployment_exit` calls
+  `rollback_release`, which restarts the previous backend and frontend without reading
+  `ai_chat_tool_call`, and the interrupted-deployment recovery in `recover_transaction` can fall
+  back to the same `rollback_release`. A pinned proposal created while the target release served
+  survives that rollback, and the older build approves it by name without its pin — how every
+  confirm-tier proposal was approved before #1865, so the protection lapses for those rows rather
+  than a new exposure opening. Gating the automatic rollback is a separate Tier 3 deployment change
+  tracked in #1871; until it lands, run the rejection above by hand after any automatic rollback
+  past this change.
+
+The framework acquires its locks in exactly this order:
+
+1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
+   covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals
+   (today only `assign_owner`'s owner), each named principal, who carries no requirement. That call takes the user roots `FOR SHARE` ascending by user id, then the
+   active workspace root `FOR SHARE`, then the memberships `FOR UPDATE` ascending by user id, then the
+   custom-role row and its `workspace_role_permission` rows `FOR UPDATE` ascending by role id. Roles
+   are locked only for users with a non-empty requirement, so the actor's custom role is locked and
+   the owner's never is. An owner whose account deletion is reserved is refused here with `User N is
+   not a member of this workspace` even while its membership row is still active.
+2. Exact `(workspace_id,id)` `ai_chat_session` root `FOR UPDATE`.
+3. Exact `ai_chat_tool_call` row `FOR UPDATE`.
+4. Immediate tier only: exact `ai_chat_turn` row `FOR UPDATE`. The real order is session → tool call
+   → turn, not session → turn → tool call.
+5. Immediate execution and approval only: the `task_board_lock` workspace root, when the tool
+   declares it (task creation). The value the write moves its target to — a deal's new stage — is
+   resolved by non-locking reads just before this step, because the stage-change lock needs it.
+6. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
+   tool only links to it (task creation on a person), otherwise the person, company or deal
+   `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
+
+After step 6 the framework, still in this order and taking no further lock of its own: retains the
+restriction-epoch read fence to completion; for every confirm-tier tool refuses a target written
+after the proposal (`AiAssistantProposalFreshness`) — the freshness check is derived from the tier,
+and no tool can opt out of it; re-asserts the tool's permissions from the step-1 snapshot; runs the
+owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
+target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier
+the write returned with the one resolved before the lock, recording any divergence as a
+`verification` sibling of the stored outcome (for the create tools that comparison is structural:
+`TaskService.create`, `ActivityService.create` and `NoteService.create` return the very bean the tool
+built, so its link cannot diverge from the target while that holds, and nothing is re-read from
+the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
+whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
+id it resolved with itself and verifying nothing; `assign_owner` compares the owner id on the record
+`updateOwner` returns with the principal locked at step 1, `null` on both sides for a removal); and
+writes the tool-call status fail-closed. The one
+read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
+`Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool
+names only the window, and the read refuses any other target kind), and which the activity tool
+makes inside `apply` for a meeting on a person, after the owner-scope gate and before it writes, so
+the new meeting is never its own conflict.
+
+The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
+stage tool reads its deal through the same scoped getter before step 6 to resolve the stage, and
+inside one transaction MyBatis answers an identical select from its first-level cache. Every target
+lock statement the framework takes at step 6 — `getVisiblePersonByIdForShare`,
+`getVisiblePersonByIdForUpdate`, `getOwnedCompanyByIdForUpdate` and `getDealByIdForUpdate` —
+therefore declares `flushCache="true"`, so the gate's getter goes to the database after the lock.
+`AiAssistantWriteTargetGateCacheIntegrationTest` pins this against MySQL for each of them. Do not
+remove the flag, and give any new target lock statement the same flag.
+
+Rejection takes no lock after step 3. Undo takes none of its own after step 3; the domain `deleteIf`
+it calls takes what that service documents — for a task the board root and then the exact task rows
+(see Tasks above), for a note or an activity the exact row `FOR UPDATE`. Domain services on this
+path may re-acquire a membership step 1 already holds (`lockAndRequireMember` for the actor in
+`TaskService.lockBoardForCreation`, for the owner in `updateOwner`); that re-acquisition adds no
+edge.
+
+**The authority is the step-1 snapshot, and its rows stay locked until commit.** The tool's own
+permissions become known only after step 3 has read the durable proposal, so the service asserts
+them in memory against the snapshot through `LockedPermissionSnapshot.effectiveFor(actorId)`. It
+asserts them the same way again after the record lock; that second assertion reads the same
+immutable snapshot and cannot fail once the first has passed, so it is a structural check, not the
+protection. The protection is the held rows: a revocation that arrives mid-decision — a `DELETE` of a
+role permission, a role change, a membership removal — waits until the decision commits, and one
+committed before step 1 is seen by it. `AiAssistantWriteToolConcurrencyIntegrationTest` pins this
+for immediate execution, approval and undo by observing the revocation waiting in
+`performance_schema.data_lock_waits`.
+
+Rules that keep this sound:
+
+- **No permission read before step 1 in the same transaction.** An unlocked `permissionsFor` read
+  populates the MyBatis first-level cache, and every later identical read in that transaction —
+  including a domain service's own `@RequirePermission` check — is then answered with the pre-lock
+  result. `preliminaryPrincipals` resolves which principal rows to lock and deliberately takes no
+  permission read. An `AiAssistantWriteTool.principals` implementation is handed only the request
+  and a member directory — a plain `WorkspaceService.getMembers` read — and may not reach anything
+  else: `AiAssistantWriteToolRegistryTest` proves, for every declared tool, that principal
+  resolution touches none of its injected dependencies, so it cannot call a domain getter whose
+  `@RequirePermission` check would be the pre-lock read. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
+  unknown tool call, an unparseable proposal, an owner that no longer resolves) and the locked 403
+  after them.
+- **After step 1, only non-locking permission reads, and only in the domain layer.** The service's
+  own assertions read the snapshot. The domain services it calls still run their `@RequirePermission`
+  and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
+  after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
+  `ActivityService.create`, `NoteService.create`, the `addTag` and `updateOwner` methods,
+  `DealService.changeStage`, and every `deleteIf` undo uses. Those reads add no lock edge, and while
+  the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
+  Do not turn one of them into a locking read, and do not route an assistant write through a
+  domain method that has no permission check on the assumption that the snapshot makes it redundant.
+- **Organization lifecycle is not in the snapshot.** `lockAndRequirePermissions` checks the
+  workspace's lifecycle, not the organization's. An organization entering teardown is refused by the
+  unlocked entry gate (`WorkspaceService.isMember`, which joins `organization.lifecycle_state`) and,
+  for built-in roles, by the domain layer's `permissionsFor` read; one that enters teardown between
+  the entry gate and step 1 is not refused by the snapshot. No write path may rely on the snapshot
+  alone to prove the organization is active.
+
+**Contention.** Per decision the service holds, until commit, the actor's `app_user` row (S), the
+workspace row (S) and the actor's membership (X) — plus the owner's on `assign_owner` — and, for a
+custom-role actor, that role's `workspace_role` row and every one of its `workspace_role_permission`
+rows (X). Assistant decisions by different members who share one custom role therefore serialize on
+that role row, and they also queue behind every other `lockAndRequirePermissions*` or
+`lockedPermissionsFor` caller for that role (note update and delete, document approvals, chat
+attachment uploads and the rest). Built-in-role members still serialize only per user. Memberships
+are always locked before any role, each ascending, so two such callers cannot form a cycle.
+
+### AI run leases
+
+`ai_run_lease` is a leaf. The lock order is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`, and
+the lease row is always the last lock any chain takes. Two rules keep that true, and each is
+checkable by reading one file rather than by convention:
+
+1. `AiRunLeaseMapper` contains no reference to any subject table. A cross-subject question — is this
+   turn still running, settle this orphan — travels through the `AiRunLeaseSubjectHandler` SPI,
+   implemented in the subject's own package. A subquery against `ai_chat_turn` inside a lease
+   statement would invert the order and is a defect.
+2. The heartbeat's subject-liveness read is a non-locking `SELECT`. The heartbeat therefore takes
+   exactly one lock, the lease leaf, and a lone leaf lock cannot close a cycle against a chain that
+   takes that same leaf last.
+
+`AiRunLeaseService.acquireInCurrentTransaction` takes the lease row `FOR UPDATE` and reads it under
+that lock in a transaction that has not read it before, so the MyBatis first-level cache cannot
+serve a pre-lock answer. It joins the caller's claim transaction and
+`releaseHeldInCurrentTransaction` joins the caller's durable terminal transaction; neither opens its
+own. A claim that rolls back therefore leaves no lease row, and a terminal write that changed no row
+releases nothing.
+
+#### Settlement is one transaction, for every lease subject
+
+For **any** lease subject, the settlement takeover and the subject's terminal write are **one
+transaction**, and it takes its locks in the order subject parent → subject → lease. For a chat turn
+that is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`; a future `agent_run` subject owes the
+same shape with its own parent. This is the authoritative statement of the rule — the
+`AiRunLeaseSubjectHandler` and `AiChatTurnOrphanSettlementService` Javadoc points here rather than
+restating it.
+
+The reason is that the epoch bump is not the fence. What stops a revived owner is the subject's own
+terminal status: every owner-side write is predicated on the subject still being running, so the
+owner learns it lost only once the settler's terminal status is committed. A settler that committed
+`takeOverForSettlement` in one transaction and the terminal write in a later one would therefore open
+a **revived-owner window** between the two commits, in which the epoch has already moved but the
+subject still reads as running. In that window the owner the settler just fenced out can settle the
+subject itself, and then release the lease by key on its way out — retiring the settler's takeover —
+so the pass that was recovering the run has instead handed it back to a dead owner.
+
+`AiRunLeaseService.takeOverForSettlement` therefore declares `MANDATORY` propagation. A handler that
+calls it without its subject-terminal transaction already open is refused with
+`IllegalTransactionStateException` rather than getting a standalone takeover that commits on its own,
+so the one-transaction requirement fails closed for a subject handler nobody has written yet.
+
 ## Disqualification vocabulary materialization
 
 Disqualification-reason settings mutations and lifecycle transitions into `DISQUALIFIED` share the
@@ -305,6 +615,36 @@ Settings mutators require `WORKSPACE_SETTINGS`; lifecycle changes require `PERSO
 catalog may be synthesized only while the workspace mutex is held. First-edit materialization holds
 the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
 returned by the locked resolution, never a separately compared caller value.
+
+## SMTP configuration
+
+A workspace's own SMTP transport (`workspace_mail_config`) has two sides with deliberately different
+lock sets.
+
+Mutations — `WorkspaceMailConfigService.saveConfig` and `deleteConfig` — take the standard settings
+order and re-assert `WORKSPACE_SETTINGS` after locking:
+
+1. Lock the actor's `app_user` root and check its account-deletion reservation.
+2. Lock the active workspace root exclusively (the workspace mutation mutex).
+3. Lock and revalidate membership, custom role, and the required permission.
+4. Re-read the exact `workspace_mail_config` row `FOR UPDATE`; the pre-lock read is preliminary only.
+5. Write the config and its secret in that same transaction.
+
+The credential is bound to its destination: a blank submitted password may reuse the stored one only
+when host, effective port, username, and the STARTTLS/SSL/AUTH transport-security settings are all
+unchanged. Any other change requires re-entry, so a settings delegate cannot redirect a stored
+password to a new endpoint. Port comparison uses the resolved effective port, so a client that echoes
+the instance default for a stored `NULL` port is not treated as an endpoint change.
+
+Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — locks the
+authenticated actor's `app_user` root `FOR SHARE` when a `User` principal is present, then the workspace
+root `FOR SHARE`. It holds these roots across the configuration and secret reads so the endpoint and
+password come from one generation. `SecretStore.get` reacquires those same roots in that order;
+acquiring the actor root first avoids an inversion with a queued exclusive user lock. Background
+resolution without an actor takes only the workspace root. Callers already holding roots must follow
+the same actor-before-workspace order. Resolution performs no provider I/O; the SMTP connection is
+made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
+disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
 
 ## Campaign mutations
 
@@ -515,6 +855,92 @@ complete a replacement claim. SMTP is consequently a best-effort campaign transp
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
+Audience delivery dispatch claims with a bare `pending` → `dispatching` compare-and-set and stores
+no lease owner, lease expiry, or attempt-target fingerprint. Its only persisted age anchor is the
+frequency reservation, which the worker writes as database time plus the hard provider deadline in
+`CampaignFrequencyAdmissionService`'s short workspace → delivery transaction before egress, after
+capturing that deadline. A worker that dies between reservation and its terminal write therefore
+leaves a `dispatching` row whose reservation would cap the contact/channel for the whole frequency
+window. The same workspace sweep that recovers triggered claims also selects unleased audience rows
+that are still `dispatching`, have no `submitted_at`, and whose `frequency_reserved_at` is older than
+the delivery lease safety margin (lease duration minus provider deadline, which covers
+database-clock adjustment and the post-return terminal write). It never returns such a row to
+`pending`: `submitted_at` is written only after the provider returns, and without an owner fence or
+fingerprint a replay could double-send. Each row instead becomes a terminal ambiguous `failed` row
+with `deadline_ambiguous` and `reconciliation_required_at`, keeping `frequency_reserved_at` so the
+cap stays in force until an operator resolves it. The sweep is one auto-commit compare-and-set per
+row on the delivery joined to its send for `origin` — the same statement shape and lock footprint as
+the triggered expired-claim sweep. It never runs inside the reservation transaction, holds no
+workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
+cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
+such a row. That discovery arm is driven by the `dispatching` delivery rows rather than by every
+audience send, because a stranded attempt usually belongs to a send that already completed, so a
+send-driven branch would cost one index probe per historical audience send on every tick.
+`idx_campaign_delivery_unleased_reservation` answers it as `status` and `dispatch_lease_owner`
+equalities plus a `frequency_reserved_at` range, so a tick with nothing to recover reads no delivery
+rows; the statement runs once per catalog with no workspace predicate, so no index leading with
+`workspace_id` could be seeked for it. Every statement stays correct without that index and only the
+scan returns, so `DeliveryRecoveryIndexArchTest` pins its leading columns against a later index
+consolidation. The same pass then settles every audience send that is still
+`running` with nothing `pending` or `dispatching`: it completes the send and refreshes the counters,
+without resolving a provider, so a connector disabled after the worker died cannot keep the send
+running. The completion is a single compare-and-set that proves the absence of `pending` and
+`dispatching` rows in the same statement that writes `completed`, so a live worker's terminal write
+cannot land between the proof and the completion; because no delivery can return to `pending` or
+`dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
+final state. A `dispatching`
+row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
+it after its terminal write, an attempt it abandons after reserving is swept and settled by a later
+pass, and one abandoned before reserving is left to the dispatch loop's own settlement. That send is
+selected by a durable predicate, not remembered from the sweep, because a marked row no longer
+matches the sweep: a settlement that fails is found again on a later pass, and scheduler discovery
+already returns a workspace that owns a `running` send. The predicate deliberately carries no
+reconciliation-row condition, because a provider webhook (`applyProviderStatus`) and an operator
+resolution (`resolveReconciliation`) both clear `reconciliation_required_at`, and the webhook also
+moves the row out of `failed`; a send whose worker has died must not depend on a marker another actor
+may clear. It is answered from `idx_campaign_send_status` plus one index probe per running send, so
+its cost follows the workspace's running sends and never its delivery history.
+
+A send that is already `completed` when the sweep marks one of its rows owes only its counters, and
+those are refreshed from the sweep's own result in the same pass rather than by a
+counter-disagreement selector: comparing `failed_count` with a `COUNT(*)` of failed rows is a
+dependent subquery over every audience send's delivery history, which the scheduler would pay on
+every tick, and putting the reconciliation `EXISTS` first does not bound it, because
+`reconciliation_required_at` is not in `idx_campaign_delivery_send_status` and the probe therefore
+reads the same failed rows from the clustered index. The bound that leaves: if a pass dies between
+the sweep's compare-and-set and its counter refresh, an already completed send under-reports
+`failed_count` until an operator resolves the reconciliation row the sweep created, which refreshes
+the counters itself. The delivery row is terminal and reconcilable throughout, so nothing is lost
+except the send-level counter. Settlement takes the same single-row auto-commit writes on
+`campaign_send` the dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
+sweep loses its `status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then
+attaches its provider id and message id to that swept row through a second single-row
+compare-and-set, and changes neither status, reconciliation state, nor the reservation, so provider
+bounce and complaint webhooks still resolve to the row and record suppression and consent revocation.
+That statement accepts a swept row with no provider id whether it is still awaiting reconciliation or
+an operator has already resolved it — a resolved row keeps neither the sweep's `last_error` nor its
+reconciliation marker, so that branch is anchored on the operator outcome, and an audience row is
+never returned to `pending`, so no later attempt can own the correlation it writes. A slow triggered
+worker whose owner-fenced terminal write loses to the expired-claim sweep attaches its message id
+through the matching statement on the triggered path. A triggered claim persists the provider id and
+the attempt target fingerprint, so that statement identifies the attempt by both instead of by the
+absence of a provider id, and it fences on an absent lease owner plus a settled status rather than on
+the sweep's `last_error`: a triggered row can be returned to `pending` and re-claimed, so a `pending`
+row is left to the replay that records its own correlation, a re-claimed row belongs to the attempt
+holding the lease, and a row the sweep re-queued that a later attempt drove back into terminal
+ambiguity still accepts the only message id the provider ever accepted for it. The statement also
+accepts a `dispatched` row that carries no message id, which is what `markTriggeredDispatched` leaves
+behind when the replay's own receipt named none: it writes that null over the column unconditionally
+and clears the lease, so the row settles correlation-free and only the late attempt's id can resolve
+its webhooks. Both attempts submit the same `Idempotency-Key`, so on a connector an administrator
+marked idempotent that id names the one message the provider kept. Many triggered items still reach
+reconciliation with no message id — a worker that never returns, a replay that never ran, a late
+return refused because a newer attempt held the claim, a terminal write or late attach that could
+not be persisted, and a receipt that names no message id from either attempt —
+so their webhooks still match no row and operators check the provider by hand for every triggered
+item (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows
+without a person (which are never reserved), have no age anchor and are not swept.
+
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
 order. Audience and triggered deliveries use the same compare-and-set, which accepts only `failed`
@@ -544,18 +970,22 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 2. Lock actor user when present.
 3. Lock every active workspace root required by the mutation in ascending id.
 4. Lock required active memberships.
-5. Lock the active organization shared.
-6. Lock the organization duplicate-decision mutex exclusively.
-7. For a CSV import that uses an auto-create custom-field mapping, lock the affected
+5. For person updates (including processing-restriction changes) and person/company sharing,
+   lock the actor's custom `workspace_role` root and permission rows when applicable. Validate
+   `PERSON_UPDATE` for person updates or `SHARE_MANAGE` for share grants and revocations from
+   the locked authority before proceeding.
+6. Lock the active organization shared.
+7. Lock the organization duplicate-decision mutex exclusively.
+8. For a CSV import that uses an auto-create custom-field mapping, lock the affected
    record-creation template set before writable record targets. Lock and revalidate
    `CUSTOM_FIELD_MANAGE` first when the definition is absent. This set row is a schema
    synchronization root, not dependency creation. After the set lock is held, recompute the
    set of absent definition keys and fail closed with a review conflict if it differs in
    either direction from the pre-lock reading, so a definition created or removed concurrently
    under `READ_COMMITTED` cannot be silently adopted or created twice.
-8. Lock writable record targets ascending by record id.
-9. Lock canonical identity groups in deterministic kind/value order.
-10. Requery/revalidate current identities while locks are held.
+9. Lock writable record targets ascending by record id.
+10. Lock canonical identity groups in deterministic kind/value order.
+11. Requery/revalidate current identities while locks are held.
 
 Duplicate-review dismissal and reopen are terminal decision writes within this hierarchy. They lock
 and revalidate both the actor's `REPORT_READ` gate and type-specific update permission before entering
@@ -605,6 +1035,88 @@ Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order 
 - Cleanup/retry workers lock/revalidate exact queue/tombstone identities before provider I/O.
 - Preserve deletion-queue → quota → audit ordering, including business-card binary storage before company/person/audit writes.
 
+## Account recovery and emailed credential tokens
+
+Password reset and verified email change are one hierarchy, not two: a reset exists to evict the
+holder of the old password and an email change moves the recovery mailbox, so each must evict the
+other family's outstanding tokens. The class order is:
+
+0. `one_time_link_flow` — the browser grant held by `OneTimeLinkFlowService.consume` (or
+   `consumePasswordReset`) across the confirm/reset operation.
+1. `app_user` — the account root, exclusive (`FOR UPDATE`) for every credential write and every
+   token claim; shared (`FOR SHARE`) for reset issuance, which only re-reads the mailbox.
+2. `password_reset_token` / `email_change_token` — the two emailed token families.
+3. The audit integrity head and its foreign-key parents.
+
+Source-token exchange and browser-grant issue run in separate transactions.
+
+Both token families are locked under the same exclusive account root, so their relative order inside
+one transaction is unconstrained; do not rely on that, and never acquire either one before the
+account root.
+
+- `PasswordResetService.requestReset` takes `app_user FOR SHARE` and re-reads the mailbox under that
+  lock before issuing, so a verified email change committing concurrently cannot leave the link
+  addressed to the mailbox it just moved away from.
+- Both public exchange endpoints (`PasswordResetService.exchangeToken`,
+  `EmailChangeService.exchangeToken`) resolve the token's owner without a lock, then take
+  `app_user FOR UPDATE` before claiming. A same-owner retry re-reads the claimed token `FOR SHARE`,
+  because its `REPEATABLE READ` snapshot predates the invalidation it waited behind.
+- `PasswordResetService.resetPasswordByHash` and `EmailChangeService.confirmChangeByHash` hold the
+  exclusive account root across the credential write and both `invalidateForUser` calls.
+- `EmailChangeService.requestChange` proves the current password through the shared throttled
+  confirmation, then re-reads the account under the exclusive root and refuses when the password
+  hash or `session_epoch` moved since the proof.
+- `EmailChangeService.requestChange` also gates privileged accounts on an enrolled passkey and a
+  fresh WebAuthn step-up (#1506). It evaluates the gate first before taking the account root and
+  audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
+  assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
+  `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
+  against committed state. That statement is mapped with `flushCache="true"`: the request is one
+  MyBatis session, so without the flush the re-check would return the privilege and passkey answers
+  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
+  below).
+
+Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
+hierarchy (#1532). Its order is:
+
+1. `app_user` exclusive (`lockById`).
+2. `privileged_mfa_recovery_redemption`: an `INSERT IGNORE` of the token's ledger row. Zero rows
+   inserted means the token is already spent, and the ceremony is refused before anything is
+   removed.
+3. The account's `webauthn_user_entity` / `webauthn_credential` rows, through
+   `WebAuthnService.recover`. That call re-takes the `app_user` lock it already holds.
+4. The audit integrity head.
+
+The token digest is bound to one account id, so only that account's root can reach a given ledger
+row. The account root therefore already serializes concurrent redemptions, and the primary key is
+the backstop. The ledger row belongs to the recovery transaction, so any later failure rolls it back
+with the credential removal and leaves the token unspent.
+
+The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
+actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
+own: `MfaRecoveryService.recover` calls it while holding that row exclusively, so an append there
+would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
+pooled connection. Callers that are not already holding the account root —
+`EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
+The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
+re-check of the privileged gate throws without auditing, because any append there would block on
+the request's own exclusive lock.
+
+The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
+The corpus lookup runs before any lock, but the fail-open decision reads account privilege under
+the exclusive account root so a promotion that commits while the reset waits is observed; do not
+hoist that read above `lockById`. Only the decision's audit moves.
+`PasswordCredentialService.encodeScreened` never appends it independently while a transaction is
+open:
+
+- `fail_open` is appended in the caller's transaction from a `beforeCommit` synchronization, so it
+  takes the audit head after `markConsumed` and both `invalidateForUser` calls (class 3 after class
+  2), and a failed append aborts the credential write with it.
+- `fail_closed` is appended independently from an `afterCompletion` synchronization, after the
+  rollback its own exception causes has released the account root. A failure there is logged, not
+  thrown, because the refusal already stands.
+- Outside a transaction, either decision is appended independently at once.
+
 ## Connected-provider credentials
 
 Provider credential transitions lock the owning `app_user` shared before the exact
@@ -630,3 +1142,24 @@ For any transaction/locking change:
 - Failure/retry/idempotency behavior is preserved.
 - Targeted concurrency/architecture tests pass.
 - Independent correctness/concurrency review attempts to find deadlocks, stale authorization, lost updates, and partial side effects.
+
+## Retained attachment malware scanning
+
+Scan claims use READ COMMITTED and short REQUIRES_NEW transactions. Discover the URL without locks,
+lock all same-workspace attachment references using the established URL lock ordering, then lock
+and revalidate the selected row and due predicate. One UUID/database-clock claim covers every
+reference to the object. Provider reads and scanner calls happen outside the transaction. Decision
+writes take the same reference locks and require the exact still-live owner; stale completions cannot
+release successor state. Administrative quarantine uses permission roots before the same attachment
+reference locks and revalidates held permission authority after the target lock. Never acquire
+membership roots after claiming an object. See `docs/MALWARE_SCANNING.md` for expiry/recovery limits.
+
+Ordinary attachment deletion never removes a reference on the strength of its unlocked discovery
+read. The generic route takes no membership root. When the discovery row already needs quarantine
+authority, the route delegates to the quarantine service before taking any attachment lock; that
+service keeps its permission-roots-first order and re-reads the row under lock. Otherwise the route
+locks the URL references, re-reads the exact row with a locking read, and refuses with 409 when the
+row now needs quarantine authority. It does not delegate at that point, because delegating while it
+holds attachment rows would take membership roots after them. The assistant route already holds the
+caller's membership and session roots, so it re-reads the exact row the same way and checks
+quarantine authority in place.

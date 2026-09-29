@@ -79,7 +79,7 @@ class FreshMembershipScopeArchTest {
             "ooo.klae.connex.backend.controllers.InviteLinkController",
             "accept",
             List.of("InviteFlowAcceptRequest", "String", "HttpServletRequest", "HttpServletResponse"))),
-        new EntryPoint("SsoLoginService", "resolve", 7), Set.of(
+        new EntryPoint("SsoLoginService", "resolve", 8), Set.of(
             new CallSite(
                 "ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler",
                 "handleOidc",
@@ -132,6 +132,7 @@ class FreshMembershipScopeArchTest {
                     "String",
                     "boolean",
                     "int",
+                    "String",
                     "String"))));
 
     @Test

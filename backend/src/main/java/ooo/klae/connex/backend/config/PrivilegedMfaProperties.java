@@ -20,8 +20,13 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 @Component
 @ConfigurationProperties(prefix = "connex.security.privileged-mfa")
 public class PrivilegedMfaProperties {
+    /** The single refusal for every recovery-token failure, so none reveals which check failed. */
+    public static final String INVALID_RECOVERY_AUTHORIZATION = "MFA recovery authorization is invalid or expired";
+
     private static final String DEFAULT_ACTOR = "configuration-default";
+    private static final String RECOVERY_TOKEN_PURPOSE = "connex-privileged-mfa-recovery:v1:";
     private static final int SHA_256_HEX_LENGTH = 64;
+    private static final int MAX_RECOVERY_ACTOR_CHARACTERS = 255;
     private static final Duration MAX_RECOVERY_WINDOW = Duration.ofHours(1);
 
     private String enforced = "true";
@@ -118,27 +123,52 @@ public class PrivilegedMfaProperties {
                 || !normalize(recoveryTokenSha256).matches("[0-9a-fA-F]+")) {
             throw new IllegalStateException("Privileged MFA recovery token hash must be 64 hexadecimal characters");
         }
+        String actor = normalize(recoveryActor);
+        if (actor.codePointCount(0, actor.length()) > MAX_RECOVERY_ACTOR_CHARACTERS) {
+            throw new IllegalStateException(
+                    "Privileged MFA recovery actor must be at most 255 characters");
+        }
         recoveryExpiry();
     }
 
-    public String requireValidRecoveryToken(String candidate, Clock clock) {
+    /**
+     * Accepts the operator recovery token only for the account it was issued to (#1532).
+     *
+     * <p>The configured digest is {@code sha256("connex-privileged-mfa-recovery:v1:" + userId + ":"
+     * + token)}, so the account id and a purpose prefix are bound into the hashed material. A
+     * token issued for one account therefore matches no other account, and a bare SHA-256 of the
+     * token matches none at all. Every refusal — no configuration, blank or wrong token, another
+     * account's token, expiry — raises the same message.
+     *
+     * <p>This check is stateless. The caller must also record the returned redemption key so the
+     * token is spent after one successful use.
+     *
+     * @param userId the account completing the recovery ceremony
+     * @param candidate the raw token submitted by that account
+     * @param clock the clock the expiry is evaluated against
+     * @return the operator who issued the token and the one-way key identifying this redemption
+     * @throws ForbiddenException when the token is not valid for this account now
+     */
+    public PrivilegedMfaRecoveryAuthorization requireValidRecoveryToken(int userId, String candidate, Clock clock) {
         try {
             validateRecoveryStructure();
         } catch (IllegalStateException exception) {
-            throw new ForbiddenException("MFA recovery authorization is invalid or expired");
+            throw new ForbiddenException(INVALID_RECOVERY_AUTHORIZATION);
         }
         if (normalize(recoveryTokenSha256).isEmpty()
                 || candidate == null
                 || candidate.isBlank()
                 || !clock.instant().isBefore(recoveryExpiry())) {
-            throw new ForbiddenException("MFA recovery authorization is invalid or expired");
+            throw new ForbiddenException(INVALID_RECOVERY_AUTHORIZATION);
         }
         byte[] expected = HexFormat.of().parseHex(normalize(recoveryTokenSha256));
-        byte[] actual = sha256(candidate);
+        byte[] actual = sha256((RECOVERY_TOKEN_PURPOSE + userId + ":" + candidate)
+                .getBytes(StandardCharsets.UTF_8));
         if (!MessageDigest.isEqual(expected, actual)) {
-            throw new ForbiddenException("MFA recovery authorization is invalid or expired");
+            throw new ForbiddenException(INVALID_RECOVERY_AUTHORIZATION);
         }
-        return normalize(recoveryActor);
+        return new PrivilegedMfaRecoveryAuthorization(
+                normalize(recoveryActor), HexFormat.of().formatHex(sha256(expected)));
     }
 
     private Instant recoveryExpiry() {
@@ -149,10 +179,9 @@ public class PrivilegedMfaProperties {
         }
     }
 
-    private static byte[] sha256(String candidate) {
+    private static byte[] sha256(byte[] material) {
         try {
-            return MessageDigest.getInstance("SHA-256")
-                    .digest(candidate.getBytes(StandardCharsets.UTF_8));
+            return MessageDigest.getInstance("SHA-256").digest(material);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable");
         }

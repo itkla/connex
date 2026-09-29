@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.mail.ResolvedMailConfig;
  * @param idempotentSubmission whether this exact connector guarantees deduplication of repeated keys
  * @param attemptTargetFingerprint non-secret identity of the exact attempted configuration
  * @param mailConfig exact SMTP configuration for this attempt, or null for non-SMTP providers
+ * @param configGeneration protected delivery-provider generation, or null for SMTP/webhook targets
  */
 public record ResolvedDeliveryProvider(
         String providerId,
@@ -30,13 +31,30 @@ public record ResolvedDeliveryProvider(
         DeliveryCredentials credentials,
         boolean idempotentSubmission,
         String attemptTargetFingerprint,
-        ResolvedMailConfig mailConfig) {
+        ResolvedMailConfig mailConfig,
+        Long configGeneration) {
 
     public ResolvedDeliveryProvider {
         Objects.requireNonNull(providerId, "providerId");
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(credentials, "credentials");
         Objects.requireNonNull(attemptTargetFingerprint, "attemptTargetFingerprint");
+    }
+
+    /** Builds a transport target without a delivery-provider row generation. */
+    public ResolvedDeliveryProvider(
+            String providerId,
+            DeliveryChannel channel,
+            int workspaceId,
+            String endpoint,
+            String fromAddress,
+            String fromName,
+            DeliveryCredentials credentials,
+            boolean idempotentSubmission,
+            String attemptTargetFingerprint,
+            ResolvedMailConfig mailConfig) {
+        this(providerId, channel, workspaceId, endpoint, fromAddress, fromName, credentials,
+                idempotentSubmission, attemptTargetFingerprint, mailConfig, null);
     }
 
     public ResolvedDeliveryProvider(

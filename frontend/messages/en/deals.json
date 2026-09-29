@@ -385,6 +385,8 @@
         "oneTimeTotal": "One-time",
         "recurringTotal": "Recurring",
         "grandTotal": "Total",
+        "totalsUnavailable": "Totals are unavailable while line currencies are being repaired.",
+        "currencyMismatch": "This line uses {lineCurrency}; the deal uses {dealCurrency}. Check the amounts before editing this line in {dealCurrency}, or remove it. No currency conversion is applied.",
         "saveFailed": "Couldn't save the line item"
     },
     "DealsDocuments": {

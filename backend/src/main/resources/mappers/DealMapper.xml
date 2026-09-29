@@ -1030,7 +1030,9 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="getDealByIdForUpdate" resultMap="DealResult">
+  <!-- flushCache is required: a caller may read this deal through getDealById before the lock
+       and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+  <select id="getDealByIdForUpdate" resultMap="DealResult" flushCache="true">
     SELECT <include refid="dealColumns"/>
     FROM deal FORCE INDEX (uq_deal_workspace_id)
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -1147,6 +1149,16 @@
         position = #{position},
         company_id = #{companyId},
         expected_close_date = #{expectedCloseDate},
+        closed_at = #{closedAt},
+        closed_reason = #{closedReason},
+        won = #{won}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateOutcome">
+    UPDATE deal
+    SET stage_id = #{stageId},
+        position = #{position},
         closed_at = #{closedAt},
         closed_reason = #{closedReason},
         won = #{won}
@@ -1313,13 +1325,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{dealId}
   </update>
 
-  <select id="getCollaborators" resultType="User">
-    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone, u.locale,
-           u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
+  <select id="getCollaboratorIds" resultType="int">
+    SELECT dc.user_id
     FROM deal_collaborator dc
-    JOIN app_user u ON u.id = dc.user_id
     WHERE dc.workspace_id = #{workspaceId} AND dc.deal_id = #{dealId}
-    ORDER BY u.display_name, u.id
+    ORDER BY dc.user_id
   </select>
 
   <delete id="clearCollaborators">
@@ -1364,23 +1374,5 @@
   <delete id="removeCollaboratorAnywhere">
     DELETE FROM deal_collaborator WHERE user_id = #{userId}
   </delete>
-
-  <select id="findMentionedRecords" resultMap="DealResult">
-    SELECT id, name
-    FROM deal
-    WHERE workspace_id = #{workspaceId}
-      AND name IS NOT NULL
-      AND name != ''
-      AND (TRIM(name) = TRIM(#{text})
-        OR (TRIM(name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
-          AND REGEXP_LIKE(
-            #{text},
-            CONCAT('(^|[^A-Za-z0-9_])', TRIM(name), '([^A-Za-z0-9_]|$)'),
-            'i'))
-        OR LENGTH(TRIM(name)) &gt; CHAR_LENGTH(TRIM(name)))
-      AND LOCATE(name, #{text}) &gt; 0
-    ORDER BY CHAR_LENGTH(name) DESC, id
-    LIMIT #{limit}
-  </select>
 
 </mapper>

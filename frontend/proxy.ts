@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { isProtectedPath } from '@/app/lib/protectedRoutes';
+import { browserFacingOrigin } from '@/app/lib/requestHost';
 import {
     applyFrontendContentSecurityPolicy,
     applyFrontendReportingEndpoints,
@@ -37,28 +38,11 @@ function createNonce(): string {
 }
 
 function browserFacingRequestOrigin(request: NextRequest): string {
-    const forwardedProtocol = request.headers.get('x-forwarded-proto');
-    const protocol = forwardedProtocol === 'http' || forwardedProtocol === 'https'
-        ? `${forwardedProtocol}:`
-        : request.nextUrl.protocol;
-    const host = request.headers.get('host');
-
-    if (host) {
-        try {
-            const url = new URL(`${protocol}//${host}`);
-            if (
-                !url.username
-                && !url.password
-                && url.pathname === '/'
-                && !url.search
-                && !url.hash
-            ) {
-                return url.origin;
-            }
-        } catch {}
-    }
-
-    return new URL(request.url).origin;
+    return browserFacingOrigin({
+        host: request.headers.get('host'),
+        forwardedProtocol: request.headers.get('x-forwarded-proto'),
+        fallbackProtocol: request.nextUrl.protocol,
+    }) ?? new URL(request.url).origin;
 }
 
 function isDocumentAcceptancePath(pathname: string): boolean {

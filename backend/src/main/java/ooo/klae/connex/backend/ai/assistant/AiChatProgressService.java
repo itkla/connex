@@ -6,12 +6,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
@@ -25,7 +24,6 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatProgressService {
-    private static final Pattern TURN_STEP = Pattern.compile("turn-([1-9][0-9]*)-step-([1-9][0-9]*)");
     private static final int MAX_PROGRESS_COUNT = 1_000;
     private static final String SCOPE = "scope";
     private static final String ANSWER = "answer";
@@ -48,15 +46,30 @@ public class AiChatProgressService {
         return project(turn.getWorkspaceId(), turn.getSessionId(), turn.getId(), turn.getStatus());
     }
 
-    /** Returns a safe milestone snapshot with an explicit terminal status for final persistence. */
+    /**
+     * Returns a safe milestone snapshot with an explicit terminal status for final persistence.
+     *
+     * <p>A {@code find_tools} row is skipped rather than mapped: the loop publishes no step frame
+     * for it, so projecting one would raise an {@code other} milestone that appeared live and
+     * vanished on reload. It reads nothing, so there is no coverage for it to claim.
+     *
+     * <p>The row limit is {@link AiChatAgentLoopService#MAX_TOOL_CALL_ROWS_PER_TURN} rather than the
+     * step ceiling, because a step is no longer guaranteed to write exactly one
+     * {@code ai_chat_tool_call} row. The step ceiling was an exact bound only while that equality
+     * held; a turn whose steps may each carry several calls would silently lose real milestones
+     * under it, while every suffixed key it wrote still parsed and looked healthy.
+     */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {
         Map<String, ProgressAccumulator> milestones = new LinkedHashMap<>();
         milestones.put(SCOPE, new ProgressAccumulator(
                 0, SCOPE, "queued".equals(turnStatus) ? "running" : "complete"));
-        String prefix = "turn-" + turnId + "-step-";
         for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
-                workspaceId, sessionId, prefix, AiChatAgentLoopService.HARD_MAX_STEPS)) {
+                workspaceId, sessionId, AiAssistantToolCallKey.turnPrefix(turnId),
+                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN)) {
+            if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
+                continue;
+            }
             String source = sourceForTool(toolCall.getToolName());
             int seq = step(toolCall.getIdempotencyKey(), turnId);
             ProgressAccumulator current = milestones.get(source);
@@ -129,22 +142,37 @@ public class AiChatProgressService {
         }
         try {
             JsonNode result = objectMapper.readTree(toolCall.getResultJson());
-            Integer count = switch (toolCall.getToolName()) {
-                case "search_records", "get_records" -> arraySize(result, "records");
-                case "get_record", "create_activity", "create_task", "create_note",
-                        "add_tag", "change_deal_stage", "assign_owner",
-                        "relationship_metrics" -> 1;
-                case "list_activities", "list_scope_activities" ->
-                        arraySize(result, "activities");
-                case "deal_attention" -> arraySize(result, "deals");
-                case "list_tasks" -> arraySize(result, "tasks");
-                case "find_schedule_conflicts" -> arraySize(result, "conflicts");
-                default -> null;
-            };
-            return new ProgressResult(count, containsTruncation(result));
+            return new ProgressResult(
+                    resultCount(toolCall.getToolName(), result), containsTruncation(result));
         } catch (JacksonException exception) {
             return ProgressResult.EMPTY;
         }
+    }
+
+    /**
+     * Counts what one executed tool call produced, for the milestone's viewer-safe count.
+     *
+     * <p>Every write tool counts as one completed action. An unmapped tool reports no count rather
+     * than a guessed one; {@code AiChatProgressServiceTest} fails when a declared write tool is left
+     * unmapped here or in {@link #sourceForTool}.
+     *
+     * @param tool internal tool key
+     * @param result the executed call's stored result
+     * @return the bounded count, or {@code null} when the tool reports none
+     */
+    static Integer resultCount(String tool, JsonNode result) {
+        return switch (tool == null ? "" : tool) {
+            case "search_records", "get_records" -> arraySize(result, "records");
+            case "get_record", "create_activity", "create_task", "create_note",
+                    "add_tag", "change_deal_stage", "assign_owner",
+                    "relationship_metrics" -> 1;
+            case "list_activities", "list_scope_activities" ->
+                    arraySize(result, "activities");
+            case "deal_attention" -> arraySize(result, "deals");
+            case "list_tasks" -> arraySize(result, "tasks");
+            case "find_schedule_conflicts" -> arraySize(result, "conflicts");
+            default -> null;
+        };
     }
 
     private static Integer arraySize(JsonNode node, String field) {
@@ -199,20 +227,25 @@ public class AiChatProgressService {
         return Set.copyOf(combined);
     }
 
+    /**
+     * Reads the model step a durable key names, or the placeholder that sorts it last.
+     *
+     * <p>A key {@link AiAssistantToolCallKey} does not accept — malformed, past the step ceiling,
+     * or claiming an ordinal past {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} — is one
+     * no step of this loop could have written, so it sorts last rather than being trusted for its
+     * step number; so does a key naming another turn. Without the optional call suffix a row
+     * written by a call that shared its step would land there too, sorting a real milestone to the
+     * very end of the turn.
+     *
+     * @param idempotencyKey the durable row's idempotency key
+     * @param turnId the turn the projection is reading
+     * @return the milestone's ordering step number
+     */
     private static int step(String idempotencyKey, int turnId) {
-        Matcher matcher = TURN_STEP.matcher(idempotencyKey == null ? "" : idempotencyKey);
-        if (!matcher.matches()) {
-            return AiChatAgentLoopService.HARD_MAX_STEPS;
-        }
-        try {
-            if (Integer.parseInt(matcher.group(1)) != turnId) {
-                return AiChatAgentLoopService.HARD_MAX_STEPS;
-            }
-            return Math.min(
-                    Integer.parseInt(matcher.group(2)), AiChatAgentLoopService.HARD_MAX_STEPS);
-        } catch (NumberFormatException exception) {
-            return AiChatAgentLoopService.HARD_MAX_STEPS;
-        }
+        return AiAssistantToolCallKey.parse(idempotencyKey)
+                .filter(key -> key.turnId() == turnId)
+                .map(AiAssistantToolCallKey::stepNumber)
+                .orElse(AiChatAgentLoopService.HARD_MAX_STEPS);
     }
 
     /**

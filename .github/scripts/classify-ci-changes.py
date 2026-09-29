@@ -48,8 +48,15 @@ DOCUMENTATION_BASENAMES = {
 
 FRONTEND_DEPENDENCY_FILES = {
     "frontend/.npmrc",
+    "frontend/.pnpmfile.cjs",
+    "frontend/.pnpmfile.mjs",
     "frontend/bun.lock",
     "frontend/bun.lockb",
+    "frontend/emails/.npmrc",
+    "frontend/emails/.pnpmfile.cjs",
+    "frontend/emails/.pnpmfile.mjs",
+    "frontend/emails/package.json",
+    "frontend/emails/pnpm-workspace.yaml",
     "frontend/npm-shrinkwrap.json",
     "frontend/package-lock.json",
     "frontend/package.json",
@@ -58,11 +65,29 @@ FRONTEND_DEPENDENCY_FILES = {
     "frontend/yarn.lock",
 }
 
+PNPM_PROJECT_BASENAMES = {
+    ".pnpmfile.cjs",
+    ".pnpmfile.mjs",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+}
+
 OCR_DEPENDENCY_FILES = {
     "ocr/pyproject.toml",
     "ocr/poetry.lock",
     "ocr/uv.lock",
 }
+
+BACKEND_API_LEDGERS = {
+    "docs/backend/api-surface.tsv",
+    "docs/backend/api-lifecycle.tsv",
+    "docs/backend/api-surface-policy.txt",
+}
+
+BACKEND_VALIDATED_FRONTEND_PREFIXES = (
+    "frontend/test/e2e/fixtures/ai-scripted/",
+)
 
 SECURITY_REGRESSION_DOCUMENTS = {
     "docs/DEPLOYMENT.md",
@@ -135,6 +160,12 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
         if path in SECURITY_REGRESSION_DOCUMENTS:
             categories["action_pins"] = True
 
+        if path in BACKEND_API_LEDGERS:
+            categories["backend"] = True
+
+        if pure_path.name in PNPM_PROJECT_BASENAMES:
+            categories["frontend_audit"] = True
+
         if is_documentation(path) or path in ROOT_METADATA:
             continue
 
@@ -167,6 +198,8 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             categories["cross_stack"] = True
             if path in FRONTEND_DEPENDENCY_FILES:
                 categories["frontend_audit"] = True
+            if path.startswith(BACKEND_VALIDATED_FRONTEND_PREFIXES):
+                categories["backend"] = True
             continue
 
         if path.startswith("ocr/"):

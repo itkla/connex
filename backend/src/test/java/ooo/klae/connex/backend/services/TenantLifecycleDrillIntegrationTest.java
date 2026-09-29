@@ -839,6 +839,14 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             attachment.setContentType(binary.contentType());
             attachment.setSize(binary.size());
             attachment.setUploadedBy(currentUser);
+            attachment.setScanState("clean");
+            attachment.setScanEngine("ClamAV");
+            attachment.setScanDatabaseVersion(scanned.report().databaseVersion());
+            attachment.setScanSignature(scanned.report().signature());
+            attachment.setScannedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+            attachment.setScanExpiresAt(java.time.LocalDateTime.ofInstant(
+                scanned.report().validUntil(), java.time.ZoneOffset.UTC));
+            attachment.setScanAttempts(1);
             attachmentMapper.insert(attachment);
             stored.set(binary);
         });

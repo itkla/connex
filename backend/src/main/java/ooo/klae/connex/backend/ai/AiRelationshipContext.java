@@ -123,11 +123,13 @@ public class AiRelationshipContext {
 
     /**
      * Appends a stakeholder's employment history and strongest network connections under their token.
+     * An interrupted worker stops after the employment load instead of loading connections.
      * @param prompt prompt under construction
      * @param personId stakeholder person id
      * @param personToken the stakeholder's issued mask token
      * @param context request-local masking context
      * @return ids of connection people whose names or notes were appended
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public List<Integer> appendStakeholderBackground(
             StringBuilder prompt, int personId, String personToken, MaskingContext context) {
@@ -139,12 +141,14 @@ public class AiRelationshipContext {
 
     /**
      * Appends stakeholder background and assigns positional ids to emitted person records.
+     * An interrupted worker stops after the employment load instead of loading connections.
      * @param prompt prompt under construction
      * @param personId stakeholder person id
      * @param personToken the stakeholder's issued mask token
      * @param context request-local masking context
      * @param sourceIds positional source-id provider
      * @return whether either optional background fetch failed
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public boolean appendStakeholderBackground(
             StringBuilder prompt,
@@ -173,6 +177,7 @@ public class AiRelationshipContext {
         appendSource(prompt, stakeholderSourceId);
         prompt.append('\n');
         FetchResult employment = employmentLines(personId, stakeholderSourceId, context);
+        AiCancellation.throwIfInterrupted();
         appendSubsection(prompt, "Employment", employment);
         FetchResult connections = connectionLines(
                 personId, context, sourceIds, connectionPersonIds);

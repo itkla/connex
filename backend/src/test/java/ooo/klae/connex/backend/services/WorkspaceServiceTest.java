@@ -3,10 +3,12 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 class WorkspaceServiceTest extends AbstractServiceTest {
@@ -29,6 +32,16 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void roleAuthorizationSeparatesCreationFromNonNullableMutation() throws Exception {
+        assertNotNull(WorkspaceService.class.getDeclaredMethod(
+            "lockRoleCreationAuthorization", int.class, int.class, Set.class));
+        assertNotNull(WorkspaceService.class.getDeclaredMethod(
+            "lockRoleMutationAuthorization", int.class, int.class, int.class, Set.class));
+        assertThrows(NoSuchMethodException.class, () -> WorkspaceService.class.getDeclaredMethod(
+            "lockRoleMutationAuthorization", int.class, int.class, Integer.class, Set.class));
+    }
 
     @Test
     void createWorkspace_makesCallerOwner() {
@@ -231,5 +244,21 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class, () -> workspaceService.updateIdentity(
             foreign.getId(), currentUser.getId(), "Probe", "UTC", "Foreign Workspace", null, 0L));
         assertEquals("Foreign Workspace", workspaceMapper.getActiveById(foreign.getId()).getName());
+    }
+
+    @Test
+    void lockedSnapshotReportsAuthorityOnlyForDeliberatelyResolvedUsers() {
+        WorkspaceService.LockedPermissionSnapshot snapshot =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(
+                    7, Set.of(Permission.AI_USE, Permission.DEAL_UPDATE),
+                    9, Set.of()),
+                Map.of(
+                    7, Set.of(Permission.AI_USE),
+                    9, Set.of()));
+
+        assertEquals(Set.of(Permission.AI_USE, Permission.DEAL_UPDATE), snapshot.effectiveFor(7));
+        assertThrows(IllegalArgumentException.class, () -> snapshot.effectiveFor(9));
+        assertThrows(IllegalArgumentException.class, () -> snapshot.effectiveFor(11));
     }
 }

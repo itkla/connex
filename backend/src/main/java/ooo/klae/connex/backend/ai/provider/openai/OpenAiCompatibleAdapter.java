@@ -5,10 +5,12 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -29,6 +31,7 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -38,8 +41,16 @@ import tools.jackson.databind.node.ObjectNode;
  * Adapter for customer-supplied OpenAI-compatible chat-completions endpoints. The adapter
  * revalidates the configured base URI, preserves its authority and path, translates Connex's
  * narrow provider request, and normalizes the response.
+ *
+ * <p>The profile negation is what lets the fixture-driven scripted adapter, described in
+ * {@code docs/backend/AI_SECURITY.md}, answer under the same {@code openai_compatible} id without
+ * weakening either closed provider-id set. {@code AiProviderRouter} refuses duplicate adapter ids, so exactly
+ * one of the two may exist at a time. Deleting this annotation does not enable a bypass — the
+ * scripted profile is unbootable outside dev and test — it makes that profile fail with an obscure
+ * duplicate-id error instead.
  */
 @Service
+@Profile("!" + ScriptedAiProviderProfile.NAME)
 @RequiredArgsConstructor
 public class OpenAiCompatibleAdapter implements AiProvider {
     private static final String PROVIDER_OPENAI_COMPATIBLE = "openai_compatible";
@@ -136,6 +147,24 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
     }
 
+    /**
+     * How many function calls this configured endpoint may emit in one assistant message.
+     *
+     * <p>Declared by an operator per endpoint rather than assumed, and for a behavioural reason
+     * rather than a syntactic one: {@code parallel_tool_calls} already travels on every request as
+     * {@code false}, so the field itself is known to be accepted. What an operator has to verify
+     * before declaring is that the endpoint emits several calls with distinct ids and its own
+     * replay signature per call, and that it accepts a replayed assistant message carrying several
+     * of them. An undeclared endpoint keeps the single-call behaviour this adapter has always had.
+     *
+     * @see AiModelCatalog#parallelReadCalls
+     */
+    @Override
+    public int parallelToolCallLimit(AiProviderTarget target) {
+        return AiModelCatalog.parallelReadCalls(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
+    }
+
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
@@ -156,7 +185,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             openAiCompatibleClient.complete(
                                     endpoint, target.allowInternalEndpoint(),
-                                    request.credentials(), requestBody, deadline));
+                                    request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -169,6 +199,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("OpenAI-compatible adapter failed");
         }
     }
@@ -204,7 +235,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                                             objectMapper,
                                             observer,
                                             appliedEnforcement,
-                                            request.reasoningMode())));
+                                            request.reasoningMode()),
+                                    request.providerAttemptExecutor()::beforeSend));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -216,6 +248,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("OpenAI-compatible adapter failed");
         }
     }
@@ -316,31 +349,58 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return objectMapper.writeValueAsString(root);
     }
 
+    /**
+     * Replays completed exchanges as the assistant and tool messages the endpoint expects.
+     *
+     * <p>One assistant message per run of exchanges sharing a step, carrying one {@code tool_calls}
+     * entry per exchange in that run and followed by their {@code tool} messages in the same order.
+     * A step that carried exactly one call therefore serializes to the single-call assistant message
+     * this adapter has always written, byte for byte; the request record already refused any
+     * grouping that would rebuild a message the model never sent.
+     *
+     * @param messages the request's message array, appended to in place
+     * @param nativeTools the native request whose exchanges are replayed, or null
+     */
     private static void addNativeHistory(
             ArrayNode messages,
             AiNativeToolRequest nativeTools) {
         if (nativeTools == null) {
             return;
         }
-        for (AiToolExchange exchange : nativeTools.exchanges()) {
+        List<AiToolExchange> exchanges = nativeTools.exchanges();
+        int index = 0;
+        while (index < exchanges.size()) {
+            int runEnd = index;
+            while (runEnd + 1 < exchanges.size()
+                    && exchanges.get(runEnd + 1).step() == exchanges.get(index).step()) {
+                runEnd++;
+            }
             ObjectNode assistant = messages.addObject();
             assistant.put("role", "assistant");
             assistant.putNull("content");
-            ObjectNode call = assistant.putArray("tool_calls").addObject();
-            call.put("id", exchange.call().id());
-            call.put("type", "function");
-            if (exchange.call().thoughtSignature() != null) {
-                call.putObject("extra_content")
-                        .putObject("google")
-                        .put("thought_signature", exchange.call().thoughtSignature());
+            ArrayNode toolCalls = assistant.putArray("tool_calls");
+            for (int position = index; position <= runEnd; position++) {
+                AiToolExchange exchange = exchanges.get(position);
+                ObjectNode call = toolCalls.addObject();
+                call.put("id", exchange.call().id());
+                call.put("type", "function");
+                if (exchange.call().thoughtSignature() != null) {
+                    call.putObject("extra_content")
+                            .putObject("google")
+                            .put("thought_signature", exchange.call().thoughtSignature());
+                }
+                ObjectNode function = call.putObject("function");
+                function.put("name", exchange.call().name());
+                function.put("arguments", exchange.call().arguments());
             }
-            ObjectNode function = call.putObject("function");
-            function.put("name", exchange.call().name());
-            function.put("arguments", exchange.call().arguments());
-            ObjectNode tool = messages.addObject();
-            tool.put("role", "tool");
-            tool.put("tool_call_id", exchange.call().id());
-            tool.put("content", exchange.maskedResult());
+            for (int position = index; position <= runEnd; position++) {
+                AiToolExchange exchange = exchanges.get(position);
+                ObjectNode tool = messages.addObject();
+                tool.put("role", "tool");
+                tool.put("tool_call_id", exchange.call().id());
+                tool.put("content", exchange.maskedResult());
+            }
+            index = runEnd + 1;
         }
         if (nativeTools.repairMessage() != null) {
             ObjectNode repair = messages.addObject();
@@ -366,7 +426,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             function.set("parameters", definition.parametersSchema());
         }
         root.put("tool_choice", nativeTools.finalOnly() ? "none" : "auto");
-        root.put("parallel_tool_calls", false);
+        root.put("parallel_tool_calls", nativeTools.maxParallelCalls() > 1);
     }
 
     private static AiStructuredOutputEnforcement requestedEnforcement(

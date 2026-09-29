@@ -2,6 +2,7 @@
   "name": "connex-emails",
   "version": "0.0.1",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "type": "module",
   "description": "React Email authoring workspace for Connex transactional emails. Renders to backend/src/main/resources/templates/emails/*.html.",
   "scripts": {

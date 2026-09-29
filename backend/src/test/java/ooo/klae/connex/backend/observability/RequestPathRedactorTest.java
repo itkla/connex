@@ -60,6 +60,17 @@ class RequestPathRedactorTest {
             RequestPathRedactor.redact("/{locale}/records/contacts/{id}"));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/api/ai/assistant/sessions",
+        "/api/ai/assistant/sessions/12",
+        "/api/ai/assistant/sessions/12/turns/34",
+        "/api/ai/assistant/skills"
+    })
+    void apiPathsAreNotPartOfTheFrontendRouteVocabulary(String path) {
+        assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, RequestPathRedactor.redact(path));
+    }
+
     @Test
     void toleratesNullWithoutInventingAReportedRoute() {
         assertNull(RequestPathRedactor.redact(null));

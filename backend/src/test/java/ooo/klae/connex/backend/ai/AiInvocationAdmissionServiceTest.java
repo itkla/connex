@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -15,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -257,6 +259,46 @@ class AiInvocationAdmissionServiceTest {
         }
     }
 
+    /**
+     * A timed-out generation interrupts its worker; a worker waiting as a follower must stop
+     * waiting instead of holding the worker until the leader or the follower deadline resolves,
+     * and must not fail the leader's flight, which other callers may still be following.
+     */
+    @Test
+    void interruptedFollowerStopsWaitingWithoutFailingTheLeaderFlight() throws Exception {
+        AiInvocationAdmissionService service = service();
+        CacheIdentity identity = identity(7, 29);
+        AtomicReference<Throwable> thrown = new AtomicReference<>();
+        AtomicReference<Boolean> interruptRestored = new AtomicReference<>();
+
+        try (Admission leader = service.acquire(identity, "hash", false);
+                Admission follower = service.acquire(identity, "hash", false)) {
+            assertEquals(Decision.FOLLOWER, follower.decision());
+            Thread waiter = new Thread(() -> {
+                try {
+                    follower.awaitLeader();
+                } catch (RuntimeException exception) {
+                    thrown.set(exception);
+                    interruptRestored.set(Thread.currentThread().isInterrupted());
+                }
+            });
+            waiter.start();
+            waiter.interrupt();
+            waiter.join(TimeUnit.SECONDS.toMillis(10));
+
+            assertFalse(waiter.isAlive());
+            assertInstanceOf(CancellationException.class, thrown.get());
+            assertEquals(Boolean.TRUE, interruptRestored.get());
+            assertEquals(1, service.activeFlightCount());
+            try (Admission joined = service.acquire(identity, "hash", false)) {
+                assertEquals(Decision.FOLLOWER, joined.decision());
+                leader.commitLeaderInvocation();
+                leader.completeLeader(LeaderOutcome.CACHE_READY);
+                assertEquals(LeaderOutcome.CACHE_READY, joined.awaitLeader());
+            }
+        }
+    }
+
     @Test
     void fullLiveQuotaStateRejectsAnUnseenOrganization() {
         properties.setInvocationQuotaMaxOrganizations(1);
@@ -342,6 +384,72 @@ class AiInvocationAdmissionServiceTest {
     }
 
     @Test
+    void precheckReservesNothingSoTheCheckedCallerStillLeads() {
+        properties.setInvocationQuotaAttemptsPerOrg(1);
+        properties.setInvocationRefreshMaxIdentities(1);
+        AiInvocationAdmissionService service = service();
+        CacheIdentity identity = identity(7, 29);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals(Rejection.NONE, service.precheck(identity, true));
+            assertEquals(Rejection.NONE, service.precheck(identity(7, 30 + attempt), true));
+            assertEquals(Rejection.NONE, service.precheck(identity, false));
+        }
+        assertEquals(0, service.quotaStateSize());
+        assertEquals(0, service.refreshStateSize());
+        assertEquals(0, service.activeFlightCount());
+
+        try (Admission admitted = service.acquire(identity, "hash", true)) {
+            assertEquals(Decision.LEADER, admitted.decision());
+            admitted.commitLeaderInvocation();
+            admitted.completeLeader(LeaderOutcome.CACHE_READY);
+        }
+    }
+
+    @Test
+    void precheckReportsTheRejectionAcquireReturnsForEveryLeaderRule() {
+        properties.setInvocationQuotaAttemptsPerOrg(2);
+        properties.setInvocationMaxActiveFlights(2);
+        properties.setInvocationQuotaMaxOrganizations(1);
+        properties.setInvocationRefreshMaxIdentities(1);
+        AiInvocationAdmissionService service = service();
+        CacheIdentity refreshed = identity(7, 29);
+
+        assertPrecheckMatchesAcquire(service, refreshed, true, Rejection.NONE);
+        assertPrecheckMatchesAcquire(service, refreshed, true, Rejection.REFRESH_THROTTLE);
+        assertPrecheckMatchesAcquire(service, identity(7, 35), true, Rejection.CAPACITY);
+        assertPrecheckMatchesAcquire(service, refreshed, false, Rejection.NONE);
+        assertPrecheckMatchesAcquire(service, identity(7, 30), false, Rejection.ORGANIZATION_QUOTA);
+        currentOrg.set(12);
+        assertPrecheckMatchesAcquire(service, identity(8, 31), false, Rejection.CAPACITY);
+        currentOrg.set(11);
+        clock.advance(Duration.ofMinutes(11));
+        try (Admission first = service.acquire(identity(7, 32), "hash", false);
+                Admission second = service.acquire(identity(7, 33), "hash", false)) {
+            assertEquals(Decision.LEADER, first.decision());
+            assertEquals(Decision.LEADER, second.decision());
+            assertPrecheckMatchesAcquire(service, identity(7, 34), false, Rejection.CAPACITY);
+        }
+    }
+
+    @Test
+    void precheckAdmitsACallerThatMayJoinAnActiveFlightDespiteExhaustedQuota() {
+        properties.setInvocationQuotaAttemptsPerOrg(1);
+        AiInvocationAdmissionService service = service();
+        CacheIdentity inFlight = identity(7, 29);
+
+        try (Admission leader = service.acquire(inFlight, "hash", true)) {
+            assertEquals(Decision.LEADER, leader.decision());
+            assertEquals(Rejection.ORGANIZATION_QUOTA, service.precheck(identity(7, 30), false));
+            assertEquals(Rejection.NONE, service.precheck(inFlight, false));
+            assertEquals(Rejection.NONE, service.precheck(inFlight, true));
+            try (Admission follower = service.acquire(inFlight, "hash", true)) {
+                assertEquals(Decision.FOLLOWER, follower.decision());
+            }
+        }
+    }
+
+    @Test
     void cacheIdentitySortsSubjectsAndNormalizesLanguage() {
         CacheIdentity identity = CacheIdentity.forPair(
                 7, AiFeature.INTRO_RATIONALE, 42, 9, Locale.JAPAN);
@@ -356,6 +464,24 @@ class AiInvocationAdmissionServiceTest {
 
     private AiInvocationAdmissionService service() {
         return new AiInvocationAdmissionService(properties, workspaceService, clock);
+    }
+
+    private static void assertPrecheckMatchesAcquire(
+            AiInvocationAdmissionService service,
+            CacheIdentity identity,
+            boolean refresh,
+            Rejection expected) {
+        assertEquals(expected, service.precheck(identity, refresh));
+        try (Admission admission = service.acquire(identity, "hash", refresh)) {
+            assertEquals(expected, admission.rejection());
+            assertEquals(
+                    expected == Rejection.NONE ? Decision.LEADER : Decision.RATE_LIMITED,
+                    admission.decision());
+            if (admission.decision() == Decision.LEADER) {
+                admission.commitLeaderInvocation();
+                admission.completeLeader(LeaderOutcome.FAILED);
+            }
+        }
     }
 
     private static CacheIdentity identity(int workspaceId, int subjectId) {

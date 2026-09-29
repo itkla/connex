@@ -13,11 +13,14 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
@@ -74,6 +77,7 @@ import ooo.klae.connex.backend.dto.CampaignAudienceExportReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignAudienceExportRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -99,6 +103,8 @@ class AudienceExportServiceTest {
     private static final long CONFIG_VERSION = 4L;
     private static final Set<Permission> EXPORT_PERMISSIONS = Set.of(
             Permission.CAMPAIGN_MANAGE, Permission.CONSENT_MANAGE);
+
+    private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
 
     @Mock private CampaignMapper campaignMapper;
     @Mock private CampaignAudienceExportMapper exportMapper;
@@ -131,7 +137,8 @@ class AudienceExportServiceTest {
     }
 
     private AudienceExportService service(LongSupplier nanoTimeSource) {
-        return new AudienceExportService(campaignMapper, exportMapper, personMapper,
+        return new AudienceExportService(sessionSecurityService,
+                campaignMapper, exportMapper, personMapper,
                 audienceEligibilityService, connectorConfigService, deliveryProviderRouter,
                 deliveryProperties, capabilityRegistry, workspaceService, tenantContext, auditService,
                 transactionManager, objectMapper, validator, meterRegistry, nanoTimeSource);
@@ -187,6 +194,17 @@ class AudienceExportServiceTest {
             return 1;
         });
         return snapshot;
+    }
+
+    @Test
+    void creatingExportRequiresStepUpBeforeTransactionsOrProviderWork() {
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireExportStepUp();
+        assertThrows(RecentAuthenticationRequiredException.class,
+                () -> service().createExport(CAMPAIGN, request()));
+        verify(auditService).recordExportStepUpRefused();
+        verifyNoInteractions(campaignMapper, exportMapper, personMapper, transactionManager,
+                connectorConfigService, deliveryProviderRouter);
     }
 
     @Test
@@ -470,7 +488,9 @@ class AudienceExportServiceTest {
     void transactionCMasksCountsWhenConsentPermissionWasRevokedAfterThePush() {
         primeCreateExport();
         when(workspaceService.lockedMemberPermissionsFor(WORKSPACE, ACTOR))
-                .thenReturn(EXPORT_PERMISSIONS, EXPORT_PERMISSIONS, Set.of(Permission.CAMPAIGN_MANAGE));
+                .thenReturn(EXPORT_PERMISSIONS)
+                .thenReturn(EXPORT_PERMISSIONS)
+                .thenReturn(Set.of(Permission.CAMPAIGN_MANAGE));
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1, 2)));

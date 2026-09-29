@@ -20,9 +20,10 @@ import java.util.Map;
 
 /**
  * Periodically dispatches queued campaign sends. Mirrors the rule scheduler: it fans out over the
- * active catalogs, pins each catalog, enumerates the workspaces with queued sends inside it, and asks
- * the dispatch service to drain each one — with per-catalog and per-workspace failure isolation so a
- * single bad placement never starves the fleet. The claim-first dispatch makes a frequent tick safe.
+ * active catalogs, pins each catalog, enumerates the workspaces with queued sends or abandoned
+ * delivery attempts inside it, and asks the dispatch service to drain each one — with per-catalog and
+ * per-workspace failure isolation so a single bad placement never starves the fleet. The claim-first
+ * dispatch makes a frequent tick safe.
  * Toggle with {@code connex.delivery.dispatch-enabled} (default false, so tests never send).
  */
 @Component
@@ -37,6 +38,7 @@ public class CampaignSendWorker {
     private final CampaignDispatchService campaignDispatchService;
     private final JobRunRecorder jobRunRecorder;
     private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final DeliveryProperties deliveryProperties;
 
     @Value("${connex.delivery.dispatch-enabled:false}")
     private boolean dispatchEnabled;
@@ -61,7 +63,8 @@ public class CampaignSendWorker {
     private void dispatchCatalog(String catalog) {
         for (int workspaceId : tenantWorkScope.withCatalog(
                 catalog, () -> campaignSendMapper.workspaceIdsWithQueuedSends(
-                    triggeredSendGate.enabled()))) {
+                    triggeredSendGate.enabled(),
+                    deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L))) {
             JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {

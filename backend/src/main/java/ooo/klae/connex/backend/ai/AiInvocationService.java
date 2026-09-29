@@ -2,8 +2,9 @@ package ooo.klae.connex.backend.ai;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,7 +14,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -105,6 +106,15 @@ public class AiInvocationService {
 
     /**
      * Resolves adapter-declared capabilities for the current organization provider configuration.
+     *
+     * <p>The per-step call ceiling is read fail-closed rather than trusted. It is the one
+     * capability an adapter answers with a number instead of a closed type, and the safe direction
+     * is unambiguous — an adapter answering anything outside 1..{@link
+     * AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} gets the single-call behaviour every
+     * undeclared endpoint has, never the ceiling — so a future adapter's arithmetic mistake neither
+     * fails every AI feature in the organization at the capability seam nor enables a batch on a
+     * target nobody probed.
+     *
      * @param feature feature whose provider gate must be satisfied
      * @return exact configured-target capabilities without performing provider egress
      */
@@ -122,7 +132,20 @@ public class AiInvocationService {
                 adapter.maxOutputTokens(resolved.target()),
                 adapter.toolCallingCapability(resolved.target()),
                 adapter.nativeToolReasoningCapability(resolved.target()),
-                adapter.supportsStreaming(resolved.target()));
+                adapter.supportsStreaming(resolved.target()),
+                currentParallelToolCallLimit(adapter, resolved.target()));
+    }
+
+    /**
+     * The per-step call ceiling one adapter answers for one target, read fail-closed.
+     *
+     * @param adapter the adapter serving the target
+     * @param target the configured provider target
+     * @return the adapter's answer when it lies within the declaration ceiling, otherwise 1
+     */
+    private static int currentParallelToolCallLimit(AiProvider adapter, AiProviderTarget target) {
+        return AiProviderCapabilities.parallelToolCallsOrSingle(
+                adapter.parallelToolCallLimit(target));
     }
 
     /**
@@ -533,56 +556,71 @@ public class AiInvocationService {
         ReasoningNormalization reasoning = captured.ambiguous()
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
-        if (result.toolCalls().size() != 1) {
+        List<AiToolCall> calls = result.toolCalls();
+        if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_multiple_calls");
+                    raw, invocation, result, reasoning, "native_multiple_calls",
+                    refusedBatchDemaskWarnings(calls, invocation.context()));
         }
         if (captured.ambiguous()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
             return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_call_content");
+                    raw, invocation, result, reasoning, "native_call_content",
+                    refusedBatchDemaskWarnings(calls, invocation.context()));
         }
         ReasoningNormalization narration = normalizeNarration(captured.answer(), invocation);
-        AiToolCall call = result.toolCalls().getFirst();
-        if (nativeTools.exchanges().stream()
-                .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_duplicate_call_id");
+        Set<String> seenIds = new HashSet<>();
+        for (AiToolCall call : calls) {
+            if (!seenIds.add(call.id())
+                    || nativeTools.exchanges().stream()
+                            .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_duplicate_call_id",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
+            }
         }
-        JsonNode arguments;
-        try {
-            arguments = objectMapper.readTree(call.arguments());
-        } catch (JacksonException | IllegalArgumentException exception) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_arguments_not_object");
+        List<JsonNode> callArguments = new ArrayList<>(calls.size());
+        int warnings = 0;
+        for (AiToolCall call : calls) {
+            JsonNode arguments;
+            try {
+                arguments = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_arguments_not_object",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
+            }
+            if (arguments == null || !arguments.isObject()) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_arguments_not_object",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
+            }
+            ObjectNode step = objectMapper.createObjectNode();
+            ObjectNode tool = step.putObject("tool");
+            tool.put("name", call.name());
+            tool.set("args", arguments);
+            step.putNull("final");
+            String rejectionReason = toolGuard.rejectionReason(step);
+            if (rejectionReason != null) {
+                return malformedNativeTool(
+                        raw,
+                        invocation,
+                        result,
+                        reasoning,
+                        "tool_name".equals(rejectionReason)
+                                ? "native_unknown_tool"
+                                : "native_invalid_arguments",
+                        refusedBatchDemaskWarnings(calls, invocation.context()));
+            }
+            warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
+            callArguments.add(arguments);
         }
-        if (arguments == null || !arguments.isObject()) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_arguments_not_object");
-        }
-        ObjectNode step = objectMapper.createObjectNode();
-        ObjectNode tool = step.putObject("tool");
-        tool.put("name", call.name());
-        tool.set("args", arguments);
-        step.putNull("final");
-        String rejectionReason = toolGuard.rejectionReason(step);
-        if (rejectionReason != null) {
-            return malformedNativeTool(
-                    raw,
-                    invocation,
-                    result,
-                    reasoning,
-                    "tool_name".equals(rejectionReason)
-                            ? "native_unknown_tool"
-                            : "native_invalid_arguments");
-        }
-        int warnings = demaskTree(arguments, invocation.context());
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
         return new AiNativeToolCompletion.Tool<>(
-                call,
-                arguments,
+                calls,
+                callArguments,
                 warnings,
                 result.inputTokens(),
                 result.outputTokens(),
@@ -591,23 +629,91 @@ public class AiInvocationService {
                 narration.rejectionReason() == null ? narration.content() : Optional.empty());
     }
 
+    /**
+     * Sums one response's per-call demask warnings without letting the total wrap to zero.
+     *
+     * <p>A non-zero total fails the whole turn as malformed output, so a wrapped sum would be a
+     * silent pass for the exact response the count exists to refuse.
+     *
+     * @param total warnings counted so far
+     * @param addition one call's warnings
+     * @return the bounded sum
+     */
+    private static int saturatedSum(int total, int addition) {
+        int sum = total + addition;
+        return sum < 0 ? Integer.MAX_VALUE : sum;
+    }
+
+    /**
+     * Counts the demask warnings of a batched response the boundary is about to refuse.
+     *
+     * <p>Every envelope refusal is repairable and an invented placeholder is not, so for a response
+     * carrying several calls the count is taken before the refusal is decided rather than skipped
+     * because of it — whether the response is refused for its size, for its content, for a shared
+     * identifier, or because one sibling's arguments failed to parse or failed the raw step guard.
+     * Otherwise a guard-rejected sibling would earn the whole batch a repair while another call in
+     * it had invented a placeholder, which that call alone would never have earned. Every call whose
+     * arguments parse as a JSON object is demasked exactly as an admitted call is, on a fresh parse
+     * so the admitted path's own arguments are untouched; a call whose arguments do not parse is
+     * left uncounted, as the admitted path refuses such arguments before demasking them. The raw
+     * step guard is deliberately not consulted: a guard rejection must not decide which refusal the
+     * response gets.
+     *
+     * <p>A response carrying one call keeps the order it has always had: its own guard rejection is
+     * the refusal, and it has no sibling whose placeholder that rejection could hide.
+     *
+     * @param calls every call the refused response carried
+     * @param context the invocation's request-local masking context
+     * @return the saturated sum of every object-shaped call's demask warnings, or 0 for one call
+     */
+    private int refusedBatchDemaskWarnings(List<AiToolCall> calls, MaskingContext context) {
+        if (calls.size() <= 1) {
+            return 0;
+        }
+        int warnings = 0;
+        for (AiToolCall call : calls) {
+            JsonNode arguments;
+            try {
+                arguments = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                continue;
+            }
+            if (arguments != null && arguments.isObject()) {
+                warnings = saturatedSum(warnings, demaskTree(arguments, context));
+            }
+        }
+        return warnings;
+    }
+
     private <T> AiNativeToolCompletion<T> malformedNativeTool(
             RawInvocation raw,
             AiInvocation invocation,
             AiCompletionResult result,
             ReasoningNormalization reasoning,
             String repairRule) {
+        return malformedNativeTool(raw, invocation, result, reasoning, repairRule, 0);
+    }
+
+    private <T> AiNativeToolCompletion<T> malformedNativeTool(
+            RawInvocation raw,
+            AiInvocation invocation,
+            AiCompletionResult result,
+            ReasoningNormalization reasoning,
+            String repairRule,
+            int demaskWarnings) {
         raw.close();
         emitAudit(
                 raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                result.stopReason(), null, null, true, AiStructuredOutcome.REASON_MALFORMED,
+                result.stopReason(), demaskWarnings == 0 ? null : demaskWarnings, null, true,
+                AiStructuredOutcome.REASON_MALFORMED,
                 new MalformedDiagnostic("native_tool_call", result.text().length(), false));
         return new AiNativeToolCompletion.Malformed<>(
                 result.inputTokens(),
                 result.outputTokens(),
                 result.stopReason(),
                 reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty(),
-                repairRule);
+                repairRule,
+                demaskWarnings);
     }
 
     private <T> AiStructuredRepairAttempt<T> malformed(
@@ -742,6 +848,14 @@ public class AiInvocationService {
                     null, null, null, null, "provider_capability", structured, null);
             throw new AiProviderException("AI provider does not support native function tools");
         }
+        if (nativeTools != null && nativeTools.maxParallelCalls() > 1
+                && nativeTools.maxParallelCalls()
+                        > currentParallelToolCallLimit(adapter, resolved.target())) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException(
+                    "AI provider parallel tool-call bound is not declared for this target");
+        }
         AiReasoningMode reasoningMode = invocation.reasoningRequested()
                 ? nativeTools == null
                         ? adapter.reasoningCapability(resolved.target())
@@ -759,6 +873,7 @@ public class AiInvocationService {
         AiInvocation effectiveInvocation = invocationOutputTokensClamped
                 ? withMaxTokens(invocation, providerMaxOutputTokens)
                 : invocation;
+        registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
         try {
@@ -780,7 +895,7 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeak(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -811,7 +926,8 @@ public class AiInvocationService {
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, budgetLease, outputTokensClamped);
+                serializedPrompt, budgetLease, outputTokensClamped,
+                nativeTools == null ? 1 : nativeTools.maxParallelCalls());
         try {
             if (!effectiveInvocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
@@ -1001,6 +1117,36 @@ public class AiInvocationService {
                         normalized.rejectionReason() == null
                                 ? "narration_shape"
                                 : normalized.rejectionReason()));
+    }
+
+    /**
+     * Registers the server-authored text this method appends to the envelope after the prompt was
+     * assembled.
+     *
+     * <p>{@link PromptAssembly} registers the system prompt a feature wrote, but the tagged
+     * reasoning directive and the native tool catalogue are attached here, later, and would
+     * otherwise be scanned as tenant text nobody vouched for — a record named after a word only
+     * those carry ({@code Thinking}, a tool description's {@code Pipeline}) would refuse every
+     * request that seeded it. Both are static, provider-neutral and contain no tenant data.
+     *
+     * @param ctx request-local masking context
+     * @param reasoningMode resolved provider reasoning protocol
+     * @param nativeTools resolved native tool request, or {@code null}
+     */
+    private static void registerEnvelopeAuthoredText(
+            MaskingContext ctx,
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools) {
+        if (reasoningMode == AiReasoningMode.TAGGED) {
+            ctx.addTrustedStaticText(TAGGED_REASONING_INSTRUCTION);
+        }
+        if (nativeTools == null) {
+            return;
+        }
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            ctx.addTrustedStaticText(definition.name());
+            ctx.addTrustedStaticText(definition.description());
+        }
     }
 
     private String serializeProviderInput(
@@ -1263,8 +1409,9 @@ public class AiInvocationService {
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
         private final boolean outputTokensClamped;
+        private final int maxParallelCalls;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
-        private AiRequestDeadline providerDeadline;
+        private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
 
@@ -1280,7 +1427,8 @@ public class AiInvocationService {
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
                 AiOrganizationBudgetCoordinator.Lease budgetLease,
-                boolean outputTokensClamped) {
+                boolean outputTokensClamped,
+                int maxParallelCalls) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.userId = userId;
@@ -1293,27 +1441,13 @@ public class AiInvocationService {
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
+            this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
+            this.maxParallelCalls = maxParallelCalls;
         }
 
         @Override
         public synchronized AiRequestDeadline deadline(long requestTimeoutMillis) {
-            if (providerDeadline != null) {
-                return providerDeadline;
-            }
-            long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(requestTimeoutMillis);
-            if (timeoutNanos <= 0) {
-                throw new IllegalStateException("AI request timeout must be positive");
-            }
-            Instant callerDeadline = invocation.callerDeadline();
-            if (callerDeadline != null) {
-                Duration remaining = Duration.between(clock.instant(), callerDeadline);
-                if (remaining.isZero() || remaining.isNegative()) {
-                    throw new AiProviderCallerDeadlineExceededException();
-                }
-                timeoutNanos = Math.min(timeoutNanos, remaining.toNanos());
-            }
-            providerDeadline = AiRequestDeadline.afterNanos(timeoutNanos);
             return providerDeadline;
         }
 
@@ -1395,6 +1529,12 @@ public class AiInvocationService {
         }
 
         @Override
+        public synchronized void beforeSend() {
+            checkpoint();
+            Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
+        }
+
+        @Override
         public void checkpoint() {
             aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                 requireCurrentProviderSnapshot();
@@ -1417,13 +1557,18 @@ public class AiInvocationService {
                 throw new AiProviderException(
                         "AI provider native function capability changed before egress");
             }
+            if (maxParallelCalls > 1 && maxParallelCalls > currentParallelToolCallLimit(
+                    aiProviderRouter.adapterFor(current.provider()), current.target())) {
+                throw new AiProviderException(
+                        "AI provider parallel tool-call bound changed before egress");
+            }
         }
 
         private void reserveFallbackBudget() {
             closeBudget();
             try {
                 budgetLease = budgetCoordinator.reserve(
-                        orgId, invocation, serializedPrompt);
+                        orgId, invocation, serializedPrompt, providerDeadline);
             } catch (AiBudgetExhaustedException exception) {
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
@@ -1435,18 +1580,18 @@ public class AiInvocationService {
 
         private synchronized void settleBudget(int inputTokens, int outputTokens) {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease == null) {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            budgetLease = null;
         }
 
         private synchronized void closeBudget() {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease != null) {
                 activeLease.close();
+                budgetLease = null;
             }
         }
 

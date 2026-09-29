@@ -129,7 +129,7 @@ export default async function DealPage({ params }: DealPageProps) {
             getLocale(),
             loadRecord(() => getDealById(id, init)),
             getActivitiesForDeal(id, init).catch(() => [] as Activity[]),
-            getNotesForDeal(id, init).catch(() => [] as Note[]),
+            getNotesForDeal(id, {}, init).catch(() => [] as Note[]),
             getTasksForDeal(id, init).catch(() => [] as Task[]),
             getTagsForDeal(id, init).catch(() => [] as Tag[]),
             getDealPeople(id, init).catch(() => [] as DealPerson[]),
@@ -593,6 +593,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                     tasks={tasks}
                                     activities={activities}
                                     notes={notes}
+                                    noteTarget={{ type: "deal", id: deal.id }}
                                     users={relatedUsers}
                                     persons={personSeeds}
                                     deals={dealSeeds}

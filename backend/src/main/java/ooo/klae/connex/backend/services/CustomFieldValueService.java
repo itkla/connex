@@ -243,7 +243,7 @@ public class CustomFieldValueService {
             throw new BadRequestException("'" + def.getLabel() + "' must be a number");
         }
         if (number.scale() > MAX_NUMERIC_DIGITS
-            || number.precision() - number.scale() > MAX_NUMERIC_DIGITS - NUMERIC_SCALE) {
+            || (long) number.precision() - number.scale() > MAX_NUMERIC_DIGITS - NUMERIC_SCALE) {
             throw new BadRequestException("'" + def.getLabel() + "' is out of range");
         }
         return number.setScale(NUMERIC_SCALE, RoundingMode.HALF_UP);

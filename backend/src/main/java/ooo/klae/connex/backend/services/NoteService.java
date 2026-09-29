@@ -68,9 +68,7 @@ public class NoteService {
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public List<Note> getAllNotes() {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotes(workspaceId, currentUserId));
+        return getNotesPage(25, 0);
     }
 
     public List<Note> getNotesPage(int limit, int offset) {
@@ -124,10 +122,22 @@ public class NoteService {
         return noteMapper.countVisibleNotes(workspaceId, currentUserId, query, authorIds);
     }
 
+    /** Returns a bounded filtered page with previews derived only after reader-specific redaction. */
+    public List<Note> getFilteredNotesPage(
+            Integer personId, Integer dealId, Integer authorId, int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (personId == null && dealId != null && !dealMapper.exists(workspaceId, dealId)) {
+            throw new ResourceNotFoundException("Deal not found");
+        }
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesFilteredPage(
+            workspaceId, workspaceService.getCurrentUserId(), personId, dealId, authorId, limit, offset));
+    }
+
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, currentUserId));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
+            workspaceId, personId, currentUserId, 25, 0));
     }
 
     public List<Note> getNotesByDealId(int dealId) {
@@ -136,13 +146,15 @@ public class NoteService {
             throw new ResourceNotFoundException("Deal not found");
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, currentUserId));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByDealId(
+            workspaceId, dealId, currentUserId, 25, 0));
     }
 
     public List<Note> getNotesByAuthorId(int authorId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByAuthorId(
+            workspaceId, authorId, currentUserId, 25, 0));
     }
 
     /**
@@ -151,12 +163,17 @@ public class NoteService {
      * private note never surfaces as a backlink to someone who cannot read it.
      */
     public List<Note> getNotesReferencing(String refType, int refId) {
+        return getNotesReferencing(refType, refId, 25, 0);
+    }
+
+    /** Returns bounded backlink previews after reader-specific reference redaction. */
+    public List<Note> getNotesReferencing(String refType, int refId, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
         String canonicalRefType = referenceService.requireVisibleTarget(
             workspaceId, refType, refId, currentUserId);
-        return referenceService.hydrate(workspaceId, noteMapper.getNotesReferencing(
-            workspaceId, canonicalRefType, refId, currentUserId));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getNotesReferencing(
+            workspaceId, canonicalRefType, refId, currentUserId, limit, offset));
     }
 
     public Note getNoteById(int id) {
@@ -194,14 +211,19 @@ public class NoteService {
     public Note update(int id, Note note) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
-        Note before = noteMapper.getVisibleNoteById(workspaceId, id, actor.getId());
+        WorkspaceService.LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(
+            workspaceId, Map.of(actor.getId(), Set.of(Permission.NOTE_UPDATE)));
+        Note before = noteMapper.getVisibleNoteByIdForUpdate(workspaceId, id, actor.getId());
+        authority.revalidate();
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         note.setId(id);
         note.setWorkspaceId(workspaceId);
         note.setAuthor(before.getAuthor());
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
         requireLinkedRecordsVisible(workspaceId, note);
-        noteMapper.update(note);
+        if (noteMapper.update(note) != 1) {
+            throw new ResourceNotFoundException("Note not found with id: " + id);
+        }
         auditService.record("note.update", "note", id, auditLabel(note),
             "Updated note",
             auditService.diff(before, note, auditFields(note.getVisibility())));
@@ -217,9 +239,14 @@ public class NoteService {
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
-        Note before = noteMapper.getVisibleNoteById(workspaceId, id, currentUserId);
+        WorkspaceService.LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(
+            workspaceId, Map.of(currentUserId, Set.of(Permission.NOTE_DELETE)));
+        Note before = noteMapper.getVisibleNoteByIdForUpdate(workspaceId, id, currentUserId);
+        authority.revalidate();
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
-        noteMapper.delete(workspaceId, id);
+        if (noteMapper.delete(workspaceId, id) != 1) {
+            throw new ResourceNotFoundException("Note not found with id: " + id);
+        }
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
         referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_NOTE, id);
         auditService.record("note.delete", "note", id, auditLabel(before),

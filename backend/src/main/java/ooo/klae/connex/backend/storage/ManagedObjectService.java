@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.storage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.DigestInputStream;
@@ -49,10 +51,19 @@ import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 @Service
 @Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class ManagedObjectService implements ApplicationRunner {
-    private static final String ATTACHMENT_URL_PREFIX = "/api/attachments/content/";
+    public static final String ATTACHMENT_URL_PREFIX = "/api/attachments/content/";
     private static final Pattern TOKEN = Pattern.compile(
         "^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\\.([a-z0-9]{1,10}))?$"
     );
+
+    @Autowired
+    private ooo.klae.connex.backend.mappers.AttachmentScanMapper attachmentScanMapper;
+
+    @Autowired
+    private ooo.klae.connex.backend.storage.malware.MalwareScanProperties malwareScanProperties;
+
+    @Autowired
+    private ooo.klae.connex.backend.config.DeploymentProperties deploymentProperties;
 
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
@@ -190,6 +201,14 @@ public class ManagedObjectService implements ApplicationRunner {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredBinary storeInspectedAttachment(int workspaceId, ScannedUpload scanned) {
+        return storeInspectedAttachment(workspaceId, scanned, () -> {});
+    }
+
+    /** Acquires caller authority after write admission and before cleanup/quota locks or provider writes. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeInspectedAttachment(
+            int workspaceId, ScannedUpload scanned, Runnable authorize) {
+        Objects.requireNonNull(authorize, "authorize");
         Objects.requireNonNull(scanned, "scanned");
         InspectedUpload upload = scanned.upload();
         Objects.requireNonNull(upload, "upload");
@@ -203,7 +222,7 @@ public class ManagedObjectService implements ApplicationRunner {
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
-        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), checksum);
+        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), checksum, authorize);
         return new StoredBinary(
             url, upload.fileName(), upload.contentType(), upload.contentLength());
     }
@@ -319,15 +338,14 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     /**
-     * Stores one legacy attachment without malware scanning during the slice-1 migration window.
-     * Slice 2 backfills these bytes; this is the sole permitted unscanned attachment-byte writer.
+     * Stores one legacy attachment only after a clean malware scan.
      */
     StoredBinary storeMigratedAttachment(
             int workspaceId,
             int attachmentId,
             String legacyUrl,
-            InspectedUpload upload) {
-        Objects.requireNonNull(upload, "upload");
+            ScannedUpload scanned) {
+        InspectedUpload upload = Objects.requireNonNull(scanned, "scanned").upload();
         uploadPolicy.validateLength(upload.contentLength());
         byte[] content = upload.content();
         byte[] checksum = upload.sha256();
@@ -455,6 +473,7 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
+        requireCleanAttachment(workspaceId, attachment.getUrl());
         String token = requireManagedToken(attachment.getUrl(), ATTACHMENT_URL_PREFIX);
         StoredObject object = getForResponse(attachmentKey(workspaceId, token));
         return new ManagedContent(
@@ -462,6 +481,15 @@ public class ManagedObjectService implements ApplicationRunner {
             uploadPolicy.safeResponseContentType(attachment.getContentType()),
             uploadPolicy.safeResponseFileName(attachment.getFileName())
         );
+    }
+
+    private void requireCleanAttachment(int workspaceId, String url) {
+        boolean allowDisabledProof = malwareScanProperties != null && !malwareScanProperties.isEnabled()
+            && deploymentProperties != null && !deploymentProperties.isConfigured();
+        if (attachmentScanMapper == null
+                || !attachmentScanMapper.isReadable(workspaceId, url, allowDisabledProof)) {
+            throw new ResourceNotFoundException("Stored file was not found");
+        }
     }
 
     public ManagedContent openPersonImage(
@@ -507,6 +535,7 @@ public class ManagedObjectService implements ApplicationRunner {
         }
         String expectedKey = switch (reference.kind()) {
             case "attachment" -> {
+                requireCleanAttachment(workspaceId, reference.persistedUrl());
                 if (reference.ownerId() != 0) {
                     throw new IllegalStateException("Attachment object owner is invalid");
                 }
@@ -630,8 +659,19 @@ public class ManagedObjectService implements ApplicationRunner {
             UploadSource source,
             String contentType,
             byte[] checksum) {
+        storeTenant(workspaceId, key, source, contentType, checksum, () -> {});
+    }
+
+    private void storeTenant(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType,
+            byte[] checksum,
+            Runnable authorize) {
         requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
+            authorize.run();
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
             ObjectDeletionTombstone tombstone = deletionRetryQueue.prepareTenantWrite(
                 workspaceId, key);
@@ -834,7 +874,46 @@ public class ManagedObjectService implements ApplicationRunner {
         }
     }
 
-    private Optional<String> managedAttachmentKey(int workspaceId, String url) {
+    /**
+     * Canonicalizes submitted URL schemes and hosts while preserving external paths and exact object tokens.
+     * Reserved route casing is folded only at creation so aliases cannot enter as external references.
+     */
+    public static String canonicalAttachmentUrl(String url) {
+        Objects.requireNonNull(url, "url");
+        if (url.regionMatches(true, 0, ATTACHMENT_URL_PREFIX, 0, ATTACHMENT_URL_PREFIX.length())) {
+            return ATTACHMENT_URL_PREFIX + url.substring(ATTACHMENT_URL_PREFIX.length());
+        }
+        if (url.startsWith("/")) {
+            return url;
+        }
+        try {
+            URI reference = new URI(url);
+            String scheme = reference.getScheme();
+            String host = reference.getHost();
+            if (scheme == null || host == null
+                    || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                throw new BadRequestException("Attachment url must have a valid HTTP(S) host");
+            }
+            String userInfo = reference.getRawUserInfo();
+            int hostStart = scheme.length() + 3 + (userInfo == null ? 0 : userInfo.length() + 1);
+            return scheme.toLowerCase(Locale.ROOT) + url.substring(scheme.length(), hostStart)
+                + host.toLowerCase(Locale.ROOT) + url.substring(hostStart + host.length());
+        } catch (URISyntaxException exception) {
+            throw new BadRequestException("Attachment url is invalid");
+        }
+    }
+
+    /** Classifies the reserved attachment namespace with the same byte-sensitive prefix as the scan queue. */
+    public static boolean hasManagedAttachmentPrefix(String url) {
+        return url != null && url.startsWith(ATTACHMENT_URL_PREFIX);
+    }
+
+    /** Reports whether a reference belongs to the managed attachment URL namespace and token grammar. */
+    public boolean isManagedAttachmentUrl(String url) {
+        return managedToken(url, ATTACHMENT_URL_PREFIX).isPresent();
+    }
+
+    Optional<String> managedAttachmentKey(int workspaceId, String url) {
         return managedToken(url, ATTACHMENT_URL_PREFIX).map(token -> attachmentKey(workspaceId, token));
     }
 

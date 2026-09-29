@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -113,7 +114,8 @@ class TenantReadIsolationIntegrationTest {
                 .session(bobSession))
             .andExpect(status().isNotFound());
 
-        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false);
+        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, wsA.getId()));
 
         mockMvc.perform(get("/api/companies/" + companyA.getId())
                 .header("X-Workspace-Id", wsB.getId())
@@ -131,7 +133,8 @@ class TenantReadIsolationIntegrationTest {
         Company companyA = newCompany(wsA);
         Person contactA = newPerson(wsA, companyA);
 
-        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false);
+        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, wsA.getId()));
 
         MockHttpSession aliceSession = login(alice.getUsername());
         mockMvc.perform(get("/api/companies/" + companyA.getId())

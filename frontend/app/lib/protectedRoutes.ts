@@ -1,4 +1,5 @@
-const PROTECTED_PREFIXES = [
+/** Path prefixes served by the authenticated, workspace-scoped application. */
+export const PROTECTED_PREFIXES = [
     '/account',
     '/activity',
     '/admin',

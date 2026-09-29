@@ -11,7 +11,7 @@ import {
     getDeals,
     getUserActivitiesFromCookie,
     getUserById,
-    getUserNotesFromCookie,
+    getUserNotesPageResultFromCookie,
     getUserTasksFromCookie,
     getUsers,
 } from "@/app/lib/api";
@@ -43,13 +43,13 @@ export default async function UserPage({ params }: { params: { id: number } }) {
         redirect("/auth/login");
     }
 
-    const [t, locale, user, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+    const [t, locale, user, tasks, activities, notePage, users, persons, deals, attachments] = await Promise.all([
         getTranslations("UsersPage"),
         getLocale(),
         getUserById(id, init).catch(() => null),
         getUserTasksFromCookie(id, cookie),
         getUserActivitiesFromCookie(id, cookie),
-        getUserNotesFromCookie(id, cookie),
+        getUserNotesPageResultFromCookie(id, cookie),
         getUsers(init).catch(() => [] as User[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
@@ -59,6 +59,10 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     if (!user) {
         notFound();
     }
+    if (!notePage.ok) {
+        return <WorkspaceUnavailablePage />;
+    }
+    const notes = notePage.data.items;
 
     const openTasks = tasks.filter((task) => !task.completed).length;
     const hasActivity = tasks.length > 0 || activities.length > 0 || notes.length > 0;
@@ -120,7 +124,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                     value={tasks.length}
                                     subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
                                 />
-                                <StatCard label={t("notes")} value={notes.length} />
+                                <StatCard label={t("notes")} value={notePage.data.total} />
                             </div>
 
                             <div className="mt-6">
@@ -131,6 +135,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                             tasks={tasks}
                                             activities={activities}
                                             notes={notes}
+                                            noteTarget={{ type: "user", id: user.id }}
                                             users={users}
                                             persons={persons}
                                             deals={deals}

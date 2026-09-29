@@ -48,7 +48,7 @@ class VertexAdapterImageTest {
     void geminiEmbedsInlineImageDataBeforeText() throws Exception {
         stubAccessToken();
         when(vertexClient.complete(
-                any(URI.class), any(), any(), any(AiRequestDeadline.class))).thenReturn("""
+                any(URI.class), any(), any(), any(AiRequestDeadline.class), any(Runnable.class))).thenReturn("""
                 {"candidates":[{"content":{"parts":[{"text":"{}"}]},"finishReason":"STOP"}],
                  "usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}
                 """);
@@ -68,7 +68,7 @@ class VertexAdapterImageTest {
     void claudeEmbedsAnthropicImageBlockBeforeText() throws Exception {
         stubAccessToken();
         when(vertexClient.complete(
-                any(URI.class), any(), any(), any(AiRequestDeadline.class))).thenReturn("""
+                any(URI.class), any(), any(), any(AiRequestDeadline.class), any(Runnable.class))).thenReturn("""
                 {"content":[{"type":"text","text":"{}"}],
                  "usage":{"input_tokens":1,"output_tokens":1},"stop_reason":"end_turn"}
                 """);
@@ -103,7 +103,7 @@ class VertexAdapterImageTest {
     private JsonNode capturedBody() throws Exception {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(vertexClient).complete(
-                any(URI.class), any(), bodyCaptor.capture(), any(AiRequestDeadline.class));
+                any(URI.class), any(), bodyCaptor.capture(), any(AiRequestDeadline.class), any(Runnable.class));
         return objectMapper.readTree(bodyCaptor.getValue());
     }
 

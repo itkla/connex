@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.dto;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -25,6 +26,7 @@ public record ReportGoalRequest(
         @NotBlank @Pattern(regexp = "won_revenue") String metric,
         @NotBlank @Pattern(regexp = "month|quarter") String periodType,
         @NotNull LocalDate periodStart,
-        @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) BigDecimal targetValue,
+        @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) @DecimalMax("9999999999999.99")
+        BigDecimal targetValue,
         @NotBlank @Size(max = 8) @Pattern(regexp = "[A-Za-z]{3,8}") String currency) {
 }

@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -14,9 +13,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.ProductImportService;
 import ooo.klae.connex.backend.services.RecordCreationTemplateService;
+import ooo.klae.connex.backend.services.RuleService;
 import ooo.klae.connex.backend.services.SequencePreviewService;
 import ooo.klae.connex.backend.services.SequenceService;
 import ooo.klae.connex.backend.services.SequenceVersionService;
@@ -164,26 +161,21 @@ class RbacEnforcementArchTest {
 
     @Test
     void controllers_do_not_inject_mappers_directly() {
-        ClassPathScanningCandidateComponentProvider scanner =
-            new ClassPathScanningCandidateComponentProvider(false);
-        scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
-        Set<BeanDefinition> controllers = scanner.findCandidateComponents(BASE + ".controllers");
+        List<Class<?>> controllers = ControllerDiscovery.scanAllControllers(
+            BASE + ".controllers", RestController.class);
 
         assertTrue(controllers.size() >= 10,
             "Expected to scan the REST controllers but found " + controllers.size()
                 + " — the scan is misconfigured and this guard would pass vacuously.");
+        assertTrue(controllers.contains(ooo.klae.connex.backend.controllers.SequenceController.class));
+        assertTrue(controllers.contains(ooo.klae.connex.backend.controllers.GuidedRecordCreationController.class));
 
         List<String> violations = new ArrayList<>();
-        for (BeanDefinition definition : controllers) {
-            try {
-                Class<?> controller = Class.forName(definition.getBeanClassName());
-                for (Field field : controller.getDeclaredFields()) {
-                    if (field.getType().getName().contains(".mappers.")) {
-                        violations.add(controller.getSimpleName() + "." + field.getName());
-                    }
+        for (Class<?> controller : controllers) {
+            for (Field field : controller.getDeclaredFields()) {
+                if (field.getType().getName().contains(".mappers.")) {
+                    violations.add(controller.getSimpleName() + "." + field.getName());
                 }
-            } catch (ClassNotFoundException e) {
-                fail("Could not load controller " + definition.getBeanClassName() + ": " + e.getMessage());
             }
         }
         assertTrue(violations.isEmpty(),
@@ -290,6 +282,33 @@ class RbacEnforcementArchTest {
                     && transaction.isolation() == Isolation.READ_COMMITTED,
                 methodName + " must claim its proof and write inside READ_COMMITTED");
         }
+    }
+
+    @Test
+    void workflowActivationEntryPointsUseReadCommittedTransactions() throws Exception {
+        List<Method> entryPoints = List.of(
+            WorkflowService.class.getDeclaredMethod("publish",
+                int.class, ooo.klae.connex.backend.dto.WorkflowPublishRequest.class),
+            WorkflowService.class.getDeclaredMethod("enable", int.class),
+            WorkflowService.class.getDeclaredMethod("resume", int.class),
+            RuleService.class.getDeclaredMethod("create",
+                ooo.klae.connex.backend.dto.RuleRequest.class),
+            RuleService.class.getDeclaredMethod("update",
+                int.class, ooo.klae.connex.backend.dto.RuleRequest.class),
+            WorkflowRecipeService.class.getDeclaredMethod("install",
+                String.class, ooo.klae.connex.backend.dto.WorkflowRecipeInstallRequest.class));
+        List<String> violations = new ArrayList<>();
+        for (Method method : entryPoints) {
+            Transactional transaction = method.getAnnotation(Transactional.class);
+            if (transaction == null || transaction.isolation() != Isolation.READ_COMMITTED) {
+                violations.add(method.getDeclaringClass().getSimpleName() + "#" + method.getName());
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Trigger-capacity admission counts enabled workflows after taking the admission mutex, "
+                + "so every activation entry point must run at READ_COMMITTED or serve the count "
+                + "from a pre-lock snapshot; install carries it because it wraps publish inside the "
+                + "same transaction: " + violations);
     }
 
     @Test

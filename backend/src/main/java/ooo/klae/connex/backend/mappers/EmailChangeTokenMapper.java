@@ -12,14 +12,21 @@ import ooo.klae.connex.backend.beans.EmailChangeToken;
 public interface EmailChangeTokenMapper {
     int insert(@Param("userId") int userId, @Param("newEmail") String newEmail,
             @Param("tokenHash") String tokenHash, @Param("requestedIp") String requestedIp,
-            @Param("expiryMinutes") int expiryMinutes);
+            @Param("expiryMinutes") int expiryMinutes,
+            @Param("credentialGeneration") Integer credentialGeneration);
 
     boolean existsRedeemableByHash(String tokenHash);
+
+    /** Reads a token's persisted lifecycle state, including consumed or expired tokens. */
+    EmailChangeToken findByHash(String tokenHash);
+
+    /** Returns the redeemable token without locks so callers can acquire its account root first. */
+    EmailChangeToken findRedeemableByHash(String tokenHash);
 
     int claimExchange(@Param("tokenHash") String tokenHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
-    boolean isExchangeOwnedBy(@Param("tokenHash") String tokenHash,
+    Integer lockExchangeOwnedBy(@Param("tokenHash") String tokenHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
     boolean existsExchangedRedeemableByHash(String tokenHash);

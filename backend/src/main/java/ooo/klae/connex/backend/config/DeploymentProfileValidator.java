@@ -15,6 +15,7 @@ import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 
@@ -43,6 +44,15 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
  * The silo profile also refuses the dormant public-API switch because its external ingress and
  * replica-wide abuse controls are not part of that isolated deployment posture.
  *
+ * <p>The {@code ai-scripted-provider} Spring profile is refused outright here, before the
+ * application context exists, so a deployed edition can never construct the fixture-driven adapter
+ * that replaces the real OpenAI-compatible one — not even transiently. Four refusals close the
+ * shapes that would otherwise admit it: the profile beside any declared edition; the profile
+ * outside dev and test, which is how a production-shaped instance with no edition would reach it;
+ * the profile without its flag; and the flag without the profile, so the switch can never lie
+ * dormant in a template waiting for a profile to be appended. The flag is additionally on every
+ * edition's forbidden-key list, which is what makes the refusal survive a future edition.
+ *
  * <p>Posture keys are read through the same relaxed {@link Binder} that populates the backing
  * {@code @ConfigurationProperties} beans, not exact-match {@code Environment.getProperty}. An
  * exact-match read would resolve {@code connex.mail.managed} only for its canonical spelling, so a
@@ -68,12 +78,15 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static final String MALWARE_SCANNING_ALLOW_DISABLED =
         "connex.malware-scanning.allow-disabled";
     private static final String PUBLIC_API_ENABLED = "connex.public-api.enabled";
+    private static final String AI_SCRIPTED_PROVIDER_ENABLED =
+        ScriptedAiProviderProfile.ENABLED_PROPERTY;
     private static final List<String> SAAS_FORBIDDEN_KEYS = List.of(
         BOOTSTRAP_ENABLED,
         SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
         AI_ALLOW_INTERNAL_ENDPOINTS,
         MAIL_ALLOW_INTERNAL_HOSTS,
-        MALWARE_SCANNING_ALLOW_DISABLED
+        MALWARE_SCANNING_ALLOW_DISABLED,
+        AI_SCRIPTED_PROVIDER_ENABLED
     );
     private static final List<String> POSTURE_KEYS = List.of(
         BOOTSTRAP_ENABLED,
@@ -82,15 +95,30 @@ public class DeploymentProfileValidator implements ApplicationRunner {
         MAIL_ALLOW_INTERNAL_HOSTS,
         MAIL_MANAGED,
         MALWARE_SCANNING_ALLOW_DISABLED,
-        PUBLIC_API_ENABLED
+        PUBLIC_API_ENABLED,
+        AI_SCRIPTED_PROVIDER_ENABLED
     );
     private static final Map<String, List<String>> FORBIDDEN_KEYS_BY_PROFILE = Map.of(
         DeploymentProperties.PROFILE_SAAS, SAAS_FORBIDDEN_KEYS,
         DeploymentProperties.PROFILE_SILO, List.of(
             MALWARE_SCANNING_ALLOW_DISABLED,
-            PUBLIC_API_ENABLED),
-        DeploymentProperties.PROFILE_ON_PREM, List.of(MALWARE_SCANNING_ALLOW_DISABLED)
+            PUBLIC_API_ENABLED,
+            AI_SCRIPTED_PROVIDER_ENABLED),
+        DeploymentProperties.PROFILE_ON_PREM, List.of(
+            MALWARE_SCANNING_ALLOW_DISABLED,
+            AI_SCRIPTED_PROVIDER_ENABLED)
     );
+    static final String SCRIPTED_PROVIDER_FORBIDS_DEPLOYMENT_PROFILE =
+        " forbids the " + ScriptedAiProviderProfile.NAME + " Spring profile";
+    static final String SCRIPTED_PROVIDER_REQUIRES_DEV_OR_TEST =
+        "The " + ScriptedAiProviderProfile.NAME
+            + " Spring profile requires the dev or test Spring profile";
+    static final String SCRIPTED_PROVIDER_REQUIRES_FLAG =
+        "The " + ScriptedAiProviderProfile.NAME + " Spring profile requires "
+            + AI_SCRIPTED_PROVIDER_ENABLED + "=true";
+    static final String SCRIPTED_PROVIDER_FLAG_REQUIRES_PROFILE =
+        AI_SCRIPTED_PROVIDER_ENABLED + " requires the " + ScriptedAiProviderProfile.NAME
+            + " Spring profile";
     private static final Map<String, Capability> CAPABILITY_BY_POSTURE_KEY = Map.of(
         MAIL_MANAGED, Capability.MANAGED_MAIL
     );
@@ -116,6 +144,7 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static ValidationResult evaluate(Environment environment) {
         Binder binder = Binder.get(environment);
         String profile = binder.bind("connex.deployment.profile", String.class).orElse("");
+        refuseScriptedAiProvider(environment, binder, profile);
         if (profile.isBlank()) {
             if (environment.acceptsProfiles(Profiles.of("dev", "test", "seeder"))) {
                 return new ValidationResult(profile, Map.of());
@@ -141,6 +170,37 @@ public class DeploymentProfileValidator implements ApplicationRunner {
         }
 
         return new ValidationResult(profile, posture);
+    }
+
+    /**
+     * Refuses every combination that could put the fixture-driven AI adapter in a running context.
+     *
+     * <p>The flag alone is refused only while no edition is declared; a declared edition falls
+     * through to the forbidden-key scan below, which names the edition that forbids it and is the
+     * refusal that survives a future edition being added.
+     */
+    private static void refuseScriptedAiProvider(
+            Environment environment, Binder binder, String deploymentProfile) {
+        boolean scriptedProfile = environment.acceptsProfiles(
+            Profiles.of(ScriptedAiProviderProfile.NAME));
+        boolean scriptedEnabled = binder.bind(AI_SCRIPTED_PROVIDER_ENABLED, Boolean.class)
+            .orElse(false);
+        if (scriptedProfile) {
+            if (!deploymentProfile.isBlank()) {
+                throw new IllegalStateException("connex.deployment.profile=" + deploymentProfile
+                    + SCRIPTED_PROVIDER_FORBIDS_DEPLOYMENT_PROFILE);
+            }
+            if (!environment.acceptsProfiles(Profiles.of("dev", "test"))) {
+                throw new IllegalStateException(SCRIPTED_PROVIDER_REQUIRES_DEV_OR_TEST);
+            }
+            if (!scriptedEnabled) {
+                throw new IllegalStateException(SCRIPTED_PROVIDER_REQUIRES_FLAG);
+            }
+            return;
+        }
+        if (scriptedEnabled && deploymentProfile.isBlank()) {
+            throw new IllegalStateException(SCRIPTED_PROVIDER_FLAG_REQUIRES_PROFILE);
+        }
     }
 
     private static boolean isForbidden(String profile, List<String> forbiddenKeys, String key) {

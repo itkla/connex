@@ -9,6 +9,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -146,6 +150,11 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
+        jdbcTemplate.update(
+            "UPDATE document_delivery SET sent_at = ? WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MINUTES).minusMinutes(1),
+            workspace.getId(),
+            delivery.id());
         String frozenContent = jdbcTemplate.queryForObject(
             "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
             String.class,
@@ -206,12 +215,12 @@ class DocumentAcceptanceCommittedFixtureTest
         replacements.put("{{providerEnvelopeId}}", "in_app:" + workspace.getId()
             + ":" + delivery.getId());
         replacements.put("{{deliveryId}}", Integer.toString(delivery.getId()));
-        replacements.put("{{sentAt}}", delivery.getSentAt().toString());
-        replacements.put("{{completedAt}}", delivery.getCompletedAt().toString());
+        replacements.put("{{sentAt}}", certificateTimestamp(delivery.getSentAt()));
+        replacements.put("{{completedAt}}", certificateTimestamp(delivery.getCompletedAt()));
         replacements.put("{{signedDocumentSha256}}", signedDocumentSha256);
         replacements.put("{{recipientId}}", Integer.toString(recipient.getId()));
-        replacements.put("{{firstViewedAt}}", recipient.getFirstViewedAt().toString());
-        replacements.put("{{decidedAt}}", recipient.getDecidedAt().toString());
+        replacements.put("{{firstViewedAt}}", certificateTimestamp(recipient.getFirstViewedAt()));
+        replacements.put("{{decidedAt}}", certificateTimestamp(recipient.getDecidedAt()));
         String evidenceScope = workspace.getId() + ":" + delivery.getId()
             + ":" + recipient.getId();
         String tokenHash = sha256(token);
@@ -223,6 +232,15 @@ class DocumentAcceptanceCommittedFixtureTest
             expected = expected.replace(replacement.getKey(), replacement.getValue());
         }
         return expected.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Renders a certificate timestamp in the ISO-8601 form the certificate contract
+     * uses, which always carries seconds; {@link LocalDateTime#toString()} drops
+     * {@code :00} seconds from second-precision values.
+     */
+    private static String certificateTimestamp(LocalDateTime value) {
+        return DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(value);
     }
 
     private static String expectedEvidenceHash(String key, String purpose, String value) {

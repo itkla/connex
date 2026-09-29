@@ -161,7 +161,9 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
   `w:instrText` runs after a field result.
 - **Spreadsheet and chart formulas** — refused entirely, including `calculatedColumnFormula` and
   `definedName`/`refersTo`. The VML namespace is exempt, because `v:formulas`/`v:f` there are
-  static shape geometry.
+  static shape geometry. The un-namespaced SpreadsheetML `sheetView`/`customSheetView` `showFormulas`
+  view flag is exempt only when its value is an xsd:boolean literal (`true`, `false`, `1`, `0`),
+  so LibreOffice Calc workbooks upload; every other `formula`-named attribute is still refused.
 - **OOXML relationships** — a closed active-kind blocklist (`oleObject`, `package`, `vbaProject`,
   `activeXControl`, `attachedTemplate`, `control`, `ctrlProp`, `customUI`, `ddeLink`,
   `embeddedObject`, `embeddedPackage`, `externalLink`, `queryTable`, `audio`, `video`, `media`).
@@ -242,8 +244,5 @@ accident:
 - ODF `META-INF/documentsignatures.xml` references (`Reference`, `RetrievalMethod`) are admitted
   by vocabulary only; their URIs are not bound to package members the way OOXML signature
   references are. Pre-existing, unchanged here.
-- LibreOffice-saved `.xlsx` workbooks are refused because Calc writes `showFormulas="false"` on
-  `sheetView` and the attribute rule refuses any attribute name containing `formula`.
-  Pre-existing and independent of package-member inspection; a follow-up outside this change.
 
 [#1122]: https://github.com/itkla/connex/issues/1122

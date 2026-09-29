@@ -61,6 +61,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiAssistantIdentifierMapper",
         MAPPERS + "AiBriefScheduleMapper",
         MAPPERS + "AiChatMapper",
+        MAPPERS + "AiRunLeaseMapper",
         MAPPERS + "AiWatchMapper",
         MAPPERS + "AiWorkspaceGovernanceMapper",
         MAPPERS + "CompanyMapper",
@@ -115,6 +116,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ObjectStorageQuotaMapper",
         MAPPERS + "EntityReferenceMapper",
         MAPPERS + "AttachmentMapper",
+        MAPPERS + "AttachmentScanMapper",
         MAPPERS + "BusinessCardImportRequestMapper",
         MAPPERS + "LegacyTenantUploadMigrationMapper",
         MAPPERS + "DealMapper",
@@ -179,6 +181,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationQuietHoursMapper",
         MAPPERS + "NativeConnectSessionMapper",
         MAPPERS + "PreferenceMapper",
+        MAPPERS + "PrivilegedMfaRecoveryRedemptionMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
         MAPPERS + "SecretValueMapper",
         MAPPERS + "SpringSessionMapper",
@@ -202,7 +205,15 @@ public class TenantScopeInterceptor implements Interceptor {
      * ({@code /api/auth/**} is excluded from tenant resolution) may reach with an
      * explicit membership-validated workspace id; the statement itself anchors
      * {@code workspace_id} in SQL, so it is safe without a resolved context. The
-     * org-scoped audit reads are org-filtered ({@code org_id}) and gated by org
+     * role and permission locking reads are that read's {@code FOR UPDATE} twins:
+     * they carry the same {@code workspace_id} predicate in SQL and reach exactly
+     * the rows the already-exempt read reaches, so the exemption widens no row set
+     * — it only allows those same rows to be read under a lock. The exemption is
+     * global rather than conditional on a caller, so it rests on that SQL anchor
+     * and not on which flow happens to reach it; the flow that needs it today is
+     * grant-creator revalidation during invitation and invite-link acceptance,
+     * where the recipient still holds no membership for a context to resolve from.
+     * The org-scoped audit reads are org-filtered ({@code org_id}) and gated by org
      * membership (an org admin needn't have any active workspace), so they too may
      * run without a resolved workspace context.
      *
@@ -237,6 +248,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "RelationshipSignalMapper.deleteActorState",
         MAPPERS + "RelationshipSignalMapper.deleteActorStateAnywhere",
         MAPPERS + "RoleMapper.findPermissions",
+        MAPPERS + "RoleMapper.lockRole",
+        MAPPERS + "RoleMapper.lockPermissions",
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",
         MAPPERS + "ProviderCaptureMapper.clearWorkspacePolicyUpdaterAnywhere",

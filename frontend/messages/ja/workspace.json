@@ -33,6 +33,7 @@
         "joinInvalid": "有効な招待リンクではないようです。"
     },
     "InviteAccept": {
+        "metaTitle": "招待を承認",
         "heading": "{workspace} に参加",
         "roleLine": "{role} として招待されています。",
         "invitedBy": "{name} が招待",
@@ -49,6 +50,7 @@
         "roleMember": "メンバー"
     },
     "InviteLinkAccept": {
+        "metaTitle": "ワークスペースに参加",
         "heading": "{workspace} に参加",
         "roleLine": "{role} として参加します。",
         "accept": "ワークスペースに参加",
@@ -967,7 +969,7 @@
         "oidcIssuerHint": "IdP の OpenID ディスカバリー URL です。Connex がエンドポイントを自動的に読み取ります。",
         "oidcClientId": "クライアント ID",
         "oidcClientSecret": "クライアントシークレット",
-        "oidcClientSecretHint": "暗号化して保存され、再表示されません。現在のシークレットを保持するには空欄のままにします。",
+        "oidcClientSecretHint": "暗号化して保存され、再表示されません。発行者 URL とクライアント ID を変更しない場合のみ、空欄のままで現在のシークレットを保持できます。いずれかを変更する場合は新しいシークレットの入力が必要です。",
         "secretConfigured": "••••••••（設定済み）",
         "oidcScopes": "スコープ",
         "samlEntityId": "IdP エンティティ ID",

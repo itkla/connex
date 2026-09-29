@@ -38,6 +38,7 @@ import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestO
 import org.springframework.security.web.webauthn.authentication.PublicKeyCredentialRequestOptionsRepository;
 import org.springframework.security.web.webauthn.registration.PublicKeyCredentialCreationOptionsRepository;
 
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
@@ -47,6 +48,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
@@ -454,6 +456,29 @@ class WebAuthnControllerTest {
                 eq("Passkey recovery denied"), eq("proof_rejected"));
         assertFalse(recovery.toString().contains("sensitive-current-password"));
         assertFalse(recovery.toString().contains("sensitive-operator-token"));
+    }
+
+    /**
+     * Replaying a spent token keeps the client response of an invalid token, but the durable
+     * audit names the replay so operators can tell it from a mistyped token.
+     */
+    @Test
+    void spentRecoveryTokenReplayIsAuditedDistinctlyWithTheInvalidTokenResponse() {
+        User user = user(7);
+        PasskeyRecoveryRequest recovery = new PasskeyRecoveryRequest();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        when(authService.getCurrentUser()).thenReturn(user);
+        doThrow(new SpentRecoveryTokenException()).when(mfaRecoveryService).recover(recovery, request);
+
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                () -> controller.recoverCredentials(recovery, request));
+
+        assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());
+        assertEquals(ForbiddenException.CODE, refusal.getCode());
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.recovery.denied"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Passkey recovery denied"), eq("token_already_redeemed"));
+        verify(sessionSecurityService, never()).completeRecoveryStamp(any(), anyInt());
     }
 
     @Test

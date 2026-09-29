@@ -55,6 +55,8 @@ const labels: AskConnexTurnLabels = {
         internal: "Something went wrong on our side.",
         unreadable: "The answer came back in a shape Connex could not read.",
         stalled: "It kept re-reading the same records without getting any further.",
+        ownerLost:
+            "Connex stopped writing this answer partway through. Anything it already saved is kept — check what it saved before you ask again.",
         timeout: "This answer ran out of time before it finished.",
     },
     turnAccepted: "Request accepted",

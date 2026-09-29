@@ -41,6 +41,8 @@ public class JobRunRecorder {
     public static final String LEAD_RESPONSE_SLA = "lead_response_sla";
     public static final String AI_BRIEF_DELIVERY = "ai_brief_delivery";
     public static final String AI_WATCH_EVALUATION = "ai_watch_evaluation";
+    public static final String AI_RUN_LEASE_SWEEP = "ai_run_lease_sweep";
+    public static final String AI_CHAT_TURN_LIFETIME_SWEEP = "ai_chat_turn_lifetime_sweep";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -71,7 +73,9 @@ public class JobRunRecorder {
         DOCUMENT_DELIVERY_EXPIRY,
         LEAD_RESPONSE_SLA,
         AI_BRIEF_DELIVERY,
-        AI_WATCH_EVALUATION);
+        AI_WATCH_EVALUATION,
+        AI_RUN_LEASE_SWEEP,
+        AI_CHAT_TURN_LIFETIME_SWEEP);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",
@@ -89,7 +93,9 @@ public class JobRunRecorder {
         "startedCount",
         "deliveredCount",
         "evaluatedCount",
-        "firedCount");
+        "firedCount",
+        "visitedCount",
+        "durationMs");
 
     private final JobRunMapper mapper;
     private final ObjectMapper objectMapper;

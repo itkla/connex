@@ -196,7 +196,7 @@ function RelatedUsersSection({ users }: { users: User[] }) {
                                         className="border-background w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-muted"
                                         onClick={() => router.push(`/users/${u.id}`)}
                                     >
-                                        <AvatarImage src={u.profilePictureUrl} className="w-10 h-10" />
+                                        <AvatarImage src={u.profilePictureUrl} alt={u.displayName ?? t('unknownUser')} className="w-10 h-10" />
                                         <AvatarFallback className="w-10 h-10">{fallback}</AvatarFallback>
                                     </Avatar>
                                 </TooltipTrigger>

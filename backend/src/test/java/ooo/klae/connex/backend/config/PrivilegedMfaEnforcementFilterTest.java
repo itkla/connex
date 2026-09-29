@@ -8,10 +8,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -21,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -29,6 +32,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -38,7 +43,9 @@ class PrivilegedMfaEnforcementFilterTest {
     private final PrivilegedMfaProperties properties = mock(PrivilegedMfaProperties.class);
     private final PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
     private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
-    private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
+    private final SessionSecurityService sessionSecurityService = spy(new SessionSecurityService(
+            new SessionSecurityProperties(), properties, Clock.systemUTC(),
+            mock(UserMapper.class), mock(SpringSessionMapper.class)));
     private final AuditService auditService = mock(AuditService.class);
     private final FilterChain filterChain = mock(FilterChain.class);
     private PrivilegedMfaEnforcementFilter filter;
@@ -265,8 +272,51 @@ class PrivilegedMfaEnforcementFilterTest {
                 Arguments.of("POST", "/api/campaigns/3/exports"),
                 Arguments.of("POST", "/api/reports/4/export.csv"),
                 Arguments.of("GET", "/api/reports/4/snapshots/8/export.csv"));
-        return surfaces.stream().flatMap(surface -> Stream.of(";x", "%3Bx", "%253Bx")
+        return surfaces.stream().flatMap(surface -> Stream.of(";x", "%3Bx")
                 .map(suffix -> Arguments.of(surface.get()[0], surface.get()[1] + suffix)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/%65xports/persons", "/%61pi/exports/persons", "/api//exports/persons",
+            "/api/%61udit/export", "/api/orgs/2/%61udit/export",
+            "/api/reports/4/%65xport.csv", "/api/reports/4/snapshots/8/%65xport.csv"})
+    void encodedExportsRequireTheCanonicalStepUp(String path) throws Exception {
+        MockHttpServletResponse response = execute("GET", path);
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void contextPathExportStillRequiresStepUp() throws Exception {
+        MockHttpServletRequest request = request("GET", "/connex/api/exports/persons");
+        request.setContextPath("/connex");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, filterChain);
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
+    void encodedCampaignExportRequiresStepUp() throws Exception {
+        MockHttpServletResponse response = execute("POST", "/api/campaigns/3/%65xports");
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void exportPolicyRespectsRolloutFlagForCanonicalAndEncodedPaths(boolean enforced) throws Exception {
+        when(properties.isEnforced()).thenReturn(enforced);
+        for (String path : List.of("/api/exports/persons", "/api/%65xports/persons")) {
+            MockHttpServletResponse response = execute("GET", path);
+            assertEquals(enforced ? 403 : 200, response.getStatus(), path);
+        }
+        verify(filterChain, org.mockito.Mockito.times(enforced ? 0 : 2)).doFilter(any(), any());
+        verify(sessionSecurityService, org.mockito.Mockito.times(2)).isExportStepUpSatisfied(null, 7);
     }
 
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {

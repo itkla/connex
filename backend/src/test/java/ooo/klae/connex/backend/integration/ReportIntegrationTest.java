@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -891,10 +892,19 @@ class ReportIntegrationTest {
     @Test
     void onlyCreatorOrAdminCanDeleteReportsAndSnapshots() throws Exception {
         RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
         User creator = newMember(workspace, "member");
         User otherMember = newMember(workspace, "member");
         User admin = newMember(workspace, "admin");
+        User formerAdmin = newMember(workspace, "admin");
+        WorkspaceRole restricted = new WorkspaceRole();
+        restricted.setWorkspaceId(workspace.getId());
+        restricted.setName("Report deletion only");
+        roleMapper.insertRole(restricted);
+        roleMapper.insertPermissions(workspace.getId(), restricted.getId(), List.of("REPORT_DELETE"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), otherMember.getId(), restricted.getId());
+        workspaceMapper.setMemberCustomRole(workspace.getId(), formerAdmin.getId(), restricted.getId());
+        MockHttpSession formerAdminSession = login(formerAdmin.getUsername());
         MockHttpSession creatorSession = login(creator.getUsername());
         MockHttpSession memberSession = login(otherMember.getUsername());
         MockHttpSession adminSession = login(admin.getUsername());
@@ -908,6 +918,17 @@ class ReportIntegrationTest {
             .andExpect(status().isCreated())
             .andReturn();
         int snapshotId = responseId(snapshotResult);
+
+        mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(formerAdminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(formerAdminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
 
         mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
                 .header("X-Workspace-Id", workspace.getId())
@@ -928,6 +949,13 @@ class ReportIntegrationTest {
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+
+        int ownReportId = createReport(creatorSession, workspace);
+        mockMvc.perform(delete("/api/reports/{id}", ownReportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(creatorSession)
                 .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
     }
@@ -1897,7 +1925,8 @@ class ReportIntegrationTest {
         assertNotNull(orgId);
         Workspace otherWorkspace = newWorkspaceInOrg(orgId);
         assertEquals(1, shareMapper.sharePipeline(
-                pipelineId, workspace.getId(), otherWorkspace.getId(), member.getId(), false));
+                pipelineId, workspace.getId(), otherWorkspace.getId(), member.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
         for (int index = 0; index < 8; index++) {
             int otherWonDealId = insertClosedDeal(otherWorkspace.getId(), pipelineId, wonStageId,
                     "Other reached-stage won " + index, "10.00", "USD", true, today.minusMonths(1));
@@ -1941,7 +1970,8 @@ class ReportIntegrationTest {
         int pipelineId = insertPipeline(pipelineOwner.getId(), "Neutral forecast pipeline");
         int stageId = insertStage(pipelineOwner.getId(), pipelineId, "Neutral stage", 1);
         assertEquals(1, shareMapper.sharePipeline(
-                pipelineId, pipelineOwner.getId(), workspace.getId(), pipelineOwnerMember.getId(), false));
+                pipelineId, pipelineOwner.getId(), workspace.getId(), pipelineOwnerMember.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, pipelineOwner.getId())));
         insertOpenDeal(workspace.getId(), pipelineId, stageId,
                 "Neutral open", "100.00", "USD", inHorizon);
 
