@@ -85,6 +85,20 @@ describe("assistant proposal review", () => {
         expect(clearing).toContain("Not set");
     });
 
+    it("states a tag removal as the tag the record holds now and nothing after", () => {
+        const markup = renderCard(card({
+            toolName: "remove_tag",
+            requestSummary: "Remove tag: Dormant",
+            change: change({ field: "tag", currentValue: "Dormant", proposedValue: null }),
+        }));
+
+        expect(markup).toContain("Remove tag: Dormant");
+        expect(markup).toContain(cardLabels.changeField.tag);
+        expect(markup).toContain("Dormant");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain("Apply the proposed change to Acme renewal");
+    });
+
     it("reads without colour: every review state carries its own sentence", () => {
         const states: Exclude<AiAssistantToolCallChangeState, "ready">[] = [
             "unchanged",

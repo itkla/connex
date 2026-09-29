@@ -2640,11 +2640,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             changeField: {
                 owner: t('toolCards.change.fieldOwner'),
                 stage: t('toolCards.change.fieldStage'),
+                tag: t('toolCards.change.fieldTag'),
             },
             changeNotSet: t('toolCards.change.notSet'),
             changeCurrentUnresolved: {
                 owner: t('toolCards.change.currentUnresolvedOwner'),
                 stage: t('toolCards.change.currentUnresolvedStage'),
+                tag: t('toolCards.change.currentUnresolvedTag'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeState: {
@@ -2708,6 +2710,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 createTask: t('toolCards.summaries.createTask'),
                 createNote: t('toolCards.summaries.createNote'),
                 addTag: t('toolCards.summaries.addTag'),
+                removeTag: t('toolCards.summaries.removeTag'),
+                removeTagNamed: (value: string) => t('toolCards.summaries.removeTagNamed', { value }),
                 changeDealStage: t('toolCards.summaries.changeDealStage'),
                 changeDealStageTo: (value: string) => t('toolCards.summaries.changeDealStageTo', { value }),
                 assignOwner: t('toolCards.summaries.assignOwner'),
@@ -2722,6 +2726,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 noteCreated: t('toolCards.summaries.noteCreated'),
                 tagAdded: t('toolCards.summaries.tagAdded'),
                 tagAlreadyPresent: t('toolCards.summaries.tagAlreadyPresent'),
+                tagRemoved: t('toolCards.summaries.tagRemoved'),
+                tagNotPresent: t('toolCards.summaries.tagNotPresent'),
                 dealStageChanged: t('toolCards.summaries.dealStageChanged'),
                 ownerRemoved: t('toolCards.summaries.ownerRemoved'),
                 ownerAssigned: t('toolCards.summaries.ownerAssigned'),

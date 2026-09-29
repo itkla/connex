@@ -331,6 +331,8 @@ export type AskConnexToolSummaryLabels = {
     createTask: string;
     createNote: string;
     addTag: string;
+    removeTag: string;
+    removeTagNamed: (value: string) => string;
     changeDealStage: string;
     changeDealStageTo: (value: string) => string;
     assignOwner: string;
@@ -345,6 +347,8 @@ export type AskConnexToolSummaryLabels = {
     noteCreated: string;
     tagAdded: string;
     tagAlreadyPresent: string;
+    tagRemoved: string;
+    tagNotPresent: string;
     dealStageChanged: string;
     ownerRemoved: string;
     ownerAssigned: string;
@@ -778,6 +782,10 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'create_task') return labels.createTask;
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
+    if (toolCall.toolName === 'remove_tag') {
+        const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
+        return tag === null ? labels.removeTag : labels.removeTagNamed(tag);
+    }
     if (toolCall.toolName === 'change_deal_stage') {
         const stage = summaryValue(toolCall.requestSummary, 'Change deal stage to:');
         return stage === null ? labels.changeDealStage : labels.changeDealStageTo(stage);
@@ -805,6 +813,11 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
         if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;
+        return labels.requestCompleted;
+    }
+    if (toolCall.toolName === 'remove_tag') {
+        if (toolCall.outcomeSummary === 'Tag removed') return labels.tagRemoved;
+        if (toolCall.outcomeSummary === 'Tag was not on the record') return labels.tagNotPresent;
         return labels.requestCompleted;
     }
     if (toolCall.toolName === 'change_deal_stage') return labels.dealStageChanged;

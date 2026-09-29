@@ -3451,7 +3451,7 @@ export type AiAssistantToolCallTarget = {
 };
 
 /** The field an assistant proposal would rewrite on an existing record. */
-export type AiAssistantToolCallChangeField = 'owner' | 'stage';
+export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag';
 
 /**
  * Whether a reviewed change can still be applied as reviewed.

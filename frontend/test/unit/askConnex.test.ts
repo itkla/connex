@@ -63,6 +63,8 @@ const TOOL_SUMMARY_LABELS = {
     createTask: 'タスクを作成',
     createNote: 'メモを作成',
     addTag: 'タグを追加',
+    removeTag: 'タグを削除',
+    removeTagNamed: (value: string) => `タグ削除: ${value}`,
     changeDealStage: 'ステージを変更',
     changeDealStageTo: (value: string) => `ステージ: ${value}`,
     assignOwner: '担当者を割り当て',
@@ -77,6 +79,8 @@ const TOOL_SUMMARY_LABELS = {
     noteCreated: 'メモ作成済み',
     tagAdded: 'タグ追加済み',
     tagAlreadyPresent: 'タグ追加済みでした',
+    tagRemoved: 'タグ削除済み',
+    tagNotPresent: 'タグなし',
     dealStageChanged: 'ステージ変更済み',
     ownerRemoved: '担当者解除済み',
     ownerAssigned: '担当者割り当て済み',
@@ -910,6 +914,31 @@ describe('Ask Connex tool-call cards', () => {
             toolName: 'add_tag',
             outcomeSummary: 'Request completed',
         }, TOOL_SUMMARY_LABELS)).toBe('完了');
+    });
+
+    it('localizes a tag removal by the tag it names and by whether it removed anything', () => {
+        const removeCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'remove_tag',
+            tier: 'confirm',
+            requestSummary: 'Remove tag: Dormant',
+            outcomeSummary: 'Tag removed',
+        };
+
+        expect(askConnexToolRequestSummary(removeCall, TOOL_SUMMARY_LABELS)).toBe('タグ削除: Dormant');
+        expect(askConnexToolRequestSummary(
+            { ...removeCall, requestSummary: 'Remove a tag' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('タグを削除');
+        expect(askConnexToolOutcomeSummary(removeCall, TOOL_SUMMARY_LABELS)).toBe('タグ削除済み');
+        expect(askConnexToolOutcomeSummary(
+            { ...removeCall, outcomeSummary: 'Tag was not on the record' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('タグなし');
+        expect(askConnexToolOutcomeSummary(
+            { ...removeCall, outcomeSummary: 'Request completed' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('完了');
     });
 });
 

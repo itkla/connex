@@ -54,6 +54,7 @@ type StatusPresentation = {
 export type AskConnexChangeFieldLabels = {
     owner: string;
     stage: string;
+    tag: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -66,6 +67,7 @@ export type AskConnexOutcomeFieldLabels = Record<AskConnexOutcomeField, string> 
 export type AskConnexUnresolvedValueLabels = {
     owner: string;
     stage: string;
+    tag: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
