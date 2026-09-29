@@ -197,6 +197,29 @@ digests, and both embedded identities again before using the pair.
 `connex-staging-prune.timer` and is the only thing permitted to unlink a quarantined tree. The
 deploy script's invariant is unchanged.
 
+**Merging a change to this script does not change what the host runs.** The unit executes
+`/usr/local/bin/connex-staging-prune`, a separately installed copy, and nothing in the repository
+copies it there — so a host keeps its old script and its old timer schedule until someone rolls the
+change out by hand. Do that whenever `connex-staging-prune.sh` or either unit file changes:
+
+```bash
+# On the staging host, as the deploy user. Verify first, then install.
+sudo install -m 0755 deploy/staging/connex-staging-prune.sh /usr/local/bin/connex-staging-prune
+sudo install -m 0644 deploy/staging/systemd/connex-staging-prune.service \
+    deploy/staging/systemd/connex-staging-prune.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now connex-staging-prune.timer
+
+# Confirm the host now runs the intended schedule and script, not the previous ones.
+systemctl cat connex-staging-prune.service | grep ExecStart
+systemctl list-timers connex-staging-prune.timer
+sudo /usr/local/bin/connex-staging-prune --dry-run
+```
+
+The dry run is the check that matters: it reports what the installed copy would reclaim without
+removing anything, so a mismatch between the repository and the host shows up as a difference in
+that output rather than as silence.
+
 It removes an entry only when every one of these holds:
 
 1. the entry is under `release-quarantine`, is a plain directory, is not a symlink, and is named as
