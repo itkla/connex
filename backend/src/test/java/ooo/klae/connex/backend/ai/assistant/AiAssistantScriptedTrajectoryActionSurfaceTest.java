@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,6 +56,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private AiAssistantToolCallReadService toolCallReadService;
 
     /** The tool calls the drift scripts complete before their write: a search and a load. */
     private static final int CALLS_BEFORE_WRITE = 2;
@@ -370,6 +372,47 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
                 "the refused approval must leave the re-created tag attached");
         assertEquals(0, auditRows("company.removeTag"));
         assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The reviewed tag is removed from the company on the record itself after the proposal. That
+     * leaves the company's own row untouched, so the approval passes and removes nothing: its
+     * outcome says nothing changed, its card says the tag was not on the record, and no audit row
+     * claims a removal that never happened.
+     */
+    @Test
+    void approvingATagRemovalWhoseTagIsAlreadyGoneChangesNothingAndAuditsNothing() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        attach(customer, dormant);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        assertEquals(1, jdbcTemplate.update(
+                "DELETE FROM company_tag WHERE company_id = ? AND tag_id = ?",
+                customer.getId(), dormant));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+            assertEquals("Tag was not on the record",
+                    toolCallReadService.get(trajectory.sessionId(), proposal.getId())
+                            .outcomeSummary());
+        } finally {
+            clearAuthentication();
+        }
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals("Dormant", outcome.path("tag").asString());
+        assertFalse(outcome.path("changed").asBoolean());
+        assertEquals(List.of(), tagsOf(customer));
+        assertEquals(0, auditRows("company.removeTag"),
+                "a removal that removed nothing must not be audited as one");
     }
 
     private int tag(String name) {

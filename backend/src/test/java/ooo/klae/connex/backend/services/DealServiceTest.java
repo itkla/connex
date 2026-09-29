@@ -259,7 +259,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
         int auditBefore = jdbcTemplate.queryForObject(
@@ -270,7 +270,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> dealService.removeTag(deal.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -290,7 +290,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsEitherWay() {
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
         Tag tag = newTag();
@@ -303,7 +303,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertTrue(dealService.removeTag(deal.getId(), tag.getId()));
         assertFalse(dealService.removeTag(deal.getId(), tag.getId()));
 
-        assertEquals(auditBefore + 2, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.removeTag'",
             Integer.class,
             workspace.getId()));

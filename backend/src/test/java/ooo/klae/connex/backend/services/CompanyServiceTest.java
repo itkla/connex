@@ -65,7 +65,7 @@ class CompanyServiceTest extends AbstractServiceTest {
     @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Company company = newCompany();
         int auditBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
@@ -75,7 +75,7 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> companyService.removeTag(company.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -94,7 +94,7 @@ class CompanyServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsEitherWay() {
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
         Company company = newCompany();
         Tag tag = newTag();
         companyService.addTag(company.getId(), tag.getId());
@@ -106,7 +106,7 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertTrue(companyService.removeTag(company.getId(), tag.getId()));
         assertFalse(companyService.removeTag(company.getId(), tag.getId()));
 
-        assertEquals(auditBefore + 2, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'company.removeTag'",
             Integer.class,
             workspace.getId()));

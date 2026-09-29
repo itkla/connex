@@ -1450,6 +1450,8 @@ public class DealService {
 
     /**
      * Removes a tag from a deal.
+     * Records the audit row only when this invocation removed the association, so a removal of
+     * a tag the record no longer holds leaves no trace of a change that never happened.
      * @param dealId
      * @param tagId
      * @return whether this invocation removed the tag association
@@ -1460,12 +1462,14 @@ public class DealService {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        boolean removed = dealMapper.removeTag(workspaceId, dealId, tagId) == 1;
+        if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
+            return false;
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
             "Removed tag " + tagName + " from " + deal.getName(),
             auditService.singleChange("tag", tagName, null));
-        return removed;
+        return true;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */
