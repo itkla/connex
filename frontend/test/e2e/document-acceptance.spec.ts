@@ -590,7 +590,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             throw new Error("Generated empty document omitted its frozen content");
         }
         expect(contentWithoutItems.lineItems).toHaveLength(0);
-        expect(contentWithoutItems.totals.currency).toBeUndefined();
+        expect(contentWithoutItems.totals.currency).toBe("USDT");
         await jsonObject(await authenticatedApi.put(
             `/api/deals/${dealWithoutItemsId}/documents/${documentWithoutItemsId}/status`,
             { headers: writeHeaders, data: { status: "final" } },

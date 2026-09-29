@@ -14,7 +14,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.services.WorkspaceService.Role;
 
 @ExtendWith(MockitoExtension.class)
 class DeletionPolicyTest {
@@ -35,7 +34,7 @@ class DeletionPolicyTest {
 
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(CURRENT_USER_ID));
 
-        verify(workspaceService, never()).requireRole(Role.ADMIN);
+        verify(workspaceService, never()).requireBuiltInAdministrator();
     }
 
     @Test
@@ -52,7 +51,7 @@ class DeletionPolicyTest {
 
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(22));
 
-        verify(workspaceService).requireRole(Role.ADMIN);
+        verify(workspaceService).requireBuiltInAdministrator();
     }
 
     @Test
@@ -61,7 +60,7 @@ class DeletionPolicyTest {
 
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(22));
 
-        verify(workspaceService).requireRole(Role.ADMIN);
+        verify(workspaceService).requireBuiltInAdministrator();
     }
 
     @Test
@@ -75,7 +74,7 @@ class DeletionPolicyTest {
     void nullCreatorAllowsAdminOrOwner() {
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(null));
 
-        verify(workspaceService).requireRole(Role.ADMIN);
+        verify(workspaceService).requireBuiltInAdministrator();
     }
 
     @Test
@@ -92,6 +91,6 @@ class DeletionPolicyTest {
 
     private void denyAdminRole() {
         doThrow(new ForbiddenException("Requires ADMIN role in this workspace"))
-                .when(workspaceService).requireRole(Role.ADMIN);
+                .when(workspaceService).requireBuiltInAdministrator();
     }
 }

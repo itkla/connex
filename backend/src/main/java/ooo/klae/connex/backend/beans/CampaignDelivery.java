@@ -28,5 +28,8 @@ public class CampaignDelivery {
     private String unsubscribeToken;
     private String unsubscribeTokenHash;
     private LocalDateTime createdAt;
+    private LocalDateTime submittedAt;
+    /** Latest possible submission time reserved before egress, including the bounded provider budget. */
+    private LocalDateTime frequencyReservedAt;
     private LocalDateTime updatedAt;
 }

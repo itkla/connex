@@ -175,7 +175,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         {interactionUsers.map((user) => (
                                             <Tooltip key={user.id}>
                                                 <TooltipTrigger asChild>
-                                                    <Link href={`/users/${user.id}`}>
+                                                    <Link href={`/users/${user.id}`} aria-label={user.displayName || user.username || t("unknownUser")}>
                                                         <Avatar className="h-12 w-12 bg-muted-foreground/40">
                                                             {user.profilePictureUrl ? (
                                                                 <AvatarImage

@@ -335,6 +335,19 @@ class RecordCreationTemplateValidatorTest {
             field("custom:42", false, number("1E+16")))));
     }
 
+    @Test
+    void rejectsNumericDefaultsWhoseExponentOverflowsIntegerDigitCount() {
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validateDealNumber("1E2147483647"));
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validateDealNumber("1E-2147483647"));
+
+        when(customFieldMapper.getById(7, 42)).thenReturn(
+            custom(42, "person", "number", false));
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validate(definition(
+            field("custom:42", false, number("1E2147483647")))));
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validate(definition(
+            field("custom:42", false, number("1E-2147483647")))));
+    }
+
     private void validateDealNumber(String value) {
         validator.validateAndCanonicalize(
             RecordCreationRecordType.deal,

@@ -264,6 +264,54 @@ class TenantDiagnosticsServiceTest {
         assertFalse(result.toString().contains("credential-sentinel"));
     }
 
+    /**
+     * The two AI recovery sweeps are the mechanism the durable-turn recovery bound rests on, so a
+     * sweep failing for one tenant has to be readable here. The recorder accepted and persisted
+     * their rows from the day they shipped, while this assembler iterated its own fixed job-name
+     * list that omitted both — so neither appeared, even after failures were recorded.
+     */
+    @Test
+    void bothAiRecoverySweepsAppearInTheScheduledJobsWithTheirCounts() {
+        when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
+                .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
+        JobRun leaseSweep = run(
+                6,
+                "failed",
+                "{\"phase\":\"lease_settlement\",\"visitedCount\":4,\"expiredCount\":3,"
+                        + "\"failedCount\":1,\"durationMs\":250}");
+        leaseSweep.setJobName(JobRunRecorder.AI_RUN_LEASE_SWEEP);
+        JobRun lifetimeSweep = run(7, "succeeded", "{\"visitedCount\":2,\"expiredCount\":2}");
+        lifetimeSweep.setJobName(JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP);
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", null))
+                .thenReturn(List.of(leaseSweep, lifetimeSweep));
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", "failed"))
+                .thenReturn(List.of(leaseSweep));
+
+        TenantDiagnosticsDto result = service.forWorkspace(WORKSPACE_ID, ACTOR_ID);
+
+        Job lease = result.jobs().stream()
+                .filter(job -> JobRunRecorder.AI_RUN_LEASE_SWEEP.equals(job.jobName()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("failed", lease.last().status());
+        assertEquals("failed", lease.lastFailure().status());
+        assertEquals(1, lease.workspacesFailingLatest());
+        assertEquals(
+                Map.of(
+                        "phase", "lease_settlement",
+                        "visitedCount", 4,
+                        "expiredCount", 3,
+                        "failedCount", 1,
+                        "durationMs", 250),
+                lease.last().detail());
+        Job lifetime = result.jobs().stream()
+                .filter(job -> JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP.equals(job.jobName()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("succeeded", lifetime.last().status());
+        assertEquals(Map.of("visitedCount", 2, "expiredCount", 2), lifetime.last().detail());
+    }
+
     @Test
     void emptyWorkspaceOrganizationReturnsNoTenantSections() {
         when(scopeControlAccess.getForOrg(ORG_ID))

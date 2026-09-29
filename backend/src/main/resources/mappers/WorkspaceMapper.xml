@@ -85,6 +85,12 @@
     UPDATE app_user SET last_active_workspace_id = #{workspaceId} WHERE id = #{userId}
   </update>
 
+  <!-- The only writer that NULLs the remembered selection. Without it a user removed from their
+       last workspace keeps pointing at a workspace they can never resolve again (#1649). -->
+  <update id="clearLastActiveWorkspaceId">
+    UPDATE app_user SET last_active_workspace_id = NULL WHERE id = #{userId}
+  </update>
+
   <select id="isMember" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -109,6 +115,13 @@
     FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
     FOR UPDATE
+  </select>
+
+  <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR SHARE
   </select>
 
   <select id="getAuthorizationMembership" resultType="WorkspaceMember">
@@ -195,22 +208,27 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'active'
   </select>
 
-  <select id="hasMembersWithCustomRole" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1
-      FROM workspace_member
-      WHERE workspace_id = #{workspaceId} AND role_id = #{roleId}
-    )
-  </select>
-
   <update id="setMemberCustomRole">
     UPDATE workspace_member SET role_id = #{roleId}
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
-  <select id="countOwners" resultType="int">
-    SELECT COUNT(*) FROM workspace_member
+  <!-- NOWAIT: the caller already holds the workspace root, while departure cleanup can hold a
+       membership row before requesting that root. Waiting here would close the cycle. -->
+  <select id="lockActiveOwnerMembers" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_role_status)
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
+    ORDER BY user_id
+    FOR UPDATE NOWAIT
+  </select>
+
+  <select id="lockRoleAssignees" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (fk_workspace_member_role)
+    WHERE role_id = #{roleId} AND workspace_id = #{workspaceId}
+    ORDER BY user_id
+    FOR UPDATE NOWAIT
   </select>
 
   <select id="workspaceIdsOwnedBy" resultType="int">
@@ -238,13 +256,6 @@
        workspace root and its organization while the workspace is tearing down. -->
   <select id="lockWorkspaceOrgIdForShare" resultType="java.lang.Integer">
     SELECT org_id FROM workspace WHERE id = #{workspaceId} FOR SHARE
-  </select>
-
-  <select id="lockOwnerIds" resultType="int">
-    SELECT user_id FROM workspace_member
-    WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
-    ORDER BY user_id
-    FOR UPDATE
   </select>
 
   <delete id="removeMember">
@@ -298,6 +309,31 @@
     LIMIT #{limit}
   </select>
 
+  <!-- Share hydration snapshot (#811). This replaces the control-plane `workspace` joins the
+       tenant-scoped ShareMapper used to carry, so it must reproduce them exactly: those joins had
+       no lifecycle predicate, and adding one here would silently stop listing (and stop granting
+       to) a target workspace whose organization is winding down. Ordering by name then id is what
+       the removed `ORDER BY w.name` produced, made total.
+       DIVERGENCE, deliberate: `findByOrgId` below answers the same question for the read-path
+       ceilings and for tenant diagnostics, and it admits only workspaces whose own and whose
+       organization's lifecycle_state is 'active'. The two therefore return different sets for a
+       winding-down organization, so the allowlist ShareMapper enforces can be wider than the one
+       IdentityMapper/PersonEdgeMapper/AiAssistantIdentifierMapper enforce. Neither statement may
+       be swapped for the other; see ShareWorkspaceControlAccess for the full argument. -->
+  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+    SELECT peer.id, peer.org_id, peer.name
+    FROM workspace anchor
+    JOIN workspace peer ON peer.org_id = anchor.org_id
+    WHERE anchor.id = #{workspaceId}
+    ORDER BY peer.name, peer.id
+  </select>
+
+  <!-- Read-path organization scope. OrganizationWorkspaceScopeControlAccess turns this into the
+       #{orgWorkspaceIdsJson} allowlist the read ceilings bind, and it is lifecycle-filtered on
+       purpose: a torn-down or winding-down workspace must stop contributing read visibility.
+       DIVERGENCE, deliberate: `findOrganizationWorkspacesForShare` above applies no lifecycle
+       filter, because the share joins it replaced applied none. The same bound parameter name
+       therefore carries a different set on the share path than on the read path. -->
   <select id="findByOrgId" resultType="Workspace">
     SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
@@ -411,4 +447,20 @@
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>
+
+  <!-- Deliberately unfiltered by lifecycle_state: a verified email change must revoke every grant
+       addressed to the old address, including ones parked in a suspended or tearing-down tenant.
+       Ordered so the caller acquires the workspace roots in the contract's ascending id order. -->
+  <select id="findPendingGrants" resultType="ooo.klae.connex.backend.dto.RevokedInvitationDto">
+    SELECT wm.workspace_id AS workspaceId, w.org_id AS orgId, w.name AS workspaceName
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+    ORDER BY wm.workspace_id
+  </select>
+
+  <delete id="removePendingMember">
+    DELETE FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
+  </delete>
 </mapper>

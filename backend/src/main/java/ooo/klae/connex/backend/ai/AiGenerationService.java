@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -342,6 +343,12 @@ public class AiGenerationService {
         }
     }
 
+    /**
+     * Runs one accepted task on a generation worker. A timeout or invalidation interrupts the
+     * worker, and the task's {@link AiCancellation} checkpoints then unwind it with a
+     * {@link CancellationException} that is recorded as cancelled, releasing the worker for queued
+     * work instead of letting it finish an assembly whose result is already discarded.
+     */
     private <T> void execute(
             GenerationState state,
             Locale locale,
@@ -374,6 +381,8 @@ public class AiGenerationService {
                             state, serializeResult(outcome.result()), outcome.sensitive());
                 }
             });
+        } catch (CancellationException exception) {
+            fail(state, "cancelled");
         } catch (RuntimeException exception) {
             fail(state, Thread.currentThread().isInterrupted() ? "cancelled" : "generation_failed");
         }

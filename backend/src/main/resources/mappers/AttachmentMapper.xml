@@ -93,7 +93,7 @@
     SELECT <include refid="attachmentColumns"/>,
       COALESCE(c.name, p.name, d.name) AS entity_label
     <include refid="tenantAttachJoins"/>
-    WHERE a.workspace_id = #{workspaceId} AND a.url = #{url}
+    WHERE a.workspace_id = #{workspaceId} AND a.url = #{url} AND BINARY a.url = BINARY #{url}
       <include refid="noteVisibilityPredicate"/>
     LIMIT 1
   </select>
@@ -107,7 +107,7 @@
   <select id="getMetadataByUrl" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a
-    WHERE a.workspace_id = #{workspaceId} AND a.url = #{url}
+    WHERE a.workspace_id = #{workspaceId} AND a.url = #{url} AND BINARY a.url = BINARY #{url}
     LIMIT 1
   </select>
 
@@ -157,12 +157,12 @@
 
   <select id="countUrl" resultType="int">
     SELECT COUNT(*) FROM attachment
-    WHERE workspace_id = #{workspaceId} AND url = #{url}
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url}
   </select>
 
   <select id="lockIdsByUrl" resultType="int">
     SELECT id FROM attachment
-    WHERE workspace_id = #{workspaceId} AND url = #{url}
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url}
     ORDER BY id
     FOR UPDATE
   </select>

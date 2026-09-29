@@ -59,7 +59,7 @@ public class AiReportComposerAssembler {
                 + "\nInterpret the request in " + (language.isBlank() ? "English" : language)
                 + ". Keep every JSON property and vocabulary value exactly as specified."
                 + " Connex localizes all user-facing labels after validation.";
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system(system)
                 .userTurn("REPORT_REQUEST_BEGIN\n" + masked + "\nREPORT_REQUEST_END")
                 .build();

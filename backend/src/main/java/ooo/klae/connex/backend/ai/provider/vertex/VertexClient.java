@@ -20,6 +20,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
@@ -31,11 +32,16 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 /**
  * Minimal Vertex AI transport. The production path accepts only constructed regional Vertex
  * hosts and uses bounded, validated, pinned DNS under the caller's absolute provider deadline.
+ *
+ * <p>Endpoints carry no query string, with one allowlisted exception: {@code streamGenerateContent}
+ * answers as server-sent events only when {@code ?alt=sse} is present, and returns a chunked JSON
+ * array otherwise, so the streaming path permits that one raw query verbatim and nothing else.
  */
 @Component
 public class VertexClient {
     private static final Pattern VERTEX_HOST = Pattern.compile(
             "^[a-z]+-[a-z]+[0-9]{1,2}-aiplatform\\.googleapis\\.com$");
+    private static final String SSE_QUERY = "alt=sse";
     private static final int BUFFER_BYTES = 8192;
 
     private final RestClient restClient;
@@ -76,6 +82,15 @@ public class VertexClient {
             String accessToken,
             String requestBodyJson,
             AiRequestDeadline deadline) {
+        return complete(endpoint, accessToken, requestBodyJson, deadline, () -> {});
+    }
+
+    String complete(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         String host = requireVertexEndpoint(endpoint);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
@@ -83,12 +98,13 @@ public class VertexClient {
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         VertexResponse response;
         try {
-            response = sendOnce(endpoint, host, accessToken, body, deadline);
+            response = sendOnce(endpoint, host, accessToken, body, deadline, beforeSend);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
             throw new AiProviderException("Vertex invocation failed during transport");
         } catch (RuntimeException exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Vertex invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
@@ -105,7 +121,19 @@ public class VertexClient {
             AiRequestDeadline deadline,
             VertexSseAccumulator accumulator,
             AiProviderStreamObserver observer) {
-        String host = requireVertexEndpoint(endpoint);
+        return stream(endpoint, accessToken, requestBodyJson, deadline, accumulator, observer, () -> {});
+    }
+
+    /** Streams a model response after the durable pre-send callback succeeds. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            VertexSseAccumulator accumulator,
+            AiProviderStreamObserver observer,
+            Runnable beforeSend) {
+        String host = requireVertexEndpoint(endpoint, SSE_QUERY);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
         Objects.requireNonNull(deadline, "deadline");
@@ -130,7 +158,8 @@ public class VertexClient {
                                         input, accumulator::accept,
                                         accumulator::onTransportActivity);
                                 return accumulator.finish();
-                            });
+                            },
+                            beforeSend);
             if (response.statusCode() < 200 || response.statusCode() > 299) {
                 throw new AiProviderException(
                         "Vertex invocation failed with status " + response.statusCode());
@@ -143,6 +172,7 @@ public class VertexClient {
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .header("Authorization", "Bearer " + accessToken);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         return spec.body(body).exchange((request, response) -> {
             if (response.getStatusCode().isError()) {
                 throw new AiProviderException(
@@ -161,7 +191,8 @@ public class VertexClient {
             String host,
             String accessToken,
             byte[] body,
-            AiRequestDeadline deadline) {
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         if (providerClient != null) {
             FixedAiProviderClient.Response response = providerClient.post(
                     endpoint,
@@ -173,7 +204,8 @@ public class VertexClient {
                     ContentType.APPLICATION_JSON,
                     body,
                     deadline,
-                    "Vertex invocation");
+                    "Vertex invocation",
+                    beforeSend);
             return new VertexResponse(response.statusCode(), response.body());
         }
         RestClient.RequestBodySpec spec = restClient.post()
@@ -182,6 +214,7 @@ public class VertexClient {
                 .accept(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + accessToken);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         return spec.body(body)
                 .exchange((request, response) -> new VertexResponse(response.getStatusCode().value(),
                         readBounded(response.getBody())));
@@ -203,9 +236,14 @@ public class VertexClient {
     }
 
     private static String requireVertexEndpoint(URI endpoint) {
+        return requireVertexEndpoint(endpoint, null);
+    }
+
+    private static String requireVertexEndpoint(URI endpoint, String permittedRawQuery) {
         if (endpoint == null || !"https".equalsIgnoreCase(endpoint.getScheme())
                 || endpoint.getUserInfo() != null || endpoint.getFragment() != null
-                || endpoint.getQuery() != null || endpoint.getPort() != -1) {
+                || !permittedQuery(endpoint.getRawQuery(), permittedRawQuery)
+                || endpoint.getPort() != -1) {
             throw new AiProviderException("Invalid Vertex endpoint");
         }
         String host = endpoint.getHost();
@@ -217,6 +255,10 @@ public class VertexClient {
             throw new AiProviderException("Invalid Vertex endpoint");
         }
         return normalizedHost;
+    }
+
+    private static boolean permittedQuery(String rawQuery, String permittedRawQuery) {
+        return rawQuery == null || rawQuery.equals(permittedRawQuery);
     }
 
     private static void requireHeaderValue(String accessToken) {

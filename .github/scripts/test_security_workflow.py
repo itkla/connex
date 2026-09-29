@@ -10,6 +10,19 @@ FRONTEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "frontend.yml"
 CODEQL_REVISION = "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"
 BACKEND_CODEQL_CONFIG_INPUT = "./.github/codeql/backend.yml"
 FRONTEND_CODEQL_CONFIG_INPUT = "./.github/codeql/frontend.yml"
+# The javascript-typescript analysis also covers the prelaunch Worker in landing/, a separate package
+# written in the same language. Every other surface analyses exactly its own tree.
+CODEQL_ANALYSED_PATHS = {"frontend": ["frontend", "landing"]}
+
+
+def _load_policy_guard():
+    import importlib.util
+
+    path = Path(__file__).parent / "check-pnpm-supply-chain-policy.py"
+    spec = importlib.util.spec_from_file_location("check_pnpm_supply_chain_policy", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class SecurityWorkflowTest(unittest.TestCase):
@@ -66,7 +79,7 @@ class SecurityWorkflowTest(unittest.TestCase):
             with self.subTest(surface=surface):
                 self.assertEqual([], config["query-filters"])
                 self.assertNotIn("paths-ignore", config)
-                self.assertEqual([surface], config["paths"])
+                self.assertEqual(CODEQL_ANALYSED_PATHS.get(surface, [surface]), config["paths"])
 
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
         """The backend analysis is scoped by its config file's `paths`, never by `source-root`.
@@ -122,6 +135,36 @@ class SecurityWorkflowTest(unittest.TestCase):
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
         self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+
+    def test_the_pnpm_supply_chain_policy_is_checked_before_any_frontend_install(self) -> None:
+        steps = self.steps("frontend-audit")
+        runs = [step.get("run", "") for step in steps]
+        uses = [str(step.get("uses", "")) for step in steps]
+        guard = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py")
+        resolved = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py --effective")
+        install = runs.index("pnpm install --frozen-lockfile --ignore-scripts")
+        pnpm_setup = next(index for index, action in enumerate(uses) if action.startswith("pnpm/action-setup@"))
+        self.assertLess(guard, install)
+        self.assertLess(pnpm_setup, resolved)
+        self.assertLess(resolved, install)
+        pin_runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/test_pnpm_supply_chain_policy.py", pin_runs)
+
+    def test_every_policy_covered_pnpm_project_gets_a_frozen_install_after_the_resolved_check(self) -> None:
+        guard = _load_policy_guard()
+        steps = self.steps("frontend-audit")
+        runs = [step.get("run", "") for step in steps]
+        resolved = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py --effective")
+        frozen = {
+            str(step.get("working-directory")): index
+            for index, step in enumerate(steps)
+            if step.get("run") == "pnpm install --frozen-lockfile --ignore-scripts"
+        }
+        covered = {directory.as_posix() for directory in guard.PROJECT_DIRECTORIES}
+        self.assertEqual(covered, set(frozen))
+        for directory, index in frozen.items():
+            self.assertLess(resolved, index, directory)
+
     def test_the_canary_proof_is_regression_tested_in_the_pin_policy_job(self) -> None:
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/test_sast_canary_proof.py", runs)

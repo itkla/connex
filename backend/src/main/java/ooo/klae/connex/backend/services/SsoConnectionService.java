@@ -36,8 +36,9 @@ import ooo.klae.connex.backend.sso.SsoUrlSafety;
  * workspace-level permission, which a workspace owner could otherwise obtain by
  * creating a workspace inside the org (#316). One connection per organization.
  * The OIDC client secret is encrypted at rest and never returned; a blank secret
- * on save keeps the stored one. Email-domain routing is replaced wholesale on each
- * save. The org-scoped accessors and domain lookup back the login flow.
+ * on save keeps the stored one only for the same issuer and client id. Email-domain routing is
+ * replaced wholesale on each save; new claims cannot conflict with verified accounts outside the
+ * organization. The org-scoped accessors and domain lookup back the login flow.
  */
 @Service
 @RequiredArgsConstructor
@@ -92,8 +93,9 @@ public class SsoConnectionService {
     /**
      * Creates or updates the SSO connection for the acting workspace's organization.
      * Validates the protocol's required fields when enabled, encrypts a supplied
-     * client secret (preserving the stored one when blank), and replaces the org's
-     * routing domains. The JIT workspace must belong to the same organization.
+     * client secret (preserving the stored one when blank only for unchanged credentials), and
+     * replaces the org's routing domains. The JIT workspace must belong to the same organization.
+     * Credential identity changes retire the old secret reference before allocating its replacement.
      * @param workspaceId the acting workspace
      * @param actorId the requesting user
      * @param request the submitted connection
@@ -112,7 +114,7 @@ public class SsoConnectionService {
 
         String protocol = request.getProtocol().trim().toLowerCase();
         String role = resolveRole(request.getDefaultRole());
-        SsoConnection existing = ssoConnectionMapper.findByOrg(orgId);
+        SsoConnection existing = ssoConnectionMapper.findByOrgForUpdate(orgId);
         if (request.isEnabled()) {
             validateEnabled(protocol, request, existing);
         }
@@ -132,10 +134,21 @@ public class SsoConnectionService {
         connection.setSamlIdpMetadataXml(trimToNull(request.getSamlIdpMetadataXml()));
         connection.setSamlIdpX509(trimToNull(request.getSamlIdpX509()));
         if ("oidc".equals(protocol)) {
+            boolean credentialIdentityChanged = existing != null
+                    && (!"oidc".equals(existing.getProtocol())
+                        || !Objects.equals(existing.getOidcIssuer(), connection.getOidcIssuer())
+                        || !Objects.equals(existing.getOidcClientId(), connection.getOidcClientId()));
             if (!isBlank(request.getOidcClientSecret())) {
+                if (credentialIdentityChanged) {
+                    ssoSecretCipher.deleteOidcClientSecretReference(orgId, existing.getOidcClientSecretEnc());
+                }
                 connection.setOidcClientSecretEnc(
                         ssoSecretCipher.encryptOidcClientSecret(orgId, request.getOidcClientSecret().trim()));
             } else if (existing != null && "oidc".equals(existing.getProtocol())) {
+                if (credentialIdentityChanged) {
+                    throw new BadRequestException(
+                            "A new OIDC client secret is required when the issuer or client id changes");
+                }
                 connection.setOidcClientSecretEnc(existing.getOidcClientSecretEnc());
             }
         }
@@ -288,6 +301,9 @@ public class SsoConnectionService {
             if (owner != null && owner != orgId) {
                 throw new BadRequestException(
                         "The domain " + domain + " is already routed to another organization");
+            }
+            if (ssoDomainMapper.hasVerifiedEmailOutsideOrg(domain, orgId)) {
+                throw new BadRequestException("The domain is used by accounts outside this organization");
             }
             ssoDomainMapper.insert(domain, orgId);
         }

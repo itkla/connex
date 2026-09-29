@@ -122,7 +122,7 @@ class InteractionHistoryImportServiceTest {
         lenient().when(duplicatePreflightService.beginImportCommit(
                 anyList(), anyList(), anyString(), eq(admission)))
             .thenAnswer(invocation -> commits.removeFirst());
-        lenient().when(personMapper.getOwnedPersonByIdForUpdate(eq(WORKSPACE_ID), anyInt()))
+        lenient().when(personMapper.getOwnedPersonByIdForShare(eq(WORKSPACE_ID), anyInt()))
             .thenAnswer(invocation ->
                 person(invocation.getArgument(1, Integer.class), WORKSPACE_ID));
         NotificationReconciliationService.HistoricalExpectationSnapshot emptySnapshot =

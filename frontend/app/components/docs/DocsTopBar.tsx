@@ -9,6 +9,8 @@ import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/
 import LanguageSwitcher from "@/app/components/landing/LanguageSwitcher";
 import DocsNav from "./DocsNav";
 
+const LAUNCH_SIGNUP_HREF = "/#launch-signup";
+
 function ThemeToggle() {
     const t = useTranslations("CommonHome");
     const { resolvedTheme, setTheme } = useTheme();
@@ -31,11 +33,19 @@ function ThemeToggle() {
  * Sticky docs header. Adapts its call to action to the visitor's session
  * (`Open app` when signed in, `Sign in` / `Get started` otherwise) and holds the
  * mobile navigation drawer.
+ *
+ * `preLaunch` drops every account action: the docs are public before launch, so the header's only
+ * call to action is the launch signup form on the landing page.
  */
-export default function DocsTopBar({ authed }: { authed: boolean }) {
+export default function DocsTopBar({ authed, preLaunch = false }: { authed: boolean; preLaunch?: boolean }) {
     const home = useTranslations("CommonHome");
     const t = useTranslations("DocsMeta");
     const [navOpen, setNavOpen] = useState(false);
+    const cta = authed
+        ? { href: "/dashboard", label: t("openApp") }
+        : preLaunch
+          ? { href: LAUNCH_SIGNUP_HREF, label: home("prelaunch.navCta") }
+          : { href: "/auth/register", label: t("getStarted") };
 
     return (
         <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
@@ -63,15 +73,15 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                         </DrawerContent>
                     </Drawer>
 
-                    <Link href="/" className="flex items-center gap-2.5">
-                        <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                        <span className="text-lg font-bold tracking-tight text-foreground">
+                    <Link href="/" className="flex shrink-0 items-center gap-2.5">
+                        <span className="size-3 shrink-0 rounded-[5px] bg-brand" aria-hidden="true" />
+                        <span className="whitespace-nowrap text-lg font-bold tracking-tight text-foreground max-[359px]:sr-only">
                             {home("brand")}
                         </span>
                     </Link>
                     <Link
                         href="/docs"
-                        className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                        className="hidden rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground min-[400px]:inline-flex"
                     >
                         {t("sectionLabel")}
                     </Link>
@@ -82,29 +92,20 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                     <div className="hidden sm:block">
                         <LanguageSwitcher />
                     </div>
-                    {authed ? (
+                    {!authed && !preLaunch && (
                         <Link
-                            href="/dashboard"
-                            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                            href="/auth/login"
+                            className="hidden text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
                         >
-                            {t("openApp")}
+                            {t("signIn")}
                         </Link>
-                    ) : (
-                        <>
-                            <Link
-                                href="/auth/login"
-                                className="hidden text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
-                            >
-                                {t("signIn")}
-                            </Link>
-                            <Link
-                                href="/auth/register"
-                                className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
-                            >
-                                {t("getStarted")}
-                            </Link>
-                        </>
                     )}
+                    <Link
+                        href={cta.href}
+                        className="shrink-0 whitespace-nowrap rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                    >
+                        {cta.label}
+                    </Link>
                 </div>
             </div>
         </header>

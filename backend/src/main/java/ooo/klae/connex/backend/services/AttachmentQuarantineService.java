@@ -23,6 +23,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class AttachmentQuarantineService {
+    private static final Set<String> ORDINARY_DELETION_SCAN_STATES = Set.of("clean", "pending", "scanning", "error");
+
     private final WorkspaceService workspaceService;
     private final AttachmentScanMapper scanMapper;
     private final AttachmentMapper attachmentMapper;
@@ -72,6 +74,30 @@ public class AttachmentQuarantineService {
         attachmentMapper.delete(locked.workspaceId(), id);
         referenceService.deleteReferencesTo(locked.workspaceId(), ReferenceService.TYPE_FILE, id);
         audit("malware.quarantine_deleted", locked, "Deleted quarantined attachment");
+    }
+
+    /**
+     * Reports whether removing this reference is quarantine administration rather than ordinary
+     * deletion, and therefore needs {@link Permission#ATTACHMENT_QUARANTINE_MANAGE} and a strict audit.
+     *
+     * <p>The predicate fails closed: a managed object qualifies unless its scan state is one of the
+     * ordinary states {@code clean}, {@code pending}, {@code scanning} or {@code error}. Today that
+     * gates the {@code quarantined} lifecycle state and every non-clean scanner verdict
+     * ({@code infected}, {@code unscannable}); a missing or unrecognised state, such as one persisted
+     * for a verdict added later, is gated as well rather than silently becoming ordinary. Pre-verdict
+     * states stay ordinary because {@code pending} is the default for every legacy and server-generated
+     * reference and is permanent while scanning is disabled. Unmanaged references are outside the
+     * quarantine lifecycle and are never scanned.
+     *
+     * @param attachment attachment row whose persisted scan state and URL decide the route
+     * @param managedObjectService classifier for the managed attachment URL namespace
+     * @return {@code true} when only quarantine authority may delete the reference
+     */
+    public static boolean requiresQuarantineAuthority(
+            Attachment attachment, ManagedObjectService managedObjectService) {
+        String scanState = attachment.getScanState();
+        return managedObjectService.isManagedAttachmentUrl(attachment.getUrl())
+            && (scanState == null || !ORDINARY_DELETION_SCAN_STATES.contains(scanState));
     }
 
     private LockedAttachment lock(int id) {

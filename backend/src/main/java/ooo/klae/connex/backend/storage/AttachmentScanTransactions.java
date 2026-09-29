@@ -26,8 +26,7 @@ public class AttachmentScanTransactions {
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public Attachment claim(int workspaceId, int id) {
         Attachment selected = scans.getById(workspaceId, id);
-        if (selected == null || selected.getUrl() == null
-                || !selected.getUrl().startsWith("/api/attachments/content/")) {
+        if (selected == null || !ManagedObjectService.hasManagedAttachmentPrefix(selected.getUrl())) {
             return null;
         }
         attachments.lockIdsByUrl(workspaceId, selected.getUrl());
@@ -64,5 +63,17 @@ public class AttachmentScanTransactions {
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public void retry(Attachment claimed) {
         scans.retry(claimed.getWorkspaceId(), claimed.getUrl(), claimed.getScanOwner());
+    }
+
+    /** Permanently refuses a malformed reference only while the worker still owns its live claim. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public void refuse(Attachment claimed) {
+        var survivingIds = attachments.lockIdsByUrl(claimed.getWorkspaceId(), claimed.getUrl());
+        if (!survivingIds.isEmpty()
+                && scans.refuse(claimed.getWorkspaceId(), claimed.getUrl(), claimed.getScanOwner()) > 0) {
+            audit.recordStrictScoped("malware.unscannable", "attachment", survivingIds.getFirst(),
+                claimed.getWorkspaceId(), null, null, "Stored attachment reference is invalid",
+                java.util.Map.of("reason", "invalid_reference"));
+        }
     }
 }

@@ -32,7 +32,7 @@ class WorkspaceCreationGateTest {
 
     @Test
     void createWorkspace_refusedWhenSelfServiceCreationDisabled() {
-        User created = authService.register(dto("gate_user", "gate.user@example.com"), true);
+        User created = authService.register(dto("gate_user", "gate.user@example.com"), null);
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.createWorkspace("Gated WS", created.getId()));
@@ -40,7 +40,7 @@ class WorkspaceCreationGateTest {
 
     @Test
     void register_succeedsWithoutProvisioningAWorkspace() {
-        User created = authService.register(dto("gate_nows", "gate.nows@example.com"), true);
+        User created = authService.register(dto("gate_nows", "gate.nows@example.com"), null);
 
         assertNotNull(created.getId());
         assertTrue(workspaceMapper.getMembershipsForUser(created.getId()).isEmpty(),

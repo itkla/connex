@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -15,13 +17,26 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.time.LocalDateTime;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.springframework.test.util.ReflectionTestUtils;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
+import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.capability.Capability;
@@ -35,6 +50,10 @@ import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 class CampaignDispatchServiceTest {
 
+    private static final String EXPIRED_AUDIENCE_RESERVATION =
+            "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
+    private static final long RESERVATION_GRACE_MICROS = 30_000_000L;
+
     @Test
     void providerDetailsMapToTheBoundedRecipientReasonVocabulary() {
         assertEquals("provider_timeout",
@@ -47,8 +66,9 @@ class CampaignDispatchServiceTest {
                 CampaignDeliveryFailureReason.classify("private relay diagnostic", true).token());
     }
 
-    @Test
-    void staleClaimOwnerCannotRewriteWorkflowFrequencyCapOutcome() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void staleClaimOwnerCannotRewriteWorkflowFrequencyCapOutcome(boolean cappedAtAdmission) {
         CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
@@ -86,7 +106,10 @@ class CampaignDispatchServiceTest {
         when(eligibilityService.consentBlocks(7, 17, "email", "marketing"))
                 .thenReturn(false);
         when(deliveryMapper.recentDispatchCount(
-                eq(7), eq(17), eq("email"), eq(11), any())).thenReturn(1);
+                eq(7), eq(17), eq("email"), eq(11), any())).thenReturn(cappedAtAdmission ? 0 : 1);
+        CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
+        when(admission.reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24)))
+                .thenReturn(CampaignFrequencyAdmissionService.Admission.CAPPED);
         when(deliveryMapper.markTriggeredSkipped(
                 eq(7), eq(13), anyString(), eq("frequency_capped"))).thenReturn(0);
         CampaignDispatchService service = new CampaignDispatchService(
@@ -100,7 +123,8 @@ class CampaignDispatchServiceTest {
                 capabilityRegistry,
                 gate,
                 workflowRunMapper,
-                boundary);
+                boundary,
+                admission);
 
         assertTrue(service.processSend(7, 11));
 
@@ -165,7 +189,8 @@ class CampaignDispatchServiceTest {
                 capabilityRegistry,
                 gate,
                 workflowRunMapper,
-                boundary);
+                boundary,
+                admittedFrequency());
 
         assertTrue(service.processSend(7, 11));
 
@@ -232,7 +257,8 @@ class CampaignDispatchServiceTest {
                 capabilityRegistry,
                 gate,
                 workflowRunMapper,
-                boundary);
+                boundary,
+                admittedFrequency());
 
         assertTrue(service.processSend(7, 11));
 
@@ -242,6 +268,57 @@ class CampaignDispatchServiceTest {
                 anyInt(), anyInt(), anyString(), anyString(), anyString());
         verify(deliveryMapper, never()).markAmbiguous(
                 anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void deadlineExpiringDuringAdmissionReleasesTheReservationBeforeEgress() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        AudienceEligibilityService eligibilityService = mock(AudienceEligibilityService.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
+        AtomicLong now = new AtomicLong();
+        ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(
+                "smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.none());
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(gate.enabled()).thenReturn(true);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.getSend(7, 11)).thenReturn(triggeredSend());
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(target);
+        when(providerRouter.dispatcherFor("smtp")).thenReturn(dispatcher);
+        when(deliveryMapper.pendingDeliveryIdsPage(7, 11, 200)).thenReturn(List.of(13));
+        when(deliveryMapper.claimTriggered(
+                eq(7), eq(13), anyString(), anyLong(), eq("smtp"), anyString())).thenReturn(1);
+        when(deliveryMapper.renewTriggeredClaim(eq(7), eq(13), anyString(), anyLong())).thenReturn(1);
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(delivery());
+        when(deliveryMapper.getDelivery(7, 13)).thenReturn(delivery());
+        when(eligibilityService.restrictedIds(7, List.of(17))).thenReturn(Set.of());
+        when(eligibilityService.suppressedAddresses(eq(7), eq("email"), any())).thenReturn(Set.of());
+        when(eligibilityService.suppressedPersonRefIds(7, List.of(17), "email")).thenReturn(Set.of());
+        when(admission.reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24)))
+                .thenAnswer(invocation -> {
+                    now.set(Long.MAX_VALUE / 2);
+                    return CampaignFrequencyAdmissionService.Admission.RESERVED;
+                });
+        CampaignDispatchService service = new CampaignDispatchService(
+                sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
+                providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+        ReflectionTestUtils.setField(service, "nanoTimeSource", (java.util.function.LongSupplier) now::get);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(admission).reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24));
+        verify(deliveryMapper).releaseFrequencyWindowBeforeEgress(eq(7), eq(13), anyString());
+        verify(deliveryMapper).markTriggeredFailed(eq(7), eq(13), anyString(),
+                eq("Provider deadline expired before egress"), eq("provider_timeout"));
+        verifyNoInteractions(dispatcher);
     }
 
     @Test
@@ -287,7 +364,8 @@ class CampaignDispatchServiceTest {
                 capabilityRegistry,
                 gate,
                 workflowRunMapper,
-                boundary);
+                boundary,
+                admittedFrequency());
 
         assertTrue(service.processSend(7, 11));
 
@@ -383,6 +461,379 @@ class CampaignDispatchServiceTest {
                 anyInt(), anyInt(), anyString());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void onlyAProvenPreEgressRejectionReleasesTheFrequencyReservation(boolean provenBeforeEgress) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service =
+                triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        when(dispatcher.dispatch(any(), any())).thenReturn(provenBeforeEgress
+                ? DispatchReceipt.rejectedBeforeEgress("No usable ESP credential is configured")
+                : DispatchReceipt.rejected("esp rejected with status 503"));
+        when(deliveryMapper.markTriggeredFailed(
+                eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper, times(provenBeforeEgress ? 1 : 0))
+                .releaseFrequencyWindowBeforeEgress(eq(7), eq(13), anyString());
+        verify(deliveryMapper).markTriggeredFailed(
+                eq(7), eq(13), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void anAmbiguousOutcomeNeverReleasesTheFrequencyReservation() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service =
+                triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        when(dispatcher.dispatch(any(), any())).thenReturn(
+                DispatchReceipt.ambiguous("Provider request failed after egress began"));
+        when(deliveryMapper.markTriggeredAmbiguous(
+                eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper, never()).releaseFrequencyWindowBeforeEgress(
+                anyInt(), anyInt(), anyString());
+        verify(deliveryMapper).markTriggeredAmbiguous(
+                eq(7), eq(13), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void aRefusedReservationTerminatesTheStillOwnedClaimInsteadOfStrandingIt() throws Exception {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
+        when(admission.reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24)))
+                .thenReturn(CampaignFrequencyAdmissionService.Admission.REFUSED);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+
+        assertTrue(service.processSend(7, 11));
+
+        ArgumentCaptor<String> reason = ArgumentCaptor.forClass(String.class);
+        verify(deliveryMapper).markTriggeredSkipped(eq(7), eq(13), anyString(), reason.capture());
+        assertEquals("not_dispatchable", reason.getValue());
+        try (InputStream migration = Objects.requireNonNull(getClass().getResourceAsStream(
+                "/db/migration/tenant/V210__allow_not_dispatchable_delivery_skip_reason.sql"))) {
+            String sql = new String(migration.readAllBytes(), StandardCharsets.UTF_8);
+            Matcher constraint = Pattern.compile("skip_reason IN \\(([^)]+)\\)").matcher(sql);
+            assertTrue(constraint.find(), "The migration must declare the allowed skip reasons");
+            List<String> allowed = Pattern.compile("'([^']+)'").matcher(constraint.group(1))
+                    .results().map(match -> match.group(1)).toList();
+            assertTrue(allowed.contains(reason.getValue()), "The database must accept the emitted reason");
+        }
+        verify(deliveryMapper, never()).markTriggeredFailed(
+                anyInt(), anyInt(), anyString(), anyString(), anyString());
+        verifyNoInteractions(dispatcher);
+    }
+
+    @Test
+    void aLostClaimIsLeftUntouchedForItsCurrentOwner() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
+        when(admission.reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24)))
+                .thenReturn(CampaignFrequencyAdmissionService.Admission.CLAIM_LOST);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper, never()).markTriggeredSkipped(
+                anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).markTriggeredFailed(
+                anyInt(), anyInt(), anyString(), anyString(), anyString());
+        verifyNoInteractions(dispatcher);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"recovered, false", "recovered, true", "legacy, false", "legacy, true",
+            "detail, false", "detail, true", "marker, false", "marker, true"})
+    void refusedClaimsPreserveEarlierSubmissionUncertainty(String historyKind, boolean refusedAtAdmission) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+        CampaignDelivery history = delivery();
+        history.setAttemptCount(2);
+        String expectedReason = "deadline_ambiguous";
+        switch (historyKind) {
+            case "recovered" -> history.setLastErrorCode(expectedReason);
+            case "legacy" -> history.setLastErrorCode(null);
+            case "detail" -> {
+                history.setAttemptCount(1);
+                history.setLastError("AMBIGUOUS: Earlier provider outcome is unknown");
+                history.setLastErrorCode("relay_error");
+                expectedReason = "relay_error";
+            }
+            case "marker" -> {
+                history.setAttemptCount(1);
+                history.setReconciliationRequiredAt(LocalDateTime.of(2026, 1, 1, 0, 0));
+                history.setLastErrorCode("provider_timeout");
+                expectedReason = "provider_timeout";
+            }
+            default -> throw new IllegalArgumentException("Unknown attempt history");
+        }
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(history);
+        when(deliveryMapper.markTriggeredAmbiguous(
+                eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        if (refusedAtAdmission) {
+            when(admission.reserve(eq(7), eq(13), eq(17), eq("email"), anyString(), eq(24)))
+                    .thenReturn(CampaignFrequencyAdmissionService.Admission.REFUSED);
+        } else {
+            when(dispatcher.dispatch(any(), any())).thenReturn(
+                    DispatchReceipt.rejectedBeforeEgress("No usable provider credential is configured"));
+        }
+
+        assertTrue(service.processSend(7, 11));
+
+        ArgumentCaptor<String> error = ArgumentCaptor.forClass(String.class);
+        verify(deliveryMapper).markTriggeredAmbiguous(
+                eq(7), eq(13), anyString(), error.capture(), eq(expectedReason));
+        assertTrue(error.getValue().startsWith("AMBIGUOUS:"));
+        if ("detail".equals(historyKind)) {
+            assertEquals(history.getLastError(), error.getValue());
+        }
+        verify(deliveryMapper, never()).markTriggeredFailed(
+                anyInt(), anyInt(), anyString(), anyString(), anyString());
+        verify(deliveryMapper, never()).markTriggeredSkipped(
+                anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).releaseFrequencyWindowBeforeEgress(
+                anyInt(), anyInt(), anyString());
+        if (refusedAtAdmission) {
+            verifyNoInteractions(dispatcher);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void theAudienceReservationSweepRunsFromBothDispatchEntryPoints(boolean workspacePass) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        if (workspacePass) {
+            assertEquals(0, service.processWorkspace(7));
+        } else {
+            assertTrue(service.processSend(7, 11));
+        }
+
+        verify(deliveryMapper).expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200);
+    }
+
+    @Test
+    void anAbandonedAudienceAttemptBecomesAmbiguousWithOneEventAndRefreshedCounters() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11), abandonedAudienceAttempt(14, 11)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        InOrder recovery = inOrder(deliveryMapper, sendMapper);
+        for (int deliveryId : List.of(13, 14)) {
+            recovery.verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                    7, deliveryId, RESERVATION_GRACE_MICROS, EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token());
+        }
+        recovery.verify(sendMapper).audienceSendsAwaitingRecoverySettlement(7, 200);
+        recovery.verify(sendMapper).refreshCounters(7, 11);
+        ArgumentCaptor<CampaignDeliveryEvent> events = ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(deliveryMapper, times(2)).insertEvent(events.capture());
+        assertEquals(List.of(13, 14), events.getAllValues().stream()
+                .map(CampaignDeliveryEvent::getDeliveryId).toList());
+        for (CampaignDeliveryEvent event : events.getAllValues()) {
+            assertEquals("failed", event.getEventType());
+            assertEquals(EXPIRED_AUDIENCE_RESERVATION, event.getDetail());
+        }
+        verify(sendMapper, times(1)).refreshCounters(7, 11);
+        verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).claim(anyInt(), anyInt());
+    }
+
+    @Test
+    void aLostAudienceReservationCompareAndSetAppendsNothing() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(13), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(0);
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                7, 13, RESERVATION_GRACE_MICROS, EXPIRED_AUDIENCE_RESERVATION,
+                CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token());
+        verify(deliveryMapper, never()).insertEvent(any());
+        verify(sendMapper, never()).refreshCounters(anyInt(), anyInt());
+    }
+
+    @Test
+    void anAudienceReservationEventFailureIsSwallowedAndTheSweepContinues() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11), abandonedAudienceAttempt(14, 12)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        doThrow(new IllegalStateException("event store unavailable"))
+                .when(deliveryMapper).insertEvent(any());
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11, 12));
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(14), eq(RESERVATION_GRACE_MICROS), anyString(), anyString());
+        verify(deliveryMapper, times(2)).insertEvent(any());
+        verify(sendMapper).refreshCounters(7, 11);
+        verify(sendMapper).refreshCounters(7, 12);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aFailedRecoverySweepIsCountedButNeverStarvesTheOtherSweepOrQueuedDispatch(boolean audienceFails) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.queuedSendIds(7, false)).thenReturn(List.of(11));
+        if (audienceFails) {
+            when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                    .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        } else {
+            when(deliveryMapper.expiredTriggeredClaimsPage(7, 200))
+                    .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        }
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(1, service.processWorkspace(7));
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper, times(2)).expiredTriggeredClaimsPage(7, 200);
+        verify(deliveryMapper, times(2)).expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200);
+        verify(sendMapper, times(2)).getSend(7, 11);
+    }
+
+    @Test
+    void aFailedAudienceCompareAndSetStillSettlesTheSendsAwaitingSettlement() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.queuedSendIds(7, false)).thenReturn(List.of(11));
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 21), abandonedAudienceAttempt(14, 22)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(13), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(14), eq(RESERVATION_GRACE_MICROS), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(21));
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(1, service.processWorkspace(7));
+
+        verify(deliveryMapper, times(1)).insertEvent(any());
+        verify(sendMapper).audienceSendsAwaitingRecoverySettlement(7, 200);
+        verify(sendMapper).refreshCounters(7, 21);
+        verify(sendMapper).getSend(7, 11);
+    }
+
+    @Test
+    void aSendAwaitingRecoverySettlementIsCompletedBeforeItsCountersAreRefreshed() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        InOrder settlement = inOrder(sendMapper);
+        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
+        settlement.verify(sendMapper).refreshCounters(7, 11);
+        verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
+        verify(sendMapper, never()).getSend(7, 11);
+        verify(deliveryMapper, never()).countPending(anyInt(), anyInt());
+        verifyNoInteractions(providerConfigService);
+    }
+
+    private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
+        CampaignDelivery abandoned = new CampaignDelivery();
+        abandoned.setId(deliveryId);
+        abandoned.setSendId(sendId);
+        return abandoned;
+    }
+
+    private static CampaignDispatchService triggeredDispatch(
+            CampaignDeliveryMapper deliveryMapper,
+            MessageDispatcher dispatcher,
+            CampaignFrequencyAdmissionService admission) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        AudienceEligibilityService eligibilityService = mock(AudienceEligibilityService.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(
+                "smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.none());
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(gate.enabled()).thenReturn(true);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.getSend(7, 11)).thenReturn(triggeredSend());
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(target);
+        when(providerRouter.dispatcherFor("smtp")).thenReturn(dispatcher);
+        when(deliveryMapper.pendingDeliveryIdsPage(7, 11, 200)).thenReturn(List.of(13));
+        when(deliveryMapper.claimTriggered(
+                eq(7), eq(13), anyString(), anyLong(), eq("smtp"), anyString())).thenReturn(1);
+        when(deliveryMapper.renewTriggeredClaim(eq(7), eq(13), anyString(), anyLong())).thenReturn(1);
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(delivery());
+        when(deliveryMapper.getDelivery(7, 13)).thenReturn(delivery());
+        when(eligibilityService.restrictedIds(7, List.of(17))).thenReturn(Set.of());
+        when(eligibilityService.suppressedAddresses(eq(7), eq("email"), any())).thenReturn(Set.of());
+        when(eligibilityService.suppressedPersonRefIds(7, List.of(17), "email")).thenReturn(Set.of());
+        when(eligibilityService.consentBlocks(7, 17, "email", "marketing")).thenReturn(false);
+        when(deliveryMapper.recentDispatchCount(
+                eq(7), eq(17), eq("email"), eq(11), any())).thenReturn(0);
+        return new CampaignDispatchService(
+                sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
+                providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+    }
+
+    private static CampaignFrequencyAdmissionService admittedFrequency() {
+        CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
+        when(admission.reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt()))
+                .thenReturn(CampaignFrequencyAdmissionService.Admission.RESERVED);
+        return admission;
+    }
+
     private static CampaignSend triggeredSend() {
         CampaignSend send = new CampaignSend();
         send.setId(11);
@@ -463,6 +914,7 @@ class CampaignDispatchServiceTest {
                 capabilityRegistry,
                 gate,
                 mock(WorkflowRunMapper.class),
-                mock(CampaignDispatchClaimBoundary.class));
+                mock(CampaignDispatchClaimBoundary.class),
+                admittedFrequency());
     }
 }

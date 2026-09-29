@@ -12,6 +12,7 @@ import java.util.Map;
 
 import jakarta.servlet.http.HttpSession;
 
+import org.springframework.core.serializer.support.SerializingConverter;
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -54,6 +56,7 @@ public class ProviderConnectionService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ProviderConnectionMapper connectionMapper;
+    private final SpringSessionMapper springSessionMapper;
     private final ConnectedAccountProviders providers;
     private final ProviderTokenClient tokenClient;
     private final ProviderCredentialPersistence credentialPersistence;
@@ -290,13 +293,18 @@ public class ProviderConnectionService {
         return form;
     }
 
+    /**
+     * Claims only the validated JDBC session value, including across concurrent request snapshots.
+     * Spring Session's ON_SET_ATTRIBUTE save mode leaves this unchanged request snapshot untouched;
+     * setting or removing it here would overwrite a newer authorization on the request's final save.
+     * The consumed marker retains the row so a concurrent authorization can still update it.
+     */
     private ProviderConnectionExpectation consumePendingState(String provider, String state) {
         HttpSession session = session(false);
         if (session == null || state == null || state.isBlank()) {
             return null;
         }
         Object attribute = session.getAttribute(STATE_SESSION_ATTRIBUTE);
-        session.removeAttribute(STATE_SESSION_ATTRIBUTE);
         if (!(attribute instanceof String stored)) {
             return null;
         }
@@ -318,7 +326,14 @@ public class ProviderConnectionService {
                 sha256(state).getBytes(StandardCharsets.UTF_8))) {
             return null;
         }
-        return decode(parts[3]);
+        ProviderConnectionExpectation expectation = decode(parts[3]);
+        if (expectation == null) {
+            return null;
+        }
+        SerializingConverter serializer = new SerializingConverter();
+        int consumed = tenantWorkScope.unrouted(() -> springSessionMapper.consumeProviderConnectionState(
+            session.getId(), serializer.convert(stored), serializer.convert("consumed")));
+        return consumed == 1 ? expectation : null;
     }
 
     private static String encode(ProviderConnectionExpectation expectation) {

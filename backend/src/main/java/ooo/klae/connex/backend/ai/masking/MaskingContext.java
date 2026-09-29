@@ -1,19 +1,17 @@
 package ooo.klae.connex.backend.ai.masking;
 
-import java.text.Normalizer;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 
@@ -24,12 +22,12 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
  * Leg-2 provider exposure but is not anonymization and does not change Connex's handler status.
  */
 public final class MaskingContext {
-    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
-
+    private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
-    private final Map<String, String> canonicalValueToToken = new LinkedHashMap<>();
-    private final Map<String, String> rawIdentifierToToken = new LinkedHashMap<>();
+    private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
+    private final Map<String, IdentifierEntry> rawIdentifierEntries = new LinkedHashMap<>();
+    private final Set<String> unsafeIdentifierValues = new LinkedHashSet<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
@@ -52,31 +50,83 @@ public final class MaskingContext {
 
     /**
      * Returns a stable placeholder for an identifier within this request, assigning by first
-     * appearance within each entity kind.
+     * appearance within each entity kind. Exact original values determine token identity and
+     * demasking; canonical and source-mapped label variants supply free-text matching coverage
+     * without merging distinct display identities.
      * @param kind identifier namespace
      * @param rawValue original CRM display value
-     * @return request-local placeholder such as {@code {{P1}}}
+     * @return request-local placeholder, or a redaction marker for an unsafe stored identifier
      */
     public String tokenFor(EntityKind kind, String rawValue) {
         Objects.requireNonNull(kind, "kind");
-        String normalizedRawValue = normalizeRawValue(rawValue);
-        String canonicalKey = canonicalKey(normalizedRawValue);
-        String token = canonicalValueToToken.get(canonicalKey);
+        if (rawValue == null || rawValue.isBlank()) {
+            throw new IllegalArgumentException("Cannot tokenize a blank identifier");
+        }
+        String token = originalValueToToken.get(rawValue);
         if (token == null) {
             token = nextToken(kind);
-            canonicalValueToToken.put(canonicalKey, token);
-            tokenToOriginalValue.put(token, normalizedRawValue);
+            originalValueToToken.put(rawValue, token);
+            tokenToOriginalValue.put(token, rawValue);
             tokenToKind.put(token, kind);
         }
-        identifierDictionary.add(normalizedRawValue);
-        rawIdentifierToToken.putIfAbsent(normalizedRawValue, token);
-        return token;
+        if (!rawIdentifierEntries.containsKey(rawValue)) {
+            CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
+            String canonicalValue = stored.literal();
+            if (isCanonicalDictionaryEligible(canonicalValue)
+                    || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+                identifierDictionary.add(rawValue);
+                rawIdentifierEntries.put(rawValue,
+                        new IdentifierEntry(rawValue, canonicalValue,
+                                stored.label(), token,
+                                Objects.requireNonNull(tokenToKind.get(token)), !stored.converged()));
+                if (!stored.converged()) {
+                    unsafeIdentifierValues.add(canonicalValue);
+                    log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
+                }
+            }
+        }
+        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
+        return entry != null && entry.unsafe() ? MaskingEngine.REDACTED : token;
+    }
+
+    /** Recognizes an unsafe structured value without projecting its exhausted label again. */
+    boolean isUnsafeIdentifierValue(String value) {
+        return !unsafeIdentifierValues.isEmpty()
+                && unsafeIdentifierValues.contains(MaskingEngine.normalizeIdentifierValue(value));
     }
 
     /**
-     * Raw identifiers collected for request-local leak scanning.
-     * @return ordered immutable identifier dictionary
+     * Whether a raw value may drive free-text replacement and mention matching.
+     *
+     * <p>A display name made only of punctuation or separators — a record literally named
+     * {@code "."} or {@code "-"} — carries no tenant identity, yet it has no word boundary, so the
+     * replacer would substitute every occurrence in uncontrolled text and expand a long note by
+     * roughly the redaction marker's length each time. Refusing dictionary membership removes that
+     * amplification, and the structured field the value came from still tokenizes.
+     *
+     * <p>Eligibility uses the stored replacement canonicalization, so control-only names cannot
+     * become empty matchers. Short symbol-only canonical values are also excluded; short names
+     * containing a letter or digit, including single-character CJK surnames, remain protected.
+     * Raw values long enough for {@link OutboundLeakScan} remain in its dictionary independently
+     * of replacement eligibility, preserving fail-closed scanning when separator folding removes
+     * their entire value or reduces it below the scanner's floor.
+     *
+     * @param rawValue candidate identifier value
+     * @return true when the value carries identity worth replacing without unanchored amplification
      */
+    static boolean isDictionaryEligible(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return false;
+        }
+        return isCanonicalDictionaryEligible(MaskingEngine.normalizeIdentifierValue(rawValue));
+    }
+
+    static boolean isCanonicalDictionaryEligible(String canonicalValue) {
+        return !canonicalValue.isEmpty()
+                && (canonicalValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                        || canonicalValue.codePoints().anyMatch(Character::isLetterOrDigit));
+    }
+
     /**
      * Registers server-authored prompt text this request will send verbatim.
      *
@@ -106,11 +156,10 @@ public final class MaskingContext {
             return false;
         }
         String candidate = OutboundLeakScan.normalizeForScan(rawValue);
-        if (candidate.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
-            return false;
-        }
+        String labelCandidate = CanonicalText.storedIdentifier(rawValue).label();
         for (String segment : trustedStaticTexts) {
-            if (segment.contains(candidate)) {
+            if (candidate.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH && segment.contains(candidate)
+                    || labelCandidate.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH && segment.contains(labelCandidate)) {
                 return true;
             }
         }
@@ -132,14 +181,18 @@ public final class MaskingContext {
         if (candidate.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
             return false;
         }
-        for (String raw : identifierDictionary) {
-            if (OutboundLeakScan.normalizeForScan(raw).equals(candidate)) {
+        for (IdentifierEntry entry : rawIdentifierEntries.values()) {
+            if (entry.canonicalValue().equals(candidate) || entry.labelValue().equals(candidate)) {
                 return true;
             }
         }
         return false;
     }
 
+    /**
+     * Raw identifiers collected for request-local leak scanning.
+     * @return ordered immutable identifier dictionary
+     */
     public Set<String> identifierDictionary() {
         return Collections.unmodifiableSet(identifierDictionary);
     }
@@ -157,6 +210,63 @@ public final class MaskingContext {
                 .collect(Collectors.toUnmodifiableList());
     }
 
+    /**
+     * Marks the identifier bindings issued so far, so {@link #restore} can later withdraw every
+     * binding issued after this point.
+     *
+     * @return a checkpoint only this context accepts
+     */
+    public Checkpoint checkpoint() {
+        return new Checkpoint(
+                this,
+                tokenToOriginalValue.size(),
+                rawIdentifierEntries.size(),
+                unsafeIdentifierValues.size());
+    }
+
+    /**
+     * Withdraws every identifier binding issued after a checkpoint, so the context binds exactly
+     * the placeholders it bound when the checkpoint was taken.
+     *
+     * <p>A batched assistant step abandoned part-way leaves the replay with none of its results,
+     * so the placeholders its executed calls seeded stand for values the model was never shown.
+     * Left bound, a closing answer could name one — placeholders are short and sequential — and it
+     * would demask cleanly into a real value instead of counting as an invented placeholder.
+     * Bindings are only ever added, in order, so the ones issued after a checkpoint are exactly
+     * the entries past its position in each ordered collection.
+     *
+     * <p>A restore is sound only while no outbound request has carried a withdrawn binding, because
+     * the provider could otherwise answer with a placeholder it was legitimately shown; the
+     * assistant loop restores before it assembles its next request. The per-kind placeholder
+     * counters are deliberately not rewound: a withdrawn placeholder may still sit in the abandoned
+     * calls' committed durable rows and can still be guessed, so it must stay unbound for as long as
+     * this context lives rather than be issued again for another value.
+     *
+     * @param checkpoint a checkpoint this context issued
+     * @throws IllegalArgumentException when the checkpoint belongs to another context, or names
+     *     more bindings than this context still holds because an earlier restore withdrew them
+     */
+    public void restore(Checkpoint checkpoint) {
+        Objects.requireNonNull(checkpoint, "checkpoint");
+        if (checkpoint.context != this
+                || checkpoint.tokens > tokenToOriginalValue.size()
+                || checkpoint.identifiers > rawIdentifierEntries.size()
+                || checkpoint.unsafeIdentifiers > unsafeIdentifierValues.size()) {
+            throw new IllegalArgumentException(
+                    "Masking checkpoint does not belong to this context");
+        }
+        for (String token : withdrawn(tokenToOriginalValue.keySet(), checkpoint.tokens)) {
+            originalValueToToken.remove(tokenToOriginalValue.remove(token));
+            tokenToKind.remove(token);
+        }
+        for (String rawValue : withdrawn(rawIdentifierEntries.keySet(), checkpoint.identifiers)) {
+            rawIdentifierEntries.remove(rawValue);
+            identifierDictionary.remove(rawValue);
+        }
+        unsafeIdentifierValues.removeAll(
+                withdrawn(unsafeIdentifierValues, checkpoint.unsafeIdentifiers));
+    }
+
     @Override
     public String toString() {
         return "MaskingContext{redacted}";
@@ -166,31 +276,12 @@ public final class MaskingContext {
         return tokenToOriginalValue.get(token);
     }
 
-    List<IdentifierEntry> identifierEntriesByLongestRawValue() {
-        List<IdentifierEntry> entries = new ArrayList<>();
-        for (Map.Entry<String, String> entry : rawIdentifierToToken.entrySet()) {
-            if (entry.getKey().isBlank()) {
-                continue;
-            }
-            EntityKind kind = Objects.requireNonNull(
-                    tokenToKind.get(entry.getValue()), "Identifier token kind is unavailable");
-            entries.add(new IdentifierEntry(entry.getKey(), entry.getValue(), kind));
-        }
-        entries.sort(Comparator.comparingInt((IdentifierEntry entry) -> entry.rawValue().length()).reversed());
-        return entries;
+    List<IdentifierEntry> identifierEntries() {
+        return List.copyOf(rawIdentifierEntries.values());
     }
 
-    private static String normalizeRawValue(String rawValue) {
-        if (rawValue == null || rawValue.isBlank()) {
-            throw new IllegalArgumentException("Cannot tokenize a blank identifier");
-        }
-        String withoutDelimiters = rawValue.replace("{{", "").replace("}}", "");
-        return WHITESPACE.matcher(withoutDelimiters.trim()).replaceAll(" ");
-    }
-
-    private static String canonicalKey(String rawValue) {
-        String canonicalValue = Normalizer.normalize(rawValue, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
-        return WHITESPACE.matcher(canonicalValue).replaceAll(" ");
+    private static List<String> withdrawn(Set<String> ordered, int kept) {
+        return ordered.stream().skip(kept).toList();
     }
 
     private String nextToken(EntityKind kind) {
@@ -198,6 +289,30 @@ public final class MaskingContext {
         return "{{" + kind.tokenPrefix() + next + "}}";
     }
 
-    record IdentifierEntry(String rawValue, String token, EntityKind kind) {
+    /** A position in one context's binding order, which only that context can restore to. */
+    public static final class Checkpoint {
+        private final MaskingContext context;
+        private final int tokens;
+        private final int identifiers;
+        private final int unsafeIdentifiers;
+
+        private Checkpoint(
+                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers) {
+            this.context = context;
+            this.tokens = tokens;
+            this.identifiers = identifiers;
+            this.unsafeIdentifiers = unsafeIdentifiers;
+        }
+    }
+
+    record IdentifierEntry(
+            String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind, boolean unsafe) {
+        boolean replacementEligible() {
+            return isCanonicalDictionaryEligible(canonicalValue);
+        }
+
+        boolean labelEligible() {
+            return isCanonicalDictionaryEligible(labelValue);
+        }
     }
 }

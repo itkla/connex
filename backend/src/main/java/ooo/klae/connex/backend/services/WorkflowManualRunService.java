@@ -622,6 +622,14 @@ public class WorkflowManualRunService {
         return username == null || username.isBlank() ? null : username.trim();
     }
 
+    /**
+     * Builds one prepared invocation whose whole lifecycle is timed by the application clock. The
+     * creation, expiry, confirmation, and completion instants of an invocation are compared to each
+     * other by the {@code chk_workflow_invocation_timing} constraint and by the confirmation
+     * precondition, so the creation instant is written explicitly instead of being defaulted from
+     * the database clock: a deployment whose database session time zone differs from the
+     * application's would otherwise fail every preparation.
+     */
     private WorkflowInvocation invocation(
             int workspaceId,
             Workflow workflow,
@@ -651,7 +659,9 @@ public class WorkflowManualRunService {
         invocation.setReadyCount(ready);
         invocation.setSkippedCount(records.size() - ready);
         invocation.setStatus("prepared");
-        invocation.setExpiresAt(LocalDateTime.now().plusMinutes(15));
+        LocalDateTime createdAt = LocalDateTime.now();
+        invocation.setCreatedAt(createdAt);
+        invocation.setExpiresAt(createdAt.plusMinutes(15));
         return invocation;
     }
 

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.report;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,9 +55,21 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
-        assertTrue(modelVisibleText.contains("{{C1}}"));
+        List<Map.Entry<String, String>> reportBindings = assembly.context().tokenBindings().stream()
+                .filter(binding -> binding.getValue().equals(companyName))
+                .toList();
+        List<Map.Entry<String, String>> measureBindings = assembly.context().tokenBindings().stream()
+                .filter(binding -> binding.getValue().equals(companyName.toLowerCase(Locale.ROOT)))
+                .toList();
+        assertEquals(1, reportBindings.size());
+        assertEquals(1, measureBindings.size());
+        String reportToken = reportBindings.getFirst().getKey();
+        String measureToken = measureBindings.getFirst().getKey();
+        assertEquals("{{C1}}", reportToken);
+        assertTrue(modelVisibleText.contains("Report: " + reportToken + "\n"));
+        assertTrue(modelVisibleText.contains("; Measure: " + measureToken + "; Group: " + reportToken + ";"));
         assertFalse(modelVisibleText.toLowerCase(Locale.ROOT)
                 .contains(companyName.toLowerCase(Locale.ROOT)));
     }
@@ -79,7 +92,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Measure: Warm-intro opportunity value"));
         assertTrue(modelVisibleText.contains("Group: [tenant label omitted]"));
@@ -104,7 +117,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Report: [tenant label omitted]"));
         assertTrue(modelVisibleText.contains("Group: [tenant label omitted]"));
@@ -137,7 +150,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Report: [tenant label omitted]"));
         assertTrue(modelVisibleText.contains("metric.0.0; Measure: Won revenue; "
@@ -168,7 +181,7 @@ class AiReportAssemblerTest {
                         .map(AiReportAssemblerTest::message)
                         .toList()));
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 finalEnvelope, assembly.context(), objectMapper));
         assertTrue(assembly.prompt().getMessages().getFirst().getContent()
                 .contains("Measure: [tenant label omitted]"));

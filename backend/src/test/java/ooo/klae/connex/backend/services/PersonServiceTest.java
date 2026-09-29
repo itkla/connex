@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
@@ -453,7 +454,7 @@ class PersonServiceTest extends AbstractServiceTest {
             ownerWorkspace.getId(),
             workspace.getId(),
             currentUser.getId(),
-            false);
+            false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         PersonDuplicatePreflightRequest request = duplicateRequest(shared);
         String reviewToken = "a".repeat(64);
 
@@ -518,7 +519,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void ceasingProvisionRevokesStandingSharesAndAuditsTheCount() {
         Person person = newPerson(newCompany());
         Workspace grantee = newWorkspaceInSameOrg();
-        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
         assertEquals(1, shareMapper.listPersonShares(workspace.getId(), person.getId()).size());
 
         personService.updateProcessingRestrictions(person.getId(), false, true);
@@ -735,7 +737,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void updateEvaluationExclusions_rejectsSharedInContact() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
-        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true,
+            orgWorkspaceIdsJson(workspaceMapper, other.getId()));
 
         assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
@@ -757,7 +760,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Person shared = personInWorkspace(ownerWorkspace);
         shareMapper.sharePerson(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         Tag tag = newTag();
         int employmentBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
@@ -801,7 +805,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Activity activeActivity = activityInWorkspace(workspace, shared);
         Task activeTask = taskInWorkspace(workspace, shared);
         Note activeNote = noteInWorkspace(workspace, shared);
-        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+            orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
 
         Person detail = personService.getPersonById(shared.getId());
 

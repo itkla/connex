@@ -5,8 +5,21 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
+
 import lombok.Data;
 
+/**
+ * Operator-facing subject disclosure. Notes arrive as an already serialized JSON array, so
+ * assembly retains at most one page of note objects at a time.
+ *
+ * <p>The serialized array itself is retained in full: the response payload, and therefore the
+ * peak heap of one disclosure, still grows with the total size of the subject's note bodies.
+ * The array is not streamed to the servlet output because the disclosure is assembled inside one
+ * routed, read-only tenant transaction and is released only after a durable disclosure audit
+ * record exists; a {@code StreamingResponseBody} body runs after both of those have ended and
+ * would inherit neither the tenant route nor the read snapshot.
+ */
 @Data
 public class DataSubjectDisclosureDto {
     private long requestId;
@@ -19,7 +32,8 @@ public class DataSubjectDisclosureDto {
     private List<CustomFieldValueDto> customFieldValues;
     private List<ActivityDto> activities;
     private List<ProviderCaptureEvidenceDto> providerCaptureEvidence;
-    private List<NoteDto> notes;
+    @JsonRawValue
+    private String notes;
     private List<RecordCommentThreadDisclosureDto> recordCommentThreads;
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;
@@ -31,6 +45,9 @@ public class DataSubjectDisclosureDto {
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
     private List<ThirdPartyProvisionDto> thirdPartyProvisions;
+    private List<ConsentStateDto> consentState;
+    private List<ConsentHistoryDto> consentHistory;
+    private List<AudienceExportEvidenceDto> audienceExportEvidence;
     private List<AuditEntryDto> auditTrail;
     private long auditTrailTotal;
 
@@ -331,6 +348,73 @@ public class DataSubjectDisclosureDto {
         private Integer grantedBy;
         private boolean canEdit;
         private LocalDateTime createdAt;
+    }
+
+    /** Current channel/purpose consent, including the retained acquisition evidence. */
+    @Data
+    public static class ConsentStateDto {
+        private int id;
+        private int workspaceId;
+        private int personId;
+        private String channel;
+        private String purpose;
+        private String status;
+        private String source;
+        private String evidenceRef;
+        private LocalDateTime capturedAt;
+        private LocalDateTime updatedAt;
+    }
+
+    /** Retained consent transitions, including superseded evidence and nullable actor attribution. */
+    @Data
+    public static class ConsentHistoryDto {
+        private int id;
+        private int workspaceId;
+        private int consentId;
+        private int personId;
+        private String channel;
+        private String purpose;
+        private String status;
+        private String source;
+        private String evidenceRef;
+        private Integer createdById;
+        private LocalDateTime createdAt;
+    }
+
+    /**
+     * Subject-only membership in a retained audience export. Frozen and staged membership are
+     * nullable for legacy records; staging records the intended request, not provider acceptance.
+     * Counts and outcome classification describe the entire export. The subject provision outcome
+     * is confirmed only for full staged-member delivery without a recorded late-outcome conflict;
+     * partial, ambiguous and conflicting results remain unconfirmed. Legacy membership is unknown.
+     */
+    @Data
+    public static class AudienceExportEvidenceDto {
+        private int id;
+        private int workspaceId;
+        private int campaignId;
+        private int snapshotId;
+        private String channel;
+        private String purpose;
+        private String connector;
+        private String externalListId;
+        private String snapshotMemberStatus;
+        private String snapshotExclusionReason;
+        private Boolean frozenMember;
+        private Boolean stagedForPush;
+        private String subjectProvisionOutcome;
+        private String status;
+        private int attempt;
+        private int totalMembers;
+        private Integer pushedCount;
+        private Integer failedCount;
+        private String outcomeClassification;
+        private String lateOutcome;
+        private String failureReason;
+        private LocalDateTime reconciliationRequiredAt;
+        private Integer createdById;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
     }
 
     @Data

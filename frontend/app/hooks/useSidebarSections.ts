@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import {
     parseCollapsedSidebarSections,
@@ -37,6 +38,11 @@ export function useSidebarSections(
     const key = sidebarSectionStorageKey(userId, workspaceId);
     const eventName = `${SECTION_CHANGE_EVENT_PREFIX}${key}`;
 
+    const canPersist = useAccountStorageGeneration(() => {
+        volatileStates.delete(key);
+        window.dispatchEvent(new Event(eventName));
+    });
+
     const subscribe = useCallback(
         (onStoreChange: () => void) => {
             const onStorage = (event: StorageEvent) => {
@@ -54,7 +60,7 @@ export function useSidebarSections(
         },
         [eventName, key],
     );
-    const getSnapshot = useCallback(() => readStoredState(key), [key]);
+    const getSnapshot = useCallback(() => canPersist() ? readStoredState(key) : null, [canPersist, key]);
     const raw = useSyncExternalStore(subscribe, getSnapshot, serverSnapshot);
     const collapsedSections = useMemo(() => new Set(parseCollapsedSidebarSections(raw)), [raw]);
 
@@ -64,6 +70,10 @@ export function useSidebarSections(
     );
     const setCollapsed = useCallback(
         (sectionId: SidebarSectionId, collapsed: boolean) => {
+            if (!canPersist()) {
+                volatileStates.delete(key);
+                return;
+            }
             const next = new Set(parseCollapsedSidebarSections(readStoredState(key)));
             if (collapsed) next.add(sectionId);
             else next.delete(sectionId);
@@ -76,7 +86,7 @@ export function useSidebarSections(
             }
             window.dispatchEvent(new Event(eventName));
         },
-        [eventName, key],
+        [canPersist, eventName, key],
     );
 
     return { isCollapsed, setCollapsed };

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -150,8 +151,10 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         newEdge(overlayWorkspace.getId(), subject, counterpart, "subject edge");
         newEdge(overlayWorkspace.getId(), other, third, "other edge");
 
-        shareMapper.sharePerson(subject.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false);
-        shareMapper.sharePerson(other.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false);
+        shareMapper.sharePerson(subject.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
+        shareMapper.sharePerson(other.getId(), ownerWorkspace.getId(), overlayWorkspace.getId(), actor.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         jdbcTemplate.update(
             "INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
             subject.getId(), foreignWorkspace.getId(), actor.getId(), false);
@@ -182,8 +185,8 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).getFirst().getDataClassification());
         assertEquals(List.of(subjectActivity.getId()), dataSubjectDisclosureMapper.findActivities(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(ActivityDto::getId).toList());
-        assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNotes(
-            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNoteIds(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds));
         var disclosedCommentThreads = dataSubjectDisclosureMapper.findRecordCommentThreads(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds);
         assertEquals(List.of(subjectCommentThread.getId()), disclosedCommentThreads.stream()

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -186,9 +187,11 @@ class AttachmentServiceTest extends AbstractServiceTest {
         Company company = companyInWorkspace(ownerWorkspace);
         Person person = personInWorkspace(ownerWorkspace);
         assertEquals(1, shareMapper.shareCompany(
-            company.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            company.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
+            person.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
         byte[] bytes = "shared attachment".getBytes(StandardCharsets.UTF_8);
 
         Attachment companyAttachment = attachmentService.upload(

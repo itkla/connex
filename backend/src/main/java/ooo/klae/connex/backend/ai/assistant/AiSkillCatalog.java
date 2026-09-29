@@ -134,6 +134,17 @@ public class AiSkillCatalog {
      * ceilings today. These fields state intent for the result-contract validator that will enforce
      * them; do not read them as guarantees.
      *
+     * <p><strong>A seeded toolset must be one the declaration can actually use.</strong> Seeding is
+     * all-or-nothing over an object family, while write authority is per tool plus an authority
+     * tier, so a declaration naming {@code write_pipeline} while its {@code authority} is
+     * {@code READ} — or while its {@code allowedTools} omits a member — would put write tools in
+     * front of the model from the synthesis step's first render that {@code requireSkillAuthority}
+     * then refuses with {@code tool_outside_skill_authority}. That refusal is raised outside every
+     * recoverable branch of the agent loop and its reason is not closable, so the turn would settle
+     * as a hard failure, with no answer, on a tool the server itself offered. The compact
+     * constructor therefore refuses the declaration rather than letting a seed arm it, by
+     * {@link AiSkillCatalog#mayHold}, the same rule the agent loop offers a routed turn by.
+     *
      * @param key stable additive catalog key
      * @param version semantic version of this declaration
      * @param availability whether this build can execute the key
@@ -146,6 +157,7 @@ public class AiSkillCatalog {
      * @param optionalInputs inputs that narrow the plan when present
      * @param plan deterministic server-owned retrieval plan
      * @param allowedTools every tool key the skill may cause to run, plan or fallback
+     * @param toolsets non-core toolsets a routed turn starts with, spent from the one per-turn cap
      * @param requiredMetrics server-computed figures the answer must be grounded in
      * @param resultBlockKinds answer-document block kinds the skill's result contract permits
      * @param coverageSources coverage source categories the skill may claim
@@ -175,6 +187,7 @@ public class AiSkillCatalog {
             Set<String> optionalInputs,
             List<PlanStep> plan,
             Set<String> allowedTools,
+            Set<String> toolsets,
             Set<String> requiredMetrics,
             Set<String> resultBlockKinds,
             Set<String> coverageSources,
@@ -197,6 +210,25 @@ public class AiSkillCatalog {
             optionalInputs = Set.copyOf(optionalInputs);
             plan = List.copyOf(plan);
             allowedTools = Set.copyOf(allowedTools);
+            toolsets = Set.copyOf(toolsets);
+            if (toolsets.size() > AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN) {
+                throw new IllegalArgumentException(
+                        "Skill " + key + " declares more toolsets than one turn may hold");
+            }
+            for (String toolset : toolsets) {
+                AiAssistantToolCatalog.Toolset loadable =
+                        AiAssistantToolCatalog.loadableByKey(toolset);
+                if (loadable == null) {
+                    throw new IllegalArgumentException(
+                            "Skill " + key + " declares an unknown toolset " + toolset);
+                }
+                if (!mayHold(authority, allowedTools, loadable)) {
+                    throw new IllegalArgumentException(
+                            "Skill " + key + " seeds toolset " + toolset
+                                    + " but its authority and allowedTools cannot call every"
+                                    + " write tool it holds");
+                }
+            }
             requiredMetrics = Set.copyOf(requiredMetrics);
             resultBlockKinds = Set.copyOf(resultBlockKinds);
             coverageSources = Set.copyOf(coverageSources);
@@ -251,6 +283,45 @@ public class AiSkillCatalog {
         return MAX_DIRECTIVE_BYTES;
     }
 
+    /**
+     * Whether a declaration with this authority and these allowed tools may hold a toolset.
+     *
+     * <p>Holding a family is all-or-nothing, while write authority is per tool plus a tier, so a
+     * family is holdable only when every write tool in it is one {@code requireSkillAuthority}
+     * would let the declaration call: a tier above {@code READ} and a key {@code allowedTools}
+     * names. A family with no write tool is always holdable, because reads carry no authority.
+     *
+     * <p>This is the one rule for both sides of the offer. {@link SkillSpec} refuses a declaration
+     * that seeds a family failing it, and the agent loop offers a routed turn only the families
+     * passing it, so a model is never listed or loaded a toolset whose use the authority gate
+     * then refuses with a turn-terminal {@code tool_outside_skill_authority}. It narrows what is
+     * offered and grants nothing: {@code requireSkillAuthority} stays the binding gate for every
+     * write.
+     *
+     * <p>Requiring every write, rather than any, deliberately narrows #1808's "allowedTools
+     * intersects it" direction: a family is held whole, so a skill allowed only some of its writes
+     * would otherwise hold write tools it may not call. A write skill must therefore be allowed
+     * every write in a family to be offered it, and a family that grows drops out of every skill
+     * not widened to match; {@code AiSkillCatalogTest} fails the build on a shipped skill left
+     * allowed a write tool no family it may hold contains.
+     *
+     * @param authority the most the declaration may do
+     * @param allowedTools every tool key the declaration may cause to run
+     * @param toolset a declared toolset
+     * @return whether every write tool of the toolset is callable under that authority
+     */
+    public static boolean mayHold(
+            Authority authority,
+            Set<String> allowedTools,
+            AiAssistantToolCatalog.Toolset toolset) {
+        for (String writeTool : AiAssistantToolCatalog.writeToolsOf(toolset)) {
+            if (authority == Authority.READ || !allowedTools.contains(writeTool)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static Map<String, SkillSpec> buildSkills() {
         Map<String, SkillSpec> skills = new LinkedHashMap<>();
         add(skills, coolingExplanation());
@@ -293,6 +364,7 @@ public class AiSkillCatalog {
                         new PlanStep(PlanStepKind.GET_RECORD, 0, 0, true),
                         new PlanStep(PlanStepKind.LIST_ACTIVITIES, 20, 0, false)),
                 Set.of("relationship_metrics", "get_record", "list_activities"),
+                Set.of(),
                 Set.of("warmth_score", "warmth_band", "warmth_trend", "days_since_touch"),
                 Set.of("answer", "fact", "metric", "inference", "recommendation", "limitation"),
                 Set.of("records", "activities", "metrics"),
@@ -352,6 +424,7 @@ public class AiSkillCatalog {
                         AiChatScopeBounds.DEFAULT_ACTIVITY_ROWS_PER_RECORD,
                         true)),
                 Set.of("list_scope_activities"),
+                Set.of(),
                 Set.of("matching_activity_count", "matched_record_count"),
                 Set.of("answer", "timeline", "list", "metric", "limitation"),
                 Set.of("records", "activities"),
@@ -408,6 +481,7 @@ public class AiSkillCatalog {
                         new PlanStep(PlanStepKind.LIST_ACTIVITIES, 10, 0, false),
                         new PlanStep(PlanStepKind.LIST_TASKS, 5, 0, false)),
                 Set.of("get_record", "relationship_metrics", "list_activities", "list_tasks"),
+                Set.of(),
                 Set.of("warmth_score", "warmth_band"),
                 Set.of("answer", "fact", "metric", "list", "recommendation", "limitation"),
                 Set.of("records", "activities", "tasks", "notes", "metrics"),
@@ -462,6 +536,7 @@ public class AiSkillCatalog {
                         PlanStepKind.DEAL_ATTENTION,
                         AiChatScopeBounds.MAX_ATTENTION_DEALS, 0, true)),
                 Set.of("deal_attention"),
+                Set.of(),
                 Set.of("risk_level", "risk_score", "risk_factors"),
                 Set.of("answer", "list", "metric", "recommendation", "limitation"),
                 Set.of("deals", "metrics"),
@@ -540,6 +615,7 @@ public class AiSkillCatalog {
                                 AiChatScopeBounds.MAX_ATTENTION_DEALS, 0, false)),
                 Set.of("work_commitments", "upcoming_meetings",
                         "warmth_movement", "deal_attention"),
+                Set.of(),
                 Set.of("overdue_commitment_count", "warmth_band", "risk_level"),
                 Set.of("answer", "fact", "metric", "list", "inference",
                         "recommendation", "limitation"),
@@ -618,6 +694,7 @@ public class AiSkillCatalog {
                 Set.of(),
                 Set.of(),
                 List.of(),
+                Set.of(),
                 Set.of(),
                 Set.of(),
                 Set.of(),

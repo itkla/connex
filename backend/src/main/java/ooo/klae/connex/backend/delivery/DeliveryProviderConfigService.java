@@ -8,15 +8,20 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.beans.DeliveryProviderConfig;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.smtp.SmtpDeliveryProvider;
@@ -26,7 +31,10 @@ import ooo.klae.connex.backend.dto.DeliveryWebhookTokenDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
+import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -65,22 +73,29 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
     private final AuthService authService;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final CampaignDeliveryMapper campaignDeliveryMapper;
     private final SecureRandom secureRandom = new SecureRandom();
 
     /**
-     * Resolves the provider a workspace should use for a channel.
+     * Resolves the provider a workspace should use for a channel. The dispatch entry points suspend
+     * their transactions; this READ_COMMITTED transaction holds actor, workspace, and configuration
+     * shared locks through credential resolution so endpoint and secret belong to one generation.
      * @param workspaceId the workspace
      * @param channel the delivery channel
      * @return the resolved provider
      * @throws DeliveryProviderException when the channel is unsupported or no transport is configured
      */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResolvedDeliveryProvider resolveForWorkspace(int workspaceId, DeliveryChannel channel) {
+        lockWorkspaceForResolution(workspaceId);
         if (channel == DeliveryChannel.SMS) {
-            return resolveSms(deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token()));
+            return resolveSms(deliveryProviderConfigMapper.findByWorkspaceChannelForShare(workspaceId, channel.token()));
         }
         requireEmail(channel);
         DeliveryProviderConfig config =
-                deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
+                deliveryProviderConfigMapper.findByWorkspaceChannelForShare(workspaceId, channel.token());
         if (isEnabledEsp(config)) {
             return resolveEsp(config);
         }
@@ -171,7 +186,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
 
     /**
      * Creates or updates the active workspace's provider settings for one channel. The send credential
-     * is write-only: a blank credential preserves the stored one when the provider is unchanged.
+     * is write-only: a blank credential preserves the current stored one only for the same endpoint.
+     * Mutations revalidate settings authority under the workspace mutex before reading the config.
      * @param request the submitted settings
      * @return the saved masked settings
      */
@@ -188,8 +204,9 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         String provider = resolveProvider(request.getProvider());
         requireProviderMatchesChannel(channel, provider);
 
+        lockWorkspaceForMutation(workspaceId, actorId);
         DeliveryProviderConfig existing =
-                deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
+                deliveryProviderConfigMapper.findByWorkspaceChannelForUpdate(workspaceId, channel.token());
         boolean sameProvider = existing != null && provider.equals(existing.getProvider());
 
         DeliveryProviderConfig config = new DeliveryProviderConfig();
@@ -210,7 +227,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         };
 
         if (sameProvider && !isBlank(existing.getCredentialRef()) && newCredential == null
-                && endpointHostChanged(existing.getEndpoint(), config.getEndpoint())) {
+                && !java.util.Objects.equals(existing.getEndpoint(), config.getEndpoint())) {
             throw new BadRequestException("Re-enter the credential to change the endpoint");
         }
         boolean hasCredential = newCredential != null || !isBlank(config.getCredentialRef());
@@ -218,7 +235,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new BadRequestException("A stored API credential is required before enabling this provider");
         }
         if (newCredential != null) {
-            config.setCredentialRef(deliveryProviderSecretCipher.encryptCredential(workspaceId, newCredential));
+            config.setCredentialRef(deliveryProviderSecretCipher.encryptCredential(workspaceId, channel, newCredential));
         }
         config.setEnabled(request.isEnabled());
         config.setIdempotentSubmission(
@@ -230,7 +247,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         auditService.record("workspace.delivery_provider.save", "workspace", workspaceId, provider,
                 "Updated delivery provider settings", null);
         return DeliveryProviderConfigDto.from(
-                deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token()));
+                deliveryProviderConfigMapper.findByWorkspaceChannelForUpdate(workspaceId, channel.token()));
     }
 
     /**
@@ -247,8 +264,9 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         int actorId = authService.getCurrentUser().getId();
         sessionSecurityService.requireRecentAuthentication(actorId);
         DeliveryChannel channel = resolveChannel(channelToken);
+        lockWorkspaceForMutation(workspaceId, actorId);
         DeliveryProviderConfig config =
-                deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
+                deliveryProviderConfigMapper.findByWorkspaceChannelForUpdate(workspaceId, channel.token());
         if (config == null || !HttpEspDeliveryProvider.PROVIDER_ID.equals(config.getProvider())) {
             throw new BadRequestException("A receipt-capable provider must be configured for this channel first");
         }
@@ -277,12 +295,14 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         int actorId = authService.getCurrentUser().getId();
         sessionSecurityService.requireRecentAuthentication(actorId);
         DeliveryChannel channel = resolveChannel(channelToken);
+        lockWorkspaceForMutation(workspaceId, actorId);
         DeliveryProviderConfig existing =
-                deliveryProviderConfigMapper.findByWorkspaceChannel(workspaceId, channel.token());
+                deliveryProviderConfigMapper.findByWorkspaceChannelForUpdate(workspaceId, channel.token());
         deliveryProviderConfigMapper.delete(workspaceId, channel.token());
         if (existing != null) {
             if (!isBlank(existing.getCredentialRef())) {
-                deliveryProviderSecretCipher.deleteCredentialReference(workspaceId, existing.getCredentialRef());
+                deliveryProviderSecretCipher.deleteCredentialReference(
+                        workspaceId, DeliveryChannel.fromToken(existing.getChannel()), existing.getCredentialRef());
             }
             if (!isBlank(existing.getWebhookSecretRef())) {
                 deliveryProviderSecretCipher.deleteWebhookSecretReference(workspaceId, existing.getWebhookSecretRef());
@@ -292,18 +312,56 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 "Removed delivery provider settings", null);
     }
 
+    /**
+     * Rechecks the protected provider generation on the still-owned delivery claim immediately
+     * before egress. Roots precede config and delivery locks; no transport I/O occurs in this
+     * transaction. The fingerprint also fences deletion and recreation with a new config id.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public boolean isCurrentClaimTarget(ResolvedDeliveryProvider target, int deliveryId, String leaseOwner) {
+        int workspaceId = target.workspaceId();
+        lockWorkspaceForResolution(workspaceId);
+        DeliveryProviderConfig current = deliveryProviderConfigMapper.findByWorkspaceChannelForShare(
+                workspaceId, target.channel().token());
+        if (current == null || !current.isEnabled() || target.configGeneration() == null
+                || current.getConfigGeneration() != target.configGeneration()
+                || !targetFingerprint(current).equals(target.attemptTargetFingerprint())) {
+            return false;
+        }
+        return campaignDeliveryMapper.getDeliveryForUpdate(workspaceId, deliveryId) != null
+                && campaignDeliveryMapper.claimStillOwned(workspaceId, deliveryId, leaseOwner);
+    }
+
+    private void lockWorkspaceForMutation(int workspaceId, int actorId) {
+        workspaceService.lockAndRequirePermissionsWithWorkspaceMutex(
+                workspaceId, Map.of(actorId, Set.of(Permission.WORKSPACE_SETTINGS)));
+    }
+
+    private void lockWorkspaceForResolution(int workspaceId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user
+                && userMapper.lockByIdForShare(user.getId()) == null) {
+            throw new DeliveryProviderException("Delivery actor is unavailable");
+        }
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new DeliveryProviderException("Delivery workspace is unavailable");
+        }
+    }
+
     private ResolvedDeliveryProvider resolveEsp(DeliveryProviderConfig config) {
         if (isBlank(config.getCredentialRef())) {
             throw new DeliveryProviderException("Delivery provider credential is not configured");
         }
+        DeliveryChannel channel = DeliveryChannel.fromToken(config.getChannel());
         String apiKey = deliveryProviderSecretCipher.decryptCredential(
-                config.getWorkspaceId(), config.getCredentialRef());
+                config.getWorkspaceId(), channel, config.getCredentialRef());
         if (isBlank(apiKey)) {
             throw new DeliveryProviderException("Delivery provider credential is not configured");
         }
         return new ResolvedDeliveryProvider(
                 config.getProvider(),
-                DeliveryChannel.fromToken(config.getChannel()),
+                channel,
                 config.getWorkspaceId(),
                 config.getEndpoint(),
                 config.getFromAddress(),
@@ -311,7 +369,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
                 config.isIdempotentSubmission(),
                 targetFingerprint(config),
-                null);
+                null,
+                config.getConfigGeneration());
     }
 
     private ResolvedDeliveryProvider resolveSms(DeliveryProviderConfig config) {
@@ -322,7 +381,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new DeliveryProviderException("Delivery provider credential is not configured");
         }
         String apiKey = deliveryProviderSecretCipher.decryptCredential(
-                config.getWorkspaceId(), config.getCredentialRef());
+                config.getWorkspaceId(), DeliveryChannel.SMS, config.getCredentialRef());
         if (isBlank(apiKey)) {
             throw new DeliveryProviderException("Delivery provider credential is not configured");
         }
@@ -336,7 +395,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
                 config.isIdempotentSubmission(),
                 targetFingerprint(config),
-                null);
+                null,
+                config.getConfigGeneration());
     }
 
     /**
@@ -429,7 +489,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             return;
         }
         if (!sameProvider || !existing.getCredentialRef().equals(replacement.getCredentialRef())) {
-            deliveryProviderSecretCipher.deleteCredentialReference(workspaceId, existing.getCredentialRef());
+            deliveryProviderSecretCipher.deleteCredentialReference(
+                    workspaceId, DeliveryChannel.fromToken(existing.getChannel()), existing.getCredentialRef());
         }
         if (!sameProvider && !isBlank(existing.getWebhookSecretRef())) {
             deliveryProviderSecretCipher.deleteWebhookSecretReference(workspaceId, existing.getWebhookSecretRef());
@@ -512,27 +573,6 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new BadRequestException("A valid from address is required");
         }
         return value;
-    }
-
-    private static boolean endpointHostChanged(String storedEndpoint, String newEndpoint) {
-        String storedHost = hostOf(storedEndpoint);
-        String newHost = hostOf(newEndpoint);
-        if (storedHost == null || newHost == null) {
-            return !java.util.Objects.equals(storedHost, newHost);
-        }
-        return !storedHost.equals(newHost);
-    }
-
-    private static String hostOf(String endpoint) {
-        if (isBlank(endpoint)) {
-            return null;
-        }
-        try {
-            String host = URI.create(endpoint.trim()).getHost();
-            return host == null ? null : host.toLowerCase(Locale.ROOT);
-        } catch (IllegalArgumentException exception) {
-            return null;
-        }
     }
 
     private static URI parseHttpsEndpoint(String endpoint) {

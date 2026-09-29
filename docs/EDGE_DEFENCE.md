@@ -69,6 +69,7 @@ independently enforces the same contracts:
 
 | Route class | Edge ceiling | Application contract |
 |---|---:|---|
+| `/api/launch-signups` | 4 KiB | Next.js launch signup handler; fixed 4,096-byte ceiling, 3-second body deadline, same-origin JSON only |
 | `/api/imports` and descendants | 64 MiB | `CONNEX_IMPORT_MAX_BODY_BYTES=67108864` |
 | Attachment, assistant-attachment, user/person image, and company-logo upload routes | 27 MiB | A 27 MiB multipart envelope around `ObjectStorageProperties.maxUploadBytes`, whose default stored object maximum is 25 MiB |
 | `/api/business-cards` and descendants | 12 MiB | `CONNEX_BUSINESS_CARD_MAX_BODY_BYTES=12582912`; decoded card bytes remain separately limited to 8 MiB |
@@ -192,6 +193,12 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 - Select Business or a contract with equivalent features; confirm all five rate rules are available
   before DNS cutover. Set the zone maximum upload size to at least 100 MB so the 64 MiB import
   contract survives. Do not create an unproxied upload hostname.
+- `www.connexcrm.jp` is bound to the prelaunch landing Worker, which answers every page and API request to it
+  with a `308` to `https://connexcrm.jp` before any application code runs; only the same public,
+  immutable build assets the apex serves are returned directly (see
+  [DEPLOYMENT.md](DEPLOYMENT.md#the-public-prelaunch-site-connexcrmjp-on-cloudflare-workers)). It renders no
+  page and serves no API, so the host sets below intentionally omit it. If the alias ever serves anything
+  other than that redirect, add it to every host set and to the evidence tooling before traffic.
 - Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets. Do not
   enable HSTS yet: first validate Cloudflare-to-origin certificate authentication and every
   compatibility flow over HTTPS.

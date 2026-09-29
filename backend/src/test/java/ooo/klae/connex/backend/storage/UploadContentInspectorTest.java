@@ -15,8 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -720,6 +722,98 @@ class UploadContentInspectorTest {
                 staticMathFraction)).format());
     }
 
+    /**
+     * Verifies that a real LibreOffice Calc workbook, which always writes the inert
+     * {@code sheetView@showFormulas} view flag, uploads as XLSX, in both the transitional and the
+     * strict SpreadsheetML namespaces.
+     *
+     * <p>The fixture was converted from the committed {@code libreoffice-calc-source.csv} and
+     * can be rebuilt with {@code soffice --headless --convert-to xlsx libreoffice-calc-source.csv}.
+     */
+    @Test
+    void acceptsRealLibreOfficeCalcWorkbook() throws Exception {
+        byte[] xlsx = fixture("libreoffice-calc-source.xlsx");
+        String sheet = new String(
+            zipEntry(xlsx, "xl/worksheets/sheet1.xml"), StandardCharsets.UTF_8);
+        assertTrue(sheet.contains("<sheetView showFormulas=\"false\""));
+
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc.xlsx", xlsxContentType(), xlsx)).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-numeric.xlsx", xlsxContentType(), calcSheetVariant(
+                "<sheetView showFormulas=\"false\"",
+                "<sheetView showFormulas=\"1\""))).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-custom.xlsx", xlsxContentType(), calcSheetVariant(
+                "</sheetViews>",
+                "</sheetViews><customSheetViews><customSheetView "
+                    + "guid=\"{00000000-0000-0000-0000-000000000001}\" "
+                    + "showFormulas=\" true \"/></customSheetViews>"))).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-strict.xlsx", xlsxContentType(), calcSheetVariant(Map.of(
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"",
+                "<worksheet xmlns=\"http://purl.oclc.org/ooxml/spreadsheetml/main\"",
+                "<sheetView showFormulas=\"false\"",
+                "<sheetView showFormulas=\"1\"")))).format());
+    }
+
+    /**
+     * Verifies that the {@code showFormulas} exemption stays narrow: any other element,
+     * namespace, value, or formula-named attribute, and any real formula cell alongside the flag,
+     * is still refused.
+     */
+    @Test
+    void rejectsFormulaVocabularyOutsideInertSpreadsheetViewFlag() throws Exception {
+        String flag = "<sheetView showFormulas=\"false\"";
+        byte[] nonBooleanValue = calcSheetVariant(
+            flag, "<sheetView showFormulas=\"=WEBSERVICE(A1)\"");
+        byte[] wrongCaseBoolean = calcSheetVariant(flag, "<sheetView showFormulas=\"TRUE\"");
+        byte[] nonViewElement = calcSheetVariant(
+            "<selection pane=", "<selection showFormulas=\"false\" pane=");
+        byte[] namespacedAttribute = calcSheetVariant(
+            flag, "<sheetView x14:showFormulas=\"false\"");
+        byte[] otherFormulaAttribute = calcSheetVariant(
+            flag, "<sheetView showFormulaBar=\"false\"");
+        byte[] extraFormulaAttribute = calcSheetVariant(
+            flag, flag + " formula=\"false\"");
+        byte[] realFormulaCell = calcSheetVariant(
+            "<c r=\"C2\" s=\"0\" t=\"n\"><v>42</v></c>",
+            "<c r=\"C2\" s=\"0\" t=\"n\"><f>WEBSERVICE(\"https://example.invalid\")</f>"
+                + "<v>42</v></c>");
+        String foreignView = "<o:sheetView xmlns:o=\"urn:example:not-spreadsheetml\"";
+        byte[] foreignNamespaceElement = calcSheetVariant(
+            "</sheetViews>", "</sheetViews>" + foreignView + " showFormulas=\"false\"/>");
+        byte[] rebuiltControl = calcSheetVariant(flag, flag);
+        byte[] foreignNamespaceControl = calcSheetVariant(
+            "</sheetViews>", "</sheetViews>" + foreignView + "/>");
+
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("control.xlsx", xlsxContentType(), rebuiltControl)).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "foreign-control.xlsx", xlsxContentType(), foreignNamespaceControl)).format());
+        Map<String, byte[]> refused = new LinkedHashMap<>();
+        refused.put("nonBooleanValue", nonBooleanValue);
+        refused.put("wrongCaseBoolean", wrongCaseBoolean);
+        refused.put("nonViewElement", nonViewElement);
+        refused.put("foreignNamespaceElement", foreignNamespaceElement);
+        refused.put("namespacedAttribute", namespacedAttribute);
+        refused.put("otherFormulaAttribute", otherFormulaAttribute);
+        refused.put("extraFormulaAttribute", extraFormulaAttribute);
+        refused.put("realFormulaCell", realFormulaCell);
+        refused.forEach((name, content) -> assertThrows(
+            UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(name + ".xlsx", xlsxContentType(), content)),
+            name));
+    }
+
     @Test
     void rejectsArchiveTraversalActiveEntriesAndChecksumMismatch() throws Exception {
         byte[] traversal = packageWithAdditionalEntry("../outside.xml", "<outside/>");
@@ -1112,6 +1206,39 @@ class UploadContentInspectorTest {
             }
             return input.readAllBytes();
         }
+    }
+
+    private static byte[] calcSheetVariant(String target, String replacement)
+            throws IOException {
+        return calcSheetVariant(Map.of(target, replacement));
+    }
+
+    private static byte[] calcSheetVariant(Map<String, String> replacements)
+            throws IOException {
+        byte[] source = fixture("libreoffice-calc-source.xlsx");
+        String sheetName = "xl/worksheets/sheet1.xml";
+        String original = new String(zipEntry(source, sheetName), StandardCharsets.UTF_8);
+        String sheet = original;
+        for (Map.Entry<String, String> replacement : replacements.entrySet()) {
+            if (!original.contains(replacement.getKey())) {
+                throw new IOException("Missing fixture text: " + replacement.getKey());
+            }
+            sheet = sheet.replace(replacement.getKey(), replacement.getValue());
+        }
+        String rewritten = sheet;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipInputStream input = new ZipInputStream(
+                    new ByteArrayInputStream(source), StandardCharsets.UTF_8);
+                ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                byte[] content = sheetName.equals(entry.getName())
+                    ? rewritten.getBytes(StandardCharsets.UTF_8)
+                    : input.readAllBytes();
+                put(zip, entry.getName(), content);
+            }
+        }
+        return output.toByteArray();
     }
 
     private static byte[] zipEntry(byte[] content, String expectedName) throws IOException {

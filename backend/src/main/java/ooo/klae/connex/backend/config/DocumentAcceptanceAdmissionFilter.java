@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.WebUtils;
 
@@ -16,10 +18,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Admits token-free document-link requests before any request-body buffering or deserialization.
@@ -49,19 +54,25 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
 
     private final DocumentAcceptanceRateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;
-
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = RequestPathNormalizer.apiPath(request);
-        boolean acceptancePath = path.equals(PATH) || path.startsWith(PATH + "/");
-        return !acceptancePath || path.equals(EXCHANGE_PATH);
-    }
+    private final ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,
             HttpServletResponse response,
             FilterChain chain) throws ServletException, IOException {
+        String path;
+        try {
+            path = RequestPathNormalizer.apiPath(request);
+        } catch (RequestRejectedException exception) {
+            rejectInvalidPath(request, response);
+            return;
+        }
+        boolean acceptancePath = path.equals(PATH) || path.startsWith(PATH + "/");
+        if (!acceptancePath || path.equals(EXCHANGE_PATH)) {
+            chain.doFilter(request, response);
+            return;
+        }
         String grant = grantFrom(request);
         String sourceAddress = clientIpResolver.resolve(request);
         boolean malformed = grant == null || !GRANT_PATTERN.matcher(grant).matches();
@@ -80,6 +91,17 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    /** Maps invalid paths here because admission runs before body-size and Spring Security filters. */
+    private void rejectInvalidPath(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        if (PublicApiPaths.isPublicRequest(request)) {
+            PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.BAD_REQUEST,
+                    "invalid_request", "Invalid request");
+        } else {
+            SecurityResponseHeaders.apply(request, response);
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        }
     }
 
     private static String grantFrom(HttpServletRequest request) {

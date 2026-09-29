@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
@@ -11,6 +14,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * Serializes candidate-affecting person, company, and deal mutations across one organization.
@@ -33,6 +38,11 @@ public class DuplicateDecisionLockService {
         return lockCurrentOrganization(null, false);
     }
 
+    /** Locks current permission authority before entering the organization's duplicate mutex. */
+    public LockedOrganization lockCurrentOrganization(Permission requiredPermission) {
+        return lockCurrentOrganization(null, false, requiredPermission);
+    }
+
     /**
      * Locks the current organization while retaining an additional active workspace root.
      *
@@ -41,6 +51,12 @@ public class DuplicateDecisionLockService {
      */
     public int lockCurrentOrganizationWithWorkspace(int additionalWorkspaceId) {
         return lockCurrentOrganization(additionalWorkspaceId, false);
+    }
+
+    /** Retains the target workspace and current permission authority before the duplicate mutex. */
+    public LockedOrganization lockCurrentOrganizationWithWorkspace(
+            int additionalWorkspaceId, Permission requiredPermission) {
+        return lockCurrentOrganization(additionalWorkspaceId, false, requiredPermission);
     }
 
     /**
@@ -53,7 +69,58 @@ public class DuplicateDecisionLockService {
         return lockCurrentOrganization(additionalWorkspaceId, true);
     }
 
+    /** Retains both memberships and current permission authority before the duplicate mutex. */
+    public LockedOrganization lockCurrentOrganizationWithMemberWorkspace(
+            int additionalWorkspaceId, Permission requiredPermission) {
+        return lockCurrentOrganization(additionalWorkspaceId, true, requiredPermission);
+    }
+
+    /**
+     * Locks the actor, both workspaces and both memberships in the same lifecycle order as
+     * {@link #lockCurrentOrganizationWithMemberWorkspace}, then current permission authority, but
+     * stops short of the organization's duplicate mutex.
+     *
+     * <p>Pipeline sharing needs the target workspace root held from before its organization
+     * ceiling is judged until the tenant grant lands: the grant statements no longer join the
+     * control-plane workspace table and no foreign key refuses the insert, so a teardown
+     * committing in between would leave a share row pointing at a workspace that is gone (#811).
+     * A pipeline is not a duplicate candidate, so entering the mutex would serialize it behind
+     * every person and company decision in the organization for no invariant of its own.
+     *
+     * @param additionalWorkspaceId workspace whose active actor membership is required
+     * @param requiredPermission permission the actor must hold in the current workspace
+     * @return permission authority retained by the locks this method acquired
+     */
+    public LockedPermissionSnapshot lockCurrentWorkspacesWithMemberWorkspace(
+            int additionalWorkspaceId, Permission requiredPermission) {
+        Objects.requireNonNull(requiredPermission, "requiredPermission");
+        lockCurrentOrganizationRoots(additionalWorkspaceId, true);
+        return workspaceService.lockAndRequirePermissionsSnapshot(
+            workspaceService.getCurrentWorkspaceId(),
+            Map.of(workspaceService.getCurrentUserId(), Set.of(requiredPermission)));
+    }
+
     private int lockCurrentOrganization(
+            Integer additionalWorkspaceId,
+            boolean requireAdditionalMembership) {
+        return lockActiveOrganization(
+            lockCurrentOrganizationRoots(additionalWorkspaceId, requireAdditionalMembership));
+    }
+
+    private LockedOrganization lockCurrentOrganization(
+            Integer additionalWorkspaceId,
+            boolean requireAdditionalMembership,
+            Permission requiredPermission) {
+        Objects.requireNonNull(requiredPermission, "requiredPermission");
+        int orgId = lockCurrentOrganizationRoots(
+            additionalWorkspaceId, requireAdditionalMembership);
+        LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(
+            workspaceService.getCurrentWorkspaceId(),
+            Map.of(workspaceService.getCurrentUserId(), Set.of(requiredPermission)));
+        return new LockedOrganization(lockActiveOrganization(orgId), authority);
+    }
+
+    private int lockCurrentOrganizationRoots(
             Integer additionalWorkspaceId,
             boolean requireAdditionalMembership) {
         int actorId = workspaceService.getCurrentUserId();
@@ -76,7 +143,14 @@ public class DuplicateDecisionLockService {
                 requireActiveMembership(lockedWorkspaceId, actorId);
             }
         }
-        return lockActiveOrganization(orgId);
+        return orgId;
+    }
+
+    /** Organization mutex and permission authority retained until the caller's transaction ends. */
+    public record LockedOrganization(int orgId, LockedPermissionSnapshot authority) {
+        public LockedOrganization {
+            Objects.requireNonNull(authority, "authority");
+        }
     }
 
     /**

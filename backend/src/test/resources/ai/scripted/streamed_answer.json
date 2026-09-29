@@ -1,0 +1,39 @@
+{
+  "id": "streamed_answer",
+  "selector": "connex_script_streamed_answer",
+  "capabilityClass": "scripted-native-stream",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Ashcombe\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"{{P1}} has nothing waiting on you. See [the record](record:r1).\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}",
+        "deltas": [
+          "{\"text\":\"{{P",
+          "1}} has nothing waiting on you. ",
+          "See [the record](record:r1).\",\"citations\":[\"r1\"],",
+          "\"suggestions\":[],\"title\":null}"
+        ]
+      }
+    }
+  ]
+}

@@ -8,11 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.web.webauthn.api.AuthenticatorTransport;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.CredentialRecord;
@@ -24,10 +28,14 @@ import org.springframework.security.web.webauthn.management.PublicKeyCredentialU
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
  * Verifies the MyBatis-backed WebAuthn repositories round-trip Spring Security's
@@ -39,6 +47,8 @@ import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 class WebAuthnPersistenceTest {
 
     @Autowired UserMapper userMapper;
+    @Autowired OrganizationMapper organizationMapper;
+    @Autowired WorkspaceMapper workspaceMapper;
     @Autowired WebauthnCredentialMapper credentialMapper;
     @Autowired WebauthnUserEntityMapper userEntityMapper;
     @Autowired UserCredentialRepository userCredentials;
@@ -122,6 +132,30 @@ class WebAuthnPersistenceTest {
         assertEquals(1, userCredentials.findByUserId(handle).size());
     }
 
+    @ParameterizedTest
+    @ValueSource(longs = { 0, 11, 12 })
+    void save_onExistingCredential_rejectsNonAdvancingCounter(long count) {
+        User user = insertUser();
+        Bytes handle = Bytes.random();
+        insertUserEntity(handle, user);
+        Bytes credentialId = Bytes.random();
+        userCredentials.save(newRecord(credentialId, handle, 12));
+        CredentialRecord current = userCredentials.findByCredentialId(credentialId);
+        CredentialRecord stale = ImmutableCredentialRecord
+            .fromCredentialRecord(current)
+            .signatureCount(count)
+            .backupState(true)
+            .lastUsed(current.getLastUsed().plusSeconds(60))
+            .build();
+
+        assertThrows(BadCredentialsException.class, () -> userCredentials.save(stale));
+
+        CredentialRecord loaded = userCredentials.findByCredentialId(credentialId);
+        assertEquals(12, loaded.getSignatureCount());
+        assertFalse(loaded.isBackupState());
+        assertEquals(current.getLastUsed(), loaded.getLastUsed());
+    }
+
     @Test
     void delete_removesCredential() {
         User user = insertUser();
@@ -173,6 +207,17 @@ class WebAuthnPersistenceTest {
         user.setPasswordHash("hash_" + s);
         user.setTimezone("UTC");
         userMapper.insert(user);
+        Organization organization = new Organization();
+        organization.setName("Passkey " + s);
+        organization.setSlug("pk-" + s);
+        organizationMapper.insert(organization);
+        Workspace workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
+        workspace.setName("Passkey " + s);
+        workspace.setSlug("pk-" + s);
+        workspace.setTimezone("UTC");
+        workspaceMapper.insert(workspace);
+        workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
         return user;
     }
 

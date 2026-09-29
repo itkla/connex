@@ -130,6 +130,48 @@ class AttachmentScanLifecycleIntegrationTest {
     @Autowired private ooo.klae.connex.backend.config.DeploymentProperties deploymentProperties;
 
     @Test
+    void malformedManagedReferenceIsRefusedAndSingleObjectSweepsAdvance() throws Exception {
+        Attachment malformed = reference(workspace, "/api/attachments/content/not-a-token.txt");
+        Attachment valid = legacyAttachment(workspace);
+        inContext(firstActor, workspace, () -> {
+            worker.sweepWorkspace(workspace.getId(), firstActor.getId(), 1);
+            Attachment refused = scans.getById(workspace.getId(), malformed.getId());
+            assertEquals("unscannable", refused.getScanState());
+            assertEquals(1, refused.getScanAttempts());
+            assertNull(refused.getScanOwner());
+            assertNull(refused.getScanNextAttemptAt());
+            assertNull(refused.getScanDatabaseVersion());
+            worker.sweepWorkspace(workspace.getId(), firstActor.getId(), 1);
+            worker.sweepWorkspace(workspace.getId(), firstActor.getId(), 1);
+            assertTrue(scans.findDue(workspace.getId(), 1).isEmpty());
+            return null;
+        });
+        assertReadable(valid);
+        assertEquals(1, scans.getById(workspace.getId(), malformed.getId()).getScanAttempts());
+        verify(scanner, times(1)).scan(any(byte[].class));
+    }
+
+    @Test
+    void staleInvalidReferenceRefusalCannotOverwriteSuccessorClaimOrQuarantine() {
+        Attachment malformed = reference(workspace, "/api/attachments/content/not-a-token.txt");
+        inContext(firstActor, workspace, () -> {
+            Attachment stale = transactions.claim(workspace.getId(), malformed.getId());
+            assertNotNull(stale);
+            jdbc.update("UPDATE attachment SET scan_lease_until = '2000-01-01' WHERE id = ?", malformed.getId());
+            transactions.refuse(stale);
+            assertEquals("scanning", scans.getById(workspace.getId(), malformed.getId()).getScanState());
+            Attachment successor = transactions.claim(workspace.getId(), malformed.getId());
+            assertNotNull(successor);
+            transactions.refuse(stale);
+            assertEquals(successor.getScanOwner(), scans.getById(workspace.getId(), malformed.getId()).getScanOwner());
+            scans.quarantine(workspace.getId(), malformed.getId());
+            transactions.refuse(successor);
+            assertEquals("quarantined", scans.getById(workspace.getId(), malformed.getId()).getScanState());
+            return null;
+        });
+    }
+
+    @Test
     void workspaceDiscoveryExaminesAtMostOneIndexEntryPerSeek() {
         for (int i = 0; i < 100; i++) {
             reference(workspace, "/api/attachments/content/" + UUID.randomUUID() + ".txt");

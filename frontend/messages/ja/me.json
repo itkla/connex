@@ -128,6 +128,7 @@
         "empty": "連絡先・会社・案件に書いたメモがここに集まります。レコードを開いて最初の1件を書いてみてください。"
     },
     "MeTimeline": {
+        "unknownAuthor": "不明",
         "chipCampaign": "キャンペーン",
         "campaignChannelEmail": "メール",
         "campaignChannelSms": "SMS",

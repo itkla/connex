@@ -224,6 +224,28 @@ requests — `POST /api/document-acceptance/accept`, `POST /api/document-accepta
 `POST /api/delivery/unsubscribe` — also carry a JSON body echoing the `flowId` the preview returned; a
 body whose `flowId` does not name the grant the browser currently holds is refused without any state change.
 
+### V212 AI budget reservation cutover
+
+`V212__ai_budget_reservation_state.sql` introduces durable `reserved`, `dispatched`, and `settled`
+states. Older backends delete expired dispatched reservations without charging them and count
+retained settled rows as reserved capacity. The release is therefore **not rolling-deploy safe**.
+
+Treat the release containing V212 as a coordinated restart: close ingress, stop every old backend
+replica and AI worker, apply the migration, then start only the new version. Resume AI admission
+only after every instance has been upgraded. Existing reservations are conservatively backfilled
+as `dispatched` because the previous schema has no reliable dispatch evidence.
+
+Rollback requires quiescing AI work and reconciling dispatched and settled reservations with
+`organization_ai_budget_usage` before restoring older code. Reverting the application alone is not
+budget-safe; follow the full backup/restore policy below if reverting the database as well.
+
+The new sweeper charges expired dispatched work and releases expired pre-dispatch work in batches
+of 100, up to 10,000 reservations per run. Settled tombstones are purged in separate batches of 100
+(up to 10,000 per run) seven days after the later of lease expiry and settlement. Late settlement
+of a purged id remains a no-op. Provider deadlines are capped at one hour and leases include a one-minute settlement margin.
+The daily usage breakdown labels ledger consumption absent from successful-call audits as
+`Conservative / unattributed charges`; this can also include successful settlements awaiting audit.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close
@@ -269,19 +291,46 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    `CONNEX_APP_SUBNET`, or `CONNEX_FRONTEND_APP_IP` to `.env`, remove those obsolete variables;
    set `CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend`, replacing any prior IP or CIDR value.
    Do not run `docker compose down` or delete a network to take this upgrade.
-5. **Refresh the backup tooling and network discovery** — from the target deployment directory,
-   rerun the shipped installer before Compose recreates the database. It preserves operator-owned
-   settings, migrates a legacy `<project>_default` Docker network value to automatic discovery, and
-   installs the matching shims used by scheduled backups and recovery:
+5. **Migrate backup prerequisites, then refresh the tooling** — before rerunning the installer,
+   update the preserved `/etc/connex-backup/backup.env` and mode-0600 client defaults files:
+
+   - **TLS is mandatory for each source, verify, and restore profile.** Put a trusted, absolute
+     `ssl-ca` or `ssl-capath` in the `[client]` section of each profile's defaults file; verify and
+     restore inherit the source file unless configured separately. The certificate must match the
+     configured host. CA paths must exist inside the DB container in `exec` mode or be mounted
+     read-only in `run` mode. The previous password-only defaults are insufficient, including on
+     loopback. If a profile deliberately uses plaintext over literal `localhost`, `127.0.0.1`, or
+     `::1`, explicitly set its own `CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT=true`,
+     `CONNEX_BACKUP_VERIFY_ALLOW_LOOPBACK_PLAINTEXT=true`, or
+     `CONNEX_BACKUP_RESTORE_ALLOW_LOOPBACK_PLAINTEXT=true` in `backup.env`. No exception is
+     inherited between profiles; remote/private addresses and the Compose host `db` require TLS.
+   - **Migrate the PITR image reference.** Replace the old sample
+     `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server:8.4` with an independently approved
+     `percona/percona-server@sha256:<64 lowercase hex digits>` reference. Substitute the digest
+     approved by the release owner; this repository does not supply an approved Percona digest.
+     Stage or mirror that exact image before recovery is needed. An empty image setting is only
+     appropriate when a native `mysqlbinlog` is installed and verified instead. Mutable tags are
+     rejected both during installation and by the runtime shim; see
+     [BACKUP_RESTORE.md](BACKUP_RESTORE.md#install-operator-once).
+
+   From the target deployment directory, rerun the shipped installer before Compose recreates the
+   database. It preserves operator-owned settings, migrates a legacy `<project>_default` Docker
+   network value to automatic discovery, and installs the matching shims:
 
    ```bash
    sudo ./backup/install.sh
    ```
 
-   Do not skip this step when backups normally use `exec`: the Docker-backed `mysqlbinlog` recovery
-   shim uses the same network discovery. Automatic discovery follows the configured DB container's
-   actual Compose `db` network, including a project name selected with `-p` or
-   `COMPOSE_PROJECT_NAME`.
+   The installer exits 64 with migration instructions if either prerequisite is missing, before
+   replacing installed programs or enabling timers. Correct the named profile or image setting and
+   rerun it; do not proceed past a failed install. Existing timers are not stopped by this preflight.
+   This is an offline configuration check; it does not test CA availability inside containers,
+   certificate trust/hostname, image availability, or native client installation. After the database
+   is available, verify a full backup and binlog archive and run the documented PITR drill.
+
+   Do not skip this step when backups normally use `exec`. Database clients in `run` mode discover
+   the configured DB container's actual Compose `db` network, including a project name selected
+   with `-p` or `COMPOSE_PROJECT_NAME`. The local PITR decoder runs with networking disabled.
 6. **Normalize object-volume ownership when required** — the backend runtime identity is permanently
    `10001:10001`. Before the first upgrade from a preview image that used a dynamic UID/GID, run the
    following idempotent preflight while writers remain stopped:

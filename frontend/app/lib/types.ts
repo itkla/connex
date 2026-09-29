@@ -7,6 +7,13 @@ export type Page<T> = {
     total: number;
 };
 
+/** Body-free authored-note count for one UTC calendar day. */
+export type NoteActivityDay = { date: string; count: number };
+
+/** The last update timestamp and id returned by a timeline note page. */
+export type NotePageCursor = { beforeAt: string; beforeId: number };
+export type NotePageParams = PageParams & Partial<NotePageCursor>;
+
 export type PageParams = {
     page?: number;
     size?: number;
@@ -871,6 +878,18 @@ export type EmailChangePayload = {
     currentPassword: string;
 };
 
+/** A pending workspace invitation revoked when the account's email address changed. */
+export type RevokedInvitation = {
+    workspaceId: number;
+    orgId: number | null;
+    workspaceName: string;
+};
+
+/** Email-change confirmation and the pending invitations that need to be sent again. */
+export type EmailChangeConfirmation = AuthResponse & {
+    revokedInvitations: RevokedInvitation[];
+};
+
 export type ResetTokenValidation = {
     valid: boolean;
 };
@@ -1705,7 +1724,8 @@ export type DealLineItemTotals = {
 
 export type DealLineItemsResponse = {
     items: DealLineItem[];
-    totals: DealLineItemTotals;
+    /** Unavailable until every remaining line uses the deal currency. */
+    totals: DealLineItemTotals | null;
 };
 
 export type DealLineItemPayload = {
@@ -5152,9 +5172,10 @@ export type WorkspaceInvite = {
 
 /**
  * The outcome of inviting someone by email. Exactly one field is set: `invite`
- * for an emailed token invite (a new address), or `member` when the address
- * belongs to an existing Connex user, who is added as a pending member and
- * notified in-app instead.
+ * for an emailed token invite (a new address, or one whose account still owes
+ * email verification), or `member` when the address belongs to an existing
+ * account whose mailbox ownership is settled, which is added as a pending member
+ * and notified in-app instead.
  */
 export type InviteResult = {
     invite: WorkspaceInvite | null;
@@ -5230,6 +5251,7 @@ export type MailConfig = {
     starttls: boolean;
     ssl: boolean;
     auth: boolean;
+    defaultPort: number;
     hasPassword: boolean;
     configured: boolean;
     updatedAt: string | null;

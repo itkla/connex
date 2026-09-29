@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -79,13 +80,15 @@ class PersonEdgePlaneRoutingIntegrationTest {
                 Statement statement = connection.createStatement()) {
             assumeTrue(tableExists(connection, defaultCatalog, "workspace"),
                 "Default catalog is not migrated; skipping PersonEdge routing test");
-            statement.execute("CREATE DATABASE " + scratchCatalog);
+            try {
+                statement.execute("CREATE DATABASE " + scratchCatalog);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + scratchCatalog + " ("
+                    + exception.getMessage() + ")");
+            }
             scratchCatalogCreated = true;
             createTenantTables(statement);
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(false, "Cannot prepare scratch catalog " + scratchCatalog + " ("
-                + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -272,7 +275,7 @@ class PersonEdgePlaneRoutingIntegrationTest {
         for (String resource : List.of("mappers/PersonEdgeMapper.xml", "mappers/WorkspaceMapper.xml")) {
             try (InputStream input = PersonEdgePlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
             }
         }

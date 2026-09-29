@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -58,12 +59,18 @@ public class AuditService {
     private static final int MAX_OFFSET = 100_000;
     private static final int EXPORT_MAX_LIMIT = 10_000;
 
+    public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
+    public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
+    public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
+
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
 
     private static final Set<String> SECRET_PURPOSES = Set.of(
             "workspace.smtp.password",
             "workspace.delivery.provider_credential",
+            "workspace.delivery.provider_credential.email",
+            "workspace.delivery.provider_credential.sms",
             "workspace.delivery.webhook_secret",
             "workspace.connector.credential",
             "org.sso.oidc_client_secret",
@@ -124,6 +131,7 @@ public class AuditService {
     private static final Pattern SAFE_SIGNATURE = Pattern.compile(
             "[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
+    private final SessionSecurityService sessionSecurityService;
     private final AuditLogMapper auditLogMapper;
     private final AuditIntegrityService auditIntegrityService;
     private final ObjectMapper objectMapper;
@@ -485,6 +493,7 @@ public class AuditService {
      * @return CSV text
      */
     public String exportRecent(int limit, int offset) {
+        requireExportStepUp();
         return toCsv(auditLogMapper.findWorkspaceExport(tenantContext.getWorkspaceId(), exportCap(limit), offset(offset)));
     }
 
@@ -497,6 +506,7 @@ public class AuditService {
      * @return CSV text
      */
     public String exportForEntity(String entityType, int entityId, int limit, int offset) {
+        requireExportStepUp();
         return toCsv(auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId,
                 exportCap(limit), offset(offset)));
     }
@@ -509,7 +519,42 @@ public class AuditService {
      * @return CSV text
      */
     public String exportRecentForOrg(int orgId, int limit, int offset) {
+        requireExportStepUp();
         return toCsv(auditLogMapper.findOrgExport(orgId, exportCap(limit), offset(offset)));
+    }
+
+    /**
+     * Records the service-boundary refusal of an export that carried no fresh passkey assertion.
+     *
+     * <p>The path-matching filter emits the same action for the requests it recognises. The
+     * {@code service_boundary} reason marks the independent guard that runs even when no filter
+     * matched the route, so a refusal reached only by the deeper control stays distinguishable in
+     * the audit trail instead of looking like the filter refused it.
+     *
+     * <p>The entry is appended in an independent transaction that re-takes the actor's
+     * {@code app_user} row {@code FOR SHARE}, so this must not be called from a transaction that
+     * already holds that row {@code FOR UPDATE}; it would wait on its own lock.
+     */
+    public void recordExportStepUpRefused() {
+        Integer actorId = null;
+        String actorLabel = null;
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user) {
+            actorId = user.getId();
+            actorLabel = user.getDisplayName();
+        }
+        recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actorId, null, null, actorLabel,
+                EXPORT_STEP_UP_SUMMARY, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+    }
+
+    private void requireExportStepUp() {
+        try {
+            sessionSecurityService.requireExportStepUp();
+        } catch (RecentAuthenticationRequiredException exception) {
+            recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
+import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
 /**
@@ -36,6 +37,10 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Retains exact membership authority without excluding other authorized readers. */
+    WorkspaceMember lockAuthorizationMembershipForShare(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     WorkspaceMember getAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
@@ -56,20 +61,22 @@ public interface WorkspaceMapper {
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
-    boolean hasMembersWithCustomRole(
+    /** Locks the workspace's active owner rows without waiting, before acquiring role roots. */
+    List<WorkspaceMember> lockActiveOwnerMembers(@Param("workspaceId") int workspaceId);
+    /** Locks every membership currently overlaid by the role without waiting. */
+    List<WorkspaceMember> lockRoleAssignees(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
-    int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
     Integer lockWorkspace(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
-    java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     Integer lockActiveWorkspaceForShare(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceOrgIdForShare(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
+    int clearLastActiveWorkspaceId(int userId);
     int insert(Workspace workspace);
     int updateIdentity(
         @Param("workspaceId") int workspaceId,
@@ -81,6 +88,28 @@ public interface WorkspaceMapper {
         @Param("afterId") int afterId, @Param("limit") int limit);
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
+    /**
+     * Loads the id, organization and name of every workspace in the anchor workspace's
+     * organization, ordered by name then id. This is the control-plane snapshot record sharing
+     * uses as its same-organization ceiling and as its workspace-name hydration source (#811), so
+     * it deliberately applies no lifecycle filter — the {@code ShareMapper} joins it replaces
+     * applied none either. {@link #findByOrgId} answers the same question for the read-path
+     * ceilings and does filter on lifecycle, so the two statements return different sets for a
+     * winding-down organization and neither may be substituted for the other.
+     *
+     * @param workspaceId workspace anchoring the organization
+     * @return id/org/name rows in name then id order, empty when the anchor does not exist
+     */
+    List<Workspace> findOrganizationWorkspacesForShare(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Loads every active workspace of an active organization, which is the scope the read-path
+     * organization ceilings bind. It diverges from
+     * {@link #findOrganizationWorkspacesForShare} by filtering on lifecycle state.
+     *
+     * @param orgId organization to resolve
+     * @return the organization's active workspaces in id order
+     */
     List<Workspace> findByOrgId(@Param("orgId") int orgId);
     List<Workspace> findActiveByOrgIdPage(
         @Param("orgId") int orgId,
@@ -104,6 +133,12 @@ public interface WorkspaceMapper {
     );
     int activateMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<WorkspaceMembershipDto> getPendingMemberships(int userId);
+    /**
+     * Finds all of a user's pending grants in ascending workspace id, including grants in inactive
+     * workspaces and organizations, so revocation cannot leave one behind.
+     */
+    List<RevokedInvitationDto> findPendingGrants(int userId);
+    int removePendingMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int updateMemberRole(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,

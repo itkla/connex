@@ -17,8 +17,13 @@ public interface WebauthnCredentialMapper {
     List<WebauthnCredentialRow> findByUserEntityUserId(String userEntityUserId);
     List<WebauthnCredentialRow> findByUserEntityUserIdForUpdate(String userEntityUserId);
     int insert(WebauthnCredentialRow row);
-    /** Updates the mutable fields written on each successful assertion (counter, backup/uv state, last used, label). */
-    int updateMutable(WebauthnCredentialRow row);
+    /**
+     * Updates assertion state only while the expected counter is current and the new counter
+     * advances, or both counters are zero for an authenticator without counter support.
+     * @return one if the assertion state was saved, zero if the credential is stale or missing
+     */
+    int updateMutable(@Param("row") WebauthnCredentialRow row,
+            @Param("expectedSignatureCount") long expectedSignatureCount);
     int updateLabel(@Param("credentialId") byte[] credentialId, @Param("label") String label);
     int delete(byte[] credentialId);
 }

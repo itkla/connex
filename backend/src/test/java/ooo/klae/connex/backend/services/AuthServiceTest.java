@@ -14,6 +14,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -43,10 +45,10 @@ class AuthServiceTest extends AbstractServiceTest {
     @Test
     void register_duplicateUsername_throwsFieldlessGenericConflict() {
         String username = "taken_" + unique();
-        authService.register(registration(username, unique() + "@example.com"), true);
+        authService.register(registration(username, unique() + "@example.com"), null);
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
-            () -> authService.register(registration(username, unique() + "@example.com"), true));
+            () -> authService.register(registration(username, unique() + "@example.com"), null));
         assertNull(ex.getField(), "a duplicate username must not be revealed via the error field");
         assertEquals("Registration could not be completed", ex.getMessage());
     }
@@ -54,10 +56,10 @@ class AuthServiceTest extends AbstractServiceTest {
     @Test
     void register_duplicateEmail_throwsIdenticalFieldlessConflict() {
         String email = "taken_" + unique() + "@example.com";
-        authService.register(registration("user_" + unique(), email), true);
+        authService.register(registration("user_" + unique(), email), null);
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
-            () -> authService.register(registration("user_" + unique(), email), true));
+            () -> authService.register(registration("user_" + unique(), email), null));
         assertNull(ex.getField(), "a duplicate email must not be revealed via the error field");
         assertEquals("Registration could not be completed", ex.getMessage());
     }
@@ -89,7 +91,7 @@ class AuthServiceTest extends AbstractServiceTest {
         request.setPassword("Password1!");
 
         assertThrows(BreachedPasswordException.class,
-                () -> authService.register(request, true));
+                () -> authService.register(request, null));
     }
 
     @Test
@@ -103,14 +105,14 @@ class AuthServiceTest extends AbstractServiceTest {
 
     @Test
     void requireCurrentPassword_acceptsTheAccountPassword() {
-        User user = authService.register(registration("pw_" + unique(), unique() + "@example.com"), true);
+        User user = authService.register(registration("pw_" + unique(), unique() + "@example.com"), null);
 
         assertDoesNotThrow(() -> authService.requireCurrentPassword(user.getId(), "Aa1!aaaa", "203.0.113.10"));
     }
 
     @Test
     void requireCurrentPassword_rejectsWrongPassword() {
-        User user = authService.register(registration("badpw_" + unique(), unique() + "@example.com"), true);
+        User user = authService.register(registration("badpw_" + unique(), unique() + "@example.com"), null);
 
         assertThrows(BadCredentialsException.class,
             () -> authService.requireCurrentPassword(user.getId(), "wrong", "203.0.113.10"));
@@ -119,7 +121,7 @@ class AuthServiceTest extends AbstractServiceTest {
     @Test
     void firstPasskeyBootstrap_passwordBackedAccountStillRequiresPasswordAfterFreshLogin() {
         User user = authService.register(registration("bootstrap_pw_" + unique(),
-            unique() + "@example.com"), true);
+            unique() + "@example.com"), null);
         MockHttpServletRequest request = new MockHttpServletRequest();
         sessionSecurityService.markAuthenticated(request, user.getId());
 
@@ -152,7 +154,7 @@ class AuthServiceTest extends AbstractServiceTest {
     @Test
     void hasPasswordCredentialReflectsStoredCredentialType() {
         User passwordBacked = authService.register(registration("credential_pw_" + unique(),
-            unique() + "@example.com"), true);
+            unique() + "@example.com"), null);
         User passwordless = passwordlessUser();
 
         assertTrue(authService.hasPasswordCredential(passwordBacked.getId()));
@@ -203,6 +205,45 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertThrows(BadCredentialsException.class, () -> authService.establishAuthenticatedSession(
             member, new MockHttpServletRequest(), new MockHttpServletResponse()));
+    }
+
+    /**
+     * A session whose account row is gone is a signed-out caller, not a missing resource. Answering
+     * 404 left the app shell — which reads only 401 as signed out — stuck on a retryable
+     * "unavailable" state that re-read the same rejection forever (#1479).
+     */
+    @Test
+    void aPrincipalWhoseAccountRowIsGoneFailsAuthenticationRatherThanReadingAsMissing() {
+        User member = passwordlessUser();
+        authenticateAs(member, workspace.getId());
+        assertEquals(member.getId(), authService.getCurrentUser().getId());
+
+        userMapper.delete(member.getId());
+
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentUser());
+        assertEquals(member.getId(), authService.getCurrentPrincipal().getId(),
+            "the session principal itself still resolves; only the refresh fails");
+    }
+
+    /** An empty security context is the same authentication failure, not a 404. */
+    @Test
+    void anEmptySecurityContextFailsAuthentication() {
+        SecurityContextHolder.clearContext();
+
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentPrincipal());
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentUser());
+    }
+
+    /** A credential probe for an account that no longer exists answers the same way. */
+    @Test
+    void aPasswordCredentialProbeForADeletedAccountFailsAuthentication() {
+        User member = passwordlessUser();
+        assertFalse(authService.hasPasswordCredential(member.getId()));
+
+        userMapper.delete(member.getId());
+
+        assertThrows(AuthenticationException.class,
+            () -> authService.hasPasswordCredential(member.getId()));
     }
 
     private User passwordlessUser() {

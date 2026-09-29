@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.PersonFirstResponseState;
@@ -259,7 +260,8 @@ public class PersonService {
             referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
         }
         hydrated.setNotes(
-            referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, id, workspaceService.getCurrentUserId())).toArray(new Note[0]));
+            referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
+                workspaceId, id, workspaceService.getCurrentUserId(), 25, 0)).toArray(new Note[0]));
         return hydrated;
     }
 
@@ -380,6 +382,20 @@ public class PersonService {
         return person;
     }
 
+    /** Locks one currently processable contact for a linked write that does not mutate the contact. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Person lockProcessablePersonForShare(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, id);
+        if (person == null
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
+        return person;
+    }
+
     /**
      * Creates a business-card contact for trusted internal callers that own duplicate review.
      *
@@ -474,8 +490,9 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        duplicateDecisionLockService.lockCurrentOrganization();
+        var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        locked.authority().revalidate();
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
@@ -640,8 +657,10 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int orgId = duplicateDecisionLockService.lockCurrentOrganization();
+        var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
+        int orgId = locked.orgId();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        locked.authority().revalidate();
         if (before == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
@@ -919,9 +938,19 @@ public class PersonService {
      * Retrieves the notes associated with a person in the active workspace.
      */
     public List<Note> getNotesByPersonId(int personId) {
+        return getNotesByPersonId(personId, 25, 0);
+    }
+
+    /** Returns a bounded page of reader-redacted note previews for the record. */
+    public List<Note> getNotesByPersonId(int personId, int limit, int offset) {
+        return getNotesByPersonId(personId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByPersonId(int personId, int limit, int offset, NotePageCursor before) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
+            workspaceId, personId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
     }
 
     /**

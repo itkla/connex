@@ -160,6 +160,12 @@ public class UploadContentInspector implements AutoCloseable {
     private static final Set<String> WORDPROCESSING_NAMESPACES = Set.of(
         "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         "http://purl.oclc.org/ooxml/wordprocessingml/main");
+    private static final Set<String> SPREADSHEETML_NAMESPACES = Set.of(
+        "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "http://purl.oclc.org/ooxml/spreadsheetml/main");
+    private static final Set<String> SPREADSHEET_VIEW_ELEMENTS = Set.of(
+        "sheetview", "customsheetview");
+    private static final Set<String> XSD_BOOLEAN_VALUES = Set.of("true", "false", "1", "0");
     private static final Set<String> OOXML_OFFICE_DOCUMENT_RELATIONSHIPS = Set.of(
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument",
         "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument");
@@ -1103,9 +1109,7 @@ public class UploadContentInspector implements AutoCloseable {
                 "xl/workbook.xml",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
                 "workbook",
-                Set.of(
-                    "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-                    "http://purl.oclc.org/ooxml/spreadsheetml/main"));
+                SPREADSHEETML_NAMESPACES);
             case PPTX -> requireOoxml(
                 evidence,
                 "ppt/presentation.xml",
@@ -2657,6 +2661,10 @@ public class UploadContentInspector implements AutoCloseable {
                         && !SAFE_PRESENTATION_ACTION.matcher(value.trim()).matches()) {
                     throw new SAXException("Presentation action is not allowed");
                 }
+                if (inertSpreadsheetViewAttribute(
+                        uri, normalizedElement, attributes.getURI(index), normalizedName, value)) {
+                    continue;
+                }
                 if (("instr".equals(normalizedName)
                             && !(WORDPROCESSING_NAMESPACES.contains(uri)
                                 && "fldsimple".equals(normalizedElement)))
@@ -3159,6 +3167,28 @@ public class UploadContentInspector implements AutoCloseable {
                 }
             }
             return true;
+        }
+
+        /**
+         * Recognises the SpreadsheetML {@code showFormulas} view flag as inert.
+         *
+         * <p>LibreOffice Calc writes {@code showFormulas="false"} on every worksheet view. It is
+         * an xsd:boolean display toggle with no expression content, so it is exempt from the
+         * formula attribute rule only on an un-namespaced attribute of a SpreadsheetML
+         * {@code sheetView} or {@code customSheetView} carrying a boolean literal. Formula
+         * elements are refused separately and are unaffected.
+         */
+        private static boolean inertSpreadsheetViewAttribute(
+                String uri,
+                String normalizedElement,
+                String attributeUri,
+                String normalizedName,
+                String value) {
+            return SPREADSHEETML_NAMESPACES.contains(uri)
+                && SPREADSHEET_VIEW_ELEMENTS.contains(normalizedElement)
+                && attributeUri.isEmpty()
+                && "showformulas".equals(normalizedName)
+                && XSD_BOOLEAN_VALUES.contains(value.trim());
         }
 
         /**

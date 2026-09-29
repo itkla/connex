@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -16,6 +18,8 @@ import ooo.klae.connex.backend.exceptions.ShareBlockedPrivacyHoldException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess.OrganizationWorkspaces;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -23,6 +27,24 @@ import ooo.klae.connex.backend.tenant.Permission;
  * owning workspace shares a record it owns with another workspace the actor also
  * belongs to; the grantee gains read visibility. Requires the SHARE_MANAGE
  * permission in the owning workspace.
+ *
+ * <p>This service is the cross-plane boundary for sharing (#811). Permission,
+ * membership, organization and workspace-metadata reads run on the control plane;
+ * the share rows themselves are tenant data. The organization's workspace snapshot
+ * is loaded once per operation through {@link ShareWorkspaceControlAccess} and is
+ * what the tenant grant statements enforce their same-organization ceiling against,
+ * what filters stale listing targets, and what supplies workspace names and their
+ * ordering. It is taken before any row lock, so no second pooled connection is
+ * borrowed while a tenant write holds locks (see {@code docs/backend/LOCKING.md}).
+ * A listing with no share rows needs no snapshot and skips the control query
+ * entirely, as deal-collaborator hydration does for an empty collaborator set.
+ *
+ * <p>Every grant holds the target workspace root from before the grant statement
+ * judges that snapshot until the insert lands. The removed {@code JOIN workspace} was
+ * also an existence check on the target at insert time, and V65 dropped the foreign
+ * key that used to refuse a dangling reference, so without the lock a workspace
+ * teardown committing in between would leave a share row addressed to a workspace
+ * that no longer exists.
  */
 @Service
 @RequiredArgsConstructor
@@ -37,6 +59,7 @@ public class ShareService {
     private final AuditService auditService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final NotificationChangePublisher notificationChanges;
+    private final ShareWorkspaceControlAccess shareWorkspaceControlAccess;
 
     public List<ShareDto> listShares(String typeRaw, int entityId) {
         Type type = parseType(typeRaw);
@@ -44,11 +67,15 @@ public class ShareService {
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         requireOwned(type, workspaceId, entityId);
-        return switch (type) {
+        List<ShareDto> shares = switch (type) {
             case COMPANY -> shareMapper.listCompanyShares(workspaceId, entityId);
             case PERSON -> shareMapper.listPersonShares(workspaceId, entityId);
             case PIPELINE -> shareMapper.listPipelineShares(workspaceId, entityId);
         };
+        if (shares.isEmpty()) {
+            return List.of();
+        }
+        return shareWorkspaceControlAccess.getForWorkspace(workspaceId).hydrate(shares);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -57,10 +84,13 @@ public class ShareService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
-        if (type != Type.PIPELINE) {
-            duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
-                targetWorkspaceId);
-        }
+        OrganizationWorkspaces organizationWorkspaces =
+            shareWorkspaceControlAccess.getForWorkspace(workspaceId);
+        LockedPermissionSnapshot authority = type == Type.PIPELINE
+            ? duplicateDecisionLockService.lockCurrentWorkspacesWithMemberWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE)
+            : duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);
         if (type == Type.PERSON) {
             requirePersonProvisionAllowed(workspaceId, entityId);
@@ -76,10 +106,15 @@ public class ShareService {
                     "A record cannot be shared across organizations");
             }
         }
+        authority.revalidate();
+        String orgWorkspaceIdsJson = organizationWorkspaces.workspaceIdsJson();
         int granted = switch (type) {
-            case COMPANY -> shareMapper.shareCompany(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
-            case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
-            case PIPELINE -> shareMapper.sharePipeline(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
+            case COMPANY -> shareMapper.shareCompany(
+                entityId, workspaceId, targetWorkspaceId, actorId, canEdit, orgWorkspaceIdsJson);
+            case PERSON -> shareMapper.sharePerson(
+                entityId, workspaceId, targetWorkspaceId, actorId, canEdit, orgWorkspaceIdsJson);
+            case PIPELINE -> shareMapper.sharePipeline(
+                entityId, workspaceId, targetWorkspaceId, actorId, canEdit, orgWorkspaceIdsJson);
         };
         if (granted == 0 && type == Type.PERSON) {
             requirePersonProvisionAllowed(workspaceId, entityId);
@@ -97,11 +132,13 @@ public class ShareService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
-        if (type != Type.PIPELINE) {
-            duplicateDecisionLockService.lockCurrentOrganizationWithWorkspace(
-                targetWorkspaceId);
-        }
+        LockedPermissionSnapshot authority = type == Type.PIPELINE
+            ? workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.SHARE_MANAGE)))
+            : duplicateDecisionLockService.lockCurrentOrganizationWithWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);
+        authority.revalidate();
         switch (type) {
             case COMPANY -> shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);
             case PERSON -> shareMapper.unsharePerson(entityId, workspaceId, targetWorkspaceId);

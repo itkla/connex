@@ -8,9 +8,9 @@
     SELECT a.* FROM attachment a WHERE a.workspace_id = #{workspaceId} AND a.id = #{id} FOR UPDATE
   </select>
   <select id="isReadable" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url})
+    SELECT EXISTS(SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url})
       AND NOT EXISTS (
-        SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url}
+        SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url}
           AND (scan_state != 'clean' OR scan_engine IS NULL OR scan_database_version IS NULL
             OR scanned_at IS NULL
             OR (scan_database_version = 'disabled' AND NOT #{allowDisabledProof})
@@ -19,13 +19,13 @@
   </select>
   <update id="quarantine">
     UPDATE attachment a JOIN attachment target
-      ON target.workspace_id = a.workspace_id AND target.url = a.url
+      ON target.workspace_id = a.workspace_id AND target.url = a.url AND BINARY target.url = BINARY a.url
     SET a.scan_state = 'quarantined', a.scan_owner = NULL, a.scan_lease_until = NULL
     WHERE target.workspace_id = #{workspaceId} AND target.id = #{id}
   </update>
   <update id="enqueue">
     UPDATE attachment a JOIN attachment target
-      ON target.workspace_id = a.workspace_id AND target.url = a.url
+      ON target.workspace_id = a.workspace_id AND target.url = a.url AND BINARY target.url = BINARY a.url
     SET a.scan_state = 'pending', a.scan_owner = NULL, a.scan_lease_until = NULL,
       a.scan_next_attempt_at = UTC_TIMESTAMP(6)
     WHERE target.workspace_id = #{workspaceId} AND target.id = #{id}
@@ -40,9 +40,10 @@
     ORDER BY workspace_id DESC LIMIT 1
   </select>
   <select id="findDue" resultType="int">
+    <bind name="managedPrefix" value="@ooo.klae.connex.backend.storage.ManagedObjectService@ATTACHMENT_URL_PREFIX + '%'"/>
     SELECT MIN(id) FROM attachment
-    WHERE workspace_id = #{workspaceId} AND url LIKE '/api/attachments/content/%'
-    GROUP BY url
+    WHERE workspace_id = #{workspaceId} AND url LIKE #{managedPrefix} AND BINARY url LIKE BINARY #{managedPrefix}
+    GROUP BY BINARY url
     HAVING SUM(scan_state = 'quarantined') = 0
       AND SUM(scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)) = 0
       AND SUM((scan_state IN ('pending', 'error', 'scanning')
@@ -58,27 +59,34 @@
       AND SUM((scan_state IN ('pending', 'error', 'scanning')
         OR (scan_state = 'clean' AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6))))
         AND (scan_next_attempt_at IS NULL OR scan_next_attempt_at &lt;= UTC_TIMESTAMP(6))) &gt; 0
-    FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url}
+    FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url}
   </select>
   <update id="claim">
     UPDATE attachment SET scan_state = 'scanning', scan_owner = #{owner},
       scan_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE),
       scan_attempts = scan_attempts + 1, scan_last_attempt_at = UTC_TIMESTAMP(6)
-    WHERE workspace_id = #{workspaceId} AND url = #{url}
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url}
   </update>
   <update id="decide">
     UPDATE attachment SET scan_state = #{state}, scan_engine = 'ClamAV',
       scan_database_version = #{version}, scan_signature = #{signature},
       scanned_at = UTC_TIMESTAMP(6), scan_expires_at = #{expiresAt},
       scan_owner = NULL, scan_lease_until = NULL, scan_next_attempt_at = #{expiresAt}
-    WHERE workspace_id = #{workspaceId} AND url = #{url} AND scan_owner = #{owner}
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url} AND scan_owner = #{owner}
       AND scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)
   </update>
   <update id="retry">
     UPDATE attachment SET scan_state = 'error', scan_owner = NULL, scan_lease_until = NULL,
       scan_next_attempt_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL LEAST(3600, 30 * scan_attempts) SECOND)
-    WHERE workspace_id = #{workspaceId} AND url = #{url} AND scan_owner = #{owner}
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url} AND scan_owner = #{owner}
       AND scan_state = 'scanning'
+  </update>
+  <update id="refuse">
+    UPDATE attachment SET scan_state = 'unscannable', scan_engine = NULL,
+      scan_database_version = NULL, scan_signature = NULL, scanned_at = NULL, scan_expires_at = NULL,
+      scan_owner = NULL, scan_lease_until = NULL, scan_next_attempt_at = NULL
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND BINARY url = BINARY #{url} AND scan_owner = #{owner}
+      AND scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)
   </update>
   <update id="recordLegacyClean">
     UPDATE attachment SET scan_state = 'clean', scan_engine = 'ClamAV',

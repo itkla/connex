@@ -90,7 +90,7 @@ class MapReplayServiceTest {
             deal(DEAL, "2026-02-15 00:00:00", COMPANY_A, "2026-04-15 00:00:00", true)));
         when(activityMapper.getAllActivities(WS)).thenReturn(List.of(
             meeting(CONTACT, "2026-02-25 12:00:00"), meeting(CONTACT, "2026-05-01 12:00:00")));
-        when(noteMapper.getAllNotes(WS)).thenReturn(List.of());
+        when(noteMapper.getWorkspaceNoteMetadataPage(WS, 0, 100)).thenReturn(List.of());
         when(taskMapper.getAllTasks(WS)).thenReturn(List.of());
         when(employmentMapper.getAllEmployment(WS)).thenReturn(List.of(
             stint(CONTACT, COMPANY_A, "2025-06-01 00:00:00", "2026-03-01 00:00:00"),

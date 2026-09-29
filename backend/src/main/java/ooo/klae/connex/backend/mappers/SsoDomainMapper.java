@@ -18,6 +18,12 @@ public interface SsoDomainMapper {
 
     Integer findOrgByDomain(String domain);
 
+    /**
+     * Whether a verified account using this domain lacks a local active workspace or organization
+     * membership, or holds such membership elsewhere. Pending workspace invitations do not count.
+     */
+    boolean hasVerifiedEmailOutsideOrg(@Param("domain") String domain, @Param("orgId") int orgId);
+
     List<String> listByOrg(int orgId);
 
     int insert(@Param("domain") String domain, @Param("orgId") int orgId);

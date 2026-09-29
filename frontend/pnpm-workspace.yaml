@@ -21,3 +21,28 @@ overrides:
   # React's optional menu ranges otherwise select releases with newer exact core/PM peers.
   '@tiptap/extension-bubble-menu': 3.30.5
   '@tiptap/extension-floating-menu': 3.30.5
+# Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
+# than one day and versions without registry publish time are refused, and a
+# package whose trust evidence (staged publish, trusted publisher, provenance)
+# drops versus an earlier release fails resolution. Emergency admissions are
+# exact-version entries in minimumReleaseAgeExclude, each owner-approved and
+# commented with the advisory, the approver, and the removal condition; see
+# "Package manager supply-chain policy" in frontend/AGENTS.md for the procedure.
+# .github/scripts/check-pnpm-supply-chain-policy.py enforces this block in CI.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+# Exact versions exempt from no-downgrade, each a verified legacy-line backport.
+trustPolicyExclude:
+  # The same maintainer's 3.x maintenance release after 4.2.6 started shipping
+  # provenance; pulled in by eslint-config-next.
+  # Publisher: jounqin. Line: 3.x. Published: 2025-04-21.
+  # Remove once eslint-config-next moves to 4.x.
+  - eslint-import-resolver-typescript@3.10.1
+  # The npm team's legacy-line backport of the CVE-2022-25883 ReDoS fix, published
+  # without provenance after the 7.5.x line gained it; the backport, not a takeover,
+  # trips no-downgrade.
+  # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
+  # Remove once nothing in the lockfile resolves semver@6.
+  - semver@6.3.1

@@ -1,5 +1,6 @@
 import {
     act,
+    Fragment,
     isValidElement,
     type AnchorHTMLAttributes,
     type ComponentProps,
@@ -171,6 +172,34 @@ function hasSsoAvailability(value: unknown): value is {
             || value.ssoAvailability === "unavailable");
 }
 
+/**
+ * Pins the sign-in route's root shape: a fragment holding the signed-out storage sweep, the
+ * account bridge, and the credential form, in that order. Reading the form's props through the
+ * pinned positions keeps the capability assertions from silently passing on a page that stopped
+ * rendering the form the visitor actually authenticates with.
+ * @param rendered the element the route's server component returned
+ * @returns the capability props the credential form received
+ */
+function loginCapabilityProps(rendered: unknown): {
+    ssoAvailability: "enabled" | "disabled" | "unavailable";
+} {
+    if (!isValidElement<{ children?: unknown }>(rendered) || rendered.type !== Fragment) {
+        throw new Error("Login did not render a fragment root");
+    }
+    const children = rendered.props.children;
+    if (!Array.isArray(children) || children.length !== 3) {
+        throw new Error("Login did not render the expected root children");
+    }
+    const [sweep, bridge, form] = children;
+    if (sweep !== null || bridge !== null) {
+        throw new Error("Login rendered browser-storage children for an unresolved session");
+    }
+    if (!isValidElement(form) || form.type !== AuthForm || !hasSsoAvailability(form.props)) {
+        throw new Error("Login did not render the expected capability contract");
+    }
+    return form.props;
+}
+
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
@@ -182,13 +211,10 @@ describe("login capability honesty", () => {
         stubCapabilities(null);
 
         const rendered = await LoginPage({ searchParams: Promise.resolve({}) });
-        if (!isValidElement(rendered) || !hasSsoAvailability(rendered.props)) {
-            throw new Error("Login did not render the expected capability contract");
-        }
+        const loginProps = loginCapabilityProps(rendered);
         const html = renderToStaticMarkup(rendered);
 
-        expect(rendered.type).toBe(AuthForm);
-        expect(rendered.props.ssoAvailability).toBe("unavailable");
+        expect(loginProps.ssoAvailability).toBe("unavailable");
         expect(html).toContain("login-username");
         expect(html).toContain("login-password");
         expect(html).toContain("CapabilityUnavailable.title");
@@ -230,9 +256,7 @@ describe("login capability honesty", () => {
         stubCapabilities(null);
 
         const rendered = await LoginPage({ searchParams: Promise.resolve({}) });
-        if (!isValidElement(rendered) || !hasSsoAvailability(rendered.props)) {
-            throw new Error("Login did not render the expected capability contract");
-        }
+        const loginProps = loginCapabilityProps(rendered);
         const interactive = installInteractiveDocument("connex_workspace=7");
         const { createRoot } = await import("react-dom/client");
         const root = createRoot(interactive.container);
@@ -247,7 +271,7 @@ describe("login capability honesty", () => {
             "Passkey login button",
         );
 
-        expect(rendered.props.ssoAvailability).toBe("unavailable");
+        expect(loginProps.ssoAvailability).toBe("unavailable");
         expect(passkey.disabled).not.toBe(true);
         await act(async () => {
             interactive.dispatch("click", passkey);
@@ -264,12 +288,10 @@ describe("login capability honesty", () => {
         stubCapabilities(DISABLED_CAPABILITIES);
 
         const rendered = await LoginPage({ searchParams: Promise.resolve({}) });
-        if (!isValidElement(rendered) || !hasSsoAvailability(rendered.props)) {
-            throw new Error("Login did not render the expected capability contract");
-        }
+        const loginProps = loginCapabilityProps(rendered);
         const html = renderToStaticMarkup(rendered);
 
-        expect(rendered.props.ssoAvailability).toBe("disabled");
+        expect(loginProps.ssoAvailability).toBe("disabled");
         expect(html).toContain("login-password");
         expect(html).not.toContain("CapabilityUnavailable.title");
         expect(html).not.toContain("AuthLogin.ssoButton");

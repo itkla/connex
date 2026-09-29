@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -37,7 +38,10 @@ export function SidebarModeProvider({ children }: { children: ReactNode }) {
     const key = modeStorageKey(context.user?.id ?? null, activeWorkspaceId);
     const [mode, setModeState] = useState<SidebarMode>('expanded');
 
+    const canPersist = useAccountStorageGeneration(() => setModeState('expanded'));
+
     useEffect(() => {
+        if (!canPersist()) return;
         let stored: string | null = null;
         try {
             stored = window.localStorage.getItem(key);
@@ -47,16 +51,20 @@ export function SidebarModeProvider({ children }: { children: ReactNode }) {
         const next: SidebarMode = isMode(stored) ? stored : 'expanded';
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setModeState((prev) => (prev === next ? prev : next));
-    }, [key]);
+    }, [canPersist, key]);
 
     const setMode = useCallback(
         (next: SidebarMode) => {
+            if (!canPersist()) {
+                setModeState('expanded');
+                return;
+            }
             setModeState(next);
             try {
                 window.localStorage.setItem(key, next);
             } catch {}
         },
-        [key],
+        [canPersist, key],
     );
 
     const toggle = useCallback(() => setMode(mode === 'rail' ? 'expanded' : 'rail'), [mode, setMode]);

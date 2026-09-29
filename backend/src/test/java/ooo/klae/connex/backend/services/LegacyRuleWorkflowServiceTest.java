@@ -4,14 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -25,6 +29,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -43,6 +51,7 @@ import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -58,6 +67,7 @@ class LegacyRuleWorkflowServiceTest {
     @Mock private WorkflowVersionMapper workflowVersionMapper;
     @Mock private WorkflowPrincipalLockService principalLockService;
     @Mock private RuleDefinitionValidator definitionValidator;
+    @Mock private WorkflowTriggerAdmissionService triggerAdmissionService;
 
     private RuleDefinitionCodec definitionCodec;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -77,24 +87,61 @@ class LegacyRuleWorkflowServiceTest {
             definitionValidator,
             definitionCodec,
             graphConverter,
-            canonicalizer);
+            canonicalizer,
+            triggerAdmissionService);
         lenient().when(definitionValidator.normalize(any())).thenAnswer(invocation -> {
             String value = invocation.getArgument(0);
             return value == null ? null : value.trim().toLowerCase();
         });
         lenient().when(definitionValidator.validateForMutation(any())).thenReturn(Set.of());
         lenient().when(principalLockService.lockUserMutation(
-                anyInt(), anyInt(), any(), any())).thenAnswer(invocation ->
+                anyInt(), anyInt(), any(), any(), anyBoolean())).thenAnswer(invocation ->
                     lockedPrincipals(
                         invocation.getArgument(1), invocation.getArgument(2)));
         lenient().when(principalLockService.lockSystemMutation(
-                anyInt(), anyInt(), any())).thenAnswer(invocation ->
+                anyInt(), anyInt(), any(), anyBoolean())).thenAnswer(invocation ->
                     lockedPrincipals(
                         invocation.getArgument(1), invocation.getArgument(2)));
     }
 
     @Test
-    void createPersistsRuleWorkflowAndVersionBeforeActivation() {
+    void createRejectsExhaustedTriggerCapacityBeforeInsertingEitherAggregate() {
+        doThrow(new ConflictException("Workflow trigger capacity is exhausted"))
+            .when(triggerAdmissionService).requireCapacity(eq(7), eq(0), eq("deal"), any());
+
+        assertThrows(ConflictException.class,
+            () -> service.create(7, 9, request("Rule", true, "user", "deal.won")));
+
+        verify(ruleMapper, never()).insert(any());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowVersionMapper, never()).insert(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"deal.won,false", "deal.lost,false", "deal.lost,true"})
+    void updateRejectsExhaustedTriggerCapacityBeforeChangingPublication(String event, boolean keepOriginal) {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        stubAggregate(aggregate);
+        doThrow(new ConflictException("Workflow trigger capacity is exhausted"))
+            .when(triggerAdmissionService).requireCapacity(eq(7), eq(101), eq("deal"), any());
+        RuleRequest request = request("Changed", true, "user", event);
+        if (keepOriginal) {
+            request.getTrigger().setEvents(List.of("deal.won", event));
+        }
+
+        assertThrows(ConflictException.class,
+            () -> service.update(7, 9, 23, request));
+
+        verify(principalLockService).lockUserMutation(eq(7), eq(9), any(), eq(Set.of(1)), eq(true));
+        verify(ruleMapper, never()).update(any());
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(workflowMapper, never()).replaceLegacyPublication(
+            any(), anyLong(), anyInt(), anyLong(), anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void createPersistsRuleWorkflowAndVersionBeforeActivation(boolean enabled) {
         AtomicReference<Rule> insertedRule = new AtomicReference<>();
         doAnswer(invocation -> {
             Rule rule = invocation.getArgument(0);
@@ -111,13 +158,16 @@ class LegacyRuleWorkflowServiceTest {
             return null;
         }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
         when(workflowMapper.updateActiveVersion(7, 101, 202L, 9)).thenReturn(1);
-        when(workflowMapper.updateLifecycle(7, 101, true, 9)).thenReturn(1);
+        if (enabled) {
+            when(workflowMapper.updateLifecycle(7, 101, true, 9)).thenReturn(1);
+        }
         when(ruleMapper.getById(7, 23)).thenAnswer(invocation -> insertedRule.get());
 
-        Rule created = service.create(7, 9, request("Rule", true, "user", "deal.won"));
+        Rule created = service.create(7, 9, request("Rule", enabled, "user", "deal.won"));
 
         assertEquals(23, created.getId());
         assertEquals(9, created.getRunAsUserId());
+        assertEquals(enabled, created.isEnabled());
         ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
         ArgumentCaptor<WorkflowVersion> version = ArgumentCaptor.forClass(WorkflowVersion.class);
         verify(workflowMapper).insert(workflow.capture());
@@ -129,12 +179,17 @@ class LegacyRuleWorkflowServiceTest {
         InOrder order = inOrder(
             principalLockService, ruleMapper, workflowMapper, workflowVersionMapper);
         order.verify(principalLockService).lockUserMutation(
-            7, 9, Set.of(9), Set.of(9));
+            7, 9, Set.of(9), Set.of(9), enabled);
         order.verify(ruleMapper).insert(any(Rule.class));
         order.verify(workflowMapper).insert(any(Workflow.class));
         order.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         order.verify(workflowMapper).updateActiveVersion(7, 101, 202L, 9);
-        order.verify(workflowMapper).updateLifecycle(7, 101, true, 9);
+        if (enabled) {
+            order.verify(workflowMapper).updateLifecycle(7, 101, true, 9);
+        } else {
+            verify(workflowMapper, never()).updateLifecycle(anyInt(), anyInt(), anyBoolean(), anyInt());
+            verifyNoInteractions(triggerAdmissionService);
+        }
     }
 
     @Test
@@ -150,6 +205,18 @@ class LegacyRuleWorkflowServiceTest {
         verify(workflowMapper, never()).replaceLegacyPublication(
             any(), anyLong(), anyInt(), anyLong(), anyInt());
         verify(workflowMapper, never()).updateLifecycle(anyInt(), anyInt(), eq(false), anyInt());
+    }
+
+    @Test
+    void semanticNoOpOnAnEnabledRuleNeverConsultsTriggerCapacity() {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        stubAggregate(aggregate);
+
+        service.update(7, 9, 23, request("Rule", true, "user", "deal.won"));
+
+        verifyNoInteractions(triggerAdmissionService);
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
     }
 
     @Test
@@ -178,11 +245,119 @@ class LegacyRuleWorkflowServiceTest {
 
         service.update(7, 9, 23, request("Rule", false, "user", "deal.won"));
 
+        verify(principalLockService).lockUserMutation(eq(7), eq(9), any(), eq(Set.of(1)), eq(false));
+        verifyNoInteractions(triggerAdmissionService);
         verify(workflowVersionMapper, never()).insert(any());
         verify(ruleMapper, never()).update(any());
         InOrder order = inOrder(ruleMapper, workflowMapper);
         order.verify(ruleMapper).updateEnabled(7, 23, false);
         order.verify(workflowMapper).updateLifecycle(7, 101, false, 9);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(booleans = true)
+    void enablingRequestsAdmissionIncludingDefaultEnabled(Boolean enabled) {
+        PersistedAggregate aggregate = persistedAggregate(false);
+        stubAggregate(aggregate);
+        when(ruleMapper.updateEnabled(7, 23, true)).thenReturn(1);
+        when(workflowMapper.updateLifecycle(7, 101, true, 9)).thenReturn(1);
+        RuleRequest request = request("Rule", true, "user", "deal.won");
+        request.setEnabled(enabled);
+
+        service.update(7, 9, 23, request);
+
+        verify(principalLockService).lockUserMutation(eq(7), eq(9), any(), eq(Set.of(1)), eq(true));
+        verify(triggerAdmissionService).requireCapacity(eq(7), eq(101), eq("deal"), any());
+        verify(ruleMapper).updateEnabled(7, 23, true);
+        verify(workflowMapper).updateLifecycle(7, 101, true, 9);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "system"})
+    void disablingWithPublicationChangesSkipsAdmissionInBothModes(String executionMode) {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        stubAggregate(aggregate);
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(303L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(ruleMapper.update(any(Rule.class))).thenReturn(1);
+        when(workflowMapper.replaceLegacyPublication(
+                any(Workflow.class), eq(303L), eq(23), eq(202L), eq(4))).thenReturn(1);
+
+        service.update(7, 9, 23, request("Changed", false, executionMode, "deal.lost"));
+
+        if ("user".equals(executionMode)) {
+            verify(principalLockService).lockUserMutation(eq(7), eq(9), any(), eq(Set.of(1)), eq(false));
+        } else {
+            verify(principalLockService).lockSystemMutation(eq(7), eq(9), any(), eq(false));
+        }
+        verifyNoInteractions(triggerAdmissionService);
+        ArgumentCaptor<Rule> replacement = ArgumentCaptor.forClass(Rule.class);
+        verify(ruleMapper).update(replacement.capture());
+        assertEquals(false, replacement.getValue().isEnabled());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void removingTriggerEventsSkipsAdmissionOnlyWithStableDiscovery(boolean changedWhileLocking) {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        RuleTrigger trigger = definitionCodec.parse(aggregate.rule().getTriggerConfig(), RuleTrigger.class);
+        trigger.setEvents(List.of("deal.won", "deal.lost"));
+        aggregate.rule().setTriggerConfig(definitionCodec.serialize(trigger));
+        aggregate.version().setTriggerConfig(aggregate.rule().getTriggerConfig());
+        rebuildCanonicalAggregate(aggregate);
+        stubAggregate(aggregate);
+        if (changedWhileLocking) {
+            Rule changed = rule(23, 7, 1, 1, true, "user", "Rule", "deal.lost");
+            when(ruleMapper.getByIdForUpdate(7, 23)).thenReturn(changed);
+
+            assertThrows(ConflictException.class,
+                () -> service.update(7, 9, 23, request("Rule", true, "user", "deal.won")));
+
+            verify(ruleMapper, never()).update(any());
+            verify(workflowVersionMapper, never()).insert(any());
+            verifyNoInteractions(triggerAdmissionService);
+            return;
+        }
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(303L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(ruleMapper.update(any(Rule.class))).thenReturn(1);
+        when(workflowMapper.replaceLegacyPublication(
+                any(Workflow.class), eq(303L), eq(23), eq(202L), eq(4))).thenReturn(1);
+
+        service.update(7, 9, 23, request("Rule", true, "user", "deal.won"));
+
+        verify(principalLockService).lockUserMutation(eq(7), eq(9), any(), eq(Set.of(1)), eq(false));
+        verifyNoInteractions(triggerAdmissionService);
+        verify(ruleMapper).update(any(Rule.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "system"})
+    void disablingStillRequiresTheModesLockedAuthorization(String executionMode) {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        when(ruleMapper.getById(7, 23)).thenReturn(aggregate.rule());
+        when(workflowMapper.getByLegacyRuleId(7, 23)).thenReturn(aggregate.workflow());
+        when(workflowVersionMapper.listByWorkflow(7, 101)).thenReturn(List.of(aggregate.version()));
+        LockedPrincipals unauthorized = new LockedPrincipals(Set.of(1, 2, 9), Set.of(1, 2, 9), Set.of());
+        if ("user".equals(executionMode)) {
+            doReturn(unauthorized).when(principalLockService).lockUserMutation(
+                eq(7), eq(9), any(), eq(Set.of(1)), eq(false));
+        } else {
+            doReturn(unauthorized).when(principalLockService).lockSystemMutation(
+                eq(7), eq(9), any(), eq(false));
+        }
+
+        assertThrows(ForbiddenException.class,
+            () -> service.update(7, 9, 23, request("Rule", false, executionMode, "deal.won")));
+
+        verify(workflowMapper, never()).getByIdForUpdate(anyInt(), anyInt());
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), anyBoolean());
+        verifyNoInteractions(triggerAdmissionService);
     }
 
     @Test
@@ -264,7 +439,7 @@ class LegacyRuleWorkflowServiceTest {
         service.update(7, 9, 23, request("Rule", true, "user", "deal.won"));
 
         verify(principalLockService).lockUserMutation(
-            eq(7), eq(9), any(), eq(Set.of(1)));
+            eq(7), eq(9), any(), eq(Set.of(1)), eq(true));
         ArgumentCaptor<Rule> replacement = ArgumentCaptor.forClass(Rule.class);
         verify(ruleMapper).update(replacement.capture());
         assertEquals(1, replacement.getValue().getRunAsUserId());
@@ -285,7 +460,7 @@ class LegacyRuleWorkflowServiceTest {
 
         service.update(7, 9, 23, request("Rule", true, "system", "deal.won"));
 
-        verify(principalLockService).lockSystemMutation(eq(7), eq(9), any());
+        verify(principalLockService).lockSystemMutation(eq(7), eq(9), any(), eq(true));
         ArgumentCaptor<Rule> replacement = ArgumentCaptor.forClass(Rule.class);
         verify(ruleMapper).update(replacement.capture());
         assertEquals(1, replacement.getValue().getCreatedById());
@@ -303,7 +478,7 @@ class LegacyRuleWorkflowServiceTest {
         aggregate.version().setRunAsUserId(3);
         stubAggregate(aggregate);
         when(principalLockService.lockUserMutation(
-                7, 9, Set.of(1, 2, 3), Set.of(3)))
+                7, 9, Set.of(1, 2, 3), Set.of(3), true))
             .thenReturn(new LockedPrincipals(Set.of(1, 2, 3, 9), Set.of(3, 9)));
         doAnswer(invocation -> {
             invocation.<WorkflowVersion>getArgument(0).setId(303L);
@@ -346,7 +521,7 @@ class LegacyRuleWorkflowServiceTest {
         InOrder order = inOrder(
             principalLockService, workflowMapper, workflowVersionMapper, ruleMapper);
         order.verify(principalLockService).lockUserMutation(
-            eq(7), eq(9), any(), eq(Set.of()));
+            eq(7), eq(9), any(), eq(Set.of()), eq(false));
         order.verify(workflowMapper).getByIdForUpdate(7, 101);
         order.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 202L);
         order.verify(ruleMapper).getByIdForUpdate(7, 23);

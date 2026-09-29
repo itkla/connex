@@ -114,25 +114,25 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
     @Override
     public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
         if (transport != null && request.providerDeadlineNanos() == null) {
-            return DispatchReceipt.rejected("SMS request has no provider deadline");
+            return DispatchReceipt.rejectedBeforeEgress("SMS request has no provider deadline");
         }
         URI endpoint = parseEndpoint(target.endpoint(), requireHttps);
         if (endpoint == null) {
-            return DispatchReceipt.rejected("No usable SMS endpoint is configured");
+            return DispatchReceipt.rejectedBeforeEgress("No usable SMS endpoint is configured");
         }
         String apiKey = target.credentials().get(CREDENTIAL_KEY_API);
         if (apiKey == null || apiKey.isBlank()) {
-            return DispatchReceipt.rejected("No usable SMS credential is configured");
+            return DispatchReceipt.rejectedBeforeEgress("No usable SMS credential is configured");
         }
         String text = request.content() == null ? null : request.content().bodyText();
         if (text == null || text.isBlank()) {
-            return DispatchReceipt.rejected("No SMS text is configured");
+            return DispatchReceipt.rejectedBeforeEgress("No SMS text is configured");
         }
         byte[] body;
         try {
             body = objectMapper.writeValueAsBytes(sendPayload(target, request, text));
         } catch (RuntimeException exception) {
-            return DispatchReceipt.rejected("Could not encode the SMS send request");
+            return DispatchReceipt.rejectedBeforeEgress("Could not encode the SMS send request");
         }
         SmsResponse response;
         try {
@@ -141,7 +141,7 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         } catch (TransportException exception) {
             return exception.ambiguous()
                     ? DispatchReceipt.ambiguous(bounded(exception.getMessage()))
-                    : DispatchReceipt.rejected(bounded(exception.getMessage()));
+                    : DispatchReceipt.rejectedBeforeEgress(bounded(exception.getMessage()));
         } catch (RuntimeException exception) {
             return DispatchReceipt.rejected(bounded(exception.getMessage()));
         }

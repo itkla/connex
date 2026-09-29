@@ -10,8 +10,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -54,7 +56,7 @@ class DealValueContractArchTest {
     private static final Pattern DEAL_MAPPER_LOOKUP =
         Pattern.compile("getMapper\\s*\\(\\s*DealMapper\\.class\\s*\\)");
     private static final List<String> DEAL_ROW_WRITE_CALLS =
-        List.of(".update(", ".insert(", ".insertBatch(");
+        List.of(".update(", ".updateOutcome(", ".insert(", ".insertBatch(");
     private static final Set<String> STATEMENT_TAGS = Set.of("select", "insert", "update", "delete");
     private static final Set<String> DEAL_ROW_WRITERS =
         Set.of("DealMapper.java", "DealOutcomeWriter.java", "SeederBatchWriter.java");
@@ -160,6 +162,26 @@ class DealValueContractArchTest {
 
         assertFalse(MONEY_ASSIGNMENT.matcher(update.sql()).find(),
             "DealMapper.update must remain a details/status-only update: " + update.sql());
+    }
+
+    /**
+     * The outcome-only update exists so a route that reopens or closes a deal cannot write anything
+     * else. Asserting the exact assigned column set — rather than only the absence of currency —
+     * means widening the statement later fails here instead of silently restoring a stale field.
+     */
+    @Test
+    void outcomeUpdateCannotOverwriteCurrencyOrUnrelatedFields() throws Exception {
+        Statement update = parse(mapperXml("DealMapper")).statements().stream()
+            .filter(statement -> "updateOutcome".equals(statement.id()))
+            .findFirst()
+            .orElseThrow();
+        Matcher assignments = Pattern.compile("([a-z_]+)\\s*=", Pattern.CASE_INSENSITIVE)
+            .matcher(update.sql().split("(?i)WHERE")[0]);
+        Set<String> columns = new HashSet<>();
+        while (assignments.find()) {
+            columns.add(assignments.group(1).toLowerCase(Locale.ROOT));
+        }
+        assertEquals(Set.of("stage_id", "position", "closed_at", "closed_reason", "won"), columns);
     }
 
     @Test

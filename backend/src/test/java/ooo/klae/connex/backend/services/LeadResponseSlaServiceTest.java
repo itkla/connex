@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -220,7 +221,8 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         Workspace grantee = siblingWorkspace();
         shareMapper.sharePerson(
-            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
         User outsider = newUser();
         workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, grantee.getId());

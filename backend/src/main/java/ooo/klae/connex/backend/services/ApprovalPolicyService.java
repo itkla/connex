@@ -77,6 +77,7 @@ public class ApprovalPolicyService {
     private static final int IMPACT_ITEM_LIMIT = 20;
     private static final int MIN_DUE_INTERVAL_HOURS = 1;
     private static final int MAX_DUE_INTERVAL_HOURS = 8760;
+    private static final BigDecimal MAX_DISCOUNT_PERCENT = BigDecimal.valueOf(100);
 
     public List<ApprovalPolicy> getAll() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -371,6 +372,9 @@ public class ApprovalPolicyService {
      * Effective discount over the frozen line items: {@code (list - discounted) / list * 100}
      * where list is the undiscounted {@code unitPrice * quantity} sum and discounted is the
      * pre-tax subtotal sum. Returns {@code null} when the snapshot has no priced lines.
+     * Approval governs the effective monetary reduction after each subtotal is rounded to scale 2,
+     * not the configured discount percentage. A 20% discount on 0.01 × 1 rounds to subtotal 0.01
+     * and therefore has 0% effective discount; it does not meet a positive discount threshold.
      */
     private BigDecimal discountPercent(DocumentContent content) {
         if (content == null || content.lineItems() == null || content.lineItems().isEmpty()) {
@@ -425,10 +429,38 @@ public class ApprovalPolicyService {
     }
 
     private void validate(ApprovalPolicy policy) {
+        validateThresholds(policy);
         if (policy.getMinTotal() != null && (policy.getCurrency() == null || policy.getCurrency().isBlank())) {
             throw new BadRequestException("currency is required when minTotal is set");
         }
         validateChain(policy);
+    }
+
+    /**
+     * Refuses a threshold that its column cannot hold: {@code minTotal} is {@code DECIMAL(15,2)} and
+     * {@code minDiscountPercent} is a {@code DECIMAL(6,3)} percentage no greater than 100. The
+     * request body declares the same bounds, but they apply only where the controller validates the
+     * body; refusing here keeps an unbounded exponent such as {@code 1E300000000} from reaching the
+     * impact fingerprint or the JDBC bind, both of which render the value as a plain string and
+     * would exhaust the heap on the request thread. Bounds are read off the parsed value and the
+     * integer-digit count widens to {@code long}, so an extreme exponent cannot wrap into a passing
+     * value.
+     *
+     * @throws BadRequestException when either threshold is negative or outside its column's range
+     */
+    private static void validateThresholds(ApprovalPolicy policy) {
+        BigDecimal minTotal = policy.getMinTotal();
+        if (minTotal != null && (minTotal.signum() < 0 || minTotal.scale() > 2
+                || (long) minTotal.precision() - minTotal.scale() > 13)) {
+            throw new BadRequestException("minTotal must be a non-negative DECIMAL(15,2) value");
+        }
+        BigDecimal minDiscountPercent = policy.getMinDiscountPercent();
+        if (minDiscountPercent != null && (minDiscountPercent.signum() < 0 || minDiscountPercent.scale() > 3
+                || (long) minDiscountPercent.precision() - minDiscountPercent.scale() > 3
+                || minDiscountPercent.compareTo(MAX_DISCOUNT_PERCENT) > 0)) {
+            throw new BadRequestException(
+                "minDiscountPercent must be between 0 and 100 with at most three decimal places");
+        }
     }
 
     private void validateStepIdentities(ApprovalPolicy before, ApprovalPolicy requested) {

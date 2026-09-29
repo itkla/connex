@@ -21,6 +21,8 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -38,6 +40,7 @@ import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
@@ -45,6 +48,7 @@ import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowRuntimeOwnershipServiceTest {
@@ -284,7 +288,7 @@ class WorkflowRuntimeOwnershipServiceTest {
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
         when(ruleMapper.getById(7, 13)).thenReturn(rule);
-        when(principalLockService.lockSystemMutation(7, 9, Set.of(17)))
+        when(principalLockService.lockSystemMutation(7, 9, Set.of(17), false))
             .thenReturn(new LockedPrincipals(Set.of(17), Set.of(17)));
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getByIdForUpdate(7, 11, 19L)).thenReturn(version);
@@ -292,9 +296,33 @@ class WorkflowRuntimeOwnershipServiceTest {
 
         service.cutOverToCanonical(11, 19L);
 
-        verify(principalLockService).lockSystemMutation(7, 9, Set.of(17));
+        verify(principalLockService).lockSystemMutation(7, 9, Set.of(17), false);
         verify(principalLockService, never()).lockUserMutation(
-            anyInt(), anyInt(), any(), any());
+            anyInt(), anyInt(), any(), any(), anyBoolean());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "canonical"})
+    void runtimeChangeRejectsMissingLockedActionPermissions(String currentOwner) {
+        Workflow workflow = workflow(currentOwner);
+        stubLock(workflow, rule("legacy".equals(currentOwner)));
+        stubCompiledVersion();
+        when(principalLockService.lockUserMutation(7, 9, Set.of(), Set.of(), false))
+            .thenReturn(new LockedPrincipals(Set.of(), Set.of(), Set.of(Permission.RULE_MANAGE)));
+        when(definitionValidator.validateForMutation(eq("company"), eq("user"), any()))
+            .thenReturn(Set.of(Permission.NOTE_CREATE));
+
+        if ("legacy".equals(currentOwner)) {
+            when(runtimeProperties.enabled()).thenReturn(true);
+            assertThrows(ForbiddenException.class, () -> service.cutOverToCanonical(11, 19L));
+        } else {
+            assertThrows(ForbiddenException.class, () -> service.rollBackToLegacy(11, 19L));
+        }
+
+        verify(ruleMapper, never()).update(any());
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), anyBoolean());
+        verify(workflowMapper, never()).compareAndSwapRuntimeOwner(
+            anyInt(), anyInt(), anyLong(), any(), any(), anyInt());
     }
 
     private void stubLock(Workflow workflow, Rule rule) {
@@ -306,7 +334,7 @@ class WorkflowRuntimeOwnershipServiceTest {
         if (workflow.getLegacyRuleId() != null) {
             when(ruleMapper.getById(7, 13)).thenReturn(rule);
         }
-        when(principalLockService.lockUserMutation(7, 9, Set.of(), Set.of()))
+        when(principalLockService.lockUserMutation(7, 9, Set.of(), Set.of(), false))
             .thenReturn(new LockedPrincipals(Set.of(), Set.of()));
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getByIdForUpdate(7, 11, 19L)).thenReturn(version);

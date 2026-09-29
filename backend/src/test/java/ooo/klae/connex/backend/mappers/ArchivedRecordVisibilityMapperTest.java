@@ -297,14 +297,15 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     void noteSearchStopsMatchingArchivedContactNames() {
         Company account = newCompany();
         Person contact = newPerson(account);
-        newWorkspaceNote(contact);
+        Note note = newWorkspaceNote(contact);
+        int readerId = java.util.Objects.requireNonNull(note.getAuthor()).getId();
         String query = "%" + contact.getName() + "%";
 
-        assertFalse(noteMapper.search(workspace.getId(), query).isEmpty());
+        assertFalse(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
 
         assertEquals(1, personMapper.archive(workspace.getId(), contact.getId()));
 
-        assertTrue(noteMapper.search(workspace.getId(), query).isEmpty());
+        assertTrue(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
     }
 
     /**

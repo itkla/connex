@@ -284,16 +284,32 @@ class DealDocumentServiceTest extends AbstractServiceTest {
 
     @Test
     void rejectsTooDeeplyNestedTemplateBody() {
-        String node = "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}";
-        for (int i = 0; i < 60; i++) {
-            node = "{\"type\":\"bulletList\",\"content\":[" + node + "]}";
-        }
         DocumentTemplate tpl = new DocumentTemplate();
         tpl.setName("Deep body " + unique());
         tpl.setType("quote");
         tpl.setLocale("en");
-        tpl.setBody("{\"type\":\"doc\",\"content\":[" + node + "]}");
-        assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+        tpl.setBody(nestedBlockquoteBody(49));
+        BadRequestException refusal = assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+        assertEquals("Document body is nested too deeply", refusal.getMessage());
+    }
+
+    @Test
+    void acceptsTemplateBodyAtMaximumDepth() {
+        DocumentTemplate tpl = new DocumentTemplate();
+        tpl.setName("Boundary-depth body " + unique());
+        tpl.setType("quote");
+        tpl.setLocale("en");
+        tpl.setBody(nestedBlockquoteBody(48));
+
+        assertNotNull(templateService.create(tpl).getBody());
+    }
+
+    private String nestedBlockquoteBody(int levels) {
+        String node = "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}";
+        for (int i = 0; i < levels; i++) {
+            node = "{\"type\":\"blockquote\",\"content\":[" + node + "]}";
+        }
+        return "{\"type\":\"doc\",\"content\":[" + node + "]}";
     }
 
     @Test

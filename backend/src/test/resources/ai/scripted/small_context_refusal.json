@@ -1,0 +1,15 @@
+{
+  "id": "small_context_refusal",
+  "selector": "connex_script_small_context",
+  "capabilityClass": "scripted-small-context",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"Nothing is waiting on you.\",\"citations\":[],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}

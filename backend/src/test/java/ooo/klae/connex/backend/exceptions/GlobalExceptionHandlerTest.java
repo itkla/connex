@@ -184,6 +184,7 @@ class GlobalExceptionHandlerTest {
         assertFalse(body.containsKey("email"), "must not reveal the email field");
         assertFalse(body.containsKey("username"), "must not reveal the username field");
         assertTrue(body.containsKey("message"), "generic message body expected");
+        assertEquals(Map.of("message", "This record conflicts with existing data"), body);
     }
 
     @Test
@@ -191,10 +192,12 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<Map<String, String>> response = handler.dataIntegrity(
             new DataIntegrityViolationException("Duplicate entry 'alice' for key 'app_user.username'"));
 
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
         Map<String, String> body = response.getBody();
         assertNotNull(body);
         assertFalse(body.containsKey("username"), "must not reveal the username field");
         assertTrue(body.containsKey("message"), "generic message body expected");
+        assertEquals(Map.of("message", "This record conflicts with existing data"), body);
     }
 
     @Test
@@ -208,6 +211,20 @@ class GlobalExceptionHandlerTest {
         assertNotNull(response.getBody());
         assertEquals(BreachedPasswordException.CODE, response.getBody().get("code"));
         assertEquals(BreachedPasswordException.MESSAGE, response.getBody().get("newPassword"));
+        assertFalse(response.getBody().toString().contains(candidate));
+    }
+
+    @Test
+    void passwordTooLong_mapsStable400FieldErrorWithoutCandidate() {
+        String candidate = "Aa1!" + "a".repeat(69);
+
+        ResponseEntity<Map<String, String>> response = handler.passwordTooLong(
+                new PasswordTooLongException("newPassword"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(PasswordTooLongException.CODE, response.getBody().get("code"));
+        assertEquals(PasswordTooLongException.MESSAGE, response.getBody().get("newPassword"));
         assertFalse(response.getBody().toString().contains(candidate));
     }
 

@@ -51,6 +51,68 @@ class LoginRateLimiterTest {
     }
 
     @Test
+    void passwordConfirmationBudgetSurvivesRenamesAndLoginsUntilTheWindowExpires() {
+        LoginRateLimiter limiter = new LoginRateLimiter(100, 2, 5000, 900);
+        long start = 1_000L;
+        ResolvedClientIp originalIp = new ResolvedClientIp("1.1.1.1", false);
+        ResolvedClientIp newIp = new ResolvedClientIp("2.2.2.2", false);
+
+        limiter.recordPasswordConfirmationFailure(1, originalIp, "alice", start);
+        assertFalse(limiter.isPasswordConfirmationBlocked(1, newIp, "renamed", start));
+        limiter.recordPasswordConfirmationFailure(1, newIp, "renamed", start);
+        limiter.recordSuccess("alice");
+        limiter.recordSuccess("renamed");
+
+        assertTrue(limiter.isPasswordConfirmationBlocked(1, newIp, "renamed-again", start));
+        assertFalse(limiter.isPasswordConfirmationBlocked(2, newIp, "bob", start));
+        assertTrue(limiter.isPasswordConfirmationBlocked(1, newIp, "renamed-again", start + 899_999L));
+        assertFalse(limiter.isPasswordConfirmationBlocked(1, newIp, "renamed-again", start + 900_000L));
+    }
+
+    @Test
+    void passwordConfirmationRetainsIpAndLoginUsernameControls() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 5000, 900);
+        long now = 1_000L;
+        ResolvedClientIp ip = new ResolvedClientIp("1.1.1.1", false);
+        ResolvedClientIp otherIp = new ResolvedClientIp("2.2.2.2", false);
+
+        limiter.recordPasswordConfirmationFailure(1, ip, "alice", now);
+
+        assertTrue(limiter.isBlockedForClient(ip, "bob", now));
+        assertTrue(limiter.isBlockedForClient(otherIp, "alice", now));
+        assertTrue(limiter.isPasswordConfirmationBlocked(2, ip, "bob", now));
+        assertTrue(limiter.isPasswordConfirmationBlocked(2, otherIp, "alice", now));
+    }
+
+    @Test
+    void passwordConfirmationThrottleAuditIsLimitedPerAccountAndWindow() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 5000, 900);
+        long start = 1_000L;
+
+        assertTrue(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, start));
+        assertFalse(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, start));
+        assertTrue(limiter.tryAcquirePasswordConfirmationThrottleAudit(2, start));
+        assertFalse(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, start + 899_999L));
+        assertTrue(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, start + 900_000L));
+        assertFalse(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, start + 900_000L));
+    }
+
+    @Test
+    void passwordConfirmationThrottleAuditIsIndependentOfAuthenticationBudgets() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 5000, 900);
+        long now = 1_000L;
+
+        assertTrue(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, now));
+        assertFalse(limiter.isBlocked("1.1.1.1", "alice", now));
+        limiter.recordFailure("1.1.1.1", "alice", now);
+        assertFalse(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, now));
+        assertTrue(limiter.isBlocked("2.2.2.2", "alice", now));
+        limiter.recordSuccess("alice");
+        assertFalse(limiter.isBlocked("2.2.2.2", "alice", now));
+        assertFalse(limiter.tryAcquirePasswordConfirmationThrottleAudit(1, now));
+    }
+
+    @Test
     void resetsAfterWindowElapses() {
         LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long start = 1_000L;

@@ -18,6 +18,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UpdateLocaleDto;
@@ -31,11 +33,14 @@ import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +57,7 @@ public class UserController {
     private final AuthService authService;
     private final WorkspaceService workspaceService;
     private final SessionSecurityService sessionSecurityService;
+    private final ClientIpResolver clientIpResolver;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -94,15 +100,16 @@ public class UserController {
     }
 
     /**
-     * POST endpoint to create a new user.
-     * @param dto
-     * @return
+     * POST endpoint to create a new user under the instance's email-verification policy.
+     * @param dto the registration details
+     * @param httpRequest the creating request, whose client IP is recorded for abuse audit
+     * @return the created account
      */
     @PostMapping
-    public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
+    public UserDto createUser(@Valid @RequestBody RegisterDto dto, HttpServletRequest httpRequest) {
         workspaceService.requirePermission(Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(authService.getCurrentUser().getId());
-        return UserDto.from(authService.register(dto, true));
+        return UserDto.from(authService.register(dto, clientIpResolver.resolve(httpRequest)));
     }
 
     /**
@@ -151,8 +158,34 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<NoteDto> getNotesForUser(@PathVariable int id) {
-        return userService.getNotesByUserId(id).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String beforeAt,
+            @RequestParam(required = false) Integer beforeId) {
+        NotePageCursor cursor = NotePageCursor.parse(beforeAt, beforeId);
+        PageBounds bounds = PageBounds.of(cursor == null ? page : 1, size);
+        return userService.getNotesByUserId(id, bounds.size(), bounds.offset(), cursor)
+            .stream().map(NoteDto::from).toList();
+    }
+
+    /** Returns visible authored-note counts for today and the preceding 83 UTC days. */
+    @GetMapping("/{id}/notes/pulse")
+    public List<NoteActivityDayDto> getNoteActivityForUser(@PathVariable int id) {
+        return userService.getNoteActivityByUserId(id);
+    }
+
+    /** Returns bounded authored-note previews and the complete visible total. */
+    @GetMapping("/{id}/notes/page")
+    public PageResponse<NoteDto> getNotesPageForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<NoteDto> items = userService.getNotesByUserId(id, bounds.size(), bounds.offset())
+            .stream().map(NoteDto::from).toList();
+        return new PageResponse<>(items, userService.countNotesByUserId(id));
     }
 
     /**

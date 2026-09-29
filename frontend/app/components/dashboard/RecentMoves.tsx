@@ -29,7 +29,7 @@ export default function RecentMoves({ moves }: { moves: JobMove[] }) {
                                 className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/50"
                             >
                                 <Avatar className="size-8">
-                                    <AvatarImage src={move.personImageUrl ?? undefined} />
+                                    <AvatarImage src={move.personImageUrl ?? undefined} alt="" />
                                     <AvatarFallback className="text-xs">{initials(move.personName)}</AvatarFallback>
                                 </Avatar>
                                 <div className="min-w-0 flex-1">

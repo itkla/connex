@@ -1,3 +1,4 @@
+import hashlib
 import io
 import tarfile
 import tempfile
@@ -126,18 +127,22 @@ class ModelDownloadTest(unittest.TestCase):
 
     def test_download_rejects_changed_length_hash_and_host(self) -> None:
         content = b"model"
-        artifact = ModelArtifact(name="test-model", size=len(content), sha256="0" * 64)
-        cases = (
-            DownloadResponse(content, artifact.url, str(len(content) + 1)),
-            DownloadResponse(content, artifact.url, str(len(content))),
-            DownloadResponse(content, "https://example.test/model.tar", str(len(content))),
+        artifact = ModelArtifact(
+            name="test-model", size=len(content), sha256=hashlib.sha256(content).hexdigest()
         )
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for index, response in enumerate(cases):
+        cases = (
+            ("length", artifact.url, len(content) + 1, artifact.sha256, "length changed"),
+            ("hash", artifact.url, len(content), "0" * 64, "integrity check failed"),
+            ("host", "https://example.test/model.tar", len(content), artifact.sha256,
+             "left the trusted host"),
+        )
+        for name, url, length, checksum, error in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                response = DownloadResponse(content, url, str(length))
+                pinned = ModelArtifact(name=artifact.name, size=artifact.size, sha256=checksum)
                 with patch("ocr_service.prefetch._MODEL_OPENER.open", return_value=response):
-                    with self.assertRaises(RuntimeError):
-                        _download(artifact, root / f"model-{index}.tar")
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        _download(pinned, Path(temporary) / "model.tar")
 
 
 if __name__ == "__main__":

@@ -28,11 +28,53 @@ close/reopen/move paths cannot clobber a freshly reconciled amount with a stale 
 ### Recomputation
 
 `DealLineItemService.create/update/delete` are transactional and always lock the parent deal
-before touching a line. After every line write the deal value is recomputed and persisted, and
+before touching a line. After every currency-consistent line write the deal value is recomputed and persisted, and
 `value_source` is set to `line_items`.
 
 Deleting the **last** line reverts `value_source` to `manual` and **retains the last derived
 total** — the number does not reset to zero, it simply becomes editable again.
+
+### Incremental repair of historical currency mismatches
+
+Updating or deleting a historical foreign-currency line may proceed only when it strictly reduces
+the mismatch count under the parent deal lock. While any mismatch remains, `value`, `value_source`,
+and `actual_value` stay frozen; no value-change signal is emitted. The line response has nullable
+`totals`: null means unavailable during repair, never zero. Each line remains displayed in its own
+currency, with an explanation that editing it uses the deal currency without FX conversion.
+
+The final repair resumes normal reconciliation. If lines remain, their consistent total becomes
+the derived value; deleting the final line returns to manual while retaining the frozen value.
+Realized value remains the win-time snapshot. Canonical line-value reads, winning, reopening, and
+new document generation refuse mismatches with HTTP 409. Closing lost remains permitted and zeroes
+`actual_value` without deriving a line total.
+
+### Document snapshots and discount approval
+
+New document generation locks authorization roots before the deal row and revalidates permissions.
+It freezes the parent currency and line items from that one locked snapshot and explicitly checks
+that every line uses that currency. It cannot combine an earlier parent currency with later totals.
+
+Documents generated without line items persist zero totals in that locked parent deal's currency.
+Before draft or approved finalization, the frozen deal, every line, and totals must agree with the
+stored document currency, independently of later parent-deal changes. Historical snapshots with
+zero lines and null totals currency are consistent with the document currency only when subtotal,
+tax, one-time total, recurring total, and grand total are all present and numerically zero. This
+compatibility rule does not rewrite the snapshot or exempt missing totals, missing or nonzero
+amounts, blank or conflicting currencies, or nonempty snapshots from the currency check.
+
+Generation and transitions to final replay each persisted line's operands at the canonical scales.
+The rounded subtotal, tax, and total must equal the stored amounts; otherwise HTTP 409 identifies
+the inconsistent line. For example, price `1.00`, quantity `1000`, and discount `20.00%` require
+subtotal `800.00`; a historical `803.20` row is refused. Repair the source line and generate a new
+document. Existing line rows and frozen documents are never silently rewritten, and already-final
+documents are not retroactively changed by this validation.
+
+Discount approval governs the **effective discount** across frozen lines: the difference between
+the sum of `unitPrice × quantity` and the sum of rounded pre-tax subtotals, divided by that gross
+sum, expressed as a nonnegative percentage rounded to three decimals. It does not govern the
+configured discount percentage. Thus `0.01 × 1` with `20%` configured rounds to subtotal `0.01`,
+giving `0%` effective discount and matching no positive discount threshold. Total-based policies
+continue to compare the frozen grand total in the document's currency.
 
 ### Line-item guards apply to CSV import too
 

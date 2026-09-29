@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,8 +22,10 @@ import static org.mockito.Mockito.inOrder;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -67,6 +73,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class AiAssistantWriteToolServiceTest {
     private static final ValidatorFactory VALIDATORS =
@@ -89,7 +96,9 @@ class AiAssistantWriteToolServiceTest {
     private PipelineService pipelineService;
     private AiRestrictionEpoch restrictionEpoch;
     private AiWorkspaceGovernanceService governanceService;
+    private WorkspaceService.LockedPermissionSnapshot authority;
     private AiAssistantWriteToolService service;
+    private AiAssistantAddTagWriteTool addTagTool;
     private AiChatToolCall storedToolCall;
 
     @AfterAll
@@ -119,6 +128,10 @@ class AiAssistantWriteToolServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
+        authority = mock(WorkspaceService.LockedPermissionSnapshot.class);
+        grantAllExcept();
+        when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
+                .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
@@ -129,8 +142,18 @@ class AiAssistantWriteToolServiceTest {
                 .thenReturn(person(31));
         when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
+        addTagTool = spy(new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService));
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
+                new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
+                new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                addTagTool,
+                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
+                registry,
                 mock(SearchService.class),
                 personService,
                 companyService,
@@ -147,18 +170,14 @@ class AiAssistantWriteToolServiceTest {
                 mock(AiAssistantScopeReadService.class));
         service = new AiAssistantWriteToolService(
                 catalog,
+                registry,
                 readExecutor,
-                dateResolver,
                 chatMapper,
                 workspaceService,
-                activityService,
                 taskService,
-                noteService,
-                tagService,
                 personService,
                 companyService,
                 dealService,
-                pipelineService,
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
@@ -194,6 +213,11 @@ class AiAssistantWriteToolServiceTest {
                 eq("executed"), any(), eq(TURN.userId()))).thenReturn(1);
         when(chatMapper.updateExecutedToolResult(
                 eq(TURN.workspaceId()), eq(29), any(), eq(TURN.userId()))).thenReturn(1);
+        Deal proposalDeal = new Deal();
+        proposalDeal.setId(44);
+        proposalDeal.setPipelineId(5);
+        when(dealService.getDealById(44)).thenReturn(proposalDeal);
+        when(pipelineService.getAllStages()).thenReturn(List.of(pipelineStage(6, "Proposal")));
     }
 
     @Test
@@ -234,10 +258,9 @@ class AiAssistantWriteToolServiceTest {
                 execution.toolCall().result().path("timezone").asString());
         assertEquals(20, execution.toolCall().result().path("conflicts").size());
         assertTrue(execution.toolCall().result().path("conflictsTruncated").asBoolean());
-        assertEquals(
-                20,
-                ((Map<?, ?>) execution.toolResult().data().get("outcome"))
-                        .get("conflictCount"));
+        Map<?, ?> modelOutcome = (Map<?, ?>) execution.toolResult().data().get("outcome");
+        assertEquals(20, modelOutcome.get("conflictCount"));
+        assertEquals(Boolean.TRUE, modelOutcome.get("conflictsTruncated"));
         assertEquals(execution.toolResult(), guardedResult.get());
         assertEquals("executed", execution.toolResult().data().get("status"));
         assertTrue(execution.toolCall().undoAvailable());
@@ -380,6 +403,45 @@ class AiAssistantWriteToolServiceTest {
         verify(personService, never()).removeTagIfUnchanged(31, 9);
     }
 
+    /**
+     * A durable tag row whose undo node was forged, or written by a future version, as available
+     * must still be refused by the framework's own inverse check, before the tool is asked to undo
+     * anything: {@code add_tag} declares no inverse, so no tag association it created may be removed.
+     */
+    @Test
+    void tagUndoRefusesAnAvailableUndoNodeBecauseTheToolDeclaresNoInverse() throws Exception {
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
+        when(personService.addTag(31, 9)).thenReturn(true);
+        AiAssistantPreparedWrite write = prepared(
+                "add_tag",
+                "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        ObjectNode envelope = (ObjectNode) objectMapper.readTree(capturedResultJson());
+        ObjectNode undo = (ObjectNode) envelope.get("undo");
+        undo.put("status", "available");
+        undo.put("expiresAt", CLOCK.instant().plusSeconds(300).toString());
+        assertEquals("tag", undo.get("entityKind").asString());
+        assertEquals(9, undo.get("tagId").intValue());
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(objectMapper.writeValueAsString(envelope));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool has no owned inverse", refused.getMessage());
+        verify(addTagTool, never()).undo(any(), any());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+        verify(personService, never()).removeTagIfUnchanged(anyInt(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(
+                anyInt(), anyInt(), anyString(), anyInt());
+    }
+
     @Test
     void autoWriteLocksTheDomainRowBeforeRetainingTheRestrictionFence() throws Exception {
         Person person = person(31);
@@ -460,13 +522,134 @@ class AiAssistantWriteToolServiceTest {
                 "deal",
                 44);
         stored(write, 29);
-        doThrow(new ForbiddenException("revoked")).when(workspaceService)
-                .requirePermission(TURN.workspaceId(), TURN.userId(), Permission.DEAL_UPDATE);
+        grantAllExcept(Permission.DEAL_UPDATE);
 
-        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
 
+        assertEquals(
+                "Requires the DEAL_UPDATE permission in this workspace", refused.getMessage());
         verify(dealService, never()).changeStage(
                 any(DealService.LockedStageChange.class));
+        verify(workspaceService, never()).requirePermission(
+                TURN.workspaceId(), TURN.userId(), Permission.DEAL_UPDATE);
+    }
+
+    @Test
+    void autoWriteRefusesWhenTheLockedAuthorityLacksTheToolPermission() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        grantAllExcept(Permission.TASK_DELETE);
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+
+        assertEquals(
+                "Requires the TASK_DELETE permission in this workspace", refused.getMessage());
+        verify(taskService, never()).create(any(Task.class));
+    }
+
+    @Test
+    void undoRefusesWhenTheLockedAuthorityLacksTheToolPermission() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setResultJson(capturedResultJson());
+        grantAllExcept(Permission.TASK_DELETE);
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals(
+                "Requires the TASK_DELETE permission in this workspace", refused.getMessage());
+        verify(taskService, never()).deleteIf(eq(74), any());
+    }
+
+    @Test
+    void everyToolDecisionReadsItsAuthorityFromLockedRows() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(write, 29);
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        assertThrows(ForbiddenException.class, () -> service.reject(TURN.sessionId(), 29));
+        assertThrows(ForbiddenException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
+    }
+
+    @Test
+    void approverWithoutAiUseIsRefusedByTheLockedAuthorityBeforeAnySessionLock() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(write, 29);
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Requires the AI_USE permission in this workspace", refused.getMessage());
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        verify(workspaceService, never()).permissionsFor(anyInt(), anyInt());
+        verify(chatMapper, never()).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+    }
+
+    @Test
+    void approverWithoutAiUseLearnsAnUnresolvableOwnerBeforeTheLockedAuthorityRefusal()
+            throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company",
+                52);
+        stored(write, 29);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of());
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Owner is unavailable or ambiguous", refused.getMessage());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(workspaceService, never()).permissionsFor(anyInt(), anyInt());
+        verify(companyService, never()).updateOwner(eq(52), any());
     }
 
     @Test
@@ -582,6 +765,9 @@ class AiAssistantWriteToolServiceTest {
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 11:59:59");
         when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        Person owned = person(31);
+        owned.setOwnerId(21);
+        when(personService.updateOwner(31, 21)).thenReturn(owned);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 
@@ -605,14 +791,19 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 12:00:30.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForShare(31)).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         assertEquals(
                 "executed",
                 service.executeAuto(TURN, 29, result -> { }).toolResult().data().get("status"));
 
-        verify(taskService).create(any(Task.class));
+        InOrder order = inOrder(taskService, personService, restrictionEpoch);
+        order.verify(taskService).lockBoardForCreation();
+        order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(taskService).create(any(Task.class));
     }
 
     @Test
@@ -632,6 +823,10 @@ class AiAssistantWriteToolServiceTest {
         unchanged.setId(52);
         unchanged.setUpdatedAt("2026-03-05 11:59:00.000000");
         when(companyService.lockOwnedCompanyForUpdate(52)).thenReturn(unchanged);
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(21);
+        when(companyService.updateOwner(52, 21)).thenReturn(owned);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 
@@ -639,12 +834,55 @@ class AiAssistantWriteToolServiceTest {
         verify(personService, never()).updateOwner(52, 21);
         verify(dealService, never()).updateOwner(52, 21);
 
-        InOrder lockOrder = inOrder(workspaceService, chatMapper);
-        lockOrder.verify(workspaceService)
-                .lockAndRequireMember(TURN.workspaceId(), TURN.userId());
-        lockOrder.verify(workspaceService).lockAndRequireMember(TURN.workspaceId(), 21);
+        InOrder lockOrder = inOrder(workspaceService, chatMapper, companyService);
+        lockOrder.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(
+                        TURN.userId(), Set.of(Permission.AI_USE),
+                        21, Set.of()));
         lockOrder.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        lockOrder.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
+        lockOrder.verify(companyService).lockOwnedCompanyForUpdate(52);
+        verify(workspaceService, never()).lockAndRequireMember(
+                eq(TURN.workspaceId()), anyInt());
+    }
+
+    @Test
+    void theOwnerWrittenIsThePrincipalResolvedAndLockedBeforeTheWrite() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        User renamedInto = new User();
+        renamedInto.setId(22);
+        renamedInto.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(owner))
+                .thenReturn(List.of(owner))
+                .thenReturn(List.of(renamedInto));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company",
+                52);
+        stored(write, 29);
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(21);
+        when(companyService.updateOwner(52, 21)).thenReturn(owned);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(workspaceService, times(2)).getMembers(TURN.workspaceId());
+        InOrder order = inOrder(workspaceService, companyService);
+        order.verify(workspaceService).getMembers(TURN.workspaceId());
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+        order.verify(companyService).lockOwnedCompanyForUpdate(52);
+        order.verify(companyService).updateOwner(52, 21);
+        verify(companyService, never()).updateOwner(52, 22);
     }
 
     @Test
@@ -748,51 +986,6 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
-    void proposalReadsReturnOnlyAuthorizedResolvedArguments() throws Exception {
-        User owner = new User();
-        owner.setId(21);
-        owner.setDisplayName("Grace Hopper");
-        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
-        Company company = new Company();
-        company.setId(52);
-        company.setName("Analytical Engines");
-        when(companyService.getCompanyById(52)).thenReturn(company);
-        AiAssistantPreparedWrite write = prepared(
-                "assign_owner",
-                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
-                "company",
-                52);
-        stored(write, 29);
-        when(chatMapper.listPendingToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of(storedToolCall));
-
-        var listed = service.listPendingProposals(TURN.sessionId());
-        var detail = service.getPendingProposal(TURN.sessionId(), 29);
-
-        assertEquals(1, listed.size());
-        assertEquals("Analytical Engines", detail.target().name());
-        assertEquals("Grace Hopper", detail.arguments().get("owner").asString());
-        assertFalse(detail.arguments().has("handle"));
-        assertFalse(detail.arguments().has("idempotency_key"));
-    }
-
-    @Test
-    void proposalReadsRefuseOtherTenantAndNonParticipantCallers() {
-        when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(null);
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> service.listPendingProposals(TURN.sessionId()));
-
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(99);
-        when(workspaceService.getCurrentUserId()).thenReturn(77);
-        when(chatMapper.getAccessibleSessionById(99, 77, TURN.sessionId())).thenReturn(null);
-        assertThrows(
-                ResourceNotFoundException.class,
-                () -> service.getPendingProposal(TURN.sessionId(), 29));
-    }
-
-    @Test
     void otherTenantAndUnauthorizedActorsFailBeforeDomainExecution() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(99);
         when(workspaceService.getCurrentUserId()).thenReturn(77);
@@ -803,7 +996,7 @@ class AiAssistantWriteToolServiceTest {
                 () -> service.approve(TURN.sessionId(), 29));
 
         doThrow(new ForbiddenException("revoked")).when(workspaceService)
-                .lockAndRequireMember(99, 77);
+                .lockAndRequirePermissionsSnapshot(eq(99), any());
         assertThrows(ResourceNotFoundException.class, () -> service.reject(TURN.sessionId(), 29));
         verify(dealService, never()).changeStage(
                 any(DealService.LockedStageChange.class));
@@ -837,12 +1030,423 @@ class AiAssistantWriteToolServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), 29);
     }
 
+    /**
+     * The entry gates are deliberately asymmetric: executing and approving need workspace AI to be
+     * enabled, while undoing an executed write and rejecting a proposal need only membership, so a
+     * member can still take back or decline what the assistant did after an administrator turns it
+     * off.
+     */
+    @Test
+    void undoAndRejectionStillWorkAfterWorkspaceAiIsDisabled() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(capturedResultJson());
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
+        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+
+        assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
+        verify(taskService).deleteIf(eq(74), any());
+
+        AiAssistantPreparedWrite proposal = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(proposal, 29);
+        storedToolCall.setStatus("proposed");
+        storedToolCall.setResultJson(null);
+        when(chatMapper.updateToolCall(
+                eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
+                eq("rejected"), any(), eq(TURN.userId()))).thenReturn(1);
+
+        assertEquals("rejected", service.reject(TURN.sessionId(), 29).status());
+        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        verify(governanceService, times(2)).isEnabled(TURN.workspaceId());
+    }
+
+    /**
+     * A stored row whose name is not a registered write — a read tool's, one forged with a write
+     * tier, or a name the catalog no longer declares — is refused as an invalid proposal by every
+     * decision: approval before any authority lock, and rejection and undo before any status write
+     * or domain call.
+     */
+    @Test
+    void aStoredRowNamingNoRegisteredWriteToolIsRefusedByEveryDecision() {
+        for (String[] row : List.of(
+                new String[] {"list_tasks", "read"},
+                new String[] {"list_tasks", "auto"},
+                new String[] {"update_record_fields", "confirm"})) {
+            storedToolCall.setId(29);
+            storedToolCall.setToolName(row[0]);
+            storedToolCall.setArgumentsJson("{\"tool\":\"" + row[0] + "\",\"tier\":\"" + row[1]
+                    + "\",\"restrictionEpoch\":23,\"target\":{\"kind\":\"person\",\"id\":31},"
+                    + "\"request\":{\"handle\":\"r1\"}}");
+            storedToolCall.setStatus("proposed");
+            storedToolCall.setResultJson(null);
+
+            IllegalStateException approved = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.approve(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", approved.getMessage(), row[0]);
+            verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+
+            IllegalStateException rejected = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.reject(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", rejected.getMessage(), row[0]);
+
+            storedToolCall.setStatus("executed");
+            storedToolCall.setResultJson("{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"},"
+                    + "\"undo\":{\"status\":\"available\",\"expiresAt\":\"2026-03-06T15:10:00Z\","
+                    + "\"entityKind\":\"task\",\"entityId\":74,\"fingerprint\":\"0f1e2d\"}}");
+            IllegalStateException undone = assertThrows(
+                    IllegalStateException.class,
+                    () -> service.undo(TURN.sessionId(), 29));
+            assertEquals("Assistant tool proposal is invalid", undone.getMessage(), row[0]);
+            clearInvocations(workspaceService);
+        }
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(
+                anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
+        verify(taskService, never()).create(any(Task.class));
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(personService, never()).getPersonById(anyInt());
+    }
+
+    /**
+     * A confirm-tier proposal stores the stage and the members its card is reviewed against as two
+     * siblings after its request, which a reader predating them never looks at; an immediate
+     * proposal is executed in its own turn and stores neither.
+     */
+    @Test
+    void aConfirmProposalPinsWhatItResolvedAndAnImmediateOneDoesNot() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+
+        assertEquals(
+                "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"stage\":\" proposal\"},"
+                        + "\"resolution\":{\"field\":\"stage\",\"id\":6},\"principals\":[]}",
+                prepared(
+                        "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\" proposal\"}",
+                        "deal", 44).argumentsJson());
+        assertEquals(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"company\",\"id\":52},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"grace hopper\"},"
+                        + "\"principals\":[21]}",
+                prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"grace hopper\"}",
+                        "company", 52).argumentsJson());
+        assertEquals(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"Unassigned\"},"
+                        + "\"principals\":[]}",
+                prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Unassigned\"}",
+                        "deal", 44).argumentsJson());
+        String immediate = prepared(
+                "create_task", "{\"handle\":\"r1\",\"description\":\"Agenda\"}", "person", 31)
+                .argumentsJson();
+        assertFalse(immediate.contains("principals"), immediate);
+        assertFalse(immediate.contains("resolution"), immediate);
+    }
+
+    /**
+     * A name that resolves to no single row is refused before any proposal exists, recoverably and
+     * with a reason that names no row, so the member is never shown a card its approval could only
+     * refuse.
+     */
+    @Test
+    void aNameThatResolvesToNoSingleRowIsRefusedRecoverablyBeforeAnythingIsStored() {
+        User grace = member(21, "Grace Hopper");
+        User admiral = member(22, "Admiral");
+        admiral.setUsername("grace hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(grace, admiral));
+
+        AiAssistantLoopException unknownStage = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Closed won\"}",
+                        "deal", 44));
+        AiAssistantLoopException ambiguousOwner = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                        "company", 52));
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(admiral));
+        AiAssistantLoopException unknownOwner = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Ada Owner\"}",
+                        "company", 52));
+
+        for (AiAssistantLoopException refusal
+                : List.of(unknownStage, ambiguousOwner, unknownOwner)) {
+            assertTrue(refusal.recoverable());
+            assertEquals("unresolved_reference", refusal.detailReason());
+            assertEquals("malformed_output", refusal.terminalReason());
+        }
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+    }
+
+    /**
+     * A stage renamed away and another renamed into the reviewed name after the proposal: the name
+     * now resolves to a stage the card never named, so the approval is refused before any board
+     * row is locked, and nothing is written.
+     */
+    @Test
+    void anApprovalWhoseStageNameNowResolvesToAnotherStageIsRefusedBeforeAnyLock()
+            throws Exception {
+        stored(prepared(
+                "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Proposal\"}", "deal", 44),
+                29);
+        when(pipelineService.getAllStages()).thenReturn(List.of(
+                pipelineStage(6, "Negotiation"), pipelineStage(7, "Proposal")));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * Issue 1865: the card reviewed member 21 as the owner; member 21 is offboarded and member 22
+     * takes the same display name. The name now resolves uniquely to an active member and the
+     * record is unchanged, so only the pin stands between the approval and a write to a member the
+     * approver never saw.
+     */
+    @Test
+    void anApprovalWhoseOwnerNameNowNamesAnotherMemberIsRefusedAndWritesNothing()
+            throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company", 52), 29);
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper"), member(11, "Ada Owner")));
+        Company unchanged = new Company();
+        unchanged.setId(52);
+        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(companyService.lockOwnedCompanyForUpdate(52)).thenReturn(unchanged);
+        Company handedOver = new Company();
+        handedOver.setId(52);
+        handedOver.setOwnerId(22);
+        when(companyService.updateOwner(52, 22)).thenReturn(handedOver);
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(companyService, never()).lockOwnedCompanyForUpdate(anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * The drifted member is compared with the pin before any authorization lock: member 22, who
+     * took the reviewed name and whose account deletion is reserved, is never locked or asked
+     * about, and the approver is told the proposal changed rather than that permission was lost.
+     */
+    @Test
+    void aDriftedPrincipalIsRefusedBeforeItsAuthorizationRowsAreLocked() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company", 52), 29);
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper"), member(11, "Ada Owner")));
+        doThrow(new ForbiddenException("User 22 is not a member of this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(
+                        TURN.workspaceId(),
+                        Map.of(TURN.userId(), Set.of(Permission.AI_USE), 22, Set.of()));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(anyInt(), anyInt(), anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+    }
+
+    /**
+     * A proposal stored before pinning carries neither pin and is approved exactly as it always
+     * was: its names are resolved again before the lock and whatever they resolve to is written.
+     */
+    @Test
+    void aProposalStoredBeforePinningIsApprovedByNameExactlyAsBefore() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper")));
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("assign_owner");
+        storedToolCall.setArgumentsJson(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"company\",\"id\":52},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}}");
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(22);
+        when(companyService.updateOwner(52, 22)).thenReturn(owned);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(companyService).updateOwner(52, 22);
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(TURN.userId(), Set.of(Permission.AI_USE), 22, Set.of()));
+    }
+
+    /** A stage proposal stored before pinning moves the deal to whatever its name resolves to. */
+    @Test
+    void aStageProposalStoredBeforePinningIsApprovedByNameExactlyAsBefore() throws Exception {
+        when(pipelineService.getAllStages()).thenReturn(List.of(
+                pipelineStage(6, "Negotiation"), pipelineStage(7, "Proposal")));
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("change_deal_stage");
+        storedToolCall.setArgumentsJson(
+                "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"stage\":\"Proposal\"}}");
+        DealService.LockedStageChange locked = mock(DealService.LockedStageChange.class);
+        when(dealService.lockStageChangeRowsForUpdate(44, 7)).thenReturn(locked);
+        Deal moved = new Deal();
+        moved.setId(44);
+        moved.setStageId(7);
+        when(dealService.changeStage(locked)).thenReturn(moved);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(dealService).changeStage(locked);
+    }
+
+    /**
+     * Only the framework writes pins, so a stored proposal whose pins do not parse is metadata it
+     * never wrote: an approval refuses it before any authority lock, and a rejection before it
+     * writes a status.
+     */
+    @Test
+    void aProposalWithMalformedPinsIsRefusedByEveryDecision() {
+        String legacy = "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
+                + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"deal\",\"id\":44},"
+                + "\"request\":{\"handle\":\"r1\",\"stage\":\"Proposal\"}";
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("change_deal_stage");
+        for (String pins : List.of(
+                ",\"resolution\":{\"field\":\"stage\",\"id\":6}}",
+                ",\"principals\":{}}",
+                ",\"principals\":[\"21\"]}",
+                ",\"principals\":[22,21]}",
+                ",\"principals\":[21,21]}",
+                ",\"principals\":[0]}",
+                ",\"resolution\":{\"field\":\"stage\"},\"principals\":[]}",
+                ",\"resolution\":{\"field\":\"\",\"id\":6},\"principals\":[]}",
+                ",\"resolution\":{\"field\":\"stage\",\"id\":6,\"label\":\"x\"},"
+                        + "\"principals\":[]}")) {
+            storedToolCall.setArgumentsJson(legacy + pins);
+
+            assertThrows(
+                    IllegalStateException.class, () -> service.approve(TURN.sessionId(), 29),
+                    pins);
+            assertThrows(
+                    IllegalStateException.class, () -> service.reject(TURN.sessionId(), 29),
+                    pins);
+        }
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * A step reached again after its proposal was stored replays the stored pins verbatim. The
+     * reviewed member was offboarded and the stage renamed away since, so the same calls prepared
+     * afresh are now unresolved; replayed, neither name is resolved again and each rebuilt proposal
+     * is byte-identical to the stored one. A stored row whose pins do not parse is refused like
+     * any other stored proposal that no longer parses.
+     */
+    @Test
+    void aReplayCarriesTheStoredPinsAndResolvesNothingAgain() throws Exception {
+        String ownerCall = "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}";
+        String stageCall = "{\"handle\":\"r1\",\"stage\":\"Proposal\"}";
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper")));
+        String storedOwner = prepared("assign_owner", ownerCall, "company", 52).argumentsJson();
+        String storedStage = prepared("change_deal_stage", stageCall, "deal", 44).argumentsJson();
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(11, "Ada Owner")));
+        when(pipelineService.getAllStages())
+                .thenReturn(List.of(pipelineStage(6, "Proposal (retired)")));
+        for (AiAssistantLoopException refusal : List.of(
+                assertThrows(AiAssistantLoopException.class,
+                        () -> prepared("assign_owner", ownerCall, "company", 52)),
+                assertThrows(AiAssistantLoopException.class,
+                        () -> prepared("change_deal_stage", stageCall, "deal", 44)))) {
+            assertEquals("unresolved_reference", refusal.detailReason());
+        }
+        clearInvocations(workspaceService, pipelineService, dealService);
+
+        assertEquals(storedOwner,
+                replayed("assign_owner", ownerCall, "company", 52, storedOwner).argumentsJson());
+        assertEquals(storedStage,
+                replayed("change_deal_stage", stageCall, "deal", 44, storedStage)
+                        .argumentsJson());
+        verify(workspaceService, never()).getMembers(anyInt());
+        verify(pipelineService, never()).getAllStages();
+        verify(dealService, never()).getDealById(anyInt());
+
+        String malformed = storedStage.replace("\"principals\":[]", "\"principals\":[0]");
+        assertThrows(IllegalStateException.class,
+                () -> replayed("change_deal_stage", stageCall, "deal", 44, malformed));
+    }
+
+    private void grantAllExcept(Permission... revoked) {
+        EnumSet<Permission> granted = EnumSet.allOf(Permission.class);
+        granted.removeAll(List.of(revoked));
+        when(authority.effectiveFor(TURN.userId())).thenReturn(granted);
+    }
+
     private AiAssistantPreparedWrite prepared(
             String tool, String json, String targetKind, int targetId) throws Exception {
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register(targetKind, targetId);
         return service.prepare(
                 tool, objectMapper.readTree(json), resources, TURN.restrictionEpoch());
+    }
+
+    private AiAssistantPreparedWrite replayed(
+            String tool, String json, String targetKind, int targetId, String storedArguments)
+            throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register(targetKind, targetId);
+        return service.prepareReplay(
+                tool, objectMapper.readTree(json), resources, TURN.restrictionEpoch(),
+                storedArguments);
     }
 
     private void stored(AiAssistantPreparedWrite write, int id) {
@@ -859,6 +1463,24 @@ class AiAssistantWriteToolServiceTest {
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 eq("executed"), result.capture(), eq(TURN.userId()));
         return result.getValue();
+    }
+
+    private static Stage pipelineStage(int id, String name) {
+        ooo.klae.connex.backend.beans.Pipeline pipeline =
+                new ooo.klae.connex.backend.beans.Pipeline();
+        pipeline.setId(5);
+        Stage stage = new Stage();
+        stage.setId(id);
+        stage.setName(name);
+        stage.setPipeline(pipeline);
+        return stage;
+    }
+
+    private static User member(int id, String displayName) {
+        User member = new User();
+        member.setId(id);
+        member.setDisplayName(displayName);
+        return member;
     }
 
     private static Person person(int id) {

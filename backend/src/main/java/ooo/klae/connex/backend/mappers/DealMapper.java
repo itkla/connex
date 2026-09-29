@@ -10,7 +10,6 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
-import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
@@ -324,10 +323,6 @@ public interface DealMapper {
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
-    List<Deal> findMentionedRecords(
-            @Param("workspaceId") int workspaceId,
-            @Param("text") String text,
-            @Param("limit") int limit);
     /** Bounded candidates for interactive canonical-name and company duplicate rechecking. */
     List<Deal> findDuplicatePreflightCandidates(
         @Param("workspaceId") int workspaceId,
@@ -347,6 +342,8 @@ public interface DealMapper {
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
     int update(Deal deal);
+    /** Updates only outcome and stage fields on the workspace-scoped, locked parent deal. */
+    int updateOutcome(Deal deal);
     int updateName(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
@@ -461,7 +458,15 @@ public interface DealMapper {
         @Param("dealId") int dealId,
         @Param("riskExcluded") boolean riskExcluded
     );
-    List<User> getCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    /**
+     * Lists the collaborator user ids recorded on one deal. The ids come from tenant data only;
+     * callers hydrate the matching profiles from the control plane.
+     *
+     * @param workspaceId workspace that owns the deal
+     * @param dealId deal whose collaborators are listed
+     * @return collaborator user ids in ascending order
+     */
+    List<Integer> getCollaboratorIds(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int clearCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int removeCollaborator(
         @Param("workspaceId") int workspaceId,

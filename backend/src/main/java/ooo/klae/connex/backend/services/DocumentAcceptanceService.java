@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.util.ContactMask;
+import ooo.klae.connex.backend.util.DocumentBodySchema;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -266,6 +267,7 @@ public class DocumentAcceptanceService {
         if (!"signer".equals(aggregate.recipient().getRole())) {
             throw unavailable();
         }
+        DocumentBodySchema.validateFrozenContent(aggregate.document().getContent(), objectMapper);
         LocalDateTime decidedAt = now();
         Evidence evidence = evidence(link, aggregate, sourceAddress, userAgent);
         if (deliveryMapper.completeRecipient(

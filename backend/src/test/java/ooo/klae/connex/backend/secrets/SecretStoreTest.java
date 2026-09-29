@@ -28,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryProviderSecretCipher;
 import ooo.klae.connex.backend.exceptions.SecretUnavailableException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
@@ -104,6 +106,32 @@ class SecretStoreTest {
         assertNotEquals(first.getCiphertext(), second.getCiphertext());
         assertEquals("second-secret", testStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD,
                 workspaceId, firstReference));
+    }
+
+    @Test
+    void deliveryCredentialsRejectCrossChannelReferencesAndCiphertext() {
+        int workspaceId = workspaceId();
+        DeliveryProviderSecretCipher cipher = new DeliveryProviderSecretCipher(store());
+        String emailReference = cipher.encryptCredential(workspaceId, DeliveryChannel.EMAIL, "email-key");
+        String smsReference = cipher.encryptCredential(workspaceId, DeliveryChannel.SMS, "sms-key");
+
+        assertNotEquals(emailReference, smsReference);
+        assertThrows(IllegalStateException.class,
+                () -> cipher.decryptCredential(workspaceId, DeliveryChannel.EMAIL, smsReference));
+        cipher.deleteCredentialReference(workspaceId, DeliveryChannel.EMAIL, smsReference);
+        assertEquals("sms-key", cipher.decryptCredential(workspaceId, DeliveryChannel.SMS, smsReference));
+
+        StoredSecret email = secretValueMapper.findById(SecretReference.parse(emailReference).id());
+        StoredSecret sms = secretValueMapper.findById(SecretReference.parse(smsReference).id());
+        assertNotNull(email);
+        assertNotNull(sms);
+        sms.setEncryptedDataKey(email.getEncryptedDataKey());
+        sms.setCiphertext(email.getCiphertext());
+        secretValueMapper.upsert(sms);
+
+        assertThrows(SecretUnavailableException.class,
+                () -> cipher.decryptCredential(workspaceId, DeliveryChannel.SMS, smsReference));
+        assertEquals("email-key", cipher.decryptCredential(workspaceId, DeliveryChannel.EMAIL, emailReference));
     }
 
     @Test

@@ -51,6 +51,19 @@ public class RegistrationVerificationService {
     }
 
     /**
+     * Reports whether an account still owes proof that it controls its address before it may be
+     * granted membership. Only meaningful while the feature is enabled: when it is off no token is
+     * ever issued and no resend can clear the flag, so an {@code email_verified=0} row left behind
+     * by an earlier enabled period would otherwise be permanently un-invitable. Mirrors the
+     * enablement condition {@link InviteLinkService} already applies to the shareable-link gate.
+     * @param user the account being admitted, or null when it could not be re-read
+     * @return true when the account must prove mailbox ownership first
+     */
+    public boolean requiresMailboxProof(User user) {
+        return enabled && (user == null || !user.isEmailVerified());
+    }
+
+    /**
      * Issues a verification token for the user and emails the link to their address. No-op when
      * the feature is disabled or the user is already verified. Silently drops requests over the
      * per-account rate limit. Called at registration and by the authenticated resend endpoint.

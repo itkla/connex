@@ -126,7 +126,7 @@ public class UserOffboardingService {
      * that block a concurrent insert of authored content for this user until
      * the deletion transaction commits — the serialization the RESTRICT
      * constraints provided at the parent row (same idiom as
-     * {@code lockOwnerIds} in the sole-owner guard). Runs FIRST in the
+     * {@code lockActiveOwnerMembers} in the owner-recovery guard). Runs FIRST in the
      * deletion flow so a refused deletion does no doomed erasure work; the gap
      * locks are held until commit, so the race stays closed through the
      * erasure and the {@code app_user} delete. One asymmetry with RESTRICT

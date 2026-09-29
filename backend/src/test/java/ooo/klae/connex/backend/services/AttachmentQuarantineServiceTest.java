@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -12,9 +15,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.Attachment;
@@ -25,6 +32,7 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.malware.MalwareScanVerdict;
 
 /** Pins post-lock authorization and non-overridable clean verdicts for quarantine operations. */
 class AttachmentQuarantineServiceTest {
@@ -165,5 +173,41 @@ class AttachmentQuarantineServiceTest {
 
         verifyNoInteractions(references, audit);
         verify(attachmentMapper, never()).delete(7, 19);
+    }
+
+    @Test
+    void everyNonCleanPersistedScannerVerdictRequiresQuarantineAuthorityToDelete() {
+        for (MalwareScanVerdict verdict : MalwareScanVerdict.values()) {
+            attachment.setScanState(verdict.name().toLowerCase(Locale.ROOT));
+
+            assertEquals(verdict != MalwareScanVerdict.CLEAN,
+                AttachmentQuarantineService.requiresQuarantineAuthority(attachment, objects), verdict.name());
+        }
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"quarantined", "suspicious"})
+    void quarantinedMissingAndUnrecognisedManagedStatesFailClosedToQuarantineAuthority(String state) {
+        attachment.setScanState(state);
+
+        assertTrue(AttachmentQuarantineService.requiresQuarantineAuthority(attachment, objects));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"clean", "pending", "scanning", "error"})
+    void cleanAndPreVerdictManagedStatesKeepOrdinaryDeletion(String state) {
+        attachment.setScanState(state);
+
+        assertFalse(AttachmentQuarantineService.requiresQuarantineAuthority(attachment, objects));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"pending", "quarantined", "infected", "suspicious"})
+    void unmanagedReferencesNeverRequireQuarantineAuthority(String state) {
+        attachment.setUrl("https://external.example/file.txt");
+        attachment.setScanState(state);
+
+        assertFalse(AttachmentQuarantineService.requiresQuarantineAuthority(attachment, objects));
     }
 }

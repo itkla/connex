@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -57,7 +58,8 @@ class RecordCommentIndicatorTest extends AbstractServiceTest {
             "Indicator Grantee " + unique(), currentUser.getId());
         Person person = personIn(owner.getId());
         assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         recordCommentService.createThread("person", person.getId(), "Owner thread", token());
 
         authenticateAs(currentUser, grantee.getId());

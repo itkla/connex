@@ -87,6 +87,16 @@ public class BedrockClient {
             AiCredentials credentials,
             String requestBodyJson,
             AiRequestDeadline deadline) {
+        return invokeModel(region, modelId, credentials, requestBodyJson, deadline, () -> {});
+    }
+
+    String invokeModel(
+            BedrockRegion region,
+            String modelId,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         Objects.requireNonNull(region, "region");
         Objects.requireNonNull(deadline, "deadline");
         requireText(modelId, "modelId");
@@ -98,7 +108,7 @@ public class BedrockClient {
             BedrockResponse response;
             try {
                 response = sendOnce(
-                        host, rawPath, region.regionCode(), credentials, body, deadline);
+                        host, rawPath, region.regionCode(), credentials, body, deadline, beforeSend);
             } catch (FixedAiProviderClient.RetryableTransportException exception) {
                 if (canRetry(attempt)
                         && pauseBeforeRetry(TRANSIENT_RETRY_BASE_NANOS, attempt, deadline)) {
@@ -120,7 +130,7 @@ public class BedrockClient {
     }
 
     private BedrockResponse sendOnce(String host, String rawPath, String regionCode, AiCredentials credentials,
-            byte[] body, AiRequestDeadline deadline) {
+            byte[] body, AiRequestDeadline deadline, Runnable beforeSend) {
         AwsSigV4Signer.SignedRequest signed = AwsSigV4Signer.sign(METHOD_POST, host, rawPath, EMPTY_QUERY, body,
                 regionCode, credentials, Instant.now());
         URI uri = URI.create("https://" + host + signed.encodedPath());
@@ -133,7 +143,7 @@ public class BedrockClient {
             headers.put("X-Amz-Security-Token", signed.securityToken());
         }
         FixedAiProviderClient.Response response = providerClient.post(
-                uri, ALLOWED_HOSTS, headers, ContentType.APPLICATION_JSON, body, deadline, "Bedrock invocation");
+                uri, ALLOWED_HOSTS, headers, ContentType.APPLICATION_JSON, body, deadline, "Bedrock invocation", beforeSend);
         return new BedrockResponse(response.statusCode(), response.body());
     }
 

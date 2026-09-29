@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.util.Set;
+
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ArgumentSpec;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolSpec;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -16,21 +19,16 @@ public class AiAssistantStepSchema {
     private static final String FINAL_SCHEMA_NAME = "ask_connex_final";
     private static final String CLOSING_SCHEMA_NAME = "ask_connex_closing_step";
 
-    private final AiResponseSchema responseSchema;
+    private final ObjectMapper objectMapper;
+    private final AiAssistantToolCatalog toolCatalog;
     private final AiResponseSchema finalResponseSchema;
     private final AiResponseSchema closingResponseSchema;
 
     public AiAssistantStepSchema(
             ObjectMapper objectMapper,
             AiAssistantToolCatalog toolCatalog) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("type", "object");
-        ObjectNode properties = root.putObject("properties");
-        properties.set("tool", toolSchema(objectMapper, toolCatalog));
-        properties.set("final", finalSchema(objectMapper));
-        root.putArray("required").add("tool").add("final");
-        root.put("additionalProperties", false);
-        responseSchema = new AiResponseSchema(SCHEMA_NAME, root);
+        this.objectMapper = objectMapper;
+        this.toolCatalog = toolCatalog;
         finalResponseSchema = new AiResponseSchema(
                 FINAL_SCHEMA_NAME, finalAnswerObjectSchema(objectMapper));
         ObjectNode closingRoot = objectMapper.createObjectNode();
@@ -43,9 +41,25 @@ public class AiAssistantStepSchema {
         closingResponseSchema = new AiResponseSchema(CLOSING_SCHEMA_NAME, closingRoot);
     }
 
-    /** @return immutable provider-neutral assistant step schema */
-    public AiResponseSchema responseSchema() {
-        return responseSchema;
+    /**
+     * Builds the step schema whose tool branches are exactly the loaded vocabulary.
+     *
+     * <p>Built per call rather than cached: one {@code ObjectNode} build costs nothing beside a
+     * provider round-trip, and a cache keyed on a set the turn mutates would serve a stale
+     * vocabulary.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return provider-neutral assistant step schema for those toolsets
+     */
+    public AiResponseSchema responseSchema(Set<Toolset> loadedToolsets) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("type", "object");
+        ObjectNode properties = root.putObject("properties");
+        properties.set("tool", toolSchema(objectMapper, toolCatalog, loadedToolsets));
+        properties.set("final", finalSchema(objectMapper));
+        root.putArray("required").add("tool").add("final");
+        root.put("additionalProperties", false);
+        return new AiResponseSchema(SCHEMA_NAME, root);
     }
 
     /** @return strict terminal-answer schema used alongside native provider tools */
@@ -71,20 +85,22 @@ public class AiAssistantStepSchema {
 
     private static ObjectNode toolSchema(
             ObjectMapper objectMapper,
-            AiAssistantToolCatalog toolCatalog) {
+            AiAssistantToolCatalog toolCatalog,
+            Set<Toolset> loadedToolsets) {
         ObjectNode tool = objectMapper.createObjectNode();
         ArrayNode alternatives = tool.putArray("anyOf");
         alternatives.addObject().put("type", "null");
-        alternatives.add(toolObjectSchema(objectMapper, toolCatalog));
+        alternatives.add(toolObjectSchema(objectMapper, toolCatalog, loadedToolsets));
         return tool;
     }
 
     private static ObjectNode toolObjectSchema(
             ObjectMapper objectMapper,
-            AiAssistantToolCatalog toolCatalog) {
+            AiAssistantToolCatalog toolCatalog,
+            Set<Toolset> loadedToolsets) {
         ObjectNode tool = objectMapper.createObjectNode();
         ArrayNode alternatives = tool.putArray("anyOf");
-        for (ToolSpec spec : toolCatalog.tools()) {
+        for (ToolSpec spec : toolCatalog.tools(loadedToolsets)) {
             ObjectNode branch = alternatives.addObject();
             branch.put("type", "object");
             ObjectNode properties = branch.putObject("properties");

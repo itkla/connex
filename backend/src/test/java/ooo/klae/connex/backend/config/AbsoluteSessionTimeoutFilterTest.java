@@ -9,6 +9,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -31,6 +33,22 @@ class AbsoluteSessionTimeoutFilterTest {
 
         filter.doFilter(request, response, chain);
 
+        assertEquals(401, response.getStatus());
+        assertTrue(session.isInvalid());
+        assertNull(chain.getRequest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/%61pi/auth/me", "//api/auth/me"})
+    void encodedApiSessionIsInvalidatedUnderAContextPath(String path) throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        when(sessionSecurityService.isAbsoluteExpired(session)).thenReturn(true);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/connex" + path);
+        request.setContextPath("/connex");
+        request.setSession(session);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request, response, chain);
         assertEquals(401, response.getStatus());
         assertTrue(session.isInvalid());
         assertNull(chain.getRequest());

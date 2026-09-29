@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -337,7 +338,8 @@ class CompanyServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company shared = companyInWorkspace(ownerWorkspace);
         shareMapper.shareCompany(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         Tag tag = newTag();
         int auditBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'company' AND entity_id = ?",

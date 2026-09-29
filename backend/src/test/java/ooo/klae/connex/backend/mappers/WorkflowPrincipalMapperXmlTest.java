@@ -11,6 +11,16 @@ import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Pins the exact lock primitives the workflow authoring chain uses, in documented order: the
+ * workspace root stays shared so audited CRM writes are never blocked, and mutual exclusion for
+ * trigger admission comes from the dedicated {@code workflow_trigger_admission} row.
+ *
+ * <p>The admission mutex is the upsert itself. InnoDB places an exclusive lock on the duplicate
+ * row when {@code INSERT ... ON DUPLICATE KEY UPDATE} hits the primary key and holds it to commit,
+ * so the statement both creates the row on first use and serialises later authors. Pinning a
+ * trailing {@code SELECT ... FOR UPDATE} instead would name a statement that never contends.
+ */
 class WorkflowPrincipalMapperXmlTest {
 
     @Test
@@ -28,6 +38,15 @@ class WorkflowPrincipalMapperXmlTest {
             Map.of("workspaceId", 5));
         assertTrue(workspace.contains("WHERE id = ?"));
         assertTrue(workspace.endsWith("FOR SHARE"));
+
+        String admission = sql(
+            configuration,
+            WorkflowMapper.class,
+            "acquireTriggerAdmissionMutex",
+            Map.of("workspaceId", 5));
+        assertTrue(admission.startsWith("INSERT INTO workflow_trigger_admission"));
+        assertTrue(admission.endsWith("ON DUPLICATE KEY UPDATE workspace_id = "
+            + "workflow_trigger_admission.workspace_id"));
 
         String membership = sql(
             configuration,
@@ -67,7 +86,8 @@ class WorkflowPrincipalMapperXmlTest {
         for (String resource : List.of(
                 "mappers/UserMapper.xml",
                 "mappers/WorkspaceMapper.xml",
-                "mappers/RoleMapper.xml")) {
+                "mappers/RoleMapper.xml",
+                "mappers/WorkflowMapper.xml")) {
             try (InputStream input = WorkflowPrincipalMapperXmlTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);

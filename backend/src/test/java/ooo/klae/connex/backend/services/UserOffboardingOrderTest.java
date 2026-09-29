@@ -409,7 +409,7 @@ class UserOffboardingOrderTest {
         order.verify(userMapper).lockById(9);
         order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
         order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
-        order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
+        order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(9, List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9, List.of());
         order.verify(catalogOffboardingService).assertNoAuthoredContent(9);
         order.verify(providerOffboardingService).purgeBeforeAccountDeletion(9);
@@ -418,7 +418,7 @@ class UserOffboardingOrderTest {
         order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
         order.verify(apiCredentialLifecycleService).discoverAccountReferenceRoots(9);
         order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of(3, 11, 13));
-        order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
+        order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(9, List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9, List.of(2, 5, 6));
         order.verify(apiCredentialLifecycleService).deleteForAccount(9, credentialRoots);
         order.verify(userMapper).delete(9);

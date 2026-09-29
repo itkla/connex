@@ -327,12 +327,16 @@ class UserServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void aProfileUpdateNeverRevokesSessions() {
+    void aProfileUpdateKeepsHttpSessionsAndClosesSocketsOnlyOnRename() {
         User member = newUser();
         authenticateAs(member);
 
         userService.update(member.getId(), profileUpdate(member, "My New Name"));
+        verify(accountSessionRevocationService, never()).closeWebSocketsAfterRename(anyInt());
+
         userService.update(member.getId(), renameUpdate(member, member.getUsername() + "renamed"));
+
+        verify(accountSessionRevocationService).closeWebSocketsAfterRename(member.getId());
 
         verify(accountSessionRevocationService, never()).expireAll(anyInt());
     }

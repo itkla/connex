@@ -4,14 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.Availability;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.PlanStep;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.SkillSpec;
@@ -50,6 +54,7 @@ class AiSkillCatalogTest {
             "daily_work_brief_v1");
 
     private final AiSkillCatalog catalog = new AiSkillCatalog();
+    private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
 
     @Test
     void everyFirstContractKeyIsDeclaredAndKeysStayAdditive() {
@@ -133,6 +138,220 @@ class AiSkillCatalogTest {
                                 + " without declaring it");
             }
         }
+    }
+
+    /**
+     * A routed turn starts with core plus whatever its skill seeded, and that seed is spent from
+     * the same per-turn budget an on-demand load spends from. A skill whose declared tools are not
+     * reachable from that starting set would spend a synthesis step discovering it cannot read
+     * what it declared, so the catalog is the place that has to agree.
+     */
+    @Test
+    void everySkillDeclaresReachableToolsetsWithinThePerTurnCap() {
+        for (SkillSpec spec : catalog.skills()) {
+            assertTrue(
+                    spec.toolsets().size()
+                            <= AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN,
+                    () -> spec.key() + " declares more toolsets than one turn may hold");
+            Set<Toolset> reachable = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+            for (String declared : spec.toolsets()) {
+                Toolset toolset = AiAssistantToolCatalog.LOADABLE.stream()
+                        .filter(loadable -> loadable.key().equals(declared))
+                        .findFirst()
+                        .orElse(null);
+                assertNotNull(toolset,
+                        () -> spec.key() + " declares unknown toolset " + declared);
+                reachable.add(toolset);
+            }
+            for (String tool : spec.allowedTools()) {
+                if (toolCatalog.toolsetOf(tool) == null) {
+                    continue;
+                }
+                assertTrue(toolCatalog.isLoaded(tool, reachable),
+                        () -> spec.key() + " allows " + tool
+                                + " but never reaches the toolset that declares it");
+            }
+            for (String declared : spec.toolsets()) {
+                Toolset toolset = AiAssistantToolCatalog.loadableByKey(declared);
+                for (String writeTool : AiAssistantToolCatalog.writeToolsOf(toolset)) {
+                    assertTrue(
+                            spec.authority() != AiSkillCatalog.Authority.READ
+                                    && spec.allowedTools().contains(writeTool),
+                            () -> spec.key() + " seeds " + declared + " but cannot call "
+                                    + writeTool + ", so offering it would settle the turn as"
+                                    + " tool_outside_skill_authority");
+                }
+            }
+        }
+    }
+
+    /** The cap and the key vocabulary are enforced where a skill is declared, not at use. */
+    @Test
+    void theSkillRecordRefusesAnUndeclarableToolsetDeclaration() {
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("analytics", "schedule", "write_content")));
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("core")));
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("nonexistent_toolset")));
+        assertNotNull(specWithToolsets(Set.of("analytics", "schedule")));
+    }
+
+    /**
+     * Seeding is all-or-nothing over an object family while write authority is per tool plus a
+     * tier, so a declaration that seeds a write family it cannot call would put write tools in
+     * front of the model from the synthesis step's first render and settle the turn as a
+     * non-closable {@code tool_outside_skill_authority} the moment one is chosen. That is refused
+     * where the declaration is written, not discovered at runtime.
+     */
+    @Test
+    void theSkillRecordRefusesAWriteToolsetItsOwnAuthorityCannotCall() {
+        assertThrows(IllegalArgumentException.class,
+                () -> spec(Set.of("write_pipeline"),
+                        AiSkillCatalog.Authority.READ,
+                        Set.of("change_deal_stage", "assign_owner")),
+                "a READ-authority declaration may not seed a write family");
+        assertThrows(IllegalArgumentException.class,
+                () -> spec(Set.of("write_pipeline"),
+                        AiSkillCatalog.Authority.EXECUTE_REVERSIBLE,
+                        Set.of("change_deal_stage")),
+                "seeding a family it cannot call every write of is the same trap");
+        assertNotNull(spec(Set.of("write_pipeline"),
+                AiSkillCatalog.Authority.EXECUTE_REVERSIBLE,
+                Set.of("change_deal_stage", "assign_owner")));
+        assertNotNull(spec(Set.of("analytics"),
+                AiSkillCatalog.Authority.READ,
+                Set.of("aggregate_metric")),
+                "a read-only family stays declarable on a READ-authority skill");
+    }
+
+    /**
+     * The rule a declaration's seed is validated by and the rule a routed turn's offer is computed
+     * by are one predicate, so a skill can never be offered a family it could not declare, nor
+     * declare one it would not be offered. Every loadable family is probed under a read-only tier,
+     * a write tier naming only some of the family's writes, and a write tier naming all of them.
+     */
+    @Test
+    void seedValidationAndTheRoutedOfferShareMayHold() {
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            List<String> writes = AiAssistantToolCatalog.writeToolsOf(toolset);
+            Set<String> allWrites = Set.copyOf(writes);
+            Set<String> someWrites = writes.isEmpty() ? Set.of() : Set.of(writes.getFirst());
+            for (AiSkillCatalog.Authority authority : AiSkillCatalog.Authority.values()) {
+                for (Set<String> allowed : List.of(Set.<String>of(), someWrites, allWrites)) {
+                    boolean holdable = AiSkillCatalog.mayHold(authority, allowed, toolset);
+                    boolean declarable = declares(Set.of(toolset.key()), authority, allowed);
+                    assertEquals(declarable, holdable,
+                            () -> toolset.key() + " under " + authority + " allowing " + allowed);
+                    boolean expected = writes.isEmpty()
+                            || (authority != AiSkillCatalog.Authority.READ
+                                    && allowed.containsAll(writes));
+                    assertEquals(expected, holdable,
+                            () -> toolset.key() + " under " + authority + " allowing " + allowed);
+                }
+            }
+        }
+        for (SkillSpec shipped : catalog.skills()) {
+            for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertEquals(
+                        AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty(),
+                        AiSkillCatalog.mayHold(
+                                shipped.authority(), shipped.allowedTools(), toolset),
+                        () -> "every shipped skill is READ today, so " + shipped.key()
+                                + " may hold exactly the read families and is offered no write"
+                                + " family: " + toolset.key());
+            }
+        }
+    }
+
+    /**
+     * Holding a family is all-or-nothing, so a write skill allowed only some of a family's writes
+     * is offered none of them: the authority gate would admit the tool, but the turn could never
+     * load the family that declares it. That is a deliberate narrowing of #1808's "intersects"
+     * direction, and it must fail here rather than silently, including when a family a skill
+     * already holds grows a write tool the skill was never widened to allow.
+     */
+    @Test
+    void everyWriteToolAWriteSkillIsAllowedSitsInAFamilyItMayHold() {
+        for (SkillSpec shipped : catalog.skills()) {
+            assertEquals(Set.of(), unreachableWrites(shipped),
+                    () -> shipped.key() + " is allowed write tools it can never be offered");
+        }
+        Toolset family = AiAssistantToolCatalog.LOADABLE.stream()
+                .filter(toolset -> AiAssistantToolCatalog.writeToolsOf(toolset).size() > 1)
+                .findFirst()
+                .orElseThrow();
+        List<String> writes = AiAssistantToolCatalog.writeToolsOf(family);
+        SkillSpec partlyAllowed = spec(
+                Set.of(), AiSkillCatalog.Authority.EXECUTE_REVERSIBLE, Set.of(writes.getFirst()));
+        SkillSpec whollyAllowed = spec(
+                Set.of(), AiSkillCatalog.Authority.EXECUTE_REVERSIBLE, Set.copyOf(writes));
+
+        assertEquals(Set.of(writes.getFirst()), unreachableWrites(partlyAllowed),
+                "a write skill allowed part of a family is caught, not silently narrowed");
+        assertEquals(Set.of(), unreachableWrites(whollyAllowed));
+    }
+
+    private Set<String> unreachableWrites(SkillSpec spec) {
+        Set<String> unreachable = new LinkedHashSet<>();
+        if (spec.authority() == AiSkillCatalog.Authority.READ) {
+            return unreachable;
+        }
+        for (String tool : spec.allowedTools()) {
+            if (toolCatalog.isWrite(tool)
+                    && !AiSkillCatalog.mayHold(
+                            spec.authority(), spec.allowedTools(), toolCatalog.toolsetOf(tool))) {
+                unreachable.add(tool);
+            }
+        }
+        return unreachable;
+    }
+
+    private static boolean declares(
+            Set<String> toolsets, AiSkillCatalog.Authority authority, Set<String> allowedTools) {
+        try {
+            spec(toolsets, authority, allowedTools);
+            return true;
+        } catch (IllegalArgumentException refused) {
+            return false;
+        }
+    }
+
+    private static SkillSpec specWithToolsets(Set<String> toolsets) {
+        return spec(toolsets, AiSkillCatalog.Authority.READ, Set.of());
+    }
+
+    private static SkillSpec spec(
+            Set<String> toolsets, AiSkillCatalog.Authority authority, Set<String> allowedTools) {
+        return new SkillSpec(
+                "declaration_probe_v1",
+                "1.0.0",
+                Availability.DECLARED,
+                "skill_not_yet_implemented",
+                "askConnex.skills.declarationProbe.name",
+                "askConnex.skills.declarationProbe.description",
+                Set.of(),
+                false,
+                Set.of(),
+                Set.of(),
+                List.of(),
+                allowedTools,
+                toolsets,
+                Set.of(),
+                Set.of(),
+                Set.of(),
+                true,
+                Set.of(Permission.AI_USE),
+                AiFeature.ASSISTANT_CHAT,
+                32_768,
+                authority,
+                new AiSkillCatalog.Bounds(0, 0, 0, 0),
+                new AiSkillCatalog.Budgets(0, 0L, 0),
+                Integer.MAX_VALUE,
+                AiSkillCatalog.PartialBehavior.FAIL_CLOSED,
+                new AiSkillCatalog.Evaluation("declaration_probe_v1", 0, Set.of()),
+                List.of(),
+                "");
     }
 
     @Test

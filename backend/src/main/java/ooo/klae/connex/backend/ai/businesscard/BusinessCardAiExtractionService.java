@@ -71,7 +71,7 @@ public class BusinessCardAiExtractionService {
             AiInvocation invocation = new AiInvocation(
                     AiFeature.BUSINESS_CARD_EXTRACTION,
                     context,
-                    PromptAssembly.builder()
+                    PromptAssembly.builder(context)
                             .system(MaskingEngine.maskFreeText(SYSTEM_PROMPT, context))
                             .userTurn(MaskingEngine.maskFreeText(USER_PROMPT, context))
                             .build(),

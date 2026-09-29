@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class OpenAiSseAccumulatorTest {
     @Test
@@ -115,6 +116,41 @@ class OpenAiSseAccumulatorTest {
         assertEquals("{\"city\":\"Kyoto\"}", result.toolCalls().get(1).arguments());
     }
 
+    /**
+     * Four unnumbered calls keep arrival order and each keep their own opaque replay state.
+     *
+     * <p>The two-call case pins the ordering rule; four is what a declared endpoint may really
+     * send, and the per-call replay signature is the part a batch can silently lose — one signature
+     * landing on every call, or on only the first, would produce a replay the endpoint rejects for
+     * every call but one, and nothing downstream would name the accumulator as the cause.
+     */
+    @Test
+    void keepsFourUnnumberedParallelCallsInArrivalOrderWithTheirOwnSignatures() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+        List<String> cities = List.of("Osaka", "Kyoto", "Nara", "Kobe");
+
+        for (int position = 0; position < cities.size(); position++) {
+            accumulator.accept(signedUnnumberedCall(
+                    "call_" + (position + 1), cities.get(position), "sig_" + (position + 1)));
+        }
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\"},"
+                + "\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals(4, result.toolCalls().size());
+        assertEquals(
+                List.of("call_1", "call_2", "call_3", "call_4"),
+                result.toolCalls().stream().map(call -> call.id()).toList());
+        assertEquals(
+                List.of("sig_1", "sig_2", "sig_3", "sig_4"),
+                result.toolCalls().stream().map(call -> call.thoughtSignature()).toList());
+        assertEquals(
+                cities.stream().map(city -> "{\"city\":\"" + city + "\"}").toList(),
+                result.toolCalls().stream().map(call -> call.arguments()).toList());
+    }
+
     @Test
     void rejoinsUnnumberedFragmentsThatShareOneCallIdentifier() {
         OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
@@ -130,7 +166,97 @@ class OpenAiSseAccumulatorTest {
         AiCompletionResult result = accumulator.finish();
 
         assertEquals(1, result.toolCalls().size());
+        assertEquals("call_1", result.toolCalls().getFirst().id());
         assertEquals("{\"city\":\"Osaka\"}", result.toolCalls().getFirst().arguments());
+    }
+
+    /**
+     * Four unnumbered calls whose fragments interleave keep whole identifiers and signatures.
+     *
+     * <p>Every unnumbered fragment carries its call's identifier in full, because that is what
+     * places it, so the identifier and the replay signature are whole values repeated across
+     * fragments rather than pieces. Concatenating them would give each call a doubled identifier
+     * its {@code tool} message could never correlate with, and a signature the endpoint rejects on
+     * replay. Here every call arrives in three argument fragments interleaved with its siblings,
+     * two calls repeat their signature on a later fragment, and one sends its signature late.
+     */
+    @Test
+    void keepsWholeIdentifiersAndSignaturesAcrossInterleavedUnnumberedFragments() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+        List<String> cities = List.of("Osaka", "Kyoto", "Nara", "Kobe");
+
+        for (int position = 0; position < cities.size(); position++) {
+            accumulator.accept(fragment(
+                    "call_" + (position + 1), "get_weather", "{\"city\":",
+                    position == 3 ? null : "sig_" + (position + 1)));
+        }
+        for (int position = 0; position < cities.size(); position++) {
+            accumulator.accept(fragment(
+                    "call_" + (position + 1), null, "\"" + cities.get(position),
+                    position % 2 == 0 ? "sig_" + (position + 1) : null));
+        }
+        for (int position = cities.size() - 1; position >= 0; position--) {
+            accumulator.accept(fragment(
+                    "call_" + (position + 1), null, "\"}",
+                    position == 3 ? "sig_4" : null));
+        }
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\"},"
+                + "\"finish_reason\":\"tool_calls\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals(
+                List.of("call_1", "call_2", "call_3", "call_4"),
+                result.toolCalls().stream().map(call -> call.id()).toList());
+        assertEquals(
+                List.of("get_weather", "get_weather", "get_weather", "get_weather"),
+                result.toolCalls().stream().map(call -> call.name()).toList());
+        assertEquals(
+                cities.stream().map(city -> "{\"city\":\"" + city + "\"}").toList(),
+                result.toolCalls().stream().map(call -> call.arguments()).toList());
+        assertEquals(
+                List.of("sig_1", "sig_2", "sig_3", "sig_4"),
+                result.toolCalls().stream().map(call -> call.thoughtSignature()).toList());
+    }
+
+    /** An unnumbered call cannot carry two different replay signatures; neither is guessed at. */
+    @Test
+    void refusesAnUnnumberedCallWhoseFragmentsDisagreeOnItsSignature() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+
+        accumulator.accept(fragment("call_1", "get_weather", "{\"city\":", "sig_a"));
+
+        assertThrows(AiProviderException.class, () -> accumulator.accept(
+                fragment("call_1", null, "\"Osaka\"}", "sig_b")));
+    }
+
+    /**
+     * One unnumbered tool-call fragment, built as JSON rather than by hand.
+     *
+     * @param id the call identifier the fragment carries in full
+     * @param name the function name, or {@code null} when this fragment carries none
+     * @param arguments this fragment's piece of the argument document
+     * @param signature the replay signature, or {@code null} when this fragment carries none
+     * @return one streamed event
+     */
+    private static String fragment(String id, String name, String arguments, String signature) {
+        JsonMapper mapper = JsonMapper.builder().build();
+        ObjectNode call = mapper.createObjectNode();
+        call.put("id", id);
+        ObjectNode function = call.putObject("function");
+        if (name != null) {
+            function.put("name", name);
+        }
+        function.put("arguments", arguments);
+        if (signature != null) {
+            call.putObject("extra_content").putObject("google").put("thought_signature", signature);
+        }
+        ObjectNode event = mapper.createObjectNode();
+        ObjectNode choice = event.putArray("choices").addObject();
+        choice.putObject("delta").putArray("tool_calls").add(call);
+        choice.putNull("finish_reason");
+        return event.toString();
     }
 
     @Test
@@ -217,6 +343,15 @@ class OpenAiSseAccumulatorTest {
                         + "\"finish_reason\":null}]}"));
 
         assertEquals(List.of(), deltas);
+    }
+
+    private static String signedUnnumberedCall(String id, String city, String signature) {
+        return "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":"
+                + "[{\"id\":\"" + id + "\",\"type\":\"function\",\"extra_content\":"
+                + "{\"google\":{\"thought_signature\":\"" + signature + "\"}},"
+                + "\"function\":{\"name\":\"get_weather\",\"arguments\":"
+                + "\"{\\\"city\\\":\\\"" + city
+                + "\\\"}\"}}]},\"finish_reason\":null}]}";
     }
 
     private static String unnumberedCall(String id, String city) {

@@ -9,6 +9,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -60,9 +62,12 @@ public class IntroRationaleService {
     /**
      * Generates or reuses a fresh rationale for a workspace-scoped introduction suggestion.
      * The admitted contributors are exactly the two endpoint people whose data reaches the prompt.
+     * An interrupted worker stops immediately after the suggestion ranking and after each endpoint
+     * lookup instead of loading context for a discarded generation.
      * @param personAId first requested person id
      * @param personBId second requested person id
      * @return available rationale or a graceful unavailability response
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public IntroRationaleDto generate(int personAId, int personBId) {
         int lo = Math.min(personAId, personBId);
@@ -73,21 +78,39 @@ public class IntroRationaleService {
         if (profile.isEmpty()) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
         }
+        if (lo <= 0) {
+            return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+        }
 
-        IntroSuggestionDto suggestion = introductionService.computeSuggestions(workspaceId, RESOLVE_LIMIT).stream()
+        String cacheFeature = cacheFeature();
+        CacheIdentity identity = CacheIdentity.forPair(
+                workspaceId, AiFeature.INTRO_RATIONALE, lo, hi, LocaleContextHolder.getLocale());
+        if (refusedBeforeSuggestionRanking(workspaceId, cacheFeature, lo, hi, identity)) {
+            return IntroRationaleDto.unavailable(lo, hi, RATE_LIMITED);
+        }
+
+        List<IntroSuggestionDto> suggestions =
+                introductionService.computeCancellableSuggestions(workspaceId, RESOLVE_LIMIT);
+        AiCancellation.throwIfInterrupted();
+        IntroSuggestionDto suggestion = suggestions.stream()
                 .filter(candidate -> candidate.getPersonAId() == lo && candidate.getPersonBId() == hi)
                 .findFirst()
                 .orElse(null);
         if (suggestion == null) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
-        if (isAiRestricted(personMapper.getPersonById(workspaceId, lo))
-                || isAiRestricted(personMapper.getPersonById(workspaceId, hi))) {
+        Person personA = personMapper.getPersonById(workspaceId, lo);
+        AiCancellation.throwIfInterrupted();
+        if (isAiRestricted(personA)) {
+            return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+        }
+        Person personB = personMapper.getPersonById(workspaceId, hi);
+        AiCancellation.throwIfInterrupted();
+        if (isAiRestricted(personB)) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
 
         IntroRationaleAssembly assembly = introRationaleAssembler.assemble(workspaceId, suggestion);
-        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         IntroRationaleDto cached = cached(
@@ -96,8 +119,6 @@ public class IntroRationaleService {
             return cached;
         }
 
-        CacheIdentity identity = CacheIdentity.forPair(
-                workspaceId, AiFeature.INTRO_RATIONALE, lo, hi, LocaleContextHolder.getLocale());
         boolean admissionRefresh = false;
         while (true) {
             try (Admission admission = aiInvocationAdmissionService.acquire(
@@ -168,6 +189,38 @@ public class IntroRationaleService {
                 }
             }
         }
+    }
+
+    /**
+     * Refuses, before the workspace-wide suggestion ranking and the context assembly, a request
+     * that admission would currently reject. A stored rationale can only be validated against a
+     * fresh ranking and assembly, so a request with a stored row always proceeds and a valid cache
+     * hit is never refused for quota. A request with no stored row can only end in a new provider
+     * attempt or in a refusal, so under an exhausted quota it reports rate limiting even for a pair
+     * that the ranking would have refused as no longer suggested. A concurrent caller can publish
+     * a rationale and release its flight between the first probe and the precheck, and its
+     * completed attempt may be what fills the quota, so a refused request probes again and
+     * proceeds to the hash-validated cache read when a row now exists. Generation runs outside any
+     * transaction, so each probe reads committed rows in its own session rather than a
+     * session-cached empty result.
+     */
+    private boolean refusedBeforeSuggestionRanking(
+            int workspaceId,
+            String cacheFeature,
+            int lo,
+            int hi,
+            CacheIdentity identity) {
+        if (hasStoredRationale(workspaceId, cacheFeature, lo, hi)) {
+            return false;
+        }
+        if (aiInvocationAdmissionService.precheck(identity, false) == Rejection.NONE) {
+            return false;
+        }
+        return !hasStoredRationale(workspaceId, cacheFeature, lo, hi);
+    }
+
+    private boolean hasStoredRationale(int workspaceId, String cacheFeature, int lo, int hi) {
+        return aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi).isPresent();
     }
 
     private IntroRationaleDto cached(

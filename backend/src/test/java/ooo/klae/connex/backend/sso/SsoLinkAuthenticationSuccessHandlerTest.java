@@ -1,20 +1,24 @@
 package ooo.klae.connex.backend.sso;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.net.URI;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
@@ -57,13 +61,15 @@ class SsoLinkAuthenticationSuccessHandlerTest {
         SsoLoginResult.LinkRequired linkRequired = new SsoLoginResult.LinkRequired(
             19, "oidc", "https://issuer.example", "subject", 7);
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example");
-        when(oidcUser.getIssuer()).thenReturn(URI.create("https://issuer.example").toURL());
-        when(oidcUser.getSubject()).thenReturn("subject");
+        Instant issuedAt = Instant.now();
+        when(oidcUser.getIdToken()).thenReturn(new OidcIdToken(
+            "id-token", issuedAt, issuedAt.plusSeconds(60),
+            Map.of("iss", "https://issuer.example", "sub", "subject", "aud", List.of("client"))));
         when(oidcUser.getEmail()).thenReturn("member@example.com");
         when(oidcUser.getEmailVerified()).thenReturn(true);
         when(oidcUser.getFullName()).thenReturn("Member");
         when(ssoLoginService.resolve(
-            "oidc", "https://issuer.example", "subject", "member@example.com", true, 7, "Member"))
+            "oidc", "https://issuer.example", "subject", "member@example.com", true, 7, "Member", "client"))
             .thenReturn(linkRequired);
         when(ssoLinkService.createChallenge(linkRequired)).thenReturn("raw-link-token");
         when(oneTimeLinkFlowCookie.ensureBrowserBinding(request, response))
@@ -75,8 +81,13 @@ class SsoLinkAuthenticationSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(authService).downgradeToUnauthenticatedSession(request, response);
-        verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
+        InOrder order = inOrder(authService, ssoLinkService, oneTimeLinkFlowService);
+        order.verify(authService).downgradeToUnauthenticatedSession(request, response);
+        order.verify(ssoLinkService).createChallenge(linkRequired);
+        order.verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
+        order.verify(oneTimeLinkFlowService).issue(
+            request, "browser-binding", Purpose.SSO_LINK,
+            ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256("raw-link-token"));
         verify(oneTimeLinkFlowCookie).set(
             response, Purpose.SSO_LINK, "browser-grant", java.time.Duration.ofMinutes(10));
         assertEquals("https://app.example/sso/link", response.getRedirectedUrl());

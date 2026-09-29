@@ -56,12 +56,14 @@
     "email": "メール",
     "emailPlaceholder": "taro@example.com",
     "password": "パスワード",
-    "passwordPlaceholder": "8文字以上",
+    "passwordPlaceholder": "8〜72文字",
     "breachedPassword": "このパスワードは既知の情報漏えいで確認されています。他のサービスで使用していない別のパスワードを選んでください。",
     "passwordScreeningUnavailable": "パスワードの漏えい確認を一時的に利用できません。しばらくしてからもう一度お試しください。",
+    "passwordTooLong": "パスワードは8〜72文字で入力してください。",
     "cancel": "キャンセル",
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",
+    "toastCreatedVerification": "このインスタンスでメール確認が必要な場合、確認リンクを送信しました。ドメイン制限付きの招待リンクを使う場合や、アプリ内でメンバーとして追加される場合は、メール確認が必要です。メールで届いた招待からは、確認前でも参加できます。",
     "toastFailed": "ユーザーを作成できませんでした"
   },
   "UsersLayout": {

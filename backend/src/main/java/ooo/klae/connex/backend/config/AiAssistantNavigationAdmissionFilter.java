@@ -58,7 +58,7 @@ public class AiAssistantNavigationAdmissionFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !apiPath(request).startsWith(PATH_PREFIX);
+        return !RequestPathNormalizer.apiPath(request).startsWith(PATH_PREFIX);
     }
 
     @Override
@@ -95,15 +95,6 @@ public class AiAssistantNavigationAdmissionFilter extends OncePerRequestFilter {
             return null;
         }
         return value.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            return uri.substring(contextPath.length());
-        }
-        return uri;
     }
 
     private static void reject(HttpServletResponse response, int status, String message)

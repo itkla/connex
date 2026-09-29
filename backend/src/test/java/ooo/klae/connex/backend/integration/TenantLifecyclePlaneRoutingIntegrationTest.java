@@ -73,7 +73,12 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
             assumeTrue(
                 tableExists(connection, "tenant_operation_lease"),
                 "Default catalog is not migrated; skipping lifecycle routing test");
-            statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
+            try {
+                statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + SCRATCH_CATALOG + " ("
+                    + exception.getMessage() + ")");
+            }
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company_tag");
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".tag");
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company");
@@ -93,11 +98,6 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
                     + " FOREIGN KEY (company_id) REFERENCES "
                     + SCRATCH_CATALOG + ".company(id) ON DELETE CASCADE");
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(
-                false,
-                "Cannot prepare scratch catalog " + SCRATCH_CATALOG
-                    + " (" + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -259,7 +259,7 @@ class TenantLifecyclePlaneRoutingIntegrationTest {
             try (InputStream input = TenantLifecyclePlaneRoutingIntegrationTest.class
                     .getClassLoader()
                     .getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(
                     input,
                     configuration,
