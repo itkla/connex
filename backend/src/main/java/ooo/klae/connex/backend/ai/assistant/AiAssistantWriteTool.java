@@ -14,7 +14,9 @@ import java.util.Objects;
 import java.util.Set;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
+import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.services.DealService;
@@ -243,10 +245,17 @@ public interface AiAssistantWriteTool {
     /**
      * The before and after values one pending proposal would write, never shown to the model.
      *
-     * <p>Called only for a viewer who may read the proposal's details.
+     * <p>Called only for a viewer who may read the proposal's details. The framework does not
+     * screen these values for special-care text: a stage or a member is workspace vocabulary the
+     * requester reviews by name, so a change keeps naming it even when a screened summary falls
+     * back to the generic one. A tool whose values are free-text labels a member attaches to a
+     * record, such as a tag name, screens them itself and returns {@code null} rather than name an
+     * excluded one, so its card withholds the change, and with it the apply control, exactly where
+     * its summary withholds the name.
      *
      * @param review the card's batched, viewer-authorized read state
-     * @return the change, or {@code null} when the tool has no reviewable before and after
+     * @return the change, or {@code null} when the tool has no reviewable before and after or
+     *     withholds it
      */
     Diff diff(Review review);
 
@@ -600,7 +609,7 @@ public interface AiAssistantWriteTool {
      * {@code target} is {@code null}, {@code request} holds at most the tool's boolean
      * {@link AiAssistantWriteTool#sharedRequestFlags()}, {@code outcome} holds at most the tool's
      * boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
-     * {@code members} and {@code stages} are empty.
+     * {@code members}, {@code stages}, {@code tags} and {@code targetTags} are empty.
      *
      * <p>A proposal prepared since resolutions were pinned carries the id {@link
      * AiAssistantWriteTool#resolve} and the member ids {@link AiAssistantWriteTool#principals}
@@ -623,6 +632,9 @@ public interface AiAssistantWriteTool {
      *     may not read it, or {@code null}
      * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}
      * @param stages the workspace's pipeline stages when the tool declared {@link ReviewInput#STAGES}
+     * @param tags the workspace's tags when the tool declared {@link ReviewInput#TAGS}
+     * @param targetTags the tags the target currently holds when the tool declared {@link
+     *     ReviewInput#TAGS}, read for the whole page of cards in one batch per record kind
      * @param pinnedResolutionId the resolved id pinned at proposal time, or {@code null} when none
      *     was pinned
      * @param pinnedPrincipalIds the principal ids pinned at proposal time in ascending order, or
@@ -637,6 +649,8 @@ public interface AiAssistantWriteTool {
             JsonNode outcome,
             List<User> members,
             List<Stage> stages,
+            List<Tag> tags,
+            List<RecordTag> targetTags,
             Set<Permission> viewerPermissions,
             Integer pinnedResolutionId,
             List<Integer> pinnedPrincipalIds) {
@@ -660,7 +674,12 @@ public interface AiAssistantWriteTool {
         /** The workspace's members, for a tool that reviews an owner. */
         MEMBERS,
         /** The workspace's pipeline stages, for a tool that reviews a deal stage. */
-        STAGES
+        STAGES,
+        /**
+         * The workspace's tags and the tags the target currently holds, for a tool that reviews a
+         * tag association.
+         */
+        TAGS
     }
 
     /** Whether a reviewed value resolved and whether the record already holds it. */

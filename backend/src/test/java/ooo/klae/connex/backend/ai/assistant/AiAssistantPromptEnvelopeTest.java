@@ -299,7 +299,7 @@ class AiAssistantPromptEnvelopeTest {
                 List.of("search_records", "get_record", "get_records", "set_todos",
                         "list_activities", "list_tasks", "list_scope_activities", "find_tools",
                         "aggregate_metric", "create_activity", "create_task",
-                        "create_note", "add_tag"),
+                        "create_note", "add_tag", "remove_tag"),
                 promptAssembler.nativeToolDefinitions(toolCatalog.reservationToolsets()).stream()
                         .map(definition -> definition.name())
                         .toList(),

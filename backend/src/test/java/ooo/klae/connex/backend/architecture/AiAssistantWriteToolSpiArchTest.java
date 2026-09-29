@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
@@ -79,6 +80,7 @@ class AiAssistantWriteToolSpiArchTest {
     private static final Path FRAMEWORK =
             ASSISTANT_SOURCES.resolve("AiAssistantWriteToolService.java");
     private static final Path LOCKING = Path.of("docs/backend/LOCKING.md");
+    private static final Path ASK_CONNEX_CLIENT = Path.of("frontend/app/lib/askConnex.ts");
     private static final List<Path> TOOL_AGNOSTIC_SOURCES = List.of(
             FRAMEWORK,
             ASSISTANT_SOURCES.resolve("AiAssistantWriteToolRegistry.java"),
@@ -153,6 +155,15 @@ class AiAssistantWriteToolSpiArchTest {
      * framework reads the target through its own scoped gate. {@code change_deal_stage} holds the
      * same {@code DealService} and is granted none of that.
      *
+     * <p>{@code remove_tag} is granted {@code getAllTags}, to resolve and pin the requested name
+     * against the workspace's tag vocabulary exactly as {@code add_tag} does and to name the pinned
+     * tag as it reads after the record lock, and each record service's {@code removeTag}, the
+     * method the workflow engine's remove-tag action already calls, which refuses a record the
+     * workspace does not hold, records its audit row and reports whether it removed the
+     * association. Neither {@code addTag} nor any record read is granted: the tool
+     * has no inverse, and the framework reads the target through its own scoped gate. {@code
+     * add_tag} holds the same services and is granted no {@code removeTag}.
+     *
      * <p>{@code assign_owner} is granted exactly the call its legacy arm made: each record service's
      * {@code updateOwner}, which asserts its own update permission, locks the named owner's
      * membership, records its audit row and returns the updated record the tool reads the owner id
@@ -177,6 +188,12 @@ class AiAssistantWriteToolSpiArchTest {
                             PersonService.class, Set.of("addTag"),
                             CompanyService.class, Set.of("addTag"),
                             DealService.class, Set.of("addTag")),
+                    AiAssistantRemoveTagWriteTool.class,
+                    Map.of(
+                            TagService.class, Set.of("getAllTags"),
+                            PersonService.class, Set.of("removeTag"),
+                            CompanyService.class, Set.of("removeTag"),
+                            DealService.class, Set.of("removeTag")),
                     AiAssistantAssignOwnerWriteTool.class,
                     Map.of(
                             PersonService.class, Set.of("updateOwner"),
@@ -186,10 +203,12 @@ class AiAssistantWriteToolSpiArchTest {
     /**
      * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved
      * identifier with itself, which verifies nothing. {@code add_tag} is here because its record
-     * services report only whether they created the association, and it is granted no read of the
-     * association. Adding a tool is a reviewed decision to ship a write with no verify-after-write.
+     * services report only whether they created the association, and {@code remove_tag} because
+     * they report only whether they removed it; neither is granted a read of the association.
+     * Adding a tool is a reviewed decision to ship a write with no verify-after-write.
      */
-    private static final Set<String> STRUCTURAL_READ_BACK = Set.of("AiAssistantAddTagWriteTool");
+    private static final Set<String> STRUCTURAL_READ_BACK = Set.of(
+            "AiAssistantAddTagWriteTool", "AiAssistantRemoveTagWriteTool");
 
     private static final Pattern SELF_COMPARED_READ_BACK = Pattern.compile(
             "new\\s+ReadBack\\s*\\(\\s*[^,]+,\\s*([^,]+?)\\s*,\\s*\\1\\s*\\)");
@@ -370,6 +389,18 @@ class AiAssistantWriteToolSpiArchTest {
                 unpermittedToolUses(
                         AiAssistantAddTagWriteTool.class,
                         tagTool + "\nObject owned = personService.updateOwner(target.id(), 21);\n"));
+        String removeTagTool = read(ASSISTANT_SOURCES.resolve(
+                "AiAssistantRemoveTagWriteTool.java"));
+        assertEquals(
+                List.of("AiAssistantAddTagWriteTool calls personService.removeTag"),
+                unpermittedToolUses(
+                        AiAssistantAddTagWriteTool.class,
+                        tagTool + "\nboolean removed = personService.removeTag(target.id(), 9);\n"));
+        assertEquals(
+                List.of("AiAssistantRemoveTagWriteTool calls dealService.addTag"),
+                unpermittedToolUses(
+                        AiAssistantRemoveTagWriteTool.class,
+                        removeTagTool + "\nboolean added = dealService.addTag(target.id(), 9);\n"));
         String ownerTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAssignOwnerWriteTool.java"));
         assertEquals(
                 List.of("AiAssistantAssignOwnerWriteTool calls companyService.addTag"),
@@ -408,6 +439,28 @@ class AiAssistantWriteToolSpiArchTest {
         assertFalse(SELF_COMPARED_READ_BACK
                 .matcher("new ReadBack(\"stageId\", resolution.id(), changed.getStageId())")
                 .find());
+    }
+
+    /**
+     * The client localizes every card from its own arms keyed by tool name, and a tool it has no
+     * arm for falls back to a generic "run a write action" with no outcome of its own. So every
+     * declared write tool needs its own arm in both the request and the outcome summary, and
+     * declaring one without them fails here rather than shipping an unlabelled card.
+     */
+    @Test
+    void everyWriteToolHasItsOwnRequestAndOutcomeLabelArmOnTheClient() throws IOException {
+        String client = read(ASK_CONNEX_CLIENT);
+        List<String> missing = new ArrayList<>();
+        for (String function : List.of(
+                "askConnexToolRequestSummary", "askConnexToolOutcomeSummary")) {
+            String body = functionBody(client, function);
+            for (String name : AiAssistantToolCatalog.writeToolNames()) {
+                if (!body.contains("toolCall.toolName === '" + name + "'")) {
+                    missing.add(function + " has no arm for " + name);
+                }
+            }
+        }
+        assertEquals(List.of(), missing);
     }
 
     @Test
@@ -509,6 +562,14 @@ class AiAssistantWriteToolSpiArchTest {
             }
         }
         return violations;
+    }
+
+    private static String functionBody(String source, String function) {
+        int start = source.indexOf("export function " + function + "(");
+        assertTrue(start >= 0, "askConnex.ts no longer declares " + function);
+        int end = source.indexOf("\n}\n", start);
+        assertTrue(end > start, "askConnex.ts's " + function + " has no closing brace");
+        return source.substring(start, end);
     }
 
     private static boolean isDomainService(Class<?> type) {

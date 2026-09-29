@@ -15,6 +15,7 @@ import {
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import {
     askConnexProposalAppliable,
+    askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
     type AskConnexProposalGroup,
@@ -170,6 +171,7 @@ export default function AskConnexProposalReview({
                 {group.cards.map((card) => {
                     const targetHref = askConnexToolTargetHref(card.target);
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
+                    const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
@@ -213,9 +215,14 @@ export default function AskConnexProposalReview({
                                 </div>
                                 {card.change !== null ? (
                                     <>
-                                        <AskConnexChangeRow change={card.change} labels={cardLabels} />
+                                        <AskConnexChangeRow
+                                            change={card.change}
+                                            removal={removal}
+                                            labels={cardLabels}
+                                        />
                                         <AskConnexChangeNotice
                                             state={card.change.state}
+                                            removal={removal}
                                             labels={cardLabels}
                                         />
                                     </>

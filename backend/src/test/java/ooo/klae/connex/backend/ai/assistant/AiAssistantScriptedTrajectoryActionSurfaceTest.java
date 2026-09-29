@@ -52,6 +52,11 @@ import tools.jackson.databind.ObjectMapper;
  * would leave it, and then moves which row its name resolves to before the loop reaches that step.
  * The stored proposal must win: it is replayed with its original pins and no second row, where
  * resolving the name again would disagree with the stored row and fail the turn on its key.
+ *
+ * <p>The {@code remove_tag} goldens pin the first confirm-tier tool added on the pinned SPI. The
+ * proposal leaves the association alone until the member approves it, and a tag deleted and
+ * re-created under the reviewed name between the proposal and the approval is another tag: only
+ * the pin refuses it, because the company stays backdated and the freshness refusal cannot fire.
  */
 class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTrajectoryTest {
 
@@ -59,6 +64,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private AiAssistantToolCallReadService toolCallReadService;
 
     /** The tool calls the drift scripts complete before their write: a search and a load. */
     private static final int CALLS_BEFORE_WRITE = 2;
@@ -70,6 +76,11 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     private static final String RELATIONSHIP_BRIEF = "relationship_brief_v1";
 
     private final List<Integer> extraMembers = new ArrayList<>();
+
+    @AfterEach
+    void removeTags() {
+        jdbcTemplate.update("DELETE FROM tag WHERE workspace_id = ?", workspaceId());
+    }
 
     @AfterEach
     void removeExtraMembers() {
@@ -291,6 +302,149 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         assertEquals(
                 objectMapper.createArrayNode().add(successor.getId()),
                 arguments.path("principals"));
+    }
+
+    /**
+     * A tag removal is only proposed: the association stays until the member approves, and the
+     * approval then removes exactly the reviewed tag, through the company's own service and its
+     * audit row, leaving every other tag in place.
+     */
+    @Test
+    void aTagRemovalLeavesTheTagAttachedUntilApprovedAndThenRemovesOnlyThatTag() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        int priority = tag("Priority");
+        attach(customer, dormant);
+        attach(customer, priority);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "remove_tag"),
+                trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("tag", stored.path("resolution").path("field").asString());
+        assertEquals(dormant, stored.path("resolution").path("id").asInt(),
+                "the proposal must pin the tag its card names");
+        assertEquals(List.of(dormant, priority), tagsOf(customer),
+                "a confirm-tier removal must leave the tag attached until the member approves");
+        assertEquals(0, auditRows("company.removeTag"));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(List.of(priority), tagsOf(customer));
+        assertEquals(1, auditRows("company.removeTag"));
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals("Dormant", outcome.path("tag").asString());
+        assertTrue(outcome.path("changed").asBoolean());
+    }
+
+    /**
+     * The reviewed tag is deleted and another is created under the same name and attached to the
+     * same company after the proposal. The name now resolves uniquely to a tag the card never
+     * named and the company is unchanged, so only the pin refuses, and the new tag stays attached.
+     */
+    @Test
+    void approvingATagRemovalWhoseTagWasRecreatedUnderTheSameNameIsRefused() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        attach(customer, dormant);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        assertEquals(1, jdbcTemplate.update(
+                "DELETE FROM tag WHERE workspace_id = ? AND id = ?", workspaceId(), dormant));
+        int recreated = tag("Dormant");
+        attach(customer, recreated);
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a name that now resolves to another tag must refuse rather than remove an"
+                            + " association the member never reviewed");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(List.of(recreated), tagsOf(customer),
+                "the refused approval must leave the re-created tag attached");
+        assertEquals(0, auditRows("company.removeTag"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The reviewed tag is removed from the company on the record itself after the proposal. That
+     * leaves the company's own row untouched, so the approval passes and removes nothing: its
+     * outcome says nothing changed, its card says the tag was not on the record, and no audit row
+     * claims a removal that never happened.
+     */
+    @Test
+    void approvingATagRemovalWhoseTagIsAlreadyGoneChangesNothingAndAuditsNothing() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        attach(customer, dormant);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        assertEquals(1, jdbcTemplate.update(
+                "DELETE FROM company_tag WHERE company_id = ? AND tag_id = ?",
+                customer.getId(), dormant));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+            assertEquals("Tag was not on the record",
+                    toolCallReadService.get(trajectory.sessionId(), proposal.getId())
+                            .outcomeSummary());
+        } finally {
+            clearAuthentication();
+        }
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals("Dormant", outcome.path("tag").asString());
+        assertFalse(outcome.path("changed").asBoolean());
+        assertEquals(List.of(), tagsOf(customer));
+        assertEquals(0, auditRows("company.removeTag"),
+                "a removal that removed nothing must not be audited as one");
+    }
+
+    private int tag(String name) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO tag (workspace_id, name, color) VALUES (?, ?, '#abcdef')",
+                workspaceId(), name));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM tag WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId(), name);
+    }
+
+    private void attach(Company company, int tagId) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)",
+                company.getId(), tagId));
+    }
+
+    private List<Integer> tagsOf(Company company) {
+        return jdbcTemplate.queryForList(
+                "SELECT tag_id FROM company_tag WHERE company_id = ? ORDER BY tag_id",
+                Integer.class, company.getId());
     }
 
     /**

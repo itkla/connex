@@ -331,6 +331,8 @@ export type AskConnexToolSummaryLabels = {
     createTask: string;
     createNote: string;
     addTag: string;
+    removeTag: string;
+    removeTagNamed: (value: string) => string;
     changeDealStage: string;
     changeDealStageTo: (value: string) => string;
     assignOwner: string;
@@ -345,6 +347,8 @@ export type AskConnexToolSummaryLabels = {
     noteCreated: string;
     tagAdded: string;
     tagAlreadyPresent: string;
+    tagRemoved: string;
+    tagNotPresent: string;
     dealStageChanged: string;
     ownerRemoved: string;
     ownerAssigned: string;
@@ -543,6 +547,19 @@ export function askConnexToolCardStatus(
 export function askConnexChangeApplicable(change: AiAssistantToolCallChange | null): boolean {
     if (change === null) return false;
     return change.state === 'ready';
+}
+
+/**
+ * Whether a tool's reviewed change takes a value off its record rather than writing one.
+ *
+ * A removal proposes an empty after-value on purpose. When it can no longer be made, what changed
+ * is the value it would remove — renamed, deleted or replaced since the proposal — not a proposed
+ * value that disappeared, so its card keeps that empty after-value and gives its own reason.
+ */
+export function askConnexToolProposesRemoval(
+    toolCall: Pick<AiAssistantToolCall, 'toolName'>,
+): boolean {
+    return toolCall.toolName === 'remove_tag';
 }
 
 /**
@@ -778,6 +795,10 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'create_task') return labels.createTask;
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
+    if (toolCall.toolName === 'remove_tag') {
+        const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
+        return tag === null ? labels.removeTag : labels.removeTagNamed(tag);
+    }
     if (toolCall.toolName === 'change_deal_stage') {
         const stage = summaryValue(toolCall.requestSummary, 'Change deal stage to:');
         return stage === null ? labels.changeDealStage : labels.changeDealStageTo(stage);
@@ -805,6 +826,11 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
         if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;
+        return labels.requestCompleted;
+    }
+    if (toolCall.toolName === 'remove_tag') {
+        if (toolCall.outcomeSummary === 'Tag removed') return labels.tagRemoved;
+        if (toolCall.outcomeSummary === 'Tag was not on the record') return labels.tagNotPresent;
         return labels.requestCompleted;
     }
     if (toolCall.toolName === 'change_deal_stage') return labels.dealStageChanged;

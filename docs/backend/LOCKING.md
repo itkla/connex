@@ -417,9 +417,13 @@ proposal read unlocked, so a drifted member's authorization rows are never locke
 never answers first, and again once step 3 has read the locked proposal; the value just before
 step 5, before any board or target lock — and refuses any difference with `Assistant proposal
 target changed`, so a rename or an offboarding between the proposal and the approval can never hand
-a record to a member, or move a deal to a stage, that the card did not name. The comparison reads
-no row and takes no lock. The card resolves the stored name exactly as the approval does and names
-only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
+a record to a member, move a deal to a stage, or remove a tag, that the card did not name — a tag
+deleted and re-created under the reviewed name is another row, and `remove_tag` refuses it. The comparison reads
+no row and takes no lock. The resolved row itself is never locked either: a rename of the reviewed
+tag that commits after the approval resolved it still removes exactly the reviewed association,
+because the pin compares ids, and `remove_tag` names the tag in its stored outcome as it reads after
+the record lock, as the record service's audit row does, never by the name it was resolved under.
+The card resolves the stored name exactly as the approval does and names only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
 the card and refused at approval with the same 404 as before pinning, rather than labelled by its
 id.
 
@@ -481,9 +485,10 @@ the write returned with the one resolved before the lock, recording any divergen
 built, so its link cannot diverge from the target while that holds, and nothing is re-read from
 the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
 whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
-id it resolved with itself and verifying nothing; `assign_owner` compares the owner id on the record
-`updateOwner` returns with the principal locked at step 1, `null` on both sides for a removal); and
-writes the tool-call status fail-closed. The one
+id it resolved with itself and verifying nothing, and for `remove_tag`, whose `removeTag` reports
+only whether it removed the association and compares the pinned tag id with itself;
+`assign_owner` compares the owner id on the record `updateOwner` returns with the principal
+locked at step 1, `null` on both sides for a removal); and writes the tool-call status fail-closed. The one
 read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
 `Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool
 names only the window, and the read refuses any other target kind), and which the activity tool
@@ -534,7 +539,7 @@ Rules that keep this sound:
   own assertions read the snapshot. The domain services it calls still run their `@RequirePermission`
   and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
   after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
-  `ActivityService.create`, `NoteService.create`, the `addTag` and `updateOwner` methods,
+  `ActivityService.create`, `NoteService.create`, the `addTag`, `removeTag` and `updateOwner` methods,
   `DealService.changeStage`, and every `deleteIf` undo uses. Those reads add no lock edge, and while
   the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
   Do not turn one of them into a locking read, and do not route an assistant write through a

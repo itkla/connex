@@ -85,7 +85,7 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Person person = newPerson(newCompany());
         int auditBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
@@ -95,7 +95,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> personService.removeTag(person.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -111,6 +111,25 @@ class PersonServiceTest extends AbstractServiceTest {
         assertThrows(
             ConflictException.class,
             () -> personService.removeTagIfUnchanged(person.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
+        Person person = newPerson(newCompany());
+        Tag tag = newTag();
+        personService.addTag(person.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(personService.removeTag(person.getId(), tag.getId()));
+        assertFalse(personService.removeTag(person.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test

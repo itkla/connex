@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -64,7 +65,7 @@ class CompanyServiceTest extends AbstractServiceTest {
     @MockitoBean NotificationChangePublisher notificationChanges;
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Company company = newCompany();
         int auditBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
@@ -74,7 +75,7 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> companyService.removeTag(company.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -90,6 +91,25 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertThrows(
             ConflictException.class,
             () -> companyService.removeTagIfUnchanged(company.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        companyService.addTag(company.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'company.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(companyService.removeTag(company.getId(), tag.getId()));
+        assertFalse(companyService.removeTag(company.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'company.removeTag'",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test

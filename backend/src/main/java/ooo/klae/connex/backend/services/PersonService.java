@@ -867,17 +867,23 @@ public class PersonService {
 
     /**
      * Removes a tag from a person in the active workspace.
+     * Records the audit row only when this invocation removed the association, so a removal of
+     * a tag the record no longer holds leaves no trace of a change that never happened.
+     * @return whether this invocation removed the tag association
      */
     @RequirePermission(Permission.PERSON_UPDATE)
-    public void removeTag(int personId, int tagId) {
+    public boolean removeTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        personMapper.removeTag(workspaceId, personId, tagId);
+        if (personMapper.removeTag(workspaceId, personId, tagId) != 1) {
+            return false;
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("person.removeTag", "person", personId, person.getName(),
             "Removed tag " + tagName + " from " + person.getName(),
             auditService.singleChange("tag", tagName, null));
+        return true;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */

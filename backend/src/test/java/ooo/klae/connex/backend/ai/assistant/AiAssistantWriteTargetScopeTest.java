@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -157,6 +158,29 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
+    void anApprovedTagRemovalOnACompanyThatLeftTheActorsScopeIsNeverApplied() throws Exception {
+        Tag priority = new Tag();
+        priority.setId(9);
+        priority.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(priority));
+        when(companyService.getCompanyById(52))
+                .thenThrow(new ResourceNotFoundException("Company not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
+                "company", 52);
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
+
+        assertEquals("Company not found", refused.getMessage());
+        verify(companyService).lockOwnedCompanyForUpdate(52);
+        verify(companyService, never()).removeTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
     void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
             throws Exception {
         AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
@@ -171,7 +195,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         };
         AiAssistantWriteToolService service = framework(List.of(
                 createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool(),
-                assignOwnerTool()));
+                removeTagTool(), assignOwnerTool()));
         propose(service, "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
                         + "\"start\":\"9:00am next Thursday\"}",

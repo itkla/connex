@@ -32,7 +32,9 @@ import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -76,6 +79,7 @@ public class AiAssistantToolCallReadService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final TagMapper tagMapper;
     private final ActivityMapper activityMapper;
     private final TaskMapper taskMapper;
     private final NoteMapper noteMapper;
@@ -175,6 +179,15 @@ public class AiAssistantToolCallReadService {
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? pipelineMapper.getAllStages(viewer.workspaceId())
                 : List.of();
+        List<StoredToolCall> taggedCalls = stored.stream()
+                .filter(call -> readsInput(call, ReviewInput.TAGS)
+                        && detailsReadable(call, viewer.userId(), visibleTargets))
+                .toList();
+        List<Tag> tags = taggedCalls.isEmpty()
+                ? List.of()
+                : tagMapper.getAllTags(viewer.workspaceId());
+        Map<RecordKey, List<RecordTag>> targetTags = targetTags(
+                viewer.workspaceId(), taggedCalls);
         Map<Integer, Integer> assistantMessages = assistantMessages(
                 viewer.workspaceId(), session.getId(), stored);
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> createdRecords = liveCreatedRecords(
@@ -203,7 +216,7 @@ public class AiAssistantToolCallReadService {
             Review withheld = withheld(tool, call, status, viewerPermissions);
             Review review = review(
                     tool, call, status, readable, visibleTarget, assignableOwners, stages,
-                    withheld);
+                    tags, targetTags.getOrDefault(targetKey, List.of()), withheld);
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
@@ -320,6 +333,37 @@ public class AiAssistantToolCallReadService {
             }
         }
         return Map.copyOf(visible);
+    }
+
+    /**
+     * The tags each target of the cards that review a tag association currently holds.
+     *
+     * <p>One read per record kind for the whole page of cards, never one per card, and only for
+     * cards whose viewer may read their details, so a withheld card costs no tag read at all.
+     */
+    private Map<RecordKey, List<RecordTag>> targetTags(
+            int workspaceId, List<StoredToolCall> taggedCalls) {
+        if (taggedCalls.isEmpty()) {
+            return Map.of();
+        }
+        Set<RecordKey> requested = new LinkedHashSet<>();
+        taggedCalls.stream()
+                .map(call -> new RecordKey(call.targetKind(), call.targetId()))
+                .forEach(requested::add);
+        Map<RecordKey, List<RecordTag>> held = new LinkedHashMap<>();
+        for (String kind : List.of("person", "company", "deal")) {
+            List<Integer> ids = ids(requested, kind);
+            if (ids.isEmpty()) {
+                continue;
+            }
+            for (RecordTag tag : tagMapper.getTagsForRecords(workspaceId, kind, ids)) {
+                held.computeIfAbsent(new RecordKey(kind, tag.recordId()), key -> new ArrayList<>())
+                        .add(tag);
+            }
+        }
+        Map<RecordKey, List<RecordTag>> copied = new LinkedHashMap<>();
+        held.forEach((key, tags) -> copied.put(key, List.copyOf(tags)));
+        return Map.copyOf(copied);
     }
 
     private Map<Integer, Integer> assistantMessages(
@@ -490,10 +534,10 @@ public class AiAssistantToolCallReadService {
      * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
      * no summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
-     * outcome only for an executed call, the members and stages only when the tool declared them,
-     * and the resolution and principals pinned when the proposal was prepared, which a proposal
-     * stored before pinning does not carry; the tool never reads anything this service did not
-     * already load for the page of cards.
+     * outcome only for an executed call, the members, stages and tags only when the tool declared
+     * them, and the resolution and principals pinned when the proposal was prepared, which a
+     * proposal stored before pinning does not carry; the tool never reads anything this service
+     * did not already load for the page of cards.
      */
     private Review review(
             AiAssistantWriteTool tool,
@@ -503,6 +547,8 @@ public class AiAssistantToolCallReadService {
             RecordSnapshot target,
             List<User> assignableOwners,
             List<Stage> stages,
+            List<Tag> tags,
+            List<RecordTag> targetTags,
             Review withheld) {
         if (!readable) {
             return withheld;
@@ -517,6 +563,8 @@ public class AiAssistantToolCallReadService {
                 EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
                 inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),
                 inputs.contains(ReviewInput.STAGES) ? stages : List.of(),
+                inputs.contains(ReviewInput.TAGS) ? tags : List.of(),
+                inputs.contains(ReviewInput.TAGS) ? targetTags : List.of(),
                 withheld.viewerPermissions(),
                 call.pins() == null ? null : call.pins().resolutionId(),
                 call.pins() == null ? null : call.pins().principalIds());
@@ -544,7 +592,7 @@ public class AiAssistantToolCallReadService {
                 EXECUTED.equals(status)
                         ? sharedFlags(tool, storedOutcome(call.toolCall()))
                         : null,
-                List.of(), List.of(), viewerPermissions, null, null);
+                List.of(), List.of(), List.of(), List.of(), viewerPermissions, null, null);
     }
 
     private JsonNode sharedRequestFlags(AiAssistantWriteTool tool, JsonNode request) {

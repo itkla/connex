@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Tag;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,19 @@ public interface TagMapper {
     List<Tag> getTagsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
     List<Tag> getTagsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Tag> getTagsByAttachmentId(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
+
+    /**
+     * The tags associated with each of a batch of records of one kind, in one read.
+     *
+     * @param workspaceId the workspace every record and tag must belong to
+     * @param recordType {@code person}, {@code company} or {@code deal}; any other kind reads nothing
+     * @param ids the non-empty record ids
+     * @return one row per association, ordered by record id and then tag name
+     */
+    List<RecordTag> getTagsForRecords(
+        @Param("workspaceId") int workspaceId,
+        @Param("recordType") String recordType,
+        @Param("ids") List<Integer> ids);
 
     /** All (entityId, name) tag pairs for contacts in the workspace; for bulk export. */
     List<Map<String, Object>> getPersonTagNames(int workspaceId);

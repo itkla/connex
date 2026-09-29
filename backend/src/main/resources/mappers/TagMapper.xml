@@ -85,6 +85,43 @@
     ORDER BY t.name
   </select>
 
+  <select id="getTagsForRecords" resultType="ooo.klae.connex.backend.beans.RecordTag">
+    <choose>
+      <when test="recordType == 'person'">
+        SELECT pt.person_id AS record_id, t.id AS tag_id, t.name
+        FROM person_tag pt
+        JOIN person r ON r.id = pt.person_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE pt.person_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY pt.person_id, t.name
+      </when>
+      <when test="recordType == 'company'">
+        SELECT ct.company_id AS record_id, t.id AS tag_id, t.name
+        FROM company_tag ct
+        JOIN company r ON r.id = ct.company_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = ct.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE ct.company_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY ct.company_id, t.name
+      </when>
+      <when test="recordType == 'deal'">
+        SELECT dt.deal_id AS record_id, t.id AS tag_id, t.name
+        FROM deal_tag dt
+        JOIN deal r ON r.id = dt.deal_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = dt.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE dt.deal_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY dt.deal_id, t.name
+      </when>
+      <otherwise>
+        SELECT t.id AS record_id, t.id AS tag_id, t.name
+        FROM tag t
+        WHERE t.workspace_id = #{workspaceId} AND 1 = 0
+      </otherwise>
+    </choose>
+  </select>
+
   <select id="getPersonTagNames" resultType="map">
     SELECT pt.person_id AS entityId, t.name AS name
     FROM person_tag pt
