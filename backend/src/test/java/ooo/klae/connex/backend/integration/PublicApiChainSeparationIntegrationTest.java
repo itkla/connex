@@ -274,7 +274,8 @@ class PublicApiChainSeparationIntegrationTest {
 
         mockMvc.perform(request(org.springframework.http.HttpMethod.TRACE, "/api/tasks"))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("Request was rejected"));
     }
 
     @Test
@@ -316,7 +317,8 @@ class PublicApiChainSeparationIntegrationTest {
 
         mockMvc.perform(get("/api/tasks;x"))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("Request was rejected"));
     }
 
     @Test
