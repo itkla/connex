@@ -51,6 +51,47 @@ exports, and report/snapshot exports. A password re-prompt never satisfies these
 verification window defaults to ten minutes; an absent, zero, negative, or malformed duration
 fails closed.
 
+### Standing export channels and the surfaces outside the filter's path list
+
+The filter's path list only covers requests that answer with the exported bytes. Three export
+surfaces sit outside it. All three are controlled; none relies on the filter. #1763 records the
+decision for each, with the reason, so a later reader does not mistake an intentional design for an
+oversight.
+
+**Scheduled report delivery is controlled when the schedule is written, not when it sends.**
+`ReportDeliveryScheduler` emails a report CSV on a scheduler thread. There is no session there to
+step up, so gating the send is unimplementable, and gating it would strand every schedule that was
+already approved. The schedule is the thing that decides where tenant data goes, so
+`ScheduleService.create` and `ScheduleService.update` require a fresh WebAuthn step-up from a
+privileged account before opening or redirecting the channel. `update` replaces the whole schedule,
+so recipients, cadence, hour, timezone, and the enabled flag are all covered by that one gate.
+Delivery itself — claiming a due occurrence, resolving run-as, re-deriving recipients, freezing the
+snapshot — is deliberately untouched, so an existing schedule keeps delivering unattended.
+
+The gate is scoped to privileged accounts, and it is independent of
+`CONNEX_PRIVILEGED_MFA_ENFORCED`, like the other high-risk service boundaries above and unlike the
+staged-rollout export filter. An ordinary member reaches nobody new by scheduling: a schedule may
+only name active workspace members who already hold the report's own read permissions, re-checked at
+each send. An administrator, by contrast, can admit a new member and then name them, which is the
+ongoing exfiltration channel this refuses to open on one factor. Refusals are audited as
+`auth.mfa.step_up.required` with the `service_boundary` reason.
+
+**Deleting a schedule is not gated.** It closes a channel rather than opening one, and it is audited
+as `report.schedule.delete`. A single-factor session with `REPORT_UPDATE` can therefore stop a
+report from being delivered; it cannot cause one to be delivered anywhere new.
+
+**Support bundle download is gated at the service boundary.** `SupportBundleService.generate`
+requires organization administration and then `requireRecentAuthentication`, so
+`POST /api/orgs/{orgId}/support-bundle` already needs a fresh WebAuthn assertion. It is absent from
+the filter's path list because the service gate is the control, not because the surface is exempt.
+
+**The tenant workspace ZIP export is gated at grant issue, not at grant redemption.**
+`TenantExportService.prepare` and `TenantExportGrantService` both require organization
+administration plus `requireRecentAuthentication` before a download grant exists. Redemption then
+authorizes on the single-use, session-bound grant token rather than on a second step-up: the grant
+is the narrower authority, it is bound to the session that requested it, and requiring a fresh
+assertion again on a streaming download would only re-prove what issuing the grant already proved.
+
 ## Operator configuration
 
 `CONNEX_PRIVILEGED_MFA_ENFORCED` defaults to `true`. Only the case-insensitive value `false`
