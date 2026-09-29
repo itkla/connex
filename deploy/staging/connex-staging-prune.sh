@@ -196,12 +196,22 @@ main() {
         fi
     fi
 
+    local deployed rollback running_sha started now scratch_status=0
+    now="$(date +%s)"
+
+    # Orphaned build scratch is reclaimed FIRST, before every quarantine-specific precondition.
+    # Its own gates — the deploy lock above, the age floor, and the live-process reference check —
+    # are all it needs, and the preconditions below are exactly the ones that fail when the disk is
+    # already full: a failed deploy leaves the frontend marker stale, so gating scratch behind it
+    # would refuse to reclaim the space whose absence caused the failure, and no later deploy could
+    # recover either.
+    reap_orphaned_scratch "$now" || scratch_status=1
+
     if [ ! -d "$RELEASE_QUARANTINE_DIR" ]; then
-        log "No quarantine directory at $RELEASE_QUARANTINE_DIR; nothing to do"
-        return 0
+        log "No quarantine directory at $RELEASE_QUARANTINE_DIR; nothing more to do"
+        return "$scratch_status"
     fi
 
-    local deployed rollback running_sha started now
     deployed="$(read_sha_file "$MARKER")" || { log "Refused: committed release marker is unreadable"; return 1; }
     rollback="$(read_sha_file "$ROLLBACK_MARKER")" || { log "Refused: rollback marker is unreadable"; return 1; }
     running_sha="$(head -n 1 -- "$FRONTEND_RUNNING_MARKER" 2>/dev/null | cut -f1)" || running_sha=""
@@ -210,14 +220,11 @@ main() {
         log "Refused: cannot establish when the running frontend started"
         return 1
     fi
-    now="$(date +%s)"
-
-    reap_orphaned_scratch "$now"
 
     local entries path sha age index=0 pruned=0 freed=0 size
     entries="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' 2>/dev/null \
         | sort -rn | cut -d' ' -f2-)" || return 1
-    [ -n "$entries" ] || { log "Quarantine is empty; nothing to do"; return 0; }
+    [ -n "$entries" ] || { log "Quarantine is empty; nothing more to do"; return "$scratch_status"; }
 
     while IFS= read -r path; do
         [ -n "$path" ] || continue
@@ -273,6 +280,7 @@ main() {
     done <<< "$entries"
 
     log "Done — pruned $pruned entries, reclaimed $freed bytes; $(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }') bytes now available"
+    return "$scratch_status"
 }
 
 main "$@"

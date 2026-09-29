@@ -141,6 +141,15 @@ main() {
         ok refuses_without_frontend_evidence
     fi
     assert_dir_exists refusal_keeps_everything "$q/$OLD_ONE"
+    # The refusal is quarantine-specific. Scratch has its own gates and must still be reclaimed:
+    # a full disk fails the deploy, which leaves this very marker stale, so gating scratch behind it
+    # would strand the space whose absence caused the failure.
+    assert_dir_missing scratch_is_reclaimed_without_frontend_evidence "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+
+    # Same for a missing quarantine directory: nothing to prune is not a reason to keep scratch.
+    setup "$root"; rm -rf "$root/staging/.staging/release-quarantine"
+    run "$root" > "$root/noquarantine.log" 2>&1 || fail no_quarantine_exits_zero "$(tail -3 "$root/noquarantine.log")"
+    assert_dir_missing scratch_is_reclaimed_without_a_quarantine_directory "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
 
     # A tree any live process still references must survive, whatever its age says.
     setup "$root"
