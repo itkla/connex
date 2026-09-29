@@ -20,6 +20,15 @@
         "toolName": "create_task",
         "arguments": "{\"handle\":\"r1\",\"description\":\"Send the renewal paperwork\"}"
       }
+    },
+    {
+      "afterToolCalls": 1,
+      "onRepair": true,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"This brief can review the relationship, but it cannot create tasks, so nothing was added.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
     }
   ]
 }
