@@ -43,6 +43,13 @@ setup() {
         mkdir -p "$q/$entry"; printf 'x\n' > "$q/$entry/file"
     done
     mkdir -p "$q/$KEEP_ONE" "$q/$KEEP_TWO" "$q/$YOUNG"
+    # Orphaned build scratch, as a killed deploy leaves behind.
+    mkdir -p "$state/.target-release-${OLD_ONE}.abc123/frontend"
+    # ensure_previous_release strands these two shapes the same way a killed target build does.
+    mkdir -p "$state/.previous-release-${OLD_ONE}.def456/backend"
+    mkdir -p "$state/.previous-frontend-${OLD_ONE}.ghi789/.next"
+    # A human-named look-alike. It shares the prefix but is not a name the deploy script creates.
+    mkdir -p "$state/.target-release-manual-backup/keep-me"
     # Distinct mtimes: `sort -rn` is not stable, so equal stamps would make which entry the
     # keep-recent window retains a coin flip. Newest first: YOUNG, KEEP_ONE, KEEP_TWO, then the rest.
     touch -d "@$(( $(date +%s) - 60 ))"     "$q/$YOUNG"
@@ -89,6 +96,10 @@ main() {
 
     run "$root" > "$root/run.log" 2>&1 || { fail prune_exits_zero "$(tail -3 "$root/run.log")"; }
 
+    assert_dir_missing orphaned_scratch_is_removed "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+    assert_dir_missing orphaned_previous_release_scratch_is_removed "$root/staging/.staging/.previous-release-${OLD_ONE}.def456"
+    assert_dir_missing orphaned_previous_frontend_scratch_is_removed "$root/staging/.staging/.previous-frontend-${OLD_ONE}.ghi789"
+    assert_dir_exists prefix_look_alike_survives "$root/staging/.staging/.target-release-manual-backup"
     assert_dir_missing old_entries_are_pruned "$q/$OLD_ONE"
     assert_dir_missing second_old_entry_is_pruned "$q/$OLD_TWO"
     assert_dir_exists committed_release_survives "$q/$DEPLOYED"
@@ -106,6 +117,55 @@ main() {
     setup "$root"
     MIN_AGE=999999 run "$root" > "$root/age.log" 2>&1 || fail age_gate_exits_zero "$(tail -3 "$root/age.log")"
     assert_dir_exists age_gate_keeps_everything "$q/$OLD_ONE"
+    assert_dir_exists age_gate_keeps_scratch "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+    assert_dir_exists age_gate_keeps_previous_release_scratch "$root/staging/.staging/.previous-release-${OLD_ONE}.def456"
+
+    # An undeletable candidate must fail the run: systemd is the only thing watching the reaper.
+    # A candidate that cannot be inspected is not a candidate that can be skipped quietly.
+    setup "$root"
+    local blind="$root/stub-bin-stat"
+    mkdir -p "$blind"
+    cat > "$blind/stat" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    case "$arg" in
+        *.target-release-*) exit 1 ;;
+    esac
+done
+exec /usr/bin/stat "$@"
+STUB
+    chmod 0755 "$blind/stat"
+    if PATH="$blind:$PATH" run "$root" > "$root/blind.log" 2>&1; then
+        fail uninspectable_scratch_fails_the_run "exited zero although stat refused the candidate"
+    else
+        ok uninspectable_scratch_fails_the_run
+    fi
+
+    # Deterministic for root too: removing write bits does not stop UID 0 (CAP_DAC_OVERRIDE), so the
+    # failure is injected through a stub `rm` that refuses this one path and defers everything else.
+    setup "$root"
+    local stub="$root/stub-bin"
+    mkdir -p "$stub"
+    cat > "$stub/rm" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    case "$arg" in
+        *.target-release-*) exit 1 ;;
+    esac
+done
+exec /bin/rm "$@"
+STUB
+    chmod 0755 "$stub/rm"
+    if PATH="$stub:$PATH" run "$root" > "$root/undeletable.log" 2>&1; then
+        fail undeletable_scratch_fails_the_run "exited zero although rm refused the scratch"
+    else
+        ok undeletable_scratch_fails_the_run
+    fi
+    if grep -q "could not be removed" "$root/undeletable.log"; then
+        ok undeletable_scratch_is_reported
+    else
+        fail undeletable_scratch_is_reported "no refusal reported"
+    fi
 
     # No readable frontend marker means the reaper cannot prove anything: refuse.
     setup "$root"; rm -f "$root/staging/.staging/frontend-running"
@@ -115,6 +175,15 @@ main() {
         ok refuses_without_frontend_evidence
     fi
     assert_dir_exists refusal_keeps_everything "$q/$OLD_ONE"
+    # The refusal is quarantine-specific. Scratch has its own gates and must still be reclaimed:
+    # a full disk fails the deploy, which leaves this very marker stale, so gating scratch behind it
+    # would strand the space whose absence caused the failure.
+    assert_dir_missing scratch_is_reclaimed_without_frontend_evidence "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+
+    # Same for a missing quarantine directory: nothing to prune is not a reason to keep scratch.
+    setup "$root"; rm -rf "$root/staging/.staging/release-quarantine"
+    run "$root" > "$root/noquarantine.log" 2>&1 || fail no_quarantine_exits_zero "$(tail -3 "$root/noquarantine.log")"
+    assert_dir_missing scratch_is_reclaimed_without_a_quarantine_directory "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
 
     # A tree any live process still references must survive, whatever its age says.
     setup "$root"
