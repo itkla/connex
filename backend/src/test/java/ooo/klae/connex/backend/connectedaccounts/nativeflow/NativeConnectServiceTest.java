@@ -18,8 +18,11 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -35,7 +38,12 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -78,22 +86,18 @@ class NativeConnectServiceTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager fixtureTransactionManager;
     @MockitoBean private ProviderTokenClient tokenClient;
     @MockitoBean private ProviderCaptureConnectionStateService captureConnectionStateService;
 
     private Workspace workspace;
     private User firstUser;
     private String originalAppBaseUrl;
+    private final List<Integer> fixtureUserIds = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        workspace = workspaceMapper.getDefaultWorkspace();
-        if (workspace == null) {
-            workspace = new Workspace();
-            workspace.setName("Native Connect Test Workspace");
-            workspace.setSlug("native-connect-default");
-            workspaceMapper.insert(workspace);
-        }
+        workspace = resolveDefaultWorkspace();
         firstUser = newUser();
         originalAppBaseUrl = mailProperties.getAppBaseUrl();
         properties.getGoogle().setEnabled(true);
@@ -126,6 +130,22 @@ class NativeConnectServiceTest {
         reset(tokenClient, captureConnectionStateService);
     }
 
+    /** Retains append-only audit actors while reclaiming committed credentials and memberships. */
+    @AfterEach
+    void cleanCommittedFixtures() {
+        if (TestTransaction.isActive()) {
+            return;
+        }
+        for (int userId : fixtureUserIds) {
+            jdbcTemplate.update("DELETE FROM provider_native_connect_session WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM provider_connection WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM secret_value WHERE user_id = ?", userId);
+            jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", userId);
+        }
+        jdbcTemplate.update("UPDATE app_user SET email = ?, display_name = ? WHERE id = ?",
+            firstUser.getEmail(), firstUser.getDisplayName(), firstUser.getId());
+    }
+
     @Test
     void pairingPrepareCompleteStoresEncryptedStableAccountIdentity() {
         stubTokens("authorization-code", "issuer-a", "subject-a", "a@example.test");
@@ -156,6 +176,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void prepareIdentifiesThePairingOwnerAndKeepsTheCodeOutOfArgv() {
         NativePairingResponse emailPairing = nativeConnectService.createPairing(PROVIDER);
         assertEquals(
@@ -169,6 +190,7 @@ class NativeConnectServiceTest {
         NativePrepareResponse displayNamePrepared = prepare(
             nativeConnectService.createPairing(PROVIDER));
         assertEquals(firstUser.getDisplayName(), displayNamePrepared.accountLabel());
+        assertFailureAudit(firstUser, firstUser.getId(), "superseded", 1);
 
         jdbcTemplate.update(
             "UPDATE app_user SET display_name = '' WHERE id = ?", firstUser.getId());
@@ -176,6 +198,7 @@ class NativeConnectServiceTest {
         NativePrepareResponse idPrepared = prepare(
             nativeConnectService.createPairing(PROVIDER));
         assertEquals("user #" + firstUser.getId(), idPrepared.accountLabel());
+        assertFailureAudit(firstUser, firstUser.getId(), "superseded", 2);
     }
 
     @Test
@@ -231,6 +254,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void twoUsersRemainIsolatedAcrossHandoffPollingCancellationAndSecrets() {
         User secondUser = newUser();
         NativePairingResponse firstPairing = nativeConnectService.createPairing(PROVIDER);
@@ -246,6 +270,7 @@ class NativeConnectServiceTest {
                 "first-code",
                 queryParameter(firstPrepared.authorizeUrl(), "state")));
         assertEquals("state_mismatch", mismatch.getCode());
+        assertFailureAudit(secondUser, null, "state_mismatch", 1);
 
         authenticate(secondUser);
         NativePairingStatusResponse secondStatus =
@@ -334,6 +359,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void oneUserProviderSessionsKeepIndependentVerifierSlots() {
         properties.getMicrosoft().setEnabled(true);
         properties.getMicrosoft().setMode(ConnectedAccountMode.MANAGED);
@@ -361,6 +387,7 @@ class NativeConnectServiceTest {
 
         authenticate(firstUser);
         nativeConnectService.cancelPairing(PROVIDER);
+        assertFailureAudit(firstUser, firstUser.getId(), "cancelled", 1);
         clearAuthentication();
         assertThrows(
             RuntimeException.class,
@@ -394,6 +421,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void expiredPairingAndHandoffAreRejected() {
         NativePairingResponse expiredPairing = nativeConnectService.createPairing(PROVIDER);
         NativeConnectSession pairingSession = latest(firstUser);
@@ -406,6 +434,7 @@ class NativeConnectServiceTest {
         authenticate(firstUser);
         NativePrepareResponse expiredHandoff = prepare(
             nativeConnectService.createPairing(PROVIDER));
+        assertFailureAudit(firstUser, firstUser.getId(), "superseded", 1);
         expire(latest(firstUser));
         NativeConnectException handoffError = assertThrows(
             NativeConnectException.class,
@@ -434,6 +463,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void stateMismatchFailsClaimWithoutCallingProvider() {
         NativePrepareResponse prepared = prepare(
             nativeConnectService.createPairing(PROVIDER));
@@ -443,6 +473,7 @@ class NativeConnectServiceTest {
             () -> complete(prepared, "code", "wrong-state"));
 
         assertEquals("state_mismatch", error.getCode());
+        assertFailureAudit(firstUser, null, "state_mismatch", 1);
         authenticate(firstUser);
         NativePairingStatusResponse status =
             nativeConnectService.pairingStatus(PROVIDER);
@@ -452,6 +483,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void pairingPersistsAbsentAndPresentConnectionExpectations() {
         nativeConnectService.createPairing(PROVIDER);
 
@@ -466,9 +498,11 @@ class NativeConnectServiceTest {
         NativeConnectSession present = latest(firstUser);
         assertEquals(connection.getId(), present.getExpectedConnectionId());
         assertEquals(7L, present.getExpectedCredentialGeneration());
+        assertFailureAudit(firstUser, firstUser.getId(), "superseded", 1);
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void staleExpectationBeforeExchangeFailsWithoutProviderEgress() {
         NativePrepareResponse prepared = prepare(
             nativeConnectService.createPairing(PROVIDER));
@@ -485,9 +519,11 @@ class NativeConnectServiceTest {
         verify(tokenClient, never()).exchange(anyString(), anyMap());
         assertEquals("failed", latest(firstUser).getStatus());
         assertEquals("connection_conflict", latest(firstUser).getErrorCode());
+        assertFailureAudit(firstUser, null, "connection_conflict", 1);
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void connectionRaceAfterExchangeRevokesFreshGoogleGrant() {
         NativePrepareResponse prepared = prepare(
             nativeConnectService.createPairing(PROVIDER));
@@ -509,6 +545,7 @@ class NativeConnectServiceTest {
             "https://oauth2.googleapis.com/revoke", "refresh-race-code");
         assertEquals("failed", latest(firstUser).getStatus());
         assertEquals("connection_conflict", latest(firstUser).getErrorCode());
+        assertFailureAudit(firstUser, null, "connection_conflict", 1);
     }
 
     @Test
@@ -548,6 +585,7 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void idTokenAudienceUsesManagedClientId() {
         when(tokenClient.exchange(anyString(), anyMap())).thenReturn(
             tokenResponse(
@@ -568,6 +606,7 @@ class NativeConnectServiceTest {
 
         assertEquals("identity_audience_mismatch", error.getCode());
         assertNull(connectionMapper.getByUserAndProvider(firstUser.getId(), PROVIDER));
+        assertFailureAudit(firstUser, null, "identity_audience_mismatch", 1);
     }
 
     @Test
@@ -706,6 +745,23 @@ class NativeConnectServiceTest {
             session.getId());
     }
 
+    /** Reuses the shared default fixture and commits its creation before any test-transaction read. */
+    private Workspace resolveDefaultWorkspace() {
+        TransactionTemplate template = new TransactionTemplate(fixtureTransactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return Objects.requireNonNull(template.execute(status -> {
+            Workspace existing = workspaceMapper.getDefaultWorkspace();
+            if (existing != null) {
+                return existing;
+            }
+            Workspace created = new Workspace();
+            created.setName("Native Connect Test Workspace");
+            created.setSlug("default");
+            workspaceMapper.insert(created);
+            return Objects.requireNonNull(workspaceMapper.getDefaultWorkspace(), "created default workspace");
+        }), "default workspace");
+    }
+
     private User newUser() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         User user = new User();
@@ -715,8 +771,18 @@ class NativeConnectServiceTest {
         user.setPasswordHash("hash_" + suffix);
         user.setTimezone("UTC");
         userMapper.insert(user);
+        fixtureUserIds.add(user.getId());
         workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
         return user;
+    }
+
+    private void assertFailureAudit(User owner, Integer actorId, String errorCode, int expectedCount) {
+        assertEquals(expectedCount, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'user.connection.connect_failed' "
+                + "AND outcome = 'failure' AND entity_type = 'user' AND entity_id = ? "
+                + "AND actor_id <=> ? AND workspace_id IS NULL AND org_id IS NULL "
+                + "AND target_label = ? AND JSON_UNQUOTE(JSON_EXTRACT(context, '$.error')) = ?",
+            Integer.class, owner.getId(), actorId, PROVIDER, errorCode));
     }
 
     private void authenticate(User user) {
