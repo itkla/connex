@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.TestPropertySource;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
@@ -17,8 +16,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
  * unverified account registers with an allowed-domain address it does not own (#282).
  * Workspaces with no domain allowlist are unaffected.
  */
-@TestPropertySource(properties = "connex.registration-verification.enabled=true")
-class RegistrationVerificationGateTest extends AbstractServiceTest {
+class RegistrationVerificationGateTest extends AbstractRegistrationVerificationTest {
 
     @Autowired private InviteLinkService inviteLinkService;
     @Autowired private AllowedDomainService allowedDomainService;

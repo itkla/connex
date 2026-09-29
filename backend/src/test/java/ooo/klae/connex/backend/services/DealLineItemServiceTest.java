@@ -2,11 +2,16 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -24,6 +29,28 @@ class DealLineItemServiceTest extends AbstractServiceTest {
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
     @Autowired DealService dealService;
+    @Autowired DealValueService dealValueService;
+    @Autowired PlatformTransactionManager transactionManager;
+
+    @Test
+    void writeMethodsRequireAnExistingTransaction() {
+        int workspaceId = 7;
+        Deal deal = new Deal();
+        deal.setId(19);
+        deal.setValueSource("manual");
+        deal.setValue(new BigDecimal("10.00"));
+        deal.setActualValue(new BigDecimal("0.00"));
+        TransactionTemplate withoutTransaction = new TransactionTemplate(transactionManager);
+        withoutTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+
+        withoutTransaction.executeWithoutResult(status -> assertAll(
+            () -> assertThrows(IllegalTransactionStateException.class,
+                () -> dealValueService.setManualValue(workspaceId, deal, BigDecimal.TEN)),
+            () -> assertThrows(IllegalTransactionStateException.class,
+                () -> dealValueService.reconcileLineItems(workspaceId, deal)),
+            () -> assertThrows(IllegalTransactionStateException.class,
+                () -> dealValueService.reconcileRealizedValue(workspaceId, deal, null, null))));
+    }
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();

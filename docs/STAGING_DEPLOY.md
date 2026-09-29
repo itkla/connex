@@ -193,9 +193,36 @@ digests, and both embedded identities again before using the pair.
 
 ### Reclaiming quarantine
 
-`connex-staging-prune` (`deploy/staging/connex-staging-prune.sh`) runs daily from
+`connex-staging-prune` (`deploy/staging/connex-staging-prune.sh`) runs hourly from
 `connex-staging-prune.timer` and is the only thing permitted to unlink a quarantined tree. The
 deploy script's invariant is unchanged.
+
+**Merging a change to this script does not change what the host runs.** The unit executes
+`/usr/local/bin/connex-staging-prune`, a separately installed copy, and nothing in the repository
+copies it there — so a host keeps its old script and its old timer schedule until someone rolls the
+change out by hand. Do that whenever `connex-staging-prune.sh` or either unit file changes:
+
+```bash
+# On the staging host, as the deploy user. Verify first, then install.
+sudo install -m 0755 deploy/staging/connex-staging-prune.sh /usr/local/bin/connex-staging-prune
+sudo install -m 0644 deploy/staging/systemd/connex-staging-prune.service \
+    deploy/staging/systemd/connex-staging-prune.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now connex-staging-prune.timer
+
+# Confirm the host now runs the intended schedule and script, not the previous ones.
+systemctl cat connex-staging-prune.service | grep ExecStart
+systemctl list-timers connex-staging-prune.timer
+# Run the dry run as the unit's own user (User=dev, Group=dev), not as root: state-file
+# permissions and /proc visibility differ, so a root check can report a clean scan while the
+# timer's own runs refuse or make different reference decisions.
+sudo -u dev /usr/local/bin/connex-staging-prune --dry-run
+```
+
+The dry run is the check that matters: it reports what the installed copy would reclaim without
+removing anything, so a mismatch between the repository and the host shows up as a difference in
+that output rather than as silence — and running it as `dev` is what makes that output represent
+what the timer will actually do.
 
 It removes an entry only when every one of these holds:
 
@@ -203,7 +230,7 @@ It removes an entry only when every one of these holds:
    a bare 40-character SHA;
 2. it is not the committed, rollback, or attested-running release;
 3. it is not within the two most recent entries, which are kept for post-mortems;
-4. it is older than `CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS` (default 24h), measured from **ctime** —
+4. it is older than `CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS` (default 4h), measured from **ctime** —
    `rename(2)` preserves mtime, so mtime is when the release was built, not when it was retired;
 5. the running frontend started *after* the entry was quarantined, since a process cannot hold a
    tree that was already quarantined before that process existed;
@@ -213,6 +240,12 @@ It removes an entry only when every one of these holds:
 It takes the deploy lock non-blocking and exits quietly if a deploy holds it, so it never races the
 rename it reasons about. It refuses outright, removing nothing, if the markers are unreadable or the
 frontend start time cannot be established, and rejects any argument other than `--dry-run`.
+
+It also removes **orphaned build scratch**. A build writes into
+`.staging/.target-release-<sha>.XXXXXX` and deletes it on both the success and failure paths, but a
+build that is *killed* never reaches that cleanup, stranding most of a frontend and backend build —
+close to 900 MB. The reaper removes such a directory once it is past the minimum age, holds the
+deploy lock, and no live process references it.
 
 ```bash
 # Report what would be reclaimed, without touching anything.

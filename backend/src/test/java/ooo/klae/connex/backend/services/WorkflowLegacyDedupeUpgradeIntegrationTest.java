@@ -8,9 +8,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -18,10 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -45,7 +40,7 @@ import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
-@Import(WorkflowLegacyDedupeUpgradeIntegrationTest.FixedDedupeConfiguration.class)
+@Import(WorkflowFixedDedupeTestConfiguration.class)
 class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
 
     @Autowired private RuleService ruleService;
@@ -289,16 +284,5 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
                 Integer.class,
                 workspace.getId(),
                 workflow.getId()));
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class FixedDedupeConfiguration {
-
-        @Bean
-        @Primary
-        WorkflowDedupeKey transitionWorkflowDedupeKey() {
-            return new WorkflowDedupeKey(Clock.fixed(
-                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC));
-        }
     }
 }
