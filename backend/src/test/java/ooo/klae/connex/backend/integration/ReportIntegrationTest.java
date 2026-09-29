@@ -878,10 +878,11 @@ class ReportIntegrationTest {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void scheduledDeliveryAuditsFailureAndSendsNothingWhenCapacityCannotBeReclaimed() throws Exception {
         RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
         User member = newMember(workspace, "member");
+        MockHttpSession session = null;
         try {
-            MockHttpSession session = login(member.getUsername());
+            session = login(member.getUsername());
             int archiveReportId = createReport(session, workspace);
             int deliveryReportId = createReport(session, workspace);
             TransactionTemplate fixtureTransaction = new TransactionTemplate(fixtureTransactionManager);
@@ -905,11 +906,14 @@ class ReportIntegrationTest {
                     Integer.class, workspace.getId(), scheduleId));
             verify(mailService, never()).sendForWorkspace(anyInt(), any());
         } finally {
+            if (session != null) {
+                session.invalidate();
+            }
             cleanCommittedDeliveryFixture(workspace.getId(), member.getId());
         }
     }
 
-    /** Retains audited workspace/user roots and reclaims the quota, schedules and memberships. */
+    /** Retains audit parents only in the private organization; reclaims all delivery state. */
     private void cleanCommittedDeliveryFixture(int workspaceId, int userId) {
         jdbcTemplate.update("DELETE FROM report_snapshot WHERE workspace_id = ?", workspaceId);
         jdbcTemplate.update("DELETE FROM report_schedule WHERE workspace_id = ?", workspaceId);
@@ -917,6 +921,7 @@ class ReportIntegrationTest {
         jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ?", workspaceId);
         jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
             workspaceId, userId);
+        workspaceMapper.clearLastActiveWorkspaceId(userId);
     }
 
     @Test

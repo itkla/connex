@@ -8,10 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,13 +18,16 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.transaction.TestTransaction;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.support.CommittedAuditFixture;
 
 /**
  * Registration conflicts must surface a single generic, field-less error so an unauthenticated
@@ -40,22 +39,8 @@ class AuthServiceTest extends AbstractServiceTest {
     @Autowired private AuthService authService;
     @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private JdbcTemplate jdbcTemplate;
-
-    private final List<Integer> registeredFixtureIds = new ArrayList<>();
-
-    /** Audited users and workspaces remain; their test-only memberships can be reclaimed. */
-    @AfterEach
-    void cleanCommittedMemberships() {
-        if (TestTransaction.isActive()) {
-            return;
-        }
-        jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", currentUser.getId());
-        for (int userId : registeredFixtureIds) {
-            jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", userId);
-            jdbcTemplate.update("DELETE FROM org_member WHERE user_id = ?", userId);
-            jdbcTemplate.update("DELETE FROM notification_recipient_state WHERE recipient_id = ?", userId);
-        }
-    }
+    @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private PlatformTransactionManager fixtureTransactionManager;
 
     private RegisterDto registration(String username, String email) {
         RegisterDto dto = new RegisterDto();
@@ -68,11 +53,10 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void register_duplicateUsername_throwsFieldlessGenericConflict() {
+        useCommittedAuditFixture();
         String username = "taken_" + unique();
-        registeredFixtureIds.add(authService.register(
-            registration(username, unique() + "@example.com"), null).getId());
+        insertRegistrationConflict(registration(username, unique() + "@example.com"));
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
             () -> authService.register(registration(username, unique() + "@example.com"), null));
@@ -82,11 +66,10 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void register_duplicateEmail_throwsIdenticalFieldlessConflict() {
+        useCommittedAuditFixture();
         String email = "taken_" + unique() + "@example.com";
-        registeredFixtureIds.add(authService.register(
-            registration("user_" + unique(), email), null).getId());
+        insertRegistrationConflict(registration("user_" + unique(), email));
         RegisterDto duplicate = registration("user_" + unique(), email);
 
         DuplicateResourceException ex = assertThrows(DuplicateResourceException.class,
@@ -106,8 +89,8 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void selfServiceRegistration_rejectsKnownBreachedPassword() {
+        useCommittedAuditFixture();
         RegisterDto request = registration("breached_" + unique(), unique() + "@example.com");
         request.setPassword("Password1!");
 
@@ -120,8 +103,8 @@ class AuthServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void administratorRegistration_rejectsKnownBreachedPassword() {
+        useCommittedAuditFixture();
         RegisterDto request = registration("admin_breached_" + unique(), unique() + "@example.com");
         request.setPassword("Password1!");
 
@@ -282,12 +265,40 @@ class AuthServiceTest extends AbstractServiceTest {
             () -> authService.hasPasswordCredential(member.getId()));
     }
 
+    /** Replaces only the rolled-back base setup, then restores rollback for the tested operation. */
+    private void useCommittedAuditFixture() {
+        TestTransaction.flagForRollback();
+        TestTransaction.end();
+        clearAuthentication();
+        CommittedAuditFixture fixture = CommittedAuditFixture.create(
+            fixtureTransactionManager, organizationMapper, workspaceMapper, userMapper);
+        TestTransaction.start();
+        workspace = fixture.workspace();
+        currentUser = fixture.actor();
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+    }
+
+    /** A duplicate account needs no success audit holding the failure audit's chain head. */
+    private void insertRegistrationConflict(RegisterDto request) {
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setDisplayName(request.getDisplayName());
+        user.setEmail(request.getEmail());
+        user.setPasswordHash("fixture_" + unique());
+        user.setTimezone(request.getTimezone());
+        userMapper.insert(user);
+    }
+
     private void assertRegistrationFailureAudit(String username) {
-        assertEquals(1, jdbcTemplate.queryForObject(
+        TransactionTemplate template = new TransactionTemplate(fixtureTransactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        Integer count = template.execute(status -> jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE action = 'auth.register' "
                 + "AND outcome = 'failure' AND actor_id = ? AND workspace_id = ? "
                 + "AND entity_type = 'user' AND entity_id IS NULL AND target_label = ?",
             Integer.class, currentUser.getId(), workspace.getId(), username));
+        assertEquals(1, count);
     }
 
     private User passwordlessUser() {
