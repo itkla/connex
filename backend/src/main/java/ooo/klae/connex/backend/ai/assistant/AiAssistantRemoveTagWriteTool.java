@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.RemoveTag;
+import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -34,7 +35,7 @@ import tools.jackson.databind.JsonNode;
  * tag, and the approval is refused rather than removing an association the member never
  * reviewed. The framework holds the target {@code FOR UPDATE}, refuses the approval if the record
  * was written after the proposal, and runs the owner-scope gate before this tool removes the
- * association through the record's own service, which records the audit row.
+ * association through the record's own service, which records the audit row when it removed one.
  *
  * <p>The read-back is {@link ReadBack#structural structural} and verifies nothing: the record
  * services report only whether they removed the association, never which tag they removed, and
@@ -167,16 +168,27 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
     }
 
     /**
-     * The pinned tag while the record holds it, and nothing after the removal.
+     * The pinned tag while the record holds it, and nothing after the removal, withheld when the
+     * special-care screen excludes the name it would show.
+     *
+     * <p>A tag name is a free-text label a member attached to the record, so it is screened here
+     * on the same rule as this card's request summary and its outcome values: a card that falls
+     * back to the generic summary never names the tag in its change either, and offers no apply.
      *
      * <p>A record that no longer holds the tag would be left exactly as it is, so the change is
      * unchanged. A requested name that no longer resolves to the pinned tag — the tag was deleted,
      * renamed, or deleted and re-created under the same name — is unresolved, which is exactly
-     * when the approval refuses; the record's own tag under that name, if it holds one, is shown
-     * as the current value so the card never claims the record holds nothing.
+     * when the approval refuses; the pinned tag under its current name, or else the record's own
+     * tag under the requested name, is shown as the current value when the record holds one, so
+     * the card never claims the record holds nothing.
      */
     @Override
     public Diff diff(Review review) {
+        Diff diff = reviewedDiff(review);
+        return SpecialCareTextScreen.screen(diff.currentValue()).excluded() ? null : diff;
+    }
+
+    private static Diff reviewedDiff(Review review) {
         Tag reviewed = reviewedTag(review);
         if (reviewed == null) {
             return new Diff(
@@ -249,7 +261,23 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
         return matches.size() == 1 ? matches.getFirst() : null;
     }
 
+    /**
+     * What the record holds in place of an unresolved tag: the pinned tag under whatever name it
+     * carries now, so a renamed tag is still shown as held, and otherwise the record's own tag
+     * under the requested name.
+     */
     private static String heldName(Review review) {
+        Integer pinned = review.pinnedResolutionId();
+        if (pinned != null) {
+            String pinnedName = review.targetTags().stream()
+                    .filter(tag -> tag.tagId() == pinned)
+                    .map(RecordTag::name)
+                    .findFirst()
+                    .orElse(null);
+            if (pinnedName != null) {
+                return pinnedName;
+            }
+        }
         String requested = review.requestText(TAG_FIELD);
         if (requested == null) {
             return null;

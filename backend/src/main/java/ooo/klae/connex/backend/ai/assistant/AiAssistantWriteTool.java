@@ -245,10 +245,17 @@ public interface AiAssistantWriteTool {
     /**
      * The before and after values one pending proposal would write, never shown to the model.
      *
-     * <p>Called only for a viewer who may read the proposal's details.
+     * <p>Called only for a viewer who may read the proposal's details. The framework does not
+     * screen these values for special-care text: a stage or a member is workspace vocabulary the
+     * requester reviews by name, so a change keeps naming it even when a screened summary falls
+     * back to the generic one. A tool whose values are free-text labels a member attaches to a
+     * record, such as a tag name, screens them itself and returns {@code null} rather than name an
+     * excluded one, so its card withholds the change, and with it the apply control, exactly where
+     * its summary withholds the name.
      *
      * @param review the card's batched, viewer-authorized read state
-     * @return the change, or {@code null} when the tool has no reviewable before and after
+     * @return the change, or {@code null} when the tool has no reviewable before and after or
+     *     withholds it
      */
     Diff diff(Review review);
 

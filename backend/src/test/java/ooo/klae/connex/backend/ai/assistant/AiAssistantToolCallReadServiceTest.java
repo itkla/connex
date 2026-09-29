@@ -1511,6 +1511,53 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("Priority", drifted.change().currentValue());
         assertNull(drifted.change().proposedValue());
         assertEquals("unresolved", drifted.change().state());
+
+        when(tagMapper.getAllTags(WORKSPACE_ID))
+                .thenReturn(List.of(tag(8, "Prospect"), tag(9, "Inactive")));
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(
+                        new RecordTag(41, 8, "Prospect"), new RecordTag(41, 9, "Inactive")));
+        AiAssistantToolCallReadDto renamed = service.list(SESSION_ID, false).getFirst();
+        assertEquals("Remove a tag", renamed.requestSummary());
+        assertEquals("Inactive", renamed.change().currentValue(),
+                "a renamed pinned tag the record still holds must be shown as held");
+        assertEquals("unresolved", renamed.change().state());
+    }
+
+    /**
+     * A tag whose name the special-care screen excludes is withheld from the whole card: the
+     * request summary falls back to the generic one and no change row states the name, so the
+     * card offers no apply, while an ordinary tag on the same page is still shown.
+     */
+    @Test
+    void aTagRemovalCardWithholdsATagNameTheSpecialCareScreenExcludes() {
+        AiChatToolCall screened = pinned(
+                toolCall(85, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 85, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":7},\"principals\":[]");
+        screened.setArgumentsJson(screened.getArgumentsJson()
+                .replace("\"tag\":\"priority\"", "\"tag\":\"Diagnosis pending\""));
+        AiChatToolCall ordinary = pinned(
+                toolCall(86, USER_ID, "remove_tag", "confirm", "proposed", "deal", 41, 86, null),
+                ",\"resolution\":{\"field\":\"tag\",\"id\":9},\"principals\":[]");
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(screened, ordinary));
+        when(tagMapper.getAllTags(WORKSPACE_ID))
+                .thenReturn(List.of(tag(7, "Diagnosis pending"), tag(9, "Priority")));
+        when(tagMapper.getTagsForRecords(WORKSPACE_ID, "deal", List.of(41)))
+                .thenReturn(List.of(
+                        new RecordTag(41, 7, "Diagnosis pending"),
+                        new RecordTag(41, 9, "Priority")));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        AiAssistantToolCallReadDto withheld = cards.getFirst();
+        assertEquals("Remove a tag", withheld.requestSummary());
+        assertNull(withheld.change(), "a screened tag name must not reach the change row");
+        AiAssistantToolCallReadDto shown = cards.get(1);
+        assertEquals("Remove tag: Priority", shown.requestSummary());
+        assertEquals("Priority", shown.change().currentValue());
+        assertEquals("ready", shown.change().state());
     }
 
     /**
@@ -1933,17 +1980,17 @@ class AiAssistantToolCallReadServiceTest {
      * @param pins the pin siblings a proposal prepared now carries after its request
      * @return the same proposal carrying those pins
      */
+    private static AiChatToolCall pinned(AiChatToolCall toolCall, String pins) {
+        String stored = toolCall.getArgumentsJson();
+        toolCall.setArgumentsJson(stored.substring(0, stored.length() - 1) + pins + "}");
+        return toolCall;
+    }
+
     private static Tag tag(int id, String name) {
         Tag tag = new Tag();
         tag.setId(id);
         tag.setName(name);
         return tag;
-    }
-
-    private static AiChatToolCall pinned(AiChatToolCall toolCall, String pins) {
-        String stored = toolCall.getArgumentsJson();
-        toolCall.setArgumentsJson(stored.substring(0, stored.length() - 1) + pins + "}");
-        return toolCall;
     }
 
     private static AiChatToolCall ownerProposal(int id, int personId, String owner) {
