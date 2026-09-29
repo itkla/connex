@@ -2649,6 +2649,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 tag: t('toolCards.change.currentUnresolvedTag'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
+            changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
             changeState: {
                 unchanged: t('toolCards.change.stateUnchanged'),
                 recordChanged: t('toolCards.change.stateRecordChanged'),

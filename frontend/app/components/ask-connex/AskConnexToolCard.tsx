@@ -23,6 +23,7 @@ import {
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
     askConnexToolOutcomeSummary,
+    askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
     askConnexUndoWindow,
@@ -83,6 +84,8 @@ export type AskConnexToolCardLabels = {
     /** What the proposal asked for, when that value no longer exists in this workspace. */
     changeProposedUnresolved: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
+    /** Why a removal cannot be made once what it would remove has changed since the proposal. */
+    changeStateUnresolvedRemoval: string;
     diffAfter: string;
     diffBefore: string;
     discard: string;
@@ -235,12 +238,18 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  * left this workspace holds a real value nobody here can name, and a proposal whose value no
  * longer exists asked for something that is gone — writing either as an empty field would read as
  * a legitimate clearing proposal and contradict the very notice printed underneath it.
+ *
+ * A removal is the exception on the proposed side: its empty after-value is exactly what it
+ * proposed, and when it can no longer be made it is what it would remove that changed, so the
+ * after-value stays "not set" and its notice says why.
  */
 export function AskConnexChangeRow({
     change,
+    removal,
     labels,
 }: {
     change: AiAssistantToolCallChange;
+    removal: boolean;
     labels: AskConnexToolCardLabels;
 }) {
     const fieldLabel = labels.changeField[change.field];
@@ -260,7 +269,7 @@ export function AskConnexChangeRow({
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
-                    {change.state === 'unresolved'
+                    {change.state === 'unresolved' && !removal
                         ? labels.changeProposedUnresolved
                         : change.proposedValue ?? <NotSetValue labels={labels} />}
                 </span>
@@ -280,9 +289,11 @@ export function AskConnexChangeRow({
  */
 export function AskConnexChangeNotice({
     state,
+    removal,
     labels,
 }: {
     state: AiAssistantToolCallChangeState;
+    removal: boolean;
     labels: AskConnexToolCardLabels;
 }) {
     if (state === 'ready') return null;
@@ -294,7 +305,11 @@ export function AskConnexChangeNotice({
             blocking ? 'text-destructive' : 'text-muted-foreground',
         )}>
             <NoticeIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
-            <span>{labels.changeState[state]}</span>
+            <span>
+                {state === 'unresolved' && removal
+                    ? labels.changeStateUnresolvedRemoval
+                    : labels.changeState[state]}
+            </span>
         </p>
     );
 }
@@ -329,6 +344,7 @@ export default function AskConnexToolCard({
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
     const proposal = status === 'proposed' ? card.change : null;
+    const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'
         ? askConnexCreatedRecordHref(card.createdRecord)
@@ -469,8 +485,12 @@ export default function AskConnexToolCard({
                     {proposal !== null ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
-                            <AskConnexChangeRow change={proposal} labels={labels} />
-                            <AskConnexChangeNotice state={proposal.state} labels={labels} />
+                            <AskConnexChangeRow change={proposal} removal={removal} labels={labels} />
+                            <AskConnexChangeNotice
+                                state={proposal.state}
+                                removal={removal}
+                                labels={labels}
+                            />
                         </div>
                     ) : null}
 

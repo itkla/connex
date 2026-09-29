@@ -798,7 +798,8 @@
         "stateUnchanged": "This is already the current value, so applying it would change nothing.",
         "stateRecordChanged": "This record moved on after the assistant proposed this, so the change can't be applied as reviewed. Ask for it again to work from where the record is now.",
         "statePermissionLost": "You no longer have permission to make this change. Ask a workspace admin.",
-        "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made."
+        "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made.",
+        "stateUnresolvedRemoval": "What this would remove has changed since it was proposed, so this change can't be made."
       },
       "actions": {
         "undo": "Undo",

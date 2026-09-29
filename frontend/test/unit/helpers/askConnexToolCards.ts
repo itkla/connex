@@ -23,6 +23,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         tag: "A tag that no longer exists",
     },
     changeProposedUnresolved: "No longer exists",
+    changeStateUnresolvedRemoval: "What this would remove has changed since it was proposed.",
     changeState: {
         unchanged: "This is already the current value.",
         recordChanged: "This record moved on, so ask for the change again.",

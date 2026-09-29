@@ -550,6 +550,19 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
 }
 
 /**
+ * Whether a tool's reviewed change takes a value off its record rather than writing one.
+ *
+ * A removal proposes an empty after-value on purpose. When it can no longer be made, what changed
+ * is the value it would remove — renamed, deleted or replaced since the proposal — not a proposed
+ * value that disappeared, so its card keeps that empty after-value and gives its own reason.
+ */
+export function askConnexToolProposesRemoval(
+    toolCall: Pick<AiAssistantToolCall, 'toolName'>,
+): boolean {
+    return toolCall.toolName === 'remove_tag';
+}
+
+/**
  * Whether one reviewed proposal can still be part of what a member applies.
  *
  * The single rule behind both the standalone card's apply control and the grouped review's

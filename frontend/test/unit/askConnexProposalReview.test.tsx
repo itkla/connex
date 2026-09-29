@@ -189,6 +189,26 @@ describe("assistant proposal review", () => {
         expect(markup).toContain("The proposed value no longer exists in this workspace.");
         expect(markup).not.toContain("Apply the proposed change to Acme renewal");
     });
+
+    it("writes an unresolved tag removal as the removal it proposed, not as a value that is gone", () => {
+        const markup = renderCard(card({
+            toolName: "remove_tag",
+            requestSummary: "Remove a tag",
+            change: change({
+                field: "tag",
+                currentValue: "Urgent",
+                proposedValue: null,
+                state: "unresolved",
+            }),
+        }));
+
+        expect(markup).toContain("Urgent");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain(cardLabels.changeStateUnresolvedRemoval);
+        expect(markup).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(markup).not.toContain(cardLabels.changeState.unresolved);
+        expect(markup).not.toContain("Apply the proposed change to Acme renewal");
+    });
 });
 
 describe("completed assistant actions", () => {
@@ -425,6 +445,41 @@ describe("grouped proposal review", () => {
         expect(markup).toContain("1 of 3 can be applied now.");
         expect(markup).toContain("Apply 1 changes");
         expect(markup).toContain(cardLabels.changeState.recordChanged);
+    });
+
+    it("gives an unresolved tag removal in the full review its own reason", () => {
+        const removal = card({
+            id: 54,
+            target: { kind: "deal", id: 10, label: "Umbrella renewal" },
+            toolName: "remove_tag",
+            requestSummary: "Remove a tag",
+            change: change({
+                field: "tag",
+                currentValue: "Urgent",
+                proposedValue: null,
+                state: "unresolved",
+            }),
+        });
+        const [group] = askConnexProposalGroups(
+            [first, second, removal], new Set([51, 52, 54]), new Set(),
+        );
+        const markup = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+
+        expect(group.applicable).toBe(2);
+        expect(markup).toContain("Umbrella renewal");
+        expect(markup).toContain(cardLabels.changeStateUnresolvedRemoval);
+        expect(markup).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(markup).not.toContain(cardLabels.changeState.unresolved);
     });
 
     it("shows every record, value, and reason in the full review", () => {
