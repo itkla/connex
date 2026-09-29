@@ -121,6 +121,26 @@ main() {
     assert_dir_exists age_gate_keeps_previous_release_scratch "$root/staging/.staging/.previous-release-${OLD_ONE}.def456"
 
     # An undeletable candidate must fail the run: systemd is the only thing watching the reaper.
+    # A candidate that cannot be inspected is not a candidate that can be skipped quietly.
+    setup "$root"
+    local blind="$root/stub-bin-stat"
+    mkdir -p "$blind"
+    cat > "$blind/stat" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+    case "$arg" in
+        *.target-release-*) exit 1 ;;
+    esac
+done
+exec /usr/bin/stat "$@"
+STUB
+    chmod 0755 "$blind/stat"
+    if PATH="$blind:$PATH" run "$root" > "$root/blind.log" 2>&1; then
+        fail uninspectable_scratch_fails_the_run "exited zero although stat refused the candidate"
+    else
+        ok uninspectable_scratch_fails_the_run
+    fi
+
     # Deterministic for root too: removing write bits does not stop UID 0 (CAP_DAC_OVERRIDE), so the
     # failure is injected through a stub `rm` that refuses this one path and defers everything else.
     setup "$root"

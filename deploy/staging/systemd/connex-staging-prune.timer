@@ -1,11 +1,11 @@
 [Unit]
-Description=Prune the Connex staging release quarantine daily
+Description=Prune the Connex staging release quarantine hourly
 
 [Timer]
 # Hourly. Daily left the reaper a day behind a busy afternoon: entries became eligible long after
 # the filesystem had already tightened toward the deploy preflight floor.
 OnCalendar=hourly
-# The host is not always up at 04:20; catch up on the next boot rather than skipping a day.
+# The host is not always up for every hour; catch up on the next boot rather than skipping runs.
 Persistent=true
 RandomizedDelaySec=300
 

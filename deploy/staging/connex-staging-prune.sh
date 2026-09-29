@@ -166,7 +166,14 @@ reap_orphaned_scratch() {
             log "Skipped $(basename -- "$path"): not a name the deploy script creates"
             continue
         fi
-        created="$(stat -c %Z -- "$path")" || continue
+        # A candidate that cannot even be inspected was never assessed, so treating it as "skip"
+        # would let the service exit 0 while the space stays occupied — the silent success this
+        # reaper exists to stop.
+        if ! created="$(stat -c %Z -- "$path")"; then
+            log "Refused: could not inspect orphaned scratch $(basename -- "$path")"
+            failures=$((failures + 1))
+            continue
+        fi
         age=$((now - created))
         if [ "$age" -lt "$MIN_AGE_SECONDS" ]; then
             log "Skipped scratch $(basename -- "$path"): ${age}s old, below the ${MIN_AGE_SECONDS}s minimum"
