@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,8 +39,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -82,6 +86,7 @@ class NativeConnectServiceTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager fixtureTransactionManager;
     @MockitoBean private ProviderTokenClient tokenClient;
     @MockitoBean private ProviderCaptureConnectionStateService captureConnectionStateService;
 
@@ -92,13 +97,7 @@ class NativeConnectServiceTest {
 
     @BeforeEach
     void setUp() {
-        workspace = workspaceMapper.getDefaultWorkspace();
-        if (workspace == null) {
-            workspace = new Workspace();
-            workspace.setName("Native Connect Test Workspace");
-            workspace.setSlug("native-connect-default");
-            workspaceMapper.insert(workspace);
-        }
+        workspace = resolveDefaultWorkspace();
         firstUser = newUser();
         originalAppBaseUrl = mailProperties.getAppBaseUrl();
         properties.getGoogle().setEnabled(true);
@@ -744,6 +743,23 @@ class NativeConnectServiceTest {
                 + "SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) "
                 + "WHERE id = ?",
             session.getId());
+    }
+
+    /** Reuses the shared default fixture and commits its creation before any test-transaction read. */
+    private Workspace resolveDefaultWorkspace() {
+        TransactionTemplate template = new TransactionTemplate(fixtureTransactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return Objects.requireNonNull(template.execute(status -> {
+            Workspace existing = workspaceMapper.getDefaultWorkspace();
+            if (existing != null) {
+                return existing;
+            }
+            Workspace created = new Workspace();
+            created.setName("Native Connect Test Workspace");
+            created.setSlug("default");
+            workspaceMapper.insert(created);
+            return Objects.requireNonNull(workspaceMapper.getDefaultWorkspace(), "created default workspace");
+        }), "default workspace");
     }
 
     private User newUser() {

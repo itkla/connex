@@ -90,7 +90,10 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         when(runtimeProperties.maxTriggerFanout()).thenReturn(128);
     }
 
-    /** Reclaims only the isolated workspace committed by the canonical claim tests. */
+    /**
+     * Reclaims the isolated canonical fixtures. Clearing ownership with the active version satisfies
+     * the canonical-version check before breaking the workflow/version foreign-key cycle.
+     */
     @AfterEach
     void cleanCommittedCanonicalFixtures() {
         if (TestTransaction.isActive() || workspace == null) {
@@ -98,7 +101,8 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         }
         int workspaceId = workspace.getId();
         jdbcTemplate.update(
-            "UPDATE workflow SET enabled = FALSE, active_version_id = NULL WHERE workspace_id = ?",
+            "UPDATE workflow SET enabled = FALSE, runtime_owner = 'legacy', active_version_id = NULL "
+                + "WHERE workspace_id = ?",
             workspaceId);
         for (String table : List.of(
                 "workflow_intervention", "workflow_invocation_record", "workflow_invocation",
