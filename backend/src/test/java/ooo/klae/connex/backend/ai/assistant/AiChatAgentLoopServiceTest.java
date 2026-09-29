@@ -339,7 +339,8 @@ class AiChatAgentLoopServiceTest {
         AiAssistantToolResult loadResult = new AiAssistantToolsetLoader(
                         new AiAssistantToolCatalog())
                 .load(objectMapper.readTree("{\"toolset\":\"write_content\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE),
+                        java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE))
                 .result();
         int bothResultsBytes = sizingAssembler.assemble(
                         List.of(),
@@ -3066,6 +3067,40 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * Builds the loop with the test's collaborators but a substitute toolset loader, so a test can
+     * observe or replace what the {@code find_tools} load step receives.
+     */
+    private AiChatAgentLoopService serviceWith(AiAssistantToolsetLoader toolsetLoader) {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        return new AiChatAgentLoopService(
+                invocationService,
+                invocationAdmissionService,
+                aiProperties,
+                new AiAssistantStepGuard(catalog),
+                catalog,
+                new AiAssistantStepSchema(objectMapper, catalog),
+                toolExecutor,
+                toolsetLoader,
+                writeToolService,
+                new AiAssistantPromptAssembler(objectMapper, catalog),
+                skillRouter,
+                skillPlanRunner,
+                memoryService,
+                attachmentContextService,
+                persistenceService,
+                runLeaseHeartbeat,
+                runLeaseService,
+                progressService,
+                citationProjector,
+                restrictionEpoch,
+                workspaceService,
+                objectMapper,
+                realtimeDispatcher,
+                governanceService,
+                clock);
+    }
+
+    /**
      * The step a turn now spends before it can reach anything outside core.
      *
      * <p>Every turn starts from {@code CORE}, so a trajectory that ends in a non-core tool has to
@@ -3743,12 +3778,27 @@ class AiChatAgentLoopServiceTest {
      * Write authority is decided before the loaded set is consulted, so loading a toolset can
      * never launder a tool past the declaration its routed skill was admitted under.
      *
+     * <p>Since #1808 the offer refuses a READ skill the write family outright, so a real turn
+     * never reaches this configuration. The loader here deliberately ignores the offer, standing
+     * in for a regression of the offer or seed rule, so the family is really loaded and
+     * {@code requireSkillAuthority} is proven to be the backstop that still holds.
+     *
      * <p>The companion case — an unloaded write tool outside authority auditing under the same
      * reason rather than tool_not_loaded — is
      * {@link #aReadAuthoritySkillCannotReachAWriteToolAfterItsPlanHasRun()}.
      */
     @Test
     void loadingAWriteToolsetGrantsNoAuthorityARoutedSkillNeverDeclared() throws Exception {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        service = serviceWith(new AiAssistantToolsetLoader(catalog) {
+            @Override
+            public Load load(
+                    JsonNode args,
+                    Set<AiAssistantToolCatalog.Toolset> loadedToolsets,
+                    Set<AiAssistantToolCatalog.Toolset> offeredToolsets) {
+                return super.load(args, loadedToolsets, AiAssistantToolCatalog.ALL);
+            }
+        });
         routedDigest();
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
@@ -3763,9 +3813,109 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("tool_outside_skill_authority", result.reason());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
         verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
         verify(persistenceService, never()).proposeTool(
                 eq(TURN), anyInt(), anyInt(), eq("change_deal_stage"), any());
+    }
+
+    /**
+     * A read-only routed skill is offered only the read families, so the directory never invites
+     * a write load and a load the model asks for anyway is refused recoverably: the turn keeps its
+     * step budget and still answers, where holding the family would have ended it at the first
+     * write with {@code tool_outside_skill_authority} and no answer.
+     */
+    @Test
+    void aReadOnlyRoutedSkillIsOfferedNoWriteToolsetAndStillAnswersAfterAskingForOne()
+            throws Exception {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I can summarize the activity, but not move deals.",
+                                List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_unavailable_for_skill"));
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        for (AiInvocation invocation : invocations.getAllValues()) {
+            String systemPrompt = invocation.prompt().getSystemPrompt();
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                boolean readFamily = AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty();
+                assertEquals(
+                        readFamily,
+                        systemPrompt.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                        () -> "a READ skill's directory lists exactly the read families: "
+                                + toolset.key());
+            }
+            assertFalse(systemPrompt.contains("change_deal_stage"),
+                    "a refused load must not widen the vocabulary it was refused for");
+        }
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"toolset_unavailable_for_skill\""));
+    }
+
+    /**
+     * A generic turn keeps the full offer: every loadable family is listed and loadable, and its
+     * system prompt is byte-for-byte the fixed prompt the envelope budget is measured from.
+     */
+    @Test
+    void aGenericTurnIsStillOfferedEveryLoadableToolset() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertTrue(firstSystemPrompt.contains(
+                    toolset.key() + " - " + toolset.summary() + " - available"),
+                    () -> "a generic turn is offered every loadable family: " + toolset.key());
+        }
+        assertEquals(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .fixedPrompt(AiAssistantToolCatalog.CORE)
+                        .getSystemPrompt(),
+                firstSystemPrompt,
+                "a generic turn's envelope is unchanged by the offer");
     }
 
     /**
@@ -4408,6 +4558,61 @@ class AiChatAgentLoopServiceTest {
                                 + AiAssistantToolCatalog.Toolset.ANALYTICS.summary()
                                 + " - available"),
                 "a declaration the turn never ran under holds nothing");
+    }
+
+    /**
+     * The offer follows the skill the turn actually runs under, not the one the router picked. A
+     * routed plan that did not execute leaves no active skill, so the turn is generic for the
+     * authority gate and must be generic for the offer too: every family listed and loadable,
+     * write families included, and the prompt byte-for-byte the generic one.
+     */
+    @Test
+    void aRoutedPlanThatDidNotExecuteKeepsTheFullOffer() throws Exception {
+        AiSkillCatalog.SkillSpec digest =
+                new AiSkillCatalog().find("activity_digest_v1").orElseThrow();
+        assertEquals(AiSkillCatalog.Authority.READ, digest.authority(),
+                "a READ skill is the one whose routed offer would drop the write families");
+        when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new AiSkillRouter.Routing(
+                        digest, AiSkillRouter.MATCHED, null, false));
+        when(skillPlanRunner.run(eq(TURN), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new AiSkillPlanRunner.Execution(false, Map.of(), 0, false));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService, never()).applySkill(eq(TURN), any(), any());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertTrue(firstSystemPrompt.contains(
+                    toolset.key() + " - " + toolset.summary() + " - available"),
+                    () -> "an unexecuted routed plan keeps the generic offer: " + toolset.key());
+        }
+        assertEquals(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .fixedPrompt(AiAssistantToolCatalog.CORE)
+                        .getSystemPrompt(),
+                firstSystemPrompt,
+                "an unexecuted routed plan's envelope is the generic one");
     }
 
     /**

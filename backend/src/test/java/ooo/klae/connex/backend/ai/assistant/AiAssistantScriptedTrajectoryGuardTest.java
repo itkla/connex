@@ -46,6 +46,16 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
     /** The skill the routed golden expects the deterministic router to select. */
     private static final String RELATIONSHIP_BRIEF = "relationship_brief_v1";
 
+    /**
+     * A read-only routed skill cannot widen itself to a write family, and a model that names the
+     * write tool anyway still reaches nothing.
+     *
+     * <p>Since #1808 the family is outside the turn's offer, so the load is refused recoverably,
+     * and the write name the model then emits is unloaded, so the loaded-set guard refuses it
+     * before it is proposed. The turn keeps its answer instead of ending as a non-closable
+     * {@code tool_outside_skill_authority}; that gate stays in place as the binding backstop and
+     * is pinned where it is still reachable, by the agent-loop unit tests.
+     */
     @Test
     void aRoutedTurnCannotCallAWriteToolItsSkillNeverDeclared() {
         Person contact = person("Marisol Ardenne", "marisol.ardenne@example.invalid", null);
@@ -59,18 +69,24 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
         assertEquals(RELATIONSHIP_BRIEF, settled.getSkillKey(),
                 "this golden is only about skill authority while the turn actually ran under a "
                         + "skill; an unrouted turn would pass the write through and prove nothing");
-        assertEquals("failed", trajectory.status());
-        assertEquals("tool_outside_skill_authority", trajectory.terminalReason());
-        assertTrue(trajectory.toolNames().contains("find_tools"),
-                "the turn had to widen its own vocabulary before it could name the write tool at "
-                        + "all: " + trajectory.toolNames());
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall load = trajectory.toolCalls().stream()
+                .filter(call -> "find_tools".equals(call.getToolName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "the model asked to widen its vocabulary: " + trajectory.toolNames()));
+        assertEquals("failed", load.getStatus(),
+                "a READ skill is never offered the write family it asked for");
+        assertTrue(load.getResultJson().contains("toolset_unavailable_for_skill"),
+                load.getResultJson());
+        assertNotNull(journal().recorded().getLast().request().nativeTools().repairMessage(),
+                "the unloaded write name was refused by the loaded-set guard, not executed");
         assertFalse(trajectory.toolNames().contains("create_task"),
                 "the refusal must land before the write is even proposed: "
                         + trajectory.toolNames());
         assertEquals(0, tasksFor(contact.getId()),
                 "a skill whose authority is READ must leave no write behind");
-        assertEquals(List.of(), trajectory.answers(),
-                "a turn refused for exceeding its skill's authority delivers no answer");
+        assertTrue(trajectory.answer().contains("nothing was added"), trajectory.answer());
     }
 
     @Test

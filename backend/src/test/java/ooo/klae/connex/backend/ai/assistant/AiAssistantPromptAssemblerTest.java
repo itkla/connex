@@ -1532,6 +1532,94 @@ class AiAssistantPromptAssemblerTest {
     }
 
     /**
+     * The directory lists only what the turn is offered. A routed read-only skill's prompt drops
+     * the write families it could never call and so only ever shrinks, while the full offer a
+     * generic turn keeps renders byte-for-byte the prompt the envelope budget is measured from.
+     */
+    @Test
+    void theToolsetDirectoryListsOnlyTheOfferedToolsets() {
+        java.util.Set<AiAssistantToolCatalog.Toolset> readOffer = java.util.Set.of(
+                AiAssistantToolCatalog.Toolset.ANALYTICS, AiAssistantToolCatalog.Toolset.SCHEDULE);
+        java.util.Set<AiAssistantToolCatalog.Toolset> fullOffer =
+                java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE);
+
+        String routedReact = assembler.fixedPrompt(AiAssistantToolCatalog.CORE, readOffer)
+                .getSystemPrompt();
+        String routedNative = assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE, readOffer)
+                .getSystemPrompt();
+        for (String prompt : List.of(routedReact, routedNative)) {
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertEquals(
+                        readOffer.contains(toolset),
+                        prompt.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                        toolset.key() + " must be listed exactly when it is offered");
+            }
+        }
+        assertTrue(routedReact.length()
+                < assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt().length());
+        assertTrue(routedNative.length()
+                < assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt()
+                        .length());
+
+        assertEquals(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE, fullOffer).getSystemPrompt(),
+                "the full offer must leave a generic turn's prompt unchanged");
+        assertEquals(
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE, fullOffer)
+                        .getSystemPrompt(),
+                "the full offer must leave a generic turn's prompt unchanged");
+    }
+
+    /**
+     * The find_tools enum still names every loadable key, so a narrowed directory must not claim
+     * to be every loadable set: a narrowed offer says that only the listed sets load and any
+     * other key is refused, while the full offer keeps the generic sentence. Every narrowed offer,
+     * down to the empty one, still renders a strictly smaller prompt on both protocols, so the
+     * qualified sentence never makes a routed envelope larger than a generic one.
+     */
+    @Test
+    void aNarrowedOfferSaysOtherKeysAreRefusedAndStillOnlyShrinksThePrompt() {
+        String refusal = "any other key is refused";
+        String generic = assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt();
+        String genericNative =
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt();
+        assertTrue(generic.contains("Every loadable set is listed below"));
+        assertTrue(genericNative.contains("Every loadable set is listed below"));
+        assertFalse(generic.contains(refusal));
+        assertFalse(genericNative.contains(refusal));
+
+        List<AiAssistantToolCatalog.Toolset> loadable = AiAssistantToolCatalog.LOADABLE;
+        int full = (1 << loadable.size()) - 1;
+        for (int mask = 0; mask < full; mask++) {
+            java.util.Set<AiAssistantToolCatalog.Toolset> offer =
+                    java.util.EnumSet.noneOf(AiAssistantToolCatalog.Toolset.class);
+            for (int index = 0; index < loadable.size(); index++) {
+                if ((mask & (1 << index)) != 0) {
+                    offer.add(loadable.get(index));
+                }
+            }
+            String react = assembler.fixedPrompt(AiAssistantToolCatalog.CORE, offer)
+                    .getSystemPrompt();
+            String nativePrompt = assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE, offer)
+                    .getSystemPrompt();
+            for (String prompt : List.of(react, nativePrompt)) {
+                assertTrue(prompt.contains(refusal), () -> "offer " + offer);
+                assertFalse(prompt.contains("Every loadable set is listed below"),
+                        () -> "offer " + offer);
+            }
+            assertTrue(utf8Length(react) < utf8Length(generic), () -> "offer " + offer);
+            assertTrue(utf8Length(nativePrompt) < utf8Length(genericNative),
+                    () -> "offer " + offer);
+        }
+    }
+
+    private static int utf8Length(String text) {
+        return text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    /**
      * The find_tools result is the server's own statement of what the turn now holds, so it is
      * replayed verbatim rather than through the tenant-data replacer.
      *
@@ -1551,7 +1639,8 @@ class AiAssistantPromptAssemblerTest {
         AiAssistantToolResult findToolsResult = new AiAssistantToolsetLoader(catalog)
                 .load(
                         objectMapper.readTree("{\"toolset\":\"analytics\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE),
+                        java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE))
                 .result();
         AiAssistantToolResult companyRead = new AiAssistantToolResult(
                 Map.of("handle", "r1", "name", "Analytics"),

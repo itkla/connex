@@ -31,7 +31,7 @@ class AiAssistantToolsetLoaderTest {
     void aFirstLoadNamesTheWholeActiveSetItWillProduce() throws Exception {
         Set<Toolset> loaded = turnSet();
 
-        AiAssistantToolsetLoader.Load load = loader.load(args("write_activity"), loaded);
+        AiAssistantToolsetLoader.Load load = load(args("write_activity"), loaded);
 
         assertEquals(Toolset.WRITE_ACTIVITY, load.loaded());
         assertEquals("write_activity", load.result().data().get("loaded"));
@@ -53,7 +53,7 @@ class AiAssistantToolsetLoaderTest {
     void resolvingALoadLeavesTheTurnSetUntouchedUntilTheLoopCommitsIt() throws Exception {
         Set<Toolset> loaded = turnSet();
 
-        AiAssistantToolsetLoader.Load load = loader.load(args("analytics"), loaded);
+        AiAssistantToolsetLoader.Load load = load(args("analytics"), loaded);
 
         assertEquals(AiAssistantToolCatalog.CORE, loaded);
         commit(loaded, load);
@@ -74,7 +74,7 @@ class AiAssistantToolsetLoaderTest {
         assertTrue(declared.contains("get_deal_brief"), "analytics still declares the reserved read");
         assertFalse(catalog.isExecutable("get_deal_brief"));
 
-        AiAssistantToolsetLoader.Load load = loader.load(args("analytics"), turnSet());
+        AiAssistantToolsetLoader.Load load = load(args("analytics"), turnSet());
 
         assertEquals(List.of("aggregate_metric"), load.result().data().get("tools"));
     }
@@ -83,11 +83,11 @@ class AiAssistantToolsetLoaderTest {
     @Test
     void loadingAToolsetTwiceIsARecoverableRefusalThatLeavesTheSetAlone() throws Exception {
         Set<Toolset> loaded = turnSet();
-        commit(loaded, loader.load(args("analytics"), loaded));
+        commit(loaded, load(args("analytics"), loaded));
 
         AiAssistantLoopException refused = assertThrows(
                 AiAssistantLoopException.class,
-                () -> loader.load(args("analytics"), loaded));
+                () -> load(args("analytics"), loaded));
 
         assertEquals("toolset_already_loaded", refused.detailReason());
         assertEquals("malformed_output", refused.terminalReason());
@@ -102,18 +102,18 @@ class AiAssistantToolsetLoaderTest {
     @Test
     void aTurnAtTheCapIsRefusedHoweverItGotThere() throws Exception {
         Set<Toolset> loadedByCalls = turnSet();
-        commit(loadedByCalls, loader.load(args("analytics"), loadedByCalls));
-        commit(loadedByCalls, loader.load(args("schedule"), loadedByCalls));
+        commit(loadedByCalls, load(args("analytics"), loadedByCalls));
+        commit(loadedByCalls, load(args("schedule"), loadedByCalls));
         Set<Toolset> seededToTheCap = turnSet();
         seededToTheCap.add(Toolset.WRITE_CONTENT);
         seededToTheCap.add(Toolset.WRITE_PIPELINE);
 
         AiAssistantLoopException afterLoads = assertThrows(
                 AiAssistantLoopException.class,
-                () -> loader.load(args("write_content"), loadedByCalls));
+                () -> load(args("write_content"), loadedByCalls));
         AiAssistantLoopException afterSeeding = assertThrows(
                 AiAssistantLoopException.class,
-                () -> loader.load(args("analytics"), seededToTheCap));
+                () -> load(args("analytics"), seededToTheCap));
 
         assertEquals("toolset_load_limit_reached", afterLoads.detailReason());
         assertTrue(afterLoads.recoverable());
@@ -143,7 +143,7 @@ class AiAssistantToolsetLoaderTest {
                 objectMapper.readTree("{\"toolset\":7}"),
                 objectMapper.readTree("{}"))) {
             AiAssistantLoopException refused = assertThrows(
-                    AiAssistantLoopException.class, () -> loader.load(rejected, loaded));
+                    AiAssistantLoopException.class, () -> load(rejected, loaded));
             assertEquals("invalid_tool_arguments", refused.detailReason());
             assertTrue(refused.recoverable());
         }
@@ -167,7 +167,7 @@ class AiAssistantToolsetLoaderTest {
                 .noneMatch(argument -> "handle".equals(argument.name())
                         || "handles".equals(argument.name())));
 
-        AiAssistantToolsetLoader.Load load = loader.load(args("schedule"), turnSet());
+        AiAssistantToolsetLoader.Load load = load(args("schedule"), turnSet());
 
         assertEquals(List.of("find_schedule_conflicts"), load.result().data().get("tools"));
     }
@@ -179,7 +179,7 @@ class AiAssistantToolsetLoaderTest {
     @Test
     void everyStringTheResultCarriesIsDeclaredCatalogVocabulary() throws Exception {
         for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
-            AiAssistantToolsetLoader.Load load = loader.load(args(toolset.key()), turnSet());
+            AiAssistantToolsetLoader.Load load = load(args(toolset.key()), turnSet());
             assertTrue(catalog.isDeclaredVocabulary(
                     (String) load.result().data().get("loaded")));
             for (Object key : (List<?>) load.result().data().get("active")) {
@@ -191,10 +191,68 @@ class AiAssistantToolsetLoaderTest {
         }
     }
 
+    /**
+     * A routed turn is offered only the families its skill may hold, so a read-only skill asking
+     * for a write family is refused recoverably and the model can still answer. Reverting the
+     * offer check would hand it a write family whose first use ends the turn.
+     */
+    @Test
+    void aToolsetOutsideTheTurnsOfferIsARecoverableRefusalThatLeavesTheSetAlone()
+            throws Exception {
+        Set<Toolset> loaded = turnSet();
+        Set<Toolset> readOnlyOffer = Set.of(Toolset.ANALYTICS, Toolset.SCHEDULE);
+
+        for (Toolset refusedSet : List.of(
+                Toolset.WRITE_ACTIVITY, Toolset.WRITE_CONTENT, Toolset.WRITE_PIPELINE)) {
+            AiAssistantLoopException refused = assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> loader.load(args(refusedSet.key()), loaded, readOnlyOffer));
+
+            assertEquals("toolset_unavailable_for_skill", refused.detailReason());
+            assertEquals("malformed_output", refused.terminalReason());
+            assertTrue(refused.recoverable());
+        }
+        assertEquals(AiAssistantToolCatalog.CORE, loaded);
+
+        AiAssistantToolsetLoader.Load offered =
+                loader.load(args("analytics"), loaded, readOnlyOffer);
+
+        assertEquals(Toolset.ANALYTICS, offered.loaded());
+        assertEquals(List.of("core", "analytics"), offered.result().data().get("active"));
+    }
+
+    /**
+     * The cap is stated before the offer, so a turn with no load left hears the one reason that
+     * holds for every family rather than a per-family reason it could not act on anyway.
+     */
+    @Test
+    void aTurnAtTheCapHearsTheCapBeforeTheOffer() throws Exception {
+        Set<Toolset> atTheCap = turnSet();
+        atTheCap.add(Toolset.ANALYTICS);
+        atTheCap.add(Toolset.SCHEDULE);
+
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> loader.load(
+                        args("write_pipeline"),
+                        atTheCap,
+                        Set.of(Toolset.ANALYTICS, Toolset.SCHEDULE)));
+
+        assertEquals("toolset_load_limit_reached", refused.detailReason());
+    }
+
+    private AiAssistantToolsetLoader.Load load(JsonNode args, Set<Toolset> loaded) {
+        return loader.load(args, loaded, fullOffer());
+    }
+
+    private static Set<Toolset> fullOffer() {
+        return Set.copyOf(AiAssistantToolCatalog.LOADABLE);
+    }
+
     private int secondLoadRemaining() throws JacksonException {
         Set<Toolset> loaded = turnSet();
-        commit(loaded, loader.load(args("analytics"), loaded));
-        AiAssistantToolsetLoader.Load second = loader.load(args("schedule"), loaded);
+        commit(loaded, load(args("analytics"), loaded));
+        AiAssistantToolsetLoader.Load second = load(args("schedule"), loaded);
         return (int) second.result().data().get("remainingLoads");
     }
 

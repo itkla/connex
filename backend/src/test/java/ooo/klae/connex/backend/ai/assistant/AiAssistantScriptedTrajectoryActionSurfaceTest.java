@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,12 +16,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -31,7 +37,10 @@ import tools.jackson.databind.ObjectMapper;
  * Goldens for the action surface: whole scripted trajectories whose assertions are about controls
  * only the write framework owns.
  *
- * <p>The two goldens here pin issue 1865. A confirm-tier proposal names its stage or its owner by
+ * <p>One golden pins issue 1808: a read-only routed skill is offered no write family, so a model
+ * that asks for one is refused recoverably and still answers.
+ *
+ * <p>Two goldens pin issue 1865. A confirm-tier proposal names its stage or its owner by
  * the name the model wrote, and the approval resolves that name again. Each golden changes, between
  * the proposal and the approval, only which row that name resolves to — never the target record
  * itself, which stays backdated, so the freshness refusal cannot be what refuses — and then
@@ -56,6 +65,9 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
 
     /** The durable step the drift scripts write at, one step per call before it. */
     private static final int WRITE_STEP = CALLS_BEFORE_WRITE + 1;
+
+    /** The skill the routed golden expects the deterministic router to select. */
+    private static final String RELATIONSHIP_BRIEF = "relationship_brief_v1";
 
     private final List<Integer> extraMembers = new ArrayList<>();
 
@@ -279,6 +291,64 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         assertEquals(
                 objectMapper.createArrayNode().add(successor.getId()),
                 arguments.path("principals"));
+    }
+
+    /**
+     * A read-only routed skill is offered no write family, so a model that asks for one anyway is
+     * refused recoverably and still answers.
+     *
+     * <p>Before the offer matched the authority, the directory advertised every write family, the
+     * load succeeded, and the first write the model then chose ended the turn as a non-closable
+     * {@code tool_outside_skill_authority} with no answer. Removing the offer check turns this red
+     * three ways: the directory lists the write family, the load row settles executed, and the
+     * next request offers its write tools.
+     */
+    @Test
+    void aReadOnlyRoutedSkillIsRefusedAWriteToolsetAndStillAnswers() {
+        Person contact = person(
+                "Ottoline Fairweather", "ottoline.fairweather@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_routed_write_set",
+                "catch me up on this contact",
+                List.of(new AiChatPageContextDto("person", contact.getId())));
+
+        AiChatTurn settled = turnRow(trajectory);
+        assertEquals(RELATIONSHIP_BRIEF, settled.getSkillKey(),
+                "the offer is only narrowed on a turn that actually ran under a skill");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(1, trajectory.answers().size(),
+                "a refused load is recoverable, so the turn keeps its answer");
+        assertTrue(trajectory.answer().contains("nothing was changed"), trajectory.answer());
+
+        List<AiChatToolCall> loads = trajectory.toolCalls().stream()
+                .filter(call -> AiAssistantToolCatalog.FIND_TOOLS.equals(call.getToolName()))
+                .toList();
+        assertEquals(1, loads.size(), trajectory.toolNames().toString());
+        assertEquals("failed", loads.getFirst().getStatus());
+        assertTrue(loads.getFirst().getResultJson().contains("toolset_unavailable_for_skill"),
+                loads.getFirst().getResultJson());
+        assertFalse(trajectory.toolNames().contains("change_deal_stage"),
+                "no write tool of the refused family may be proposed: " + trajectory.toolNames());
+
+        var requests = journal().recorded();
+        assertEquals(2, requests.size());
+        String directory = requests.getFirst().request().systemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertEquals(
+                    AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty(),
+                    directory.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                    "a READ skill's directory lists exactly the read families: " + toolset.key());
+        }
+        List<AiToolExchange> replayed = requests.getLast().request().nativeTools().exchanges();
+        assertEquals(1, replayed.size());
+        assertTrue(replayed.getFirst().maskedResult().contains("toolset_unavailable_for_skill"),
+                "the model is told why the load was refused, so it can answer instead");
+        assertFalse(requests.getLast().request().nativeTools().definitions().stream()
+                        .map(AiToolDefinition::name)
+                        .anyMatch(name -> AiAssistantToolCatalog.writeToolsOf(
+                                AiAssistantToolCatalog.Toolset.WRITE_PIPELINE).contains(name)),
+                "a refused load must leave the offered vocabulary unwidened");
     }
 
     private int storeOwnerProposal(Company company, String owner) {
