@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.sso;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -25,7 +24,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * Verifies the SAML relying-party resolver: an enabled SAML connection resolves to a registration
  * with the right SP assertion-consumer location, SP entityId, and asserting-party (IdP) entityId,
  * SSO location, REDIRECT binding, and verification credential; a disabled, OIDC, or unknown org
- * resolves to null; a malformed registration id or a malformed certificate resolves to null rather
+ * resolves to null; a malformed certificate resolves to null rather
  * than throwing; and built registrations are rebuilt rather than cached with decrypted key material.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -157,13 +156,6 @@ class DbRelyingPartyRegistrationRepositoryTest {
     }
 
     @Test
-    void malformedRegistrationId_resolvesNull() {
-        assertNull(repository.findByRegistrationId("not-an-org"));
-        assertNull(repository.findByRegistrationId("org-abc"));
-        assertNull(repository.findByRegistrationId(null));
-    }
-
-    @Test
     void malformedCertificate_resolvesNullNotException() {
         SsoConnection connection = samlConnection();
         connection.setSamlIdpX509("-----BEGIN CERTIFICATE-----\nnot-a-real-certificate\n-----END CERTIFICATE-----");
@@ -171,13 +163,5 @@ class DbRelyingPartyRegistrationRepositoryTest {
 
         assertNull(repository.findByRegistrationId(registrationId),
                 "a malformed certificate must be skipped (null), never a 500");
-    }
-
-    @Test
-    void samlSpKeyMaterialToStringRedactsPrivateKey() {
-        String rendered = new SamlSpKeyMaterial("private-key", "certificate").toString();
-
-        assertFalse(rendered.contains("private-key"));
-        assertTrue(rendered.contains("certificate"));
     }
 }

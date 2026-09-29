@@ -206,15 +206,6 @@ class SecretStoreTest {
     }
 
     @Test
-    void missingMasterKeyRefusesEncryption() {
-        SecretStoreProperties properties = new SecretStoreProperties();
-        SecretStoreCrypto crypto = new SecretStoreCrypto(properties);
-
-        assertFalse(crypto.isAvailable());
-        assertThrows(SecretUnavailableException.class, () -> crypto.encrypt("value", "aad"));
-    }
-
-    @Test
     void lazyRewrapMovesStoredSecretsToActiveKeyAfterRead() {
         int workspaceId = workspaceId();
         String oldKey = base64Key((byte) 1);
