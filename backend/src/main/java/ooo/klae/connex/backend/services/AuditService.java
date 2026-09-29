@@ -524,7 +524,8 @@ public class AuditService {
     }
 
     /**
-     * Records the service-boundary refusal of an export that carried no fresh passkey assertion.
+     * Records the service-boundary refusal of an export, or of a mutation that would open a
+     * scheduled one, that carried no fresh passkey assertion.
      *
      * <p>The path-matching filter emits the same action for the requests it recognises. The
      * {@code service_boundary} reason marks the independent guard that runs even when no filter

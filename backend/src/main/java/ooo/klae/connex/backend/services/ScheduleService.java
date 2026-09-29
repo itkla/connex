@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.ReportScheduleRecipientDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
@@ -50,6 +51,8 @@ public class ScheduleService {
     private final AuditService auditService;
     private final TenantWorkScope tenantWorkScope;
     private final ReportPermissionPolicy reportPermissionPolicy;
+    private final PrivilegedAccountService privilegedAccountService;
+    private final SessionSecurityService sessionSecurityService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -61,14 +64,24 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Creates the single delivery schedule for a report. */
+    /**
+     * Creates the single delivery schedule for a report.
+     *
+     * <p>A privileged account must carry a fresh WebAuthn step-up; see
+     * {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the report to schedule
+     * @param request the validated schedule payload
+     * @return the stored schedule
+     */
     @Transactional
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto create(int reportDefinitionId, ReportScheduleRequest request) {
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
-        int currentUserId = authService.getCurrentUser().getId();
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
         ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
@@ -88,15 +101,26 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Replaces a report's delivery schedule and transfers run-as to the updater. */
+    /**
+     * Replaces a report's delivery schedule and transfers run-as to the updater.
+     *
+     * <p>The payload is a whole-schedule replacement, so this is the endpoint that moves recipients,
+     * cadence, and the enabled flag. A privileged account must therefore carry a fresh WebAuthn
+     * step-up; see {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the scheduled report
+     * @param request the validated replacement payload
+     * @return the stored schedule
+     */
     @Transactional
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto update(int reportDefinitionId, ReportScheduleRequest request) {
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
-        int currentUserId = authService.getCurrentUser().getId();
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
         ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
@@ -258,6 +282,42 @@ public class ScheduleService {
             return null;
         }
         return current;
+    }
+
+    /**
+     * Requires a fresh WebAuthn step-up before a privileged account may open or redirect a scheduled
+     * delivery channel.
+     *
+     * <p>A schedule is the one export surface that keeps emitting tenant data with no session to
+     * step up, so the control sits on the mutation that decides where a report goes rather than on
+     * the unattended send. Gating the send is unimplementable and gating it would strand every
+     * already-approved schedule, so {@code ReportDeliveryScheduler} deliberately passes through
+     * {@link #claimDue}, {@link #deliveryAccess} and the recipient re-derivation untouched.
+     *
+     * <p>Accounts that administer no other principal are unaffected. A schedule may only name
+     * active members who already hold the report's own read permissions, so an ordinary member
+     * reaches nobody new by scheduling. An administrator can admit a member and then name them,
+     * which is the ongoing channel this refuses to open on a single factor. The check is
+     * independent of {@code CONNEX_PRIVILEGED_MFA_ENFORCED}, matching the other high-risk service
+     * boundaries rather than the staged-rollout export filter.
+     *
+     * <p>Deletion is not gated: it closes a channel rather than opening one, and it is audited.
+     *
+     * <p>The refusal audit commits in an independent transaction that re-takes the actor's
+     * {@code app_user} row {@code FOR SHARE}, so this runs before the mutation takes any lock.
+     *
+     * @param userId the account attempting the mutation
+     */
+    private void requireScheduleStepUp(int userId) {
+        if (!privilegedAccountService.isPrivileged(userId)) {
+            return;
+        }
+        try {
+            sessionSecurityService.requireRecentAuthentication(userId);
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     private ValidatedSchedule validate(
