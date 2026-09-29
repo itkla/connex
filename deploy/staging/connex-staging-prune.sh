@@ -36,7 +36,13 @@ set -Eeuo pipefail
 STAGING_DIR="${CONNEX_STAGING_DIR:-/opt/connex-staging}"
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
-SCRATCH_GLOB=".target-release-*"
+# Every scratch shape connex-staging-deploy.sh creates under STATE_DIR with mktemp -d. A killed
+# build strands whichever one it held, and all three are most of a build tree, so the reaper has to
+# know all of them: .target-release-* (the target build), and .previous-release-* /
+# .previous-frontend-* (rollback bundles reconstructed by ensure_previous_release). .smoke.* is also
+# created there but is a few kilobytes, and .release-* lives under RELEASES_DIR, which the release
+# pruning below already reasons about.
+SCRATCH_GLOBS=(".target-release-*" ".previous-release-*" ".previous-frontend-*")
 MARKER="$STATE_DIR/deployed-sha"
 ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
 FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
@@ -134,7 +140,15 @@ frontend_started_at() {
 # This only runs while the deploy lock is held, so no live build owns a scratch directory here.
 # The age floor is belt and braces on that.
 reap_orphaned_scratch() {
-    local now="$1" path age created freed=0 size
+    local now="$1" path age created freed=0 size failures=0 glob
+    local -a scratch_find_args=()
+    for glob in "${SCRATCH_GLOBS[@]}"; do
+        if [ "${#scratch_find_args[@]}" -gt 0 ]; then
+            scratch_find_args+=(-o)
+        fi
+        scratch_find_args+=(-name "$glob")
+    done
+    scratch_find_args=('(' "${scratch_find_args[@]}" ')')
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         if [ ! -d "$path" ] || [ -L "$path" ]; then
@@ -160,9 +174,16 @@ reap_orphaned_scratch() {
             log "Removed orphaned scratch $(basename -- "$path") (${size} bytes)"
         else
             log "Refused: could not remove orphaned scratch $(basename -- "$path")"
+            failures=$((failures + 1))
         fi
-    done < <(find "$STATE_DIR" -mindepth 1 -maxdepth 1 -name "$SCRATCH_GLOB" -print 2>/dev/null)
+    done < <(find "$STATE_DIR" -mindepth 1 -maxdepth 1 "${scratch_find_args[@]}" -print 2>/dev/null)
     [ "$freed" -eq 0 ] || log "Reclaimed $freed bytes of orphaned build scratch"
+    # A reclamation that could not delete must not exit successfully: systemd is the only thing
+    # watching, and a silently failing reaper is how the volume filled in the first place.
+    if [ "$failures" -gt 0 ]; then
+        log "Refused: $failures orphaned scratch directory(ies) could not be removed"
+        return 1
+    fi
 }
 
 main() {

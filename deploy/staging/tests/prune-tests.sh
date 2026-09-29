@@ -45,6 +45,9 @@ setup() {
     mkdir -p "$q/$KEEP_ONE" "$q/$KEEP_TWO" "$q/$YOUNG"
     # Orphaned build scratch, as a killed deploy leaves behind.
     mkdir -p "$state/.target-release-${OLD_ONE}.abc123/frontend"
+    # ensure_previous_release strands these two shapes the same way a killed target build does.
+    mkdir -p "$state/.previous-release-${OLD_ONE}.def456/backend"
+    mkdir -p "$state/.previous-frontend-${OLD_ONE}.ghi789/.next"
     # Distinct mtimes: `sort -rn` is not stable, so equal stamps would make which entry the
     # keep-recent window retains a coin flip. Newest first: YOUNG, KEEP_ONE, KEEP_TWO, then the rest.
     touch -d "@$(( $(date +%s) - 60 ))"     "$q/$YOUNG"
@@ -92,6 +95,8 @@ main() {
     run "$root" > "$root/run.log" 2>&1 || { fail prune_exits_zero "$(tail -3 "$root/run.log")"; }
 
     assert_dir_missing orphaned_scratch_is_removed "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+    assert_dir_missing orphaned_previous_release_scratch_is_removed "$root/staging/.staging/.previous-release-${OLD_ONE}.def456"
+    assert_dir_missing orphaned_previous_frontend_scratch_is_removed "$root/staging/.staging/.previous-frontend-${OLD_ONE}.ghi789"
     assert_dir_missing old_entries_are_pruned "$q/$OLD_ONE"
     assert_dir_missing second_old_entry_is_pruned "$q/$OLD_TWO"
     assert_dir_exists committed_release_survives "$q/$DEPLOYED"
@@ -110,6 +115,23 @@ main() {
     MIN_AGE=999999 run "$root" > "$root/age.log" 2>&1 || fail age_gate_exits_zero "$(tail -3 "$root/age.log")"
     assert_dir_exists age_gate_keeps_everything "$q/$OLD_ONE"
     assert_dir_exists age_gate_keeps_scratch "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+    assert_dir_exists age_gate_keeps_previous_release_scratch "$root/staging/.staging/.previous-release-${OLD_ONE}.def456"
+
+    # An undeletable candidate must fail the run: systemd is the only thing watching the reaper.
+    setup "$root"
+    local undeletable="$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
+    chmod a-w "$root/staging/.staging"
+    if run "$root" > "$root/undeletable.log" 2>&1; then
+        fail undeletable_scratch_fails_the_run "exited zero with $undeletable still present"
+    else
+        ok undeletable_scratch_fails_the_run
+    fi
+    chmod u+w "$root/staging/.staging"
+    if grep -q "could not be removed" "$root/undeletable.log"; then
+        ok undeletable_scratch_is_reported
+    else
+        fail undeletable_scratch_is_reported "no refusal reported"
+    fi
 
     # No readable frontend marker means the reaper cannot prove anything: refuse.
     setup "$root"; rm -f "$root/staging/.staging/frontend-running"
