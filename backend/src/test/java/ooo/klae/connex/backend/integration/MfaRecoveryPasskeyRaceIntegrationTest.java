@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,12 +23,10 @@ import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
@@ -45,20 +42,13 @@ import org.springframework.security.web.webauthn.api.PublicKeyCredentialType;
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.mappers.SpringSessionMapper;
-import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.AuthService;
@@ -71,58 +61,26 @@ import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
  * Interleaves passkey recovery with the login and registration windows that cross its account
  * lock and Spring Session commit boundary (#1491).
  */
-@SpringBootTest
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class MfaRecoveryPasskeyRaceIntegrationTest {
-    private static final Duration RECOVERY_WINDOW = Duration.ofMinutes(55);
-
-    /**
-     * Resolves the operator recovery window when the context starts rather than when this class is
-     * loaded. The break-glass token is rejected once its expiry has passed, and a cold schema
-     * migration can put a load-time constant well behind the clock before the context refreshes.
-     * The startup digest only completes the configuration; every ceremony issues its own
-     * account-bound token through {@link #issueRecoveryToken(User)}.
-     */
-    @DynamicPropertySource
-    static void recoveryProperties(DynamicPropertyRegistry registry) {
-        registry.add("connex.security.privileged-mfa.recovery-token-sha256",
-                () -> sha256Hex("unused-startup-recovery-token"));
-        registry.add("connex.security.privileged-mfa.recovery-expires-at",
-                () -> Instant.now().plus(RECOVERY_WINDOW).toString());
-        registry.add("connex.security.privileged-mfa.recovery-actor",
-                () -> "integration-security-operator");
-    }
-
+class MfaRecoveryPasskeyRaceIntegrationTest extends AbstractPrivilegedMfaRecoveryIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private AuthService authService;
     @Autowired private MfaRecoveryService mfaRecoveryService;
     @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private WebAuthnService webAuthnService;
-    @Autowired private UserMapper userMapper;
     @Autowired private WebauthnUserEntityMapper userEntityMapper;
     @Autowired private WebauthnCredentialMapper credentialMapper;
     @Autowired private UserCredentialRepository userCredentials;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
     @Autowired private SessionRegistry sessionRegistry;
-    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
-    @MockitoSpyBean private SpringSessionMapper springSessionMapper;
 
     private MockMvc mockMvc;
-    private String startupDigest;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
-        startupDigest = privilegedMfaProperties.getRecoveryTokenSha256();
-    }
-
-    @AfterEach
-    void clearSecurityContext() {
-        privilegedMfaProperties.setRecoveryTokenSha256(startupDigest);
-        SecurityContextHolder.clearContext();
     }
 
     /**

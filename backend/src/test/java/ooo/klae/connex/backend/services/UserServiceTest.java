@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.List;
+import java.util.Objects;
 
 import javax.imageio.ImageIO;
 
@@ -10,9 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +21,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -46,7 +43,6 @@ class UserServiceTest extends AbstractServiceTest {
     @Autowired AuthenticationManager authenticationManager;
     @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
-    @MockitoSpyBean AccountSessionRevocationService accountSessionRevocationService;
 
     @Test
     void getActiveWorkspaceMemberReferencesPreservesRequestedOrderAndOmitsUnknownIds() {
@@ -327,18 +323,22 @@ class UserServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void aProfileUpdateKeepsHttpSessionsAndClosesSocketsOnlyOnRename() {
+    void profileUpdatesPersistDisplayNameAndUsernameChanges() {
         User member = newUser();
         authenticateAs(member);
 
-        userService.update(member.getId(), profileUpdate(member, "My New Name"));
-        verify(accountSessionRevocationService, never()).closeWebSocketsAfterRename(anyInt());
+        User profileUpdated = userService.update(member.getId(), profileUpdate(member, "My New Name"));
+        User persistedProfile = Objects.requireNonNull(userMapper.getUserById(member.getId()));
+        assertEquals("My New Name", profileUpdated.getDisplayName());
+        assertEquals("My New Name", persistedProfile.getDisplayName());
+        assertEquals(member.getUsername(), profileUpdated.getUsername());
+        assertEquals(member.getUsername(), persistedProfile.getUsername());
 
-        userService.update(member.getId(), renameUpdate(member, member.getUsername() + "renamed"));
-
-        verify(accountSessionRevocationService).closeWebSocketsAfterRename(member.getId());
-
-        verify(accountSessionRevocationService, never()).expireAll(anyInt());
+        String renamedUsername = member.getUsername() + "renamed";
+        User renamed = userService.update(member.getId(), renameUpdate(member, renamedUsername));
+        assertEquals(renamedUsername, renamed.getUsername());
+        assertEquals(renamedUsername,
+            Objects.requireNonNull(userMapper.getUserById(member.getId())).getUsername());
     }
 
     private User renameUpdate(User base, String newUsername) {

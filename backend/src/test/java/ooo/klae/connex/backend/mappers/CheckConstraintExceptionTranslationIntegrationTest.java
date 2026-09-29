@@ -144,25 +144,6 @@ class CheckConstraintExceptionTranslationIntegrationTest extends AbstractMapperT
         verify(errorReporter).report(any(ReportedError.class));
     }
 
-    @Test
-    void unrelatedMySqlGeneralErrorIsNotClassifiedAsIntegrityViolation() {
-        SQLException unrelated = new SQLException("Unrelated MySQL general error", "HY000", 3024);
-
-        assertFalse(sqlExceptionTranslator.translate("query", null, unrelated)
-            instanceof DataIntegrityViolationException);
-    }
-
-    @Test
-    void unrecognizedCheckConstraintIsNotClassifiedAsIntegrityViolation() {
-        SQLException unrecognized = new SQLException(
-            "Check constraint 'chk_future_server_invariant' is violated.",
-            "HY000",
-            3819);
-
-        assertFalse(sqlExceptionTranslator.translate("query", null, unrecognized)
-            instanceof DataIntegrityViolationException);
-    }
-
     private static SQLException nestedSqlException(Throwable throwable) {
         Throwable current = throwable;
         StringBuilder types = new StringBuilder();

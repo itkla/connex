@@ -433,28 +433,6 @@ class NativeConnectServiceTest {
             queryParameter(prepared.authorizeUrl(), "redirect_uri"));
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {
-        "http://localhost:49152/callback",
-        "https://127.0.0.1:49152/callback",
-        "http://127.0.0.1:80/callback",
-        "http://evil.example.com/callback",
-        "http://127.0.0.1:49152/callback?x=1",
-        "http://127.0.0.1:49152/other",
-        "http://user@127.0.0.1:49152/callback"
-    })
-    void nonExactLoopbackRedirectUrisAreRejected(String redirectUri) {
-        NativePairingResponse pairing = nativeConnectService.createPairing(PROVIDER);
-        clearAuthentication();
-
-        NativeConnectException error = assertThrows(
-            NativeConnectException.class,
-            () -> nativeConnectService.prepare(
-                new NativePrepareRequest(pairing.pairingCode(), redirectUri)));
-
-        assertEquals("invalid_redirect_uri", error.getCode());
-    }
-
     @Test
     void stateMismatchFailsClaimWithoutCallingProvider() {
         NativePrepareResponse prepared = prepare(

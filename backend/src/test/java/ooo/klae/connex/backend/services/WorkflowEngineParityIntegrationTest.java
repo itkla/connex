@@ -11,10 +11,8 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mockingDetails;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,10 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -73,7 +68,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * {@link WorkflowRuntimeService} as the engine-core parity seam; {@link ProductionPathParity}
  * separately drives durable intake and leased outbox delivery as production-path parity.
  */
-@Import(WorkflowEngineParityIntegrationTest.FixedDedupeConfiguration.class)
+@Import(WorkflowFixedDedupeTestConfiguration.class)
 @TestPropertySource(properties = {
     "connex.workflows.runtime.enabled=true",
     "connex.workflows.runtime.scheduling-enabled=false",
@@ -1849,17 +1844,6 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
         private boolean quiescent() {
             return pendingOutbox.isEmpty() && nonterminalRuns.isEmpty();
-        }
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class FixedDedupeConfiguration {
-
-        @Bean
-        @Primary
-        WorkflowDedupeKey parityWorkflowDedupeKey() {
-            return new WorkflowDedupeKey(Clock.fixed(
-                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC));
         }
     }
 }
