@@ -36,6 +36,17 @@ vi.mock("next/link", async () => {
 
 const NOW = Date.parse("2026-08-22T12:00:00Z");
 
+/** The markup React writes for `text`, so copy with an apostrophe matches as it renders. */
+function escaped(text: string | undefined): string {
+    if (text === undefined) throw new Error("Missing card copy");
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+}
+
 
 function render(node: ReactNode): string {
     return renderToStaticMarkup(<NowProvider value={NOW}>{node}</NowProvider>);
@@ -124,10 +135,38 @@ describe("assistant proposal review", () => {
         expect(first).toContain("Not set");
         expect(first).toContain("48 hours after it&#x27;s applied");
         expect(first).toContain("Apply the proposed change to Ada Lovelace");
-        expect(running).toContain("Due 2026-08-13T09:30 UTC");
+        expect(running).toContain(new Intl.DateTimeFormat("en", {
+            dateStyle: "medium",
+            timeStyle: "short",
+        }).format(Date.UTC(2026, 7, 13, 9, 30)));
+        expect(running).not.toContain("2026-08-13T09:30");
         expect(running).toContain("48 hours after it&#x27;s applied");
-        expect(running).toContain(cardLabels.changeState.unchanged);
+        expect(running).toContain(escaped(cardLabels.changeStateForField.responseDue?.unchanged));
+        expect(running).not.toContain(escaped(cardLabels.changeState.unchanged));
         expect(running).not.toContain("Apply the proposed change to Ada Lovelace");
+    });
+
+    it("says a shared-in contact takes no deadline here rather than calling the value gone", () => {
+        const sharedIn = renderCard(card({
+            id: 34,
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({
+                field: "responseDue",
+                currentValue: null,
+                currentValueUnresolved: true,
+                proposedValue: "48",
+                state: "unresolved",
+            }),
+        }));
+
+        expect(sharedIn).toContain(escaped(cardLabels.changeCurrentUnresolved.responseDue));
+        expect(sharedIn).toContain("48 hours after it&#x27;s applied");
+        expect(sharedIn).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(sharedIn).toContain(escaped(cardLabels.changeStateForField.responseDue?.unresolved));
+        expect(sharedIn).not.toContain(escaped(cardLabels.changeState.unresolved));
+        expect(sharedIn).not.toContain("Apply the proposed change to Ada Lovelace");
     });
 
     it("reads without colour: every review state carries its own sentence", () => {

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ContactStageDialog from '@/app/components/records/contacts/ContactStageDialog';
 import ContactLeadPanel from '@/app/components/records/contacts/ContactLeadPanel';
+import { askConnexChangeValueText } from '@/app/lib/askConnex';
 import TimelineRow from '@/app/components/me/TimelineRow';
 import DisqualificationReasonsPanel from '@/app/components/settings/DisqualificationReasonsPanel';
 import type {
@@ -481,5 +482,48 @@ describe('workspace-authored reason labels', () => {
 
         expect(container.textContent).toContain(ACTIVE_REASON.label);
         expect(container.textContent).not.toContain(`reason.${ACTIVE_REASON.code}`);
+    });
+});
+
+describe('first-response deadline', () => {
+    it('reads the stored UTC deadline the same way the assistant deadline card does', async () => {
+        const stored = '2026-08-13T09:30:15';
+        const contact: Contact = {
+            id: 30,
+            workspaceId: 7,
+            name: 'Lead contact',
+            email: 'lead@example.com',
+            phone: '',
+            title: '',
+            imageUrl: '',
+            createdAt: '2026-08-01T00:00:00Z',
+            updatedAt: '2026-08-01T00:00:00Z',
+            firstResponseDueAt: stored,
+        };
+        const previous = process.env.TZ;
+        process.env.TZ = 'Asia/Tokyo';
+        try {
+            await render(
+                <ContactLeadPanel
+                    contact={contact}
+                    lifecycle={LIFECYCLE}
+                    qualification={null}
+                    referrer={null}
+                    hasLinkedDeal={false}
+                    canEdit={false}
+                />,
+            );
+            const cardText = askConnexChangeValueText(
+                'responseDue', stored, 'current', 'en', (hours) => `${hours}`);
+
+            const badge = Array.from(container.querySelectorAll('[title]'))
+                .find((element) => element.textContent === 'response.due');
+
+            expect(cardText).toContain('6:30');
+            expect(badge?.getAttribute('title')).toBe(cardText);
+        } finally {
+            if (previous === undefined) delete process.env.TZ;
+            else process.env.TZ = previous;
+        }
     });
 });

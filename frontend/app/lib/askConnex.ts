@@ -3,6 +3,7 @@ import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
     AiAssistantToolCallChange,
+    AiAssistantToolCallChangeField,
     AiAssistantToolCallCreatedRecord,
     AiAssistantToolCallMutation,
     AiChatCitation,
@@ -16,7 +17,7 @@ import type {
     AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -788,6 +789,29 @@ function summaryValue(summary: string, prefix: string): string | null {
     return summary.startsWith(prefix) && summary.length > prefix.length
         ? summary.slice(prefix.length).trim()
         : null;
+}
+
+/**
+ * States one value a pending proposal reviews, in the reader's own language and time zone.
+ *
+ * A first-response deadline the contact already holds arrives as the offset-less UTC date-time
+ * the database stores, and is read as UTC exactly as the contact's own lead panel reads it, so the
+ * two surfaces print the same deadline. The deadline a proposal would start arrives as the whole
+ * hours from the approval the server will count them from, and is stated in the member's words.
+ * A value that does not parse stands as it is. Every other reviewed value is a name the workspace
+ * already wrote in its own words, and stands as it is.
+ */
+export function askConnexChangeValueText(
+    field: AiAssistantToolCallChangeField,
+    value: string,
+    side: 'current' | 'proposed',
+    locale: string,
+    responseDueInHours: (hours: number) => string,
+): string {
+    if (field !== 'responseDue') return value;
+    if (side === 'current') return formatUtcDateTime(value, locale, value);
+    const hours = Number(value);
+    return Number.isInteger(hours) && hours > 0 ? responseDueInHours(hours) : value;
 }
 
 /** Localizes one resolved tool request while retaining viewer-safe dynamic record values. */

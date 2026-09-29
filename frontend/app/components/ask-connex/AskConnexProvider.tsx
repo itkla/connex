@@ -70,6 +70,7 @@ import {
     activeSelectionAskConnexContext,
     appendAskConnexPrompt,
     appendAskConnexTurnSegment,
+    askConnexChangeValueText,
     askConnexReasoningSurvives,
     askConnexContextCorrected,
     askConnexMessageContent,
@@ -2486,27 +2487,18 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
         return value;
     }, [locale, t]);
-    /**
-     * States one value a pending proposal reviews, in the reader's own language and time zone.
-     *
-     * A first-response deadline the contact already holds arrives as the UTC date-time the
-     * database stores, and the deadline a proposal would start as the whole hours from the
-     * approval the server will count them from; the reader gets a date in their own zone and a
-     * number of hours in their own words. Every other reviewed value is a name the workspace
-     * already wrote in its own words, and stands as it is.
-     */
+    /** States one value a pending proposal reviews; see `askConnexChangeValueText`. */
     const changeValueText = useCallback((
         field: AiAssistantToolCallChangeField,
         value: string,
         side: 'current' | 'proposed',
-    ): string => {
-        if (field !== 'responseDue') return value;
-        if (side === 'current') return formatUtcDateTime(value, locale, value);
-        const hours = Number(value);
-        return Number.isInteger(hours) && hours > 0
-            ? t('toolCards.change.responseDueInHours', { hours })
-            : value;
-    }, [locale, t]);
+    ): string => askConnexChangeValueText(
+        field,
+        value,
+        side,
+        locale,
+        (hours) => t('toolCards.change.responseDueInHours', { hours }),
+    ), [locale, t]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2675,6 +2667,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
+            changeStateForField: {
+                responseDue: {
+                    unchanged: t('toolCards.change.stateUnchangedResponseDue'),
+                    unresolved: t('toolCards.change.stateUnresolvedResponseDue'),
+                },
+            },
             changeState: {
                 unchanged: t('toolCards.change.stateUnchanged'),
                 recordChanged: t('toolCards.change.stateRecordChanged'),

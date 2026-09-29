@@ -1,6 +1,6 @@
 import type { AskConnexProposalReviewLabels } from "@/app/components/ask-connex/AskConnexProposalReview";
 import type { AskConnexToolCardLabels } from "@/app/components/ask-connex/AskConnexToolCard";
-import type { AskConnexToolCardState } from "@/app/lib/askConnex";
+import { askConnexChangeValueText, type AskConnexToolCardState } from "@/app/lib/askConnex";
 import type { AiAssistantToolCall, AiAssistantToolCallChange } from "@/app/lib/types";
 
 /**
@@ -21,10 +21,13 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         tag: "Tag",
         responseDue: "First-response deadline",
     },
-    changeValue: (field, value, side) => {
-        if (field !== "responseDue") return value;
-        return side === "current" ? `Due ${value} UTC` : `${value} hours after it's applied`;
-    },
+    changeValue: (field, value, side) => askConnexChangeValueText(
+        field,
+        value,
+        side,
+        "en",
+        (hours) => `${hours} ${hours === 1 ? "hour" : "hours"} after it's applied`,
+    ),
     changeNotSet: "Not set",
     changeCurrentUnresolved: {
         owner: "Someone no longer in this workspace",
@@ -33,6 +36,14 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         responseDue: "A deadline that can't be shown",
     },
     changeProposedUnresolved: "No longer exists",
+    changeStateForField: {
+        responseDue: {
+            unchanged: "This contact already has a first-response deadline, and an existing"
+                + " deadline is never moved, so applying this would change nothing.",
+            unresolved: "This contact belongs to another workspace, so only that workspace can"
+                + " set its first-response deadline.",
+        },
+    },
     changeStateUnresolvedRemoval: "What this would remove has changed since it was proposed.",
     changeState: {
         unchanged: "This is already the current value.",

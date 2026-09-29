@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { Button } from '@/components/ui/button';
-import { formatDateTime } from '@/app/lib/utils';
+import { formatDateTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     Contact,
     ContactLifecycle,
@@ -57,6 +57,10 @@ const STAGE_TONE: Record<ContactLifecycleStage, string> = {
  * <p>The per-criterion answering that used to sit in the rail moves to a dialog. Up to fifty
  * label-plus-control rows do not belong in a 256px column at any level of disclosure; the rail
  * carries state, and the dialog carries the task.
+ *
+ * <p>The first-response deadline and answer times arrive offset-less but name UTC instants, as the
+ * lead-response service writes them, so they are read as UTC and shown in the reader's zone —
+ * the same reading the assistant's deadline card gives the same value.
  */
 export default function ContactLeadPanel({
     contact,
@@ -85,20 +89,20 @@ export default function ContactLeadPanel({
             return {
                 tone: 'border-border bg-muted text-muted-foreground',
                 label: t('response.answered'),
-                detail: formatDateTime(contact.firstRespondedAt, locale),
+                detail: formatUtcDateTime(contact.firstRespondedAt, locale, contact.firstRespondedAt),
             };
         }
         if (contact.firstResponseBreachedAt) {
             return {
                 tone: 'border-destructive/30 bg-destructive/10 text-destructive',
                 label: t('response.overdue'),
-                detail: formatDateTime(dueAt, locale),
+                detail: formatUtcDateTime(dueAt, locale, dueAt),
             };
         }
         return {
             tone: 'border-border bg-muted text-muted-foreground',
             label: t('response.due'),
-            detail: formatDateTime(dueAt, locale),
+            detail: formatUtcDateTime(dueAt, locale, dueAt),
         };
     }, [contact, locale, t]);
 

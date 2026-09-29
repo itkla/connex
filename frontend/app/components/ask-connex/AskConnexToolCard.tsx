@@ -96,6 +96,15 @@ export type AskConnexToolCardLabels = {
     /** What the proposal asked for, when that value no longer exists in this workspace. */
     changeProposedUnresolved: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
+    /**
+     * Why a change to one field cannot be applied, where the generic reason would misstate it: a
+     * contact that already has a first-response deadline keeps it, rather than already holding
+     * the proposed value, and a contact shared in from another workspace takes no deadline here.
+     */
+    changeStateForField: Partial<Record<
+        AiAssistantToolCallChangeField,
+        Partial<Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>>
+    >>;
     /** Why a removal cannot be made once what it would remove has changed since the proposal. */
     changeStateUnresolvedRemoval: string;
     diffAfter: string;
@@ -253,7 +262,9 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  *
  * A removal is the exception on the proposed side: its empty after-value is exactly what it
  * proposed, and when it can no longer be made it is what it would remove that changed, so the
- * after-value stays "not set" and its notice says why.
+ * after-value stays "not set" and its notice says why. So is an unresolved change that still states
+ * its proposed value: a deadline for a contact shared in from another workspace is a real number
+ * of hours, and it is the target, not the value, that the notice says cannot take it.
  *
  * Every value that is there is written through `changeValue`, because the server states what the
  * record stores rather than what a member reads: a first-response deadline arrives as a UTC
@@ -287,7 +298,7 @@ export function AskConnexChangeRow({
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
-                    {change.state === 'unresolved' && !removal
+                    {change.state === 'unresolved' && !removal && change.proposedValue === null
                         ? labels.changeProposedUnresolved
                         : change.proposedValue !== null
                             ? labels.changeValue(change.field, change.proposedValue, 'proposed')
@@ -308,10 +319,12 @@ export function AskConnexChangeRow({
  * moved is re-asked rather than re-baselined against values nobody reviewed.
  */
 export function AskConnexChangeNotice({
+    field,
     state,
     removal,
     labels,
 }: {
+    field: AiAssistantToolCallChangeField;
     state: AiAssistantToolCallChangeState;
     removal: boolean;
     labels: AskConnexToolCardLabels;
@@ -328,7 +341,7 @@ export function AskConnexChangeNotice({
             <span>
                 {state === 'unresolved' && removal
                     ? labels.changeStateUnresolvedRemoval
-                    : labels.changeState[state]}
+                    : labels.changeStateForField[field]?.[state] ?? labels.changeState[state]}
             </span>
         </p>
     );
@@ -507,6 +520,7 @@ export default function AskConnexToolCard({
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
                             <AskConnexChangeRow change={proposal} removal={removal} labels={labels} />
                             <AskConnexChangeNotice
+                                field={proposal.field}
                                 state={proposal.state}
                                 removal={removal}
                                 labels={labels}
