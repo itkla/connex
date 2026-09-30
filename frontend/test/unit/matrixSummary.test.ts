@@ -31,6 +31,18 @@ function landing(finalPath = destination, inAuthenticatedShell = true, ok = true
 }
 
 describe("matrix summary landing evidence", () => {
+    it("flags a failed capture even when the landing and page have no other faults", () => {
+        const output = summarize({
+            landing: landing(),
+            state: "capture-failed",
+            readinessFailure: "visible charts must render stable series",
+        });
+        expect(output).toContain("Cells needing triage: 1");
+        expect(output).toContain("[capture-failed]");
+        expect(output).toContain("capture readiness: visible charts must render stable series");
+        expect(output).toContain("Cells that did not render as the route they requested: 0");
+    });
+
     it("accepts a declared redirect verified inside the authenticated shell", () => {
         const output = summarize({ landing: landing() });
         expect(output).toContain("Cells that did not render as the route they requested: 0");

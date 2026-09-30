@@ -68,7 +68,9 @@ for (const entry of entries) {
     for (const failure of known) {
         knownFiled.set(failure.knownIssue, (knownFiled.get(failure.knownIssue) ?? 0) + 1);
     }
-    if (faults.length > 0 || unexpected.length > 0) needsTriage.push({ entry, faults, unexpected });
+    if (faults.length > 0 || unexpected.length > 0 || entry.readinessFailure) {
+        needsTriage.push({ entry, faults, unexpected });
+    }
 
     const finalPath = typeof entry.finalPath === 'string' ? entry.finalPath : null;
     const requestedPath = new URL(String(entry.path), 'http://matrix.invalid').pathname;
@@ -132,6 +134,7 @@ console.log(`## Cells needing triage: ${needsTriage.length}`);
 for (const { entry, faults, unexpected } of needsTriage) {
     const axes = `${entry.axes.viewport}/${entry.axes.locale}/${entry.axes.theme}`;
     console.log(`  ${entry.routeId} @ ${axes} [${entry.state}]`);
+    if (entry.readinessFailure) console.log(`      capture readiness: ${entry.readinessFailure}`);
     for (const fault of faults) console.log(`      ${fault.kind}: ${fault.text}`);
     for (const failure of unexpected) console.log(`      response: ${failure.status} ${failure.url}`);
 }

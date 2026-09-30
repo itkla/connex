@@ -366,6 +366,7 @@ export type ManifestEntry = {
     /** The pathname the browser was actually on when the cell was captured. */
     finalPath: string;
     landing?: Landing;
+    readinessFailure?: string;
     notes?: string;
 };
 
@@ -451,10 +452,25 @@ export async function record(
     const file = entry.screenshot ?? artifactName(entry.routeId, entry.state, entry.axes);
     const target = path.join(MATRIX_ARTIFACT_DIR, 'shots', file);
     mkdirSync(path.dirname(target), { recursive: true });
-    await settleForCapture(page, entry.state);
+    let readinessFailure: { error: unknown; message: string } | undefined;
+    try {
+        await settleForCapture(page, entry.state);
+    } catch (error) {
+        readinessFailure = { error, message: error instanceof Error ? error.message : String(error) };
+    }
     await page.screenshot({ path: target, fullPage: true, animations: 'disabled' });
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });
-    appendFileSync(MANIFEST_PATH, `${JSON.stringify({ ...entry, landing, screenshot: `shots/${file}` })}\n`);
+    appendFileSync(MANIFEST_PATH, `${JSON.stringify({
+        ...entry,
+        landing,
+        screenshot: `shots/${file}`,
+        ...(readinessFailure && {
+            state: 'capture-failed',
+            readinessFailure: readinessFailure.message,
+            notes: [entry.notes, `capture readiness failed for state ${entry.state}`].filter(Boolean).join(' :: '),
+        }),
+    })}\n`);
+    if (readinessFailure) throw readinessFailure.error;
 }
 
 /** Writes the run-level provenance file that the report cites. */

@@ -53,4 +53,3 @@ export async function refreshThroughRouter(page: Page) {
         return state === null || typeof state !== "object" || !("refreshProbe" in state);
     });
 }
-
