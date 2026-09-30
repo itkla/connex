@@ -24,6 +24,22 @@ import {
 } from "@/app/lib/rangeCalendar";
 import { dayKeyOf } from "@/app/lib/calendar";
 
+const DST_RANGES = [
+    { direction: "spring forward", from: "2026-03-07", to: "2026-03-09", offsets: [300, 240], total: 3 },
+    { direction: "fall back", from: "2026-10-31", to: "2026-11-02", offsets: [240, 300], total: 2 },
+] as const;
+
+function inNewYork(run: () => void): void {
+    const previous = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+        run();
+    } finally {
+        if (previous === undefined) delete process.env.TZ;
+        else process.env.TZ = previous;
+    }
+}
+
 describe("parseDayKey", () => {
     it("reads a well-formed key as a local-midnight date", () => {
         const parsed = parseDayKey("2026-08-10");
@@ -127,9 +143,12 @@ describe("rangeDays", () => {
         expect(rangeDays({ from: "nope", to: "2026-08-10" })).toBe(0);
     });
 
-    it("survives a daylight-saving transition", () => {
-        expect(rangeDays({ from: "2026-03-07", to: "2026-03-09" })).toBe(3);
-        expect(rangeDays({ from: "2026-10-31", to: "2026-11-02" })).toBe(3);
+    it.each(DST_RANGES)("survives $direction in America/New_York", ({ from, to, offsets }) => {
+        inNewYork(() => {
+            expect([parseDayKey(from)?.getTimezoneOffset(), parseDayKey(to)?.getTimezoneOffset()])
+                .toEqual(offsets);
+            expect(rangeDays({ from, to })).toBe(3);
+        });
     });
 });
 
@@ -287,7 +306,7 @@ describe("sumSeries", () => {
         expect(sumSeries(series, { from: "nope", to: "2026-01-03" })).toBe(0);
     });
 
-    it("counts every day across a daylight-saving transition", () => {
+    it.each(DST_RANGES)("counts every day across $direction in America/New_York", ({ from, to, offsets, total }) => {
         const dst = new Map([
             ["2026-03-07", 1],
             ["2026-03-08", 1],
@@ -295,8 +314,11 @@ describe("sumSeries", () => {
             ["2026-11-01", 1],
             ["2026-11-02", 1],
         ]);
-        expect(sumSeries(dst, { from: "2026-03-07", to: "2026-03-09" })).toBe(3);
-        expect(sumSeries(dst, { from: "2026-10-31", to: "2026-11-02" })).toBe(2);
+        inNewYork(() => {
+            expect([parseDayKey(from)?.getTimezoneOffset(), parseDayKey(to)?.getTimezoneOffset()])
+                .toEqual(offsets);
+            expect(sumSeries(dst, { from, to })).toBe(total);
+        });
     });
 });
 

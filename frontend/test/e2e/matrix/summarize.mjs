@@ -39,6 +39,7 @@ const axisCombos = new Set();
 const needsTriage = [];
 const knownFiled = new Map();
 const misdirected = [];
+const unverifiedLandings = [];
 
 /**
  * Splits a cell's recorded response failures into the ones a filed suppression covers and the ones
@@ -70,8 +71,20 @@ for (const entry of entries) {
     if (faults.length > 0 || unexpected.length > 0) needsTriage.push({ entry, faults, unexpected });
 
     const finalPath = typeof entry.finalPath === 'string' ? entry.finalPath : null;
-    const requestedPath = String(entry.path).split('?')[0];
-    if (entry.state === 'unexpected-landing' || (finalPath !== null && finalPath !== requestedPath)) {
+    const requestedPath = new URL(String(entry.path), 'http://matrix.invalid').pathname;
+    const landing = entry.landing;
+    const hasLanding = landing !== null && typeof landing === 'object'
+        && typeof landing.ok === 'boolean'
+        && typeof landing.inAuthenticatedShell === 'boolean'
+        && Array.isArray(landing.acceptedPaths)
+        && landing.acceptedPaths.every((accepted) => typeof accepted === 'string')
+        && landing.requestedPath === requestedPath
+        && landing.finalPath === finalPath;
+    if (!hasLanding) unverifiedLandings.push(entry);
+    const rejected = hasLanding
+        ? !landing.ok || !landing.inAuthenticatedShell || !landing.acceptedPaths.includes(finalPath)
+        : finalPath !== null && finalPath !== requestedPath;
+    if (entry.state === 'unexpected-landing' || rejected) {
         misdirected.push({ entry, finalPath });
     }
 }
@@ -94,6 +107,12 @@ for (const { entry, finalPath } of misdirected) {
 if (withoutFinalPath > 0) {
     console.log(`  NOTE: ${withoutFinalPath} cell(s) recorded no final path — they predate landing verification`);
     console.log('        and cannot be shown to have rendered the route they claim.');
+}
+console.log('');
+
+console.log(`## Cells without verified landing metadata: ${unverifiedLandings.length}`);
+for (const entry of unverifiedLandings) {
+    console.log(`  ${entry.routeId}: legacy or invalid metadata; destination allowlist and authenticated shell are unverified`);
 }
 console.log('');
 

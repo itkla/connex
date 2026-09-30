@@ -41,7 +41,9 @@ test.describe("mobile record lists", () => {
         const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.search;
         const taskDescription = `Mobile task ${fixture.username} retry ${testInfo.retry}`;
-        await createTask(page, fixture, taskDescription);
+        await createTask(page, fixture, taskDescription, contact.id);
+        const otherTaskDescription = `Other mobile task ${fixture.username} retry ${testInfo.retry}`;
+        await createTask(page, fixture, otherTaskDescription, fixture.contacts.peek.id);
 
         await page.goto(`/records/contacts?q=${encodeURIComponent(contact.name)}`);
         await page.getByRole("button", { name: "Filter and sort records" }).click();
@@ -61,14 +63,23 @@ test.describe("mobile record lists", () => {
         await expect(taskDisplayMode.getByRole("button", { name: "Board view" })).toHaveAttribute("aria-pressed", "true");
 
         await page.setViewportSize({ width: 412, height: 915 });
-        const taskRow = mobileRow(page, taskDescription);
+        const taskRow = page.getByRole("listitem").filter({ has: page.getByText(taskDescription, { exact: true }) });
+        const otherTaskRow = page.getByRole("listitem").filter({ has: page.getByText(otherTaskDescription, { exact: true }) });
         await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toBeVisible();
         await expect(taskRow.getByRole("button", { name: `Actions for ${taskDescription}` })).toBeVisible();
         await page.getByRole("button", { name: "Filter tasks" }).click();
         const tasksSheet = page.getByRole("dialog", { name: "Filters" });
         await tasksSheet.getByRole("button").filter({ hasText: contact.name }).click();
         await tasksSheet.getByRole("button", { name: "Done", exact: true }).click();
         await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toHaveCount(0);
+
+        await page.getByRole("button", { name: "Filter tasks" }).click();
+        await tasksSheet.getByRole("button").filter({ hasText: contact.name }).click();
+        await tasksSheet.getByRole("button", { name: "Done", exact: true }).click();
+        await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toBeVisible();
     });
 });
 
@@ -90,6 +101,7 @@ async function createTask(
     page: Page,
     fixture: RunFixture,
     description: string,
+    personId: number,
 ): Promise<void> {
     const response = await page.request.get("/api/auth/me");
     expect(response.status()).toBe(200);
@@ -107,6 +119,6 @@ async function createTask(
         description,
         completed: false,
         assignedToId: currentUser.id,
-        personId: fixture.contacts.search.id,
+        personId,
     });
 }

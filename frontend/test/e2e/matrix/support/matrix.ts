@@ -16,8 +16,8 @@
  * failures are annotated rather than dropped, so the manifest still shows them.
  *
  * **Capture settles before it shoots.** `networkidle` is not enough on chart-heavy surfaces —
- * recharts paints after its data arrives and entrance animations are frozen at their first frame by
- * `animations: "disabled"`, so an immediate capture yields a blank content area that misrepresents a
+ * Recharts paints after its data arrives, and `animations: "disabled"` does not settle its JavaScript
+ * reveal animations. Captures await rendered series and stable geometry to avoid misrepresenting a
  * healthy page. The app shell is also `h-dvh overflow-hidden` with `<main>` as the scrolling element,
  * so the document is always exactly one viewport tall and `fullPage` would silently crop everything
  * below the fold; the fixed height is released immediately before the screenshot, never before an
@@ -26,7 +26,7 @@
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 import {
     MATRIX_ARTIFACT_DIR,
@@ -34,7 +34,7 @@ import {
     MATRIX_FIXTURE_PATH,
     storageStateFor,
 } from '../../../../playwright.matrix.config';
-import type { RouteRole } from '../routes';
+import { MATRIX_ROUTES, type RouteRole } from '../routes';
 
 /** Viewports the matrix renders: desktop, tablet, and the reference mobile handset. */
 export const VIEWPORTS = {
@@ -365,21 +365,61 @@ export type ManifestEntry = {
     httpStatus: number | null;
     /** The pathname the browser was actually on when the cell was captured. */
     finalPath: string;
+    landing?: Landing;
     notes?: string;
 };
 
 const MANIFEST_PATH = path.join(MATRIX_ARTIFACT_DIR, 'manifest.jsonl');
 
-async function settleForCapture(page: Page): Promise<void> {
-    let previous = -1;
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-        const current = await page.locator('main svg').count().catch(() => 0);
-        if (current === previous) break;
-        previous = current;
-        await page.waitForTimeout(400);
+async function settleForCapture(page: Page, state: string): Promise<void> {
+    const content = (await page.locator('main').count()) > 0 ? page.locator('main').first() : page.locator('body');
+    await expect(content).toBeVisible();
+    if (state !== 'loading') {
+        await expect(content.locator('h1, h2').first()).toBeVisible();
+        await expect.poll(() => content.locator('h1, h2').first().evaluate((heading) => {
+            let element: Element | null = heading;
+            while (element !== null) {
+                if (Number(getComputedStyle(element).opacity) < 0.9) return false;
+                element = element.parentElement;
+            }
+            return true;
+        }), { message: 'the rendered heading and its entrance wrappers must become opaque' }).toBe(true);
+        await expect(content.locator('[aria-busy="true"]:visible, [data-slot="skeleton"]:visible')).toHaveCount(0);
+        await expectChartsSettled(content);
     }
-    await page.waitForTimeout(300);
     await expandScrollContainers(page);
+    await page.evaluate(async () => {
+        await document.fonts.ready;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+    if (state !== 'loading') await expectChartsSettled(content);
+}
+
+/** Waits for chart series and completed reveals, including resize work caused by capture expansion. */
+async function expectChartsSettled(content: Locator): Promise<void> {
+    await expect.poll(() => content.locator('.recharts-responsive-container').evaluateAll(async (charts) => {
+        const visible = charts.filter((chart) => {
+            const bounds = chart.getBoundingClientRect();
+            return bounds.width > 0 && bounds.height > 0;
+        });
+        const snapshot = () => visible.map((chart) => {
+            const surface = chart.querySelector('svg.recharts-surface');
+            if (surface === null) return null;
+            const bounds = surface.getBoundingClientRect();
+            if (bounds.width === 0 || bounds.height === 0) return null;
+            const marks = surface.querySelector(
+                '.recharts-area-area, .recharts-line-curve, .recharts-line-dots, .recharts-bar-rectangles, .recharts-pie',
+            );
+            if (marks === null) return null;
+            if (surface.querySelector('.recharts-area > g defs clipPath') !== null) return null;
+            return JSON.stringify([bounds.width, bounds.height, surface.innerHTML]);
+        });
+        const before = snapshot();
+        if (before.some((value) => value === null)) return false;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const after = snapshot();
+        return before.every((value, index) => value === after[index]);
+    }), { message: 'visible charts must render stable series after their reveal animations finish' }).toBe(true);
 }
 
 async function expandScrollContainers(page: Page): Promise<void> {
@@ -394,9 +434,7 @@ async function expandScrollContainers(page: Page): Promise<void> {
             document.documentElement.style.height = 'auto';
             document.documentElement.style.overflow = 'visible';
             document.body.style.height = 'auto';
-        })
-        .catch(() => undefined);
-    await page.waitForTimeout(250);
+        });
 }
 
 /**
@@ -408,13 +446,15 @@ export async function record(
     page: Page,
     entry: Omit<ManifestEntry, 'screenshot'> & { screenshot?: string },
 ): Promise<void> {
+    const route = MATRIX_ROUTES.find((candidate) => candidate.id === entry.routeId && candidate.path === entry.path);
+    const landing = entry.landing ?? await landingOf(page, entry.path, route?.landsOn);
     const file = entry.screenshot ?? artifactName(entry.routeId, entry.state, entry.axes);
     const target = path.join(MATRIX_ARTIFACT_DIR, 'shots', file);
     mkdirSync(path.dirname(target), { recursive: true });
-    await settleForCapture(page);
+    await settleForCapture(page, entry.state);
     await page.screenshot({ path: target, fullPage: true, animations: 'disabled' });
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });
-    appendFileSync(MANIFEST_PATH, `${JSON.stringify({ ...entry, screenshot: `shots/${file}` })}\n`);
+    appendFileSync(MANIFEST_PATH, `${JSON.stringify({ ...entry, landing, screenshot: `shots/${file}` })}\n`);
 }
 
 /** Writes the run-level provenance file that the report cites. */
