@@ -139,7 +139,7 @@ class ReportServiceTest {
 
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
 
-        verify(auditService).recordScheduledReportDeleteStepUpRefused();
+        verify(auditService).recordScheduleDeleteStepUpRefused();
         verify(auditService, never()).recordExportStepUpRefused();
         InOrder ordered = inOrder(reportMapper, scheduleMapper);
         ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);

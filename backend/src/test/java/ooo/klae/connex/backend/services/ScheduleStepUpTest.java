@@ -147,6 +147,8 @@ class ScheduleStepUpTest {
         when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
 
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+        verify(auditService).recordScheduleDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
 
         verifyNoInteractions(scheduleMapper, reportMapper, workspaceService);
     }

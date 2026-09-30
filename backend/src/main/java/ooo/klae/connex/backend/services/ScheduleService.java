@@ -151,7 +151,8 @@ public class ScheduleService {
     @Transactional
     @RequirePermission(Permission.REPORT_UPDATE)
     public void delete(int reportDefinitionId) {
-        requireScheduleStepUp(authService.getCurrentUser().getId());
+        requireScheduleStepUp(authService.getCurrentUser().getId(),
+                auditService::recordScheduleDeleteStepUpRefused);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
@@ -322,13 +323,28 @@ public class ScheduleService {
      * @param userId the account attempting the mutation
      */
     private void requireScheduleStepUp(int userId) {
+        requireScheduleStepUp(userId, auditService::recordExportStepUpRefused);
+    }
+
+    /**
+     * Applies the step-up, recording the refusal with the summary that matches what was attempted.
+     *
+     * <p>Opening or redirecting a schedule is what makes it an export channel, so those keep the
+     * export summary. Deleting one destroys the channel and its retained snapshots and exports
+     * nothing, so it passes the deletion recorder instead; the persisted text is part of the audit
+     * trail operators and alert rules read.
+     *
+     * @param userId the account whose assertion freshness is checked
+     * @param recordRefusal writes the refusal appropriate to the attempted mutation
+     */
+    private void requireScheduleStepUp(int userId, Runnable recordRefusal) {
         if (!privilegedAccountService.isPrivileged(userId)) {
             return;
         }
         try {
             sessionSecurityService.requireRecentAuthentication(userId);
         } catch (RecentAuthenticationRequiredException exception) {
-            auditService.recordExportStepUpRefused();
+            recordRefusal.run();
             throw exception;
         }
     }

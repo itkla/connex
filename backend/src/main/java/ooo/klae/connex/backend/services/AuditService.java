@@ -62,8 +62,8 @@ public class AuditService {
     public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
     public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
     public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
-    public static final String SCHEDULED_REPORT_DELETE_STEP_UP_SUMMARY =
-            "Recent MFA required to delete a scheduled report";
+    public static final String SCHEDULE_DELETE_STEP_UP_SUMMARY =
+            "Recent MFA required to delete a report delivery schedule";
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -543,15 +543,17 @@ public class AuditService {
     }
 
     /**
-     * Records the refusal of a report deletion that would cascade a delivery schedule away.
+     * Records the refusal of a deletion that destroys a report delivery schedule.
      *
-     * <p>Same action and reason as {@link #recordExportStepUpRefused()}, which the whole step-up
-     * control shares, but its summary names data export. No export is attempted here, so reusing it
-     * would describe a refused destructive deletion as a refused download to anyone reading the
-     * trail or alerting on it.
+     * <p>Covers both routes to that outcome: the direct schedule endpoint, and deleting the parent
+     * report, whose cascade is the reason that endpoint is gated at all. Same action and reason as
+     * {@link #recordExportStepUpRefused()}, which the whole step-up control shares, but its summary
+     * names data export. No export is attempted on either route, so reusing it would describe a
+     * refused destructive deletion as a refused download to anyone reading the trail or alerting
+     * on it.
      */
-    public void recordScheduledReportDeleteStepUpRefused() {
-        recordStepUpRefused(SCHEDULED_REPORT_DELETE_STEP_UP_SUMMARY);
+    public void recordScheduleDeleteStepUpRefused() {
+        recordStepUpRefused(SCHEDULE_DELETE_STEP_UP_SUMMARY);
     }
 
     private void recordStepUpRefused(String summary) {

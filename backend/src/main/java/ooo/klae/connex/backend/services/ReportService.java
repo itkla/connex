@@ -813,7 +813,7 @@ public class ReportService {
         try {
             sessionSecurityService.requireRecentAuthentication(actorId);
         } catch (RecentAuthenticationRequiredException exception) {
-            auditService.recordScheduledReportDeleteStepUpRefused();
+            auditService.recordScheduleDeleteStepUpRefused();
             throw exception;
         }
     }
