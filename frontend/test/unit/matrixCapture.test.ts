@@ -117,6 +117,47 @@ describe("matrix capture failure evidence", () => {
         },
     );
 
+    it("captures artifacts before propagating a caller's motion-readiness error", async () => {
+        const failure = new Error("content sections never reached their settled opacity and geometry");
+        const checkReadiness = vi.fn(async () => {
+            throw failure;
+        });
+
+        await expect(record(page, entry, checkReadiness)).rejects.toBe(failure);
+
+        expect(checkReadiness).toHaveBeenCalledTimes(1);
+        expect(capture.visible).not.toHaveBeenCalled();
+        expect(capture.screenshot).toHaveBeenCalledExactlyOnceWith({
+            path: path.join(capture.directory, screenshot),
+            fullPage: true,
+            animations: "disabled",
+        });
+        expect(readFileSync(path.join(capture.directory, screenshot), "utf8")).toBe("captured page");
+        expect(manifest()).toEqual({
+            ...entry,
+            state: "capture-failed",
+            screenshot,
+            readinessFailure: failure.message,
+            notes: "existing capture context :: capture readiness failed for state success",
+        });
+    });
+
+    it("checks caller readiness before capture preparation and records its diagnostic notes", async () => {
+        const notes = "h1 opacity=1 sections=3 stranded=0";
+        const checkReadiness = vi.fn(async () => {
+            expect(capture.visible).not.toHaveBeenCalled();
+            expect(capture.screenshot).not.toHaveBeenCalled();
+            return notes;
+        });
+
+        await record(page, entry, checkReadiness);
+
+        expect(checkReadiness).toHaveBeenCalledTimes(1);
+        expect(capture.visible).toHaveBeenCalledTimes(2);
+        expect(manifest()).toEqual({ ...entry, screenshot, notes });
+        expect(capture.screenshot).toHaveBeenCalledTimes(1);
+    });
+
     it("preserves a ready cell's successful state and evidence", async () => {
         await record(page, entry);
 

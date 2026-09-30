@@ -442,10 +442,13 @@ async function expandScrollContainers(page: Page): Promise<void> {
  * Records one matrix cell as evidence: a full-page screenshot plus a manifest line binding it to its
  * route, state, axes and the path the browser was actually on. Written as JSON Lines so parallel
  * workers append without clobbering, and so a partial run still yields a readable manifest.
+ * Optional readiness assertions run before capture expansion and may return diagnostic notes.
+ * Readiness failures are recorded with their screenshot before the original error is rethrown.
  */
 export async function record(
     page: Page,
     entry: Omit<ManifestEntry, 'screenshot'> & { screenshot?: string },
+    checkReadiness?: () => Promise<string | void>,
 ): Promise<void> {
     const route = MATRIX_ROUTES.find((candidate) => candidate.id === entry.routeId && candidate.path === entry.path);
     const landing = entry.landing ?? await landingOf(page, entry.path, route?.landsOn);
@@ -453,7 +456,9 @@ export async function record(
     const target = path.join(MATRIX_ARTIFACT_DIR, 'shots', file);
     mkdirSync(path.dirname(target), { recursive: true });
     let readinessFailure: { error: unknown; message: string } | undefined;
+    let notes = entry.notes;
     try {
+        notes = (await checkReadiness?.()) ?? notes;
         await settleForCapture(page, entry.state);
     } catch (error) {
         readinessFailure = { error, message: error instanceof Error ? error.message : String(error) };
@@ -462,12 +467,13 @@ export async function record(
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });
     appendFileSync(MANIFEST_PATH, `${JSON.stringify({
         ...entry,
+        notes,
         landing,
         screenshot: `shots/${file}`,
         ...(readinessFailure && {
             state: 'capture-failed',
             readinessFailure: readinessFailure.message,
-            notes: [entry.notes, `capture readiness failed for state ${entry.state}`].filter(Boolean).join(' :: '),
+            notes: [notes, `capture readiness failed for state ${entry.state}`].filter(Boolean).join(' :: '),
         }),
     })}\n`);
     if (readinessFailure) throw readinessFailure.error;
