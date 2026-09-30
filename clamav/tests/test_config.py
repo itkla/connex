@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from clamav_service.config import (
@@ -90,24 +91,30 @@ class ScratchCapacityTest(unittest.TestCase):
             2 * (STREAM_MAX_LENGTH_BYTES + MAX_SCAN_SIZE_BYTES),
         )
 
-    def test_an_undersized_mount_fails_startup(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            with patch.dict(
-                os.environ,
-                environment(CONNEX_CLAMAV_SCRATCH_DIRECTORY=str(Path(raw) / "scan")),
-                clear=True,
-            ):
-                config = ServiceConfig.from_environment()
-            statistics = os.statvfs(raw)
-            undersized = statistics.f_frsize * statistics.f_blocks < required_scratch_bytes(
-                config.max_concurrent_scans
-            )
-            if undersized:
-                with self.assertRaises(StartupFailure) as raised:
-                    verify_scratch_capacity(config)
-                self.assertEqual(raised.exception.reason, "scan_scratch_undersized")
-            else:
-                verify_scratch_capacity(config)
+    def test_scratch_capacity_boundary(self) -> None:
+        for shortfall in (1, 0):
+            with self.subTest(shortfall=shortfall), tempfile.TemporaryDirectory() as raw:
+                scratch = Path(raw) / "scan"
+                with patch.dict(
+                    os.environ,
+                    environment(CONNEX_CLAMAV_SCRATCH_DIRECTORY=str(scratch)),
+                    clear=True,
+                ):
+                    config = ServiceConfig.from_environment()
+                capacity = required_scratch_bytes(config.max_concurrent_scans) - shortfall
+                with patch(
+                    "clamav_service.config.os.statvfs",
+                    return_value=SimpleNamespace(f_frsize=1, f_blocks=capacity),
+                ) as statvfs:
+                    if shortfall:
+                        with self.assertRaises(StartupFailure) as raised:
+                            verify_scratch_capacity(config)
+                        self.assertEqual(raised.exception.reason, "scan_scratch_undersized")
+                    else:
+                        verify_scratch_capacity(config)
+                    statvfs.assert_called_once_with(scratch)
+                self.assertTrue(scratch.is_dir())
+                self.assertFalse((scratch / ".capacity-probe").exists())
 
     def test_an_unwritable_mount_fails_startup(self) -> None:
         with patch.dict(

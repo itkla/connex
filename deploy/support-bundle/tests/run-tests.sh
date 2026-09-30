@@ -743,15 +743,24 @@ case_verify_requires_every_row_examined() (
     # shellcheck source=deploy/support-bundle/support-bundle-lib.sh
     source "$SANDBOX/support-bundle-lib.sh"
     local work="$SANDBOX/rowcount"
-    make_bundle "$work/src" ""
+    make_bundle "$work/src" "$work/bundle.zip"
     mkdir -p "$work/out"
-    support_bundle_extract "$work/bundle.zip" "$work/out" >/dev/null 2>&1 || true
-    rebuild_archive "$work/src" "$work/bundle.zip"
-    rm -rf "$work/out"; mkdir -p "$work/out"
     support_bundle_verify_archive "$work/bundle.zip" "$work/out" >/dev/null 2>&1
     assert_status rowcount_ok 0 "$?" || return 1
-    grep -q 'inventory_rows_unverified' "$SANDBOX/support-bundle-lib.sh" || {
-        printf 'row-count backstop is missing from the library\n'; return 1; }
+
+    jq() {
+        if [ "$#" -eq 3 ] && [ "$1" = -er ] \
+                && [ "$2" = '.files[] | [.path, (.byteLength | tostring), .sha256] | @tsv' ]; then
+            command jq "$@" | sed '$d'
+        else
+            command jq "$@"
+        fi
+    }
+    rm -rf "$work/out"; mkdir -p "$work/out"
+    support_bundle_verify_archive "$work/bundle.zip" "$work/out" > "$work/short.log" 2>&1
+    assert_status rowcount_refused 67 "$?" || return 1
+    assert_contains rowcount_diagnostic \
+        'reason=inventory_rows_unverified expected=5 verified=4' "$work/short.log"
 )
 
 # A hostile bundle must not be able to repaint the operator's terminal and forge a summary line.
