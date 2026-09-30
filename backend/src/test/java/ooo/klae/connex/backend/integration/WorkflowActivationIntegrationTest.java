@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -52,6 +54,9 @@ import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.test.context.TestContextManager;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -104,6 +109,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationPushListener;
 import ooo.klae.connex.backend.notifications.NotificationSourceChangedListener;
 import ooo.klae.connex.backend.services.RuleTriggerListener;
+import ooo.klae.connex.backend.services.LegacyWorkflowBackfillRunner;
 import ooo.klae.connex.backend.services.WorkflowInterventionRecorder;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
@@ -304,6 +310,52 @@ class WorkflowActivationIntegrationTest {
             }
         });
         pendingCleanup.remove(committed);
+    }
+
+    @Test
+    void startupBackfillSucceedsAfterCommittedActivationFixturesAreRemoved() throws Exception {
+        int workspaceId = workspace.getId();
+        int ruleId = createRule(author, ruleBody(true, "person.owner_changed", "create_note"));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspaceId, ruleId);
+        assertNotNull(workflow);
+        assertTrue(workflow.isEnabled());
+        assertNotNull(workflow.getActiveVersionId());
+        assertNotNull(workflowVersionMapper.getById(workspaceId, workflow.getId(), workflow.getActiveVersionId()));
+
+        deleteCommittedFixture();
+        assertTrue(pendingCleanup.isEmpty());
+        assertNull(ruleMapper.getById(workspaceId, ruleId));
+        assertNull(workflowMapper.getById(workspaceId, workflow.getId()));
+        assertNull(workflowVersionMapper.getById(workspaceId, workflow.getId(), workflow.getActiveVersionId()));
+        fixture = null;
+
+        TestContextManager startup = new TestContextManager(StartupProbe.class);
+        try {
+            startup.beforeTestClass();
+            StartupProbe probe = new StartupProbe();
+            startup.prepareTestInstance(probe);
+            assertNotSame(context, probe.context);
+            assertTrue(probe.context.isActive());
+            verify(probe.backfillRunner).run(isA(ApplicationArguments.class));
+        } finally {
+            try {
+                startup.afterTestClass();
+            } finally {
+                startup.getTestContext().markApplicationContextDirty(DirtiesContext.HierarchyMode.EXHAUSTIVE);
+                RequestContextHolder.resetRequestAttributes();
+            }
+        }
+    }
+
+    @SpringBootTest(properties = {
+        "connex.workflows.runtime.enabled=false",
+        "connex.workflows.runtime.scheduling-enabled=false",
+        "connex.rules.scheduling-enabled=false"
+    })
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
+    static class StartupProbe {
+        @Autowired private ConfigurableApplicationContext context;
+        @MockitoSpyBean private LegacyWorkflowBackfillRunner backfillRunner;
     }
 
     @Test

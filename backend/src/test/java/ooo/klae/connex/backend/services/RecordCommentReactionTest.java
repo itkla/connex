@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RecordCommentReactionSummary;
+import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
@@ -133,15 +134,37 @@ class RecordCommentReactionTest extends AbstractServiceTest {
 
     @Test
     void reactionsNeverCreateNotifications() {
-        User recipient = newUser();
-        long before = notificationMapper.countPage(
-            recipient.getId(), null, null, null, null);
-        long commentId = newCommentId();
+        User author = currentUser;
+        User participant = newUser();
+        User reactor = newUser();
+        Person person = newPerson(newCompany());
+        RecordCommentThread thread = recordCommentService.createThread(
+            "person", person.getId(), "Author discussion", token());
+        authenticateAs(participant, workspace.getId());
+        recordCommentService.reply(thread.getId(), "Participant reply", token());
+        authenticateAs(reactor, workspace.getId());
+        recordCommentService.reply(thread.getId(), "Reactor reply", token());
+        List<User> recipients = List.of(author, participant, reactor);
+        Map<Integer, Long> before = recipients.stream().collect(Collectors.toMap(
+            User::getId,
+            user -> notificationMapper.countPage(user.getId(), null, null, null, null)));
+        assertTrue(before.get(author.getId()) > 0);
+        assertTrue(before.get(participant.getId()) > 0);
+        long commentId = thread.getComments().getFirst().getId();
 
         recordCommentService.addReaction(commentId, "celebrate");
 
-        assertEquals(before, notificationMapper.countPage(
-            recipient.getId(), null, null, null, null));
+        for (User recipient : recipients) {
+            assertEquals(before.get(recipient.getId()), notificationMapper.countPage(
+                recipient.getId(), null, null, null, null));
+        }
+
+        recordCommentService.removeReaction(commentId, "celebrate");
+
+        for (User recipient : recipients) {
+            assertEquals(before.get(recipient.getId()), notificationMapper.countPage(
+                recipient.getId(), null, null, null, null));
+        }
     }
 
     private long newCommentId() {

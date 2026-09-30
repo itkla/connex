@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -21,6 +22,8 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -263,6 +266,80 @@ class WarmthReconciliationIntegrationTest {
         assertEquals("hot", javaInclusive.getBand());
         assertTemperatureEquals(javaInclusive, aggregateInclusive);
         assertTrue(actualGapIds.contains(cutoff.getId()));
+    }
+
+    @ParameterizedTest(name = "{0}, {1}")
+    @CsvSource({
+        "CONTACT_LIVE, activity", "CONTACT_REPLAY, activity", "CONTACT_SUBSET, activity",
+        "COMPANY_LIVE, activity", "COMPANY_REPLAY, activity", "COMPANY_SUBSET, activity",
+        "CONTACT_LIVE, note", "CONTACT_REPLAY, note", "CONTACT_SUBSET, note",
+        "COMPANY_LIVE, note", "COMPANY_REPLAY, note", "COMPANY_SUBSET, note",
+        "CONTACT_LIVE, task", "CONTACT_REPLAY, task", "CONTACT_SUBSET, task",
+        "COMPANY_LIVE, task", "COMPANY_REPLAY, task", "COMPANY_SUBSET, task"
+    })
+    void scoringExcludesPrivateNotesAndHonorsTheReferenceBoundary(ScorePath path, String source) {
+        LocalDateTime reference = LocalDateTime.of(2026, 6, 30, 0, 0);
+        Instant asOf = reference.toInstant(ZoneOffset.UTC);
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(asOf, ZoneOffset.UTC));
+        Company company = company("Boundary");
+        Person person = person("Boundary", company);
+        Pipeline pipeline = pipeline();
+        Deal deal = deal(pipeline, stage(pipeline), company);
+        Note privateNote = note(person, "private");
+        setCreatedAt("note", privateNote.getId(), reference.minusSeconds(1));
+
+        RelationshipTemperatureDto privateOnly = score(path, service, person, company, asOf);
+        assertEquals(0, privateOnly.getTouchCount());
+        assertEquals(0, privateOnly.getScore());
+        assertEquals("cold", privateOnly.getBand());
+
+        addTouch(source, person, deal, reference.plusSeconds(1));
+        RelationshipTemperatureDto futureOnly = score(path, service, person, company, asOf);
+        assertEquals(0, futureOnly.getTouchCount());
+        assertEquals(0, futureOnly.getScore());
+        assertEquals("cold", futureOnly.getBand());
+
+        addTouch(source, person, deal, reference.minusSeconds(1));
+        RelationshipTemperatureDto before = score(path, service, person, company, asOf);
+        assertEquals(1, before.getTouchCount());
+        assertEquals(reference.minusSeconds(1).format(MYSQL_DATETIME), before.getLastTouchAt());
+
+        addTouch(source, person, deal, reference);
+        RelationshipTemperatureDto at = score(path, service, person, company, asOf);
+        assertEquals(2, at.getTouchCount());
+        assertEquals(reference.format(MYSQL_DATETIME), at.getLastTouchAt());
+        assertTrue(at.getScore() > before.getScore());
+        assertEquals(asOf, at.getAsOf());
+        assertEquals("warmth-v1", at.getModelVersion());
+    }
+
+    private void addTouch(String source, Person person, Deal deal, LocalDateTime at) {
+        switch (source) {
+            case "activity" -> activity(person, deal, "meeting", at);
+            case "note" -> setCreatedAt("note", note(person, "workspace").getId(), at);
+            case "task" -> setCreatedAt("task", task(person).getId(), at);
+            default -> throw new IllegalArgumentException(source);
+        }
+    }
+
+    private RelationshipTemperatureDto score(
+            ScorePath path, ScoringService service, Person person, Company company, Instant asOf) {
+        List<RelationshipTemperatureDto> scores = switch (path) {
+            case CONTACT_LIVE -> service.scoreContacts(workspace.getId());
+            case CONTACT_REPLAY -> service.scoreContacts(workspace.getId(), asOf);
+            case CONTACT_SUBSET -> service.scoreContacts(workspace.getId(), Set.of(person.getId()));
+            case COMPANY_LIVE -> service.scoreCompanies(workspace.getId());
+            case COMPANY_REPLAY -> service.scoreCompanies(workspace.getId(), asOf);
+            case COMPANY_SUBSET -> service.scoreCompanies(workspace.getId(), Set.of(company.getId()));
+        };
+        assertEquals(1, scores.size());
+        return scores.getFirst();
+    }
+
+    private enum ScorePath {
+        CONTACT_LIVE, CONTACT_REPLAY, CONTACT_SUBSET,
+        COMPANY_LIVE, COMPANY_REPLAY, COMPANY_SUBSET
     }
 
     private static Map<Integer, RelationshipTemperatureDto> byId(

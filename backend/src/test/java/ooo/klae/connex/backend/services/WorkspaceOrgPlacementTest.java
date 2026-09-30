@@ -7,6 +7,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.User;
@@ -46,25 +48,18 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
         workspaceMapper.setMemberCustomRole(workspace.getId(), member.getId(), role.getId());
     }
 
-    @Test
-    void ownerCreatingWorkspace_staysInTheActiveOrg() {
+    @ParameterizedTest
+    @ValueSource(strings = {"owner", "admin"})
+    void administratorCreatingWorkspace_staysInTheActiveOrg(String role) {
         int activeOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "owner", null);
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), role);
+        authenticateAs(currentUser, workspace.getId());
+        assertEquals(role, workspaceMapper.getRole(workspace.getId(), currentUser.getId()));
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Team " + unique(), currentUser.getId());
 
         assertEquals(activeOrg, workspaceService.getOrgId(created.getId()),
-            "an owner's new workspace expands their own organization");
-    }
-
-    @Test
-    void adminCreatingWorkspace_staysInTheActiveOrg() {
-        int activeOrg = workspaceService.getOrgId(workspace.getId());
-        tenantContext.set(workspace.getId(), activeOrg, currentUser.getId(), "admin", null);
-
-        WorkspaceMembershipDto created = workspaceService.createWorkspace("Team " + unique(), currentUser.getId());
-
-        assertEquals(activeOrg, workspaceService.getOrgId(created.getId()));
+            "an administrator's new workspace expands their own organization");
     }
 
     @Test
