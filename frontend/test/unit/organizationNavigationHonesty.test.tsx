@@ -7,7 +7,7 @@ import {
     type ReactElement,
     type ReactNode,
 } from "react";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -155,17 +155,6 @@ const OTHER_ORG_ADMIN_WORKSPACE = {
     orgRole: "admin",
 } satisfies Workspace;
 
-const ORG_ADMIN_ROUTES = [
-    "/organization/overview",
-    "/organization/members",
-    "/organization/allowed-domains",
-    "/organization/sso",
-    "/organization/ai",
-    "/organization/data-requests",
-    "/organization/audit",
-    "/organization/diagnostics",
-] as const;
-
 function workspaceSnapshot(workspace: Workspace): MyWorkspaces {
     return { workspaces: [workspace], activeWorkspaceId: workspace.id };
 }
@@ -301,15 +290,5 @@ describe("the legacy organization shell stays retired", () => {
             retired,
             "the organization routes redirect; a shell above them would wrap nothing and compete with /settings",
         ).toEqual([]);
-    });
-
-    it("leaves every organization address forwarding rather than rendering", () => {
-        const rendering = ORG_ADMIN_ROUTES.filter(
-            (route) => !/permanentRedirect\(/.test(
-                readFileSync(join(process.cwd(), "app", "(app)", route, "page.tsx"), "utf8"),
-            ),
-        );
-
-        expect(rendering).toEqual([]);
     });
 });

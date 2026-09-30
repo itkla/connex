@@ -209,11 +209,11 @@ afterEach(async () => {
     vi.useRealTimers();
 });
 
-async function mount(initialItems: WorkItem[]) {
+async function mount(initialItems: WorkItem[], overrides: Partial<WorkItemPage> = {}) {
     await act(async () => {
         root.render(createElement(MyWorkQueue, {
             userId: 7,
-            initial: { ok: true, data: pageOf(initialItems) },
+            initial: { ok: true, data: pageOf(initialItems, overrides) },
         }));
     });
 }
@@ -722,25 +722,36 @@ describe("My Work queue interactions", () => {
     });
 
     it("shows an empty later page without a caught-up claim and offers the way back", async () => {
-        await mount([workItem(1, "Task one")]);
-        api.getMyWork.mockResolvedValueOnce(pageOf([workItem(2, "Task two")], {
-            hasNext: true, hasNextKnown: true, knownMatchingTotal: 2, knownOverallTotal: 2,
-        }));
-        api.getMyWork.mockResolvedValueOnce(pageOf([], {
-            page: 2, hasNext: false, hasNextKnown: true, knownMatchingTotal: 2, knownOverallTotal: 2,
-        }));
+        const firstPage = pageOf([workItem(1, "Task one")], {
+            size: 1, hasNext: true, knownMatchingTotal: 2, knownOverallTotal: 2,
+            sourceStatuses: [
+                { source: "task", status: "available", matchingTotal: 2, overallTotal: 2 },
+                { source: "notification", status: "available", matchingTotal: 0, overallTotal: 0 },
+                { source: "document_approval", status: "available", matchingTotal: 0, overallTotal: 0 },
+            ],
+        });
+        await mount(firstPage.items, firstPage);
+        const remainingPage = pageOf(firstPage.items, { size: 1 });
+        api.getMyWork.mockResolvedValueOnce({ ...remainingPage, items: [], page: 2 });
+        api.getMyWork.mockResolvedValueOnce(remainingPage);
 
-        await act(async () => { void 0; });
-        const next = [...container.querySelectorAll("button, a")]
-            .find((element) => element.getAttribute("aria-label") === "queueNext");
-        if (next) {
-            await act(async () => { (next as HTMLElement).click(); });
-            await act(async () => { (next as HTMLElement).click(); });
-            expect(container.innerHTML).toContain("queuePageEmptyTitle");
-            expect(container.innerHTML).not.toContain("queueEmptyTitle");
-            expect(container.innerHTML).toContain("queueBackToFirstPage");
-        } else {
-            expect(container.innerHTML).not.toContain("queueEmptyTitle");
-        }
+        const next = container.querySelector<HTMLButtonElement>('button[aria-label="queueNext"]');
+        expect(next).not.toBeNull();
+        expect(next?.disabled).toBe(false);
+        if (next === null) throw new Error("next-page control not found");
+        await act(async () => { next.click(); });
+
+        expect(api.getMyWork).toHaveBeenCalledTimes(1);
+        expect(api.getMyWork).toHaveBeenNthCalledWith(1, expect.objectContaining({ page: 2 }));
+        expect(container.innerHTML).toContain("queuePageEmptyTitle");
+        expect(container.innerHTML).not.toContain("queueEmptyTitle");
+        expect(container.innerHTML).toContain("queueBackToFirstPage");
+
+        await act(async () => { findButton("queueBackToFirstPage").click(); });
+
+        expect(api.getMyWork).toHaveBeenCalledTimes(2);
+        expect(api.getMyWork).toHaveBeenNthCalledWith(2, expect.objectContaining({ page: 1 }));
+        expect(container.innerHTML).toContain("Task one");
+        expect(container.innerHTML).not.toContain("queuePageEmptyTitle");
     });
 });
