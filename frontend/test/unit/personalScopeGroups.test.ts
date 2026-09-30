@@ -36,8 +36,20 @@ import {
 const APP = path.join(process.cwd(), "app");
 const COMPONENTS = path.join(APP, "components", "settings");
 
+const sources = new Map<string, string>();
+let applicationFiles: string[] | undefined;
+
 function source(file: string): string {
-    return readFileSync(file, "utf8");
+    const cached = sources.get(file);
+    if (cached !== undefined) return cached;
+    const text = readFileSync(file, "utf8");
+    sources.set(file, text);
+    return text;
+}
+
+function applicationSources(): string[] {
+    applicationFiles ??= appFiles(APP);
+    return applicationFiles;
 }
 
 function routeDir(route: string): string {
@@ -274,7 +286,7 @@ describe("the last two peer-tab strips dissolved with their destinations", () =>
             "@/app/components/settings/SettingsTabs",
             "@/app/components/settings/WorkspaceSettingsChrome",
         ];
-        const stragglers = appFiles(APP).filter((file) => {
+        const stragglers = applicationSources().filter((file) => {
             const text = source(file);
             return retired.some((module) => text.includes(`from "${module}"`));
         });
@@ -333,7 +345,7 @@ describe("connected accounts keeps the one section it absorbed addressable", () 
             path.join(APP, "lib", "connectedAccountsSections.ts"),
             path.join(APP, "lib", "settingsManifest.ts"),
         ]);
-        const strays = appFiles(APP)
+        const strays = applicationSources()
             .filter((file) => !builders.has(file))
             .filter((file) => source(file).includes(`${CONNECTED_ACCOUNTS_ROUTE}#`));
 

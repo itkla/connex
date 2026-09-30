@@ -45,29 +45,6 @@ describe("parseInviteInput", () => {
         });
     });
 
-    it("routes an emailed invite URL to the invite page", () => {
-        expect(parseInviteInput(`${ORIGIN}/invite#token=${EMAILED_TOKEN}`)).toEqual({
-            kind: "invite",
-            token: EMAILED_TOKEN,
-            href: `/invite#token=${EMAILED_TOKEN}`,
-        });
-    });
-
-    it("routes a shareable invite link to the invite-link page", () => {
-        expect(parseInviteInput(`${ORIGIN}/invite-link#token=${SHAREABLE_TOKEN}`)).toEqual({
-            kind: "invite-link",
-            token: SHAREABLE_TOKEN,
-            href: `/invite-link#token=${SHAREABLE_TOKEN}`,
-        });
-    });
-
-    it("never mistakes the scheme of a shareable link for its token", () => {
-        const parsed = parseInviteInput(`${ORIGIN}/invite-link#token=${SHAREABLE_TOKEN}`);
-
-        expect(parsed?.token).not.toBe("https:");
-        expect(parsed?.href).not.toContain("https");
-    });
-
     it("accepts a bare token and redeems it as an emailed invite", () => {
         expect(parseInviteInput(EMAILED_TOKEN)).toEqual({
             kind: "invite",

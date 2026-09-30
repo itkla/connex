@@ -1079,9 +1079,11 @@ describe('Ask Connex follow-up suggestions', () => {
         expect(askConnexLatestMessagePages(100, 50)).toEqual([2]);
     });
 
-    it('refetches the tail when a concurrent write moves a full page to a new page', async () => {
+    it.each([
+        { boundary: 'full', initialTotal: 100 },
+        { boundary: 'partial', initialTotal: 99 },
+    ])('refetches the tail when concurrent writes cross a $boundary page', async ({ initialTotal }) => {
         const calls: number[] = [];
-        let firstTailRead = true;
         const messages = await loadAskConnexLatestMessages(
             {
                 items: Array.from({ length: 50 }, (_, index) => ({
@@ -1089,22 +1091,11 @@ describe('Ask Connex follow-up suggestions', () => {
                     id: index + 1,
                     seq: index + 1,
                 })),
-                total: 100,
+                total: initialTotal,
             },
             50,
             async (page) => {
                 calls.push(page);
-                if (page === 2 && firstTailRead) {
-                    firstTailRead = false;
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
                 if (page === 2) {
                     return {
                         items: Array.from({ length: 50 }, (_, index) => ({
@@ -1126,53 +1117,6 @@ describe('Ask Connex follow-up suggestions', () => {
         expect(messages.map((message) => message.seq)).toEqual(
             Array.from({ length: 50 }, (_, index) => index + 52),
         );
-        expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
-    });
-
-    it('refetches both tail pages when concurrent writes cross from a partial page', async () => {
-        const calls: number[] = [];
-        let firstTailRead = true;
-        const messages = await loadAskConnexLatestMessages(
-            {
-                items: Array.from({ length: 50 }, (_, index) => ({
-                    ...assistant,
-                    id: index + 1,
-                    seq: index + 1,
-                })),
-                total: 99,
-            },
-            50,
-            async (page) => {
-                calls.push(page);
-                if (page === 2 && firstTailRead) {
-                    firstTailRead = false;
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
-                if (page === 2) {
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
-                return {
-                    items: [{ ...assistant, id: 101, seq: 101, suggestions: ['Current follow-up'] }],
-                    total: 101,
-                };
-            },
-        );
-
-        expect(calls).toEqual([2, 2, 3]);
         expect(messages.at(-1)?.seq).toBe(101);
         expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
     });

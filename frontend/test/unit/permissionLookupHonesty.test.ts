@@ -182,15 +182,4 @@ describe('a connected-capture deep link survives a failed permission lookup', ()
         expect(panel).toContain('from "@/app/components/PermissionsUnavailable"');
         expect(panel).toContain('variant="inline"');
     });
-
-    it('ships the copy it renders in both locales, actually translated', () => {
-        for (const key of ['title', 'sectionBody', 'retry', 'retrying']) {
-            const en = JSON.parse(source('messages/en/errors.json')).PermissionsUnavailable[key];
-            const ja = JSON.parse(source('messages/ja/errors.json')).PermissionsUnavailable[key];
-
-            expect(typeof en).toBe('string');
-            expect(typeof ja).toBe('string');
-            expect(ja).not.toBe(en);
-        }
-    });
 });

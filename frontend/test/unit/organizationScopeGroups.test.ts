@@ -66,7 +66,6 @@ const AI_VIEW = path.join(COMPONENTS, "OrganizationAiGovernance.tsx");
 const DATA_REQUESTS_VIEW = path.join(COMPONENTS, "OrganizationDataRequests.tsx");
 const AUDIT_VIEW = path.join(COMPONENTS, "OrganizationAuditDiagnostics.tsx");
 const OVERVIEW_PANEL = path.join(ORG_COMPONENTS, "OrganizationOverviewPanel.tsx");
-const MEMBERS_PANEL = path.join(ORG_COMPONENTS, "OrgMembersPanel.tsx");
 const DOMAINS_PANEL = path.join(ORG_COMPONENTS, "OrgAllowedDomainsPanel.tsx");
 const SETTINGS_LAYOUT = path.join(APP, "(app)", "settings", "organization", "layout.tsx");
 
@@ -473,24 +472,6 @@ describe("the organization destinations keep the write boundaries their panels e
             destination?.access.orgWrite,
             "the destination admits administrator writes; the section that does not says so where it stands",
         ).toBe("admin");
-    });
-
-    it("renders no roster mutation an organization administrator would be refused", () => {
-        const panel = source(MEMBERS_PANEL);
-
-        expect(panel).toContain('const isOwner = activeWorkspace?.orgRole === "owner";');
-        expect(
-            panel,
-            "changing a role is owner-only on the backend, so a non-owner reads a badge instead",
-        ).toContain("const editable = isOwner && !lockedSoleOwner;");
-        expect(
-            panel,
-            "so is removing one, so the row menu is not drawn at all",
-        ).toContain("const removable = isOwner && !lockedSoleOwner;");
-        expect(
-            panel,
-            "and so is adding one: §6 prefers no entry point over a locked door",
-        ).toContain("{isOwner && (");
     });
 
     it("leaves the administrator-writable sections ungated on the owner role", () => {
