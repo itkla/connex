@@ -30,6 +30,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.stream.Stream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -42,6 +43,8 @@ import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -735,12 +738,13 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         }
     }
 
-    @Test
-    void providerOutcomeAgreeingWithConcurrentOperatorResolutionIsAuditedWithoutMarker()
-            throws Exception {
-        String prefix = "export-late-agreement-" + unique();
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("concurrentReconciliationCases")
+    void providerOutcomeAfterConcurrentReconciliationPreservesResolutionAndAuditsPrivacy(
+            ReconciliationCase scenario) throws Exception {
+        String prefix = "export-late-" + scenario.resolution() + "-" + unique();
         person(newCompany(), prefix, prefix + "@example.com");
-        String campaignName = "Late outcome agreement " + prefix;
+        String campaignName = "Late outcome " + prefix;
         CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
         CountDownLatch providerCallStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -772,7 +776,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                     """, workspace.getId(), exportId));
             CampaignAudienceExportDto reconciled = audienceExportService.reconcileExport(
                     campaign.id(), exportId,
-                    new CampaignAudienceExportReconciliationRequest("delivered"));
+                    new CampaignAudienceExportReconciliationRequest(scenario.resolution()));
             releaseProvider.countDown();
 
             CampaignAudienceExportDto completedRequest = pending.get(20, TimeUnit.SECONDS);
@@ -783,17 +787,27 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             CampaignAudienceExport stored = campaignAudienceExportMapper.getExport(
                     workspace.getId(), exportId);
 
-            assertEquals("completed", reconciled.status());
-            assertEquals("completed", completedRequest.status());
-            assertNull(completedRequest.lateOutcome());
-            assertNull(history.lateOutcome());
-            assertEquals("operator_delivered", stored.getOutcomeClassification());
-            assertNull(stored.getLateOutcome());
-            assertEquals(0, jdbcTemplate.queryForObject("""
-                    SELECT COUNT(*)
-                    FROM campaign_audience_export
-                    WHERE workspace_id = ? AND id = ? AND late_outcome IS NOT NULL
-                    """, Integer.class, workspace.getId(), exportId));
+            assertEquals(scenario.status(), reconciled.status());
+            assertEquals(scenario.status(), completedRequest.status());
+            assertEquals(scenario.lateOutcome(), completedRequest.lateOutcome());
+            assertEquals(scenario.lateOutcome(), history.lateOutcome());
+            assertEquals(scenario.classification(), stored.getOutcomeClassification());
+            if (scenario.agreement()) {
+                assertNull(completedRequest.lateOutcome());
+                assertNull(history.lateOutcome());
+                assertNull(stored.getLateOutcome());
+                assertEquals(0, jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*)
+                        FROM campaign_audience_export
+                        WHERE workspace_id = ? AND id = ? AND late_outcome IS NOT NULL
+                        """, Integer.class, workspace.getId(), exportId));
+            } else {
+                assertEquals(scenario.lateOutcome(), jdbcTemplate.queryForObject("""
+                        SELECT late_outcome
+                        FROM campaign_audience_export
+                        WHERE workspace_id = ? AND id = ?
+                        """, String.class, workspace.getId(), exportId));
+            }
             var audit = jdbcTemplate.queryForMap("""
                     SELECT action, entity_type, entity_id, target_label, outcome, changes
                     FROM audit_log
@@ -813,8 +827,8 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             assertEquals(1, changes.path("attempt").asInt());
             assertEquals(idempotencyKey.get(), changes.path("idempotencyKey").asText());
             assertEquals("confirmed", changes.path("providerOutcome").asText());
-            assertEquals("completed", changes.path("persistedState").asText());
-            assertTrue(changes.path("agreement").asBoolean());
+            assertEquals(scenario.status(), changes.path("persistedState").asText());
+            assertEquals(scenario.agreement(), changes.path("agreement").asBoolean());
             assertFalse(changes.has("members"));
             assertFalse(changes.has("pushedCount"));
             assertFalse(changes.has("failedCount"));
@@ -825,90 +839,20 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         }
     }
 
-    @Test
-    void providerOutcomeAfterConcurrentReconciliationIsAuditedAndMarkedInHistory() throws Exception {
-        String prefix = "export-late-outcome-" + unique();
-        person(newCompany(), prefix, prefix + "@example.com");
-        String campaignName = "Late outcome export " + prefix;
-        CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
-        CountDownLatch providerCallStarted = new CountDownLatch(1);
-        CountDownLatch releaseProvider = new CountDownLatch(1);
-        AtomicReference<String> idempotencyKey = new AtomicReference<>();
-        doAnswer(invocation -> {
-            AudiencePush push = invocation.getArgument(1, AudiencePush.class);
-            idempotencyKey.set(push.idempotencyKey());
-            providerCallStarted.countDown();
-            await(releaseProvider, "Audience export provider call did not resume");
-            return new AudiencePushResult(1, 0, "accepted");
-        }).when(connector).pushAudience(any(), any());
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        try {
-            Future<CampaignAudienceExportDto> pending = executor.submit(() ->
-                    createExportAs(currentUser, campaign.id()));
-            assertTrue(providerCallStarted.await(10, TimeUnit.SECONDS));
-            int exportId = jdbcTemplate.queryForObject("""
-                    SELECT id
-                    FROM campaign_audience_export
-                    WHERE workspace_id = ? AND campaign_id = ? AND status = 'running'
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """, Integer.class, workspace.getId(), campaign.id());
-            assertEquals(1, jdbcTemplate.update("""
-                    UPDATE campaign_audience_export
-                    SET lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
-                        outcome_classification = 'ambiguous'
-                    WHERE workspace_id = ? AND id = ? AND status = 'running'
-                    """, workspace.getId(), exportId));
-            CampaignAudienceExportDto reconciled = audienceExportService.reconcileExport(
-                    campaign.id(), exportId,
-                    new CampaignAudienceExportReconciliationRequest("not_delivered"));
-            releaseProvider.countDown();
+    private static Stream<ReconciliationCase> concurrentReconciliationCases() {
+        return Stream.of(
+            new ReconciliationCase("delivered/agreement", "delivered", "completed",
+                "operator_delivered", null, true),
+            new ReconciliationCase("not-delivered/disagreement", "not_delivered", "failed",
+                "operator_not_delivered", "confirmed_delivery", false));
+    }
 
-            CampaignAudienceExportDto completedRequest = pending.get(20, TimeUnit.SECONDS);
-            CampaignAudienceExportDto history = audienceExportService.listExports(campaign.id()).stream()
-                    .filter(candidate -> candidate.id() == exportId)
-                    .findFirst()
-                    .orElseThrow();
-
-            assertEquals("failed", reconciled.status());
-            assertEquals("operator_not_delivered", campaignAudienceExportMapper.getExport(
-                    workspace.getId(), exportId).getOutcomeClassification());
-            assertEquals("failed", completedRequest.status());
-            assertEquals("confirmed_delivery", completedRequest.lateOutcome());
-            assertEquals("confirmed_delivery", history.lateOutcome());
-            assertEquals("confirmed_delivery", jdbcTemplate.queryForObject("""
-                    SELECT late_outcome
-                    FROM campaign_audience_export
-                    WHERE workspace_id = ? AND id = ?
-                    """, String.class, workspace.getId(), exportId));
-            var audit = jdbcTemplate.queryForMap("""
-                    SELECT action, entity_type, entity_id, target_label, outcome, changes
-                    FROM audit_log
-                    WHERE workspace_id = ?
-                      AND action = 'campaign.audience_export.late_outcome'
-                      AND entity_id = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """, workspace.getId(), campaign.id());
-            assertEquals("campaign.audience_export.late_outcome", audit.get("action"));
-            assertEquals("campaign", audit.get("entity_type"));
-            assertEquals(campaign.id(), ((Number) audit.get("entity_id")).intValue());
-            assertEquals(campaignName, audit.get("target_label"));
-            assertEquals("success", audit.get("outcome"));
-            JsonNode changes = objectMapper.readTree((String) audit.get("changes"));
-            assertEquals(exportId, changes.path("exportId").asInt());
-            assertEquals(1, changes.path("attempt").asInt());
-            assertEquals(idempotencyKey.get(), changes.path("idempotencyKey").asText());
-            assertEquals("confirmed", changes.path("providerOutcome").asText());
-            assertEquals("failed", changes.path("persistedState").asText());
-            assertFalse(changes.path("agreement").asBoolean());
-            assertFalse(changes.has("members"));
-            assertFalse(changes.has("pushedCount"));
-            assertFalse(changes.has("failedCount"));
-            assertFalse(changes.toString().contains(prefix + "@example.com"));
-        } finally {
-            releaseProvider.countDown();
-            shutdown(executor);
+    private record ReconciliationCase(
+            String name, String resolution, String status, String classification,
+            String lateOutcome, boolean agreement) {
+        @Override
+        public String toString() {
+            return name;
         }
     }
 

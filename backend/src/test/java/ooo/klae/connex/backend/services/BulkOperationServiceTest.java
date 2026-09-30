@@ -128,6 +128,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertEquals(2, result.getSucceeded());
         assertTrue(tagMapper.getTagsByCompanyId(workspace.getId(), c1.getId()).stream()
             .anyMatch(t -> t.getId() == tag.getId()));
+        assertTrue(tagMapper.getTagsByCompanyId(workspace.getId(), c2.getId()).stream()
+            .anyMatch(t -> t.getId() == tag.getId()));
     }
 
     @Test
@@ -143,6 +145,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
 
         assertEquals(2, result.getSucceeded());
         assertEquals(newOwner.getId(), dealMapper.getDealById(workspace.getId(), d1.getId()).getOwnerId());
+        assertEquals(newOwner.getId(), dealMapper.getDealById(workspace.getId(), d2.getId()).getOwnerId());
     }
 
     @Test
