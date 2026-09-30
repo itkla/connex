@@ -600,6 +600,26 @@ class DuplicateReviewIntegrationTest {
     }
 
     @Test
+    void livePersonEvidenceReconciliationPreservesPersistedDecisionsWhenRepeated() {
+        authenticate(member);
+        Person first = personService.create(person("Live first", "live-review@example.com"));
+        personService.create(person("Live second", "live-review@example.com"));
+        personService.create(person("Live third", "live-review@example.com"));
+
+        personService.update(first.getId(), person("Live first", "live-review@example.com"));
+        var firstDecisions = persistedDecisionSnapshot();
+        assertEquals(3, firstDecisions.size());
+        assertEquals(3, currentDecisionCount());
+        assertTrue(firstDecisions.stream().allMatch(row -> "open".equals(row.get("state"))));
+
+        personService.update(first.getId(), person("Live first", "live-review@example.com"));
+        var repeatedDecisions = persistedDecisionSnapshot();
+        assertEquals(3, repeatedDecisions.size());
+        assertEquals(3, currentDecisionCount());
+        assertEquals(firstDecisions, repeatedDecisions);
+    }
+
+    @Test
     void companyExternalIdArchiveUpdatesOnlyTheSurvivingPairCardinality() throws Exception {
         authenticate(member);
         List<Company> companies = new ArrayList<>();
@@ -808,7 +828,8 @@ class DuplicateReviewIntegrationTest {
         return jdbcTemplate.queryForList(
             """
             SELECT id, record_type, kind, evidence_fingerprint, low_company_id,
-                   high_company_id, evidence_company_identity_id, collision_size, state, is_current
+                   high_company_id, evidence_company_identity_id, low_person_id,
+                   high_person_id, evidence_person_identity_id, collision_size, state, is_current
             FROM duplicate_review_decision
             WHERE workspace_id = ?
             ORDER BY id
