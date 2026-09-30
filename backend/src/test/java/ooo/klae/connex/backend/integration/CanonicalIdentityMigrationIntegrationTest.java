@@ -10,7 +10,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
-import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
@@ -25,15 +24,12 @@ import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
  */
 class CanonicalIdentityMigrationIntegrationTest {
 
-    private static final String SCRATCH_CATALOG =
-        "connex_identity_it_" + UUID.randomUUID().toString().replace("-", "");
     private static final String CANONICAL_COLLATION = "utf8mb4_0900_ai_ci";
 
-    private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
     private static String password;
-    private static boolean created;
+    private static MySqlScratchCatalog scratchCatalog;
 
     @BeforeAll
     static void createLegacyCollationCatalog() {
@@ -45,13 +41,10 @@ class CanonicalIdentityMigrationIntegrationTest {
         assumeTrue(
             username != null && password != null,
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping canonical identity migration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
-        scratchUrl = withCatalog(configuredUrl, SCRATCH_CATALOG);
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + SCRATCH_CATALOG
-                + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-            created = true;
+        try {
+            scratchCatalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_identity_it_", "utf8mb4", "utf8mb4_unicode_ci");
+            scratchUrl = scratchCatalog.url();
         } catch (SQLException exception) {
             assumeTrue(
                 false,
@@ -61,12 +54,8 @@ class CanonicalIdentityMigrationIntegrationTest {
 
     @AfterAll
     static void dropScratchCatalog() throws SQLException {
-        if (!created) {
-            return;
-        }
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + SCRATCH_CATALOG + "`");
+        if (scratchCatalog != null) {
+            scratchCatalog.close();
         }
     }
 
@@ -187,7 +176,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                 WHERE table_schema = ?
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getLong(1);
@@ -217,7 +206,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND table_name IN ('person_identity', 'company_identity')
                   AND column_name = 'superseded_at'
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getLong(1);
@@ -237,7 +226,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   )
                 ORDER BY index_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 return strings(resultSet);
             }
@@ -253,7 +242,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND table_name IN ('person', 'company')
                   AND column_name = 'normalized_name'
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getLong(1);
@@ -277,7 +266,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
                 ORDER BY table_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 return strings(resultSet);
             }
@@ -293,7 +282,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND column_name IN ('kind', 'normalized_value')
                 ORDER BY table_name, column_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 return strings(resultSet);
             }
@@ -308,7 +297,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
                 ORDER BY table_name, referenced_table_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 return strings(resultSet);
             }
@@ -322,7 +311,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                 WHERE constraint_schema = ?
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 resultSet.next();
                 return resultSet.getLong(1);
@@ -338,7 +327,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND table_name IN ('person_identity', 'company_identity', 'identity_collision')
                 ORDER BY index_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 return strings(resultSet);
             }
@@ -358,7 +347,7 @@ class CanonicalIdentityMigrationIntegrationTest {
                   AND column_name = 'normalized_value'
                 ORDER BY index_name
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             try (ResultSet resultSet = statement.executeQuery()) {
                 java.util.ArrayList<String> values = new java.util.ArrayList<>();
                 while (resultSet.next()) {
@@ -429,13 +418,4 @@ class CanonicalIdentityMigrationIntegrationTest {
         return values;
     }
 
-    private static String withCatalog(String jdbcUrl, String catalog) {
-        int authorityEnd = jdbcUrl.indexOf('/', "jdbc:mysql://".length());
-        if (authorityEnd < 0) {
-            throw new IllegalArgumentException("CONNEX_DB_URL must include a database path");
-        }
-        int queryStart = jdbcUrl.indexOf('?', authorityEnd);
-        String suffix = queryStart < 0 ? "" : jdbcUrl.substring(queryStart);
-        return jdbcUrl.substring(0, authorityEnd + 1) + catalog + suffix;
-    }
 }

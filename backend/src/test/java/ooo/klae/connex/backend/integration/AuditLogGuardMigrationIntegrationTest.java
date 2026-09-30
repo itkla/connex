@@ -12,7 +12,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
@@ -28,7 +27,6 @@ import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 /** Verifies the audit append-only guard across representative real-MySQL upgrades. */
 class AuditLogGuardMigrationIntegrationTest {
     private static String configuredUrl;
-    private static String bootstrapUrl;
     private static String username;
     private static String password;
 
@@ -42,17 +40,18 @@ class AuditLogGuardMigrationIntegrationTest {
         assumeTrue(
             username != null && password != null,
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping audit migration integration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
     }
 
     @Test
     void emptyAndV1CatalogsMigrateToExactFinalGuards() throws SQLException {
-        try (ScratchCatalog empty = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog empty = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(empty.url(), null).migrate();
             seedAuditRow(empty.url());
             assertFinalState(empty.url());
         }
-        try (ScratchCatalog v1 = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog v1 = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(v1.url(), "1").migrate();
             flyway(v1.url(), null).migrate();
             seedAuditRow(v1.url());
@@ -62,7 +61,8 @@ class AuditLogGuardMigrationIntegrationTest {
 
     @Test
     void deployedV126CatalogRepairsMissingFinalGuardsBeforeV129() throws SQLException {
-        try (ScratchCatalog catalog = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog catalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(catalog.url(), "126").migrate();
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update_v129");
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_delete");
@@ -77,7 +77,8 @@ class AuditLogGuardMigrationIntegrationTest {
     @Test
     void v122UpgradeRepairsMissingLegacyGuardAndProtectsEveryV126Boundary()
             throws SQLException {
-        try (ScratchCatalog catalog = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog catalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update");
@@ -122,7 +123,8 @@ class AuditLogGuardMigrationIntegrationTest {
 
     @Test
     void malformedLegacyDefinitionStopsBeforeV126() throws SQLException {
-        try (ScratchCatalog catalog = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog catalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_update");
@@ -152,7 +154,8 @@ class AuditLogGuardMigrationIntegrationTest {
     @Test
     void malformedDeleteDefinitionInstallsAStrictRepairBeforeV126Stops()
             throws SQLException {
-        try (ScratchCatalog catalog = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog catalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), "DROP TRIGGER trg_audit_log_no_delete");
@@ -189,7 +192,8 @@ class AuditLogGuardMigrationIntegrationTest {
     @Test
     void failedV126ClearsTrustedStateAndLeavesTheTemporaryGuardEffective()
             throws SQLException {
-        try (ScratchCatalog catalog = ScratchCatalog.create()) {
+        try (MySqlScratchCatalog catalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_audit_guard_it_", "utf8mb4", null)) {
             flyway(catalog.url(), "122").migrate();
             seedAuditRow(catalog.url());
             execute(catalog.url(), """
@@ -353,16 +357,6 @@ class AuditLogGuardMigrationIntegrationTest {
             result.next();
             return result.getLong(1);
         }
-    }
-
-    private static String withCatalog(String jdbcUrl, String catalog) {
-        int authorityEnd = jdbcUrl.indexOf('/', "jdbc:mysql://".length());
-        if (authorityEnd < 0) {
-            throw new IllegalArgumentException("CONNEX_DB_URL must include a database path");
-        }
-        int queryStart = jdbcUrl.indexOf('?', authorityEnd);
-        String suffix = queryStart < 0 ? "" : jdbcUrl.substring(queryStart);
-        return jdbcUrl.substring(0, authorityEnd + 1) + catalog + suffix;
     }
 
     private static String sqlOutcome(Connection connection, String sql) {
@@ -535,29 +529,4 @@ class AuditLogGuardMigrationIntegrationTest {
             && "126".equals(context.getMigrationInfo().getVersion().getVersion());
     }
 
-    private record ScratchCatalog(String name, String url) implements AutoCloseable {
-        private static ScratchCatalog create() throws SQLException {
-            String name = "connex_audit_guard_it_"
-                + UUID.randomUUID().toString().replace("-", "");
-            try (Connection connection = DriverManager.getConnection(
-                    bootstrapUrl,
-                    username,
-                    password);
-                    Statement statement = connection.createStatement()) {
-                statement.execute("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4");
-            }
-            return new ScratchCatalog(name, withCatalog(configuredUrl, name));
-        }
-
-        @Override
-        public void close() throws SQLException {
-            try (Connection connection = DriverManager.getConnection(
-                    bootstrapUrl,
-                    username,
-                    password);
-                    Statement statement = connection.createStatement()) {
-                statement.execute("DROP DATABASE IF EXISTS `" + name + "`");
-            }
-        }
-    }
 }

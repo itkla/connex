@@ -12,7 +12,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -58,6 +61,8 @@ import ooo.klae.connex.backend.services.IdentityBackfillTransaction;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -80,6 +85,7 @@ class DuplicateReviewIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TenantContext tenantContext;
+    @Autowired private ObjectMapper objectMapper;
 
     private MockMvc mockMvc;
     private Organization organization;
@@ -638,36 +644,68 @@ class DuplicateReviewIntegrationTest {
     @Test
     void mysqlPaginationReturnsStableSecondPageAndExactTotal() throws Exception {
         authenticate(member);
+        List<ReviewPair> created = new ArrayList<>();
         for (int group = 0; group < 3; group++) {
             String email = "page-" + group + "@example.com";
-            personService.create(person("Page " + group + " First", email));
-            personService.create(person("Page " + group + " Second", email));
+            Person first = personService.create(person("Page " + group + " First", email));
+            Person second = personService.create(person("Page " + group + " Second", email));
+            LocalDateTime detectedAt = LocalDateTime.of(2026, 1, group == 2 ? 1 : 2, 0, 0);
+            created.add(jdbcTemplate.queryForObject(
+                "SELECT id, evidence_fingerprint FROM duplicate_review_decision "
+                    + "WHERE workspace_id = ? AND low_person_id = ? AND high_person_id = ? "
+                    + "AND kind = 'email' AND is_current = TRUE",
+                (row, index) -> new ReviewPair(row.getLong("id"), first.getId(), second.getId(),
+                    row.getString("evidence_fingerprint"), detectedAt),
+                workspace.getId(), first.getId(), second.getId()));
         }
+        for (ReviewPair pair : created) {
+            assertEquals(1, jdbcTemplate.update(
+                "UPDATE duplicate_review_decision SET detected_at = ? WHERE workspace_id = ? AND id = ?",
+                pair.detectedAt(), workspace.getId(), pair.decisionId()));
+        }
+        created.sort(Comparator.comparing(ReviewPair::detectedAt)
+            .thenComparingLong(ReviewPair::decisionId).reversed());
         clearDirectAuthentication();
         MockHttpSession session = login(member);
+        List<String> returnedFingerprints = new ArrayList<>();
 
-        mockMvc.perform(get("/api/duplicate-reviews")
-                .queryParam("recordType", "person")
-                .queryParam("kind", "email")
-                .queryParam("page", "1")
-                .queryParam("size", "2")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.total").value(3))
-            .andExpect(jsonPath("$.items.length()").value(2))
-            .andExpect(jsonPath("$.items[*].evidence.normalizedValue").doesNotExist());
-        mockMvc.perform(get("/api/duplicate-reviews")
-                .queryParam("recordType", "person")
-                .queryParam("kind", "email")
-                .queryParam("page", "2")
-                .queryParam("size", "2")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.total").value(3))
-            .andExpect(jsonPath("$.items.length()").value(1))
-            .andExpect(jsonPath("$.items[0].evidence.normalizedValue").doesNotExist());
+        for (int page = 1; page <= 2; page++) {
+            JsonNode firstResponse = null;
+            for (int request = 0; request < 2; request++) {
+                MvcResult result = mockMvc.perform(get("/api/duplicate-reviews")
+                        .queryParam("recordType", "person")
+                        .queryParam("kind", "email")
+                        .queryParam("page", Integer.toString(page))
+                        .queryParam("size", "2")
+                        .header("X-Workspace-Id", workspace.getId())
+                        .session(session))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.total").value(3))
+                    .andExpect(jsonPath("$.items.length()").value(page == 1 ? 2 : 1))
+                    .andExpect(jsonPath("$.items[*].evidence.normalizedValue").doesNotExist())
+                    .andReturn();
+                JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
+                if (request == 0) {
+                    firstResponse = response;
+                    for (int index = 0; index < response.path("items").size(); index++) {
+                        JsonNode item = response.path("items").get(index);
+                        ReviewPair expected = created.get((page - 1) * 2 + index);
+                        assertEquals(expected.lowId(), item.path("members").get(0).path("recordId").asInt());
+                        assertEquals(expected.highId(), item.path("members").get(1).path("recordId").asInt());
+                        assertEquals(expected.fingerprint(), item.path("evidenceFingerprint").asText());
+                        returnedFingerprints.add(item.path("evidenceFingerprint").asText());
+                    }
+                } else {
+                    assertEquals(firstResponse, response);
+                }
+            }
+        }
+        assertEquals(3, new HashSet<>(returnedFingerprints).size());
+        assertEquals(created.stream().map(ReviewPair::fingerprint).toList(), returnedFingerprints);
+    }
+
+    private record ReviewPair(long decisionId, int lowId, int highId, String fingerprint,
+            LocalDateTime detectedAt) {
     }
 
     @Test
