@@ -138,11 +138,6 @@ public class AiAssistantSetResponseDueWriteTool implements AiAssistantWriteTool 
     }
 
     @Override
-    public Set<String> sharedOutcomeFlags() {
-        return Set.of(CHANGED);
-    }
-
-    @Override
     public Set<ReviewInput> reviewInputs() {
         return Set.of(ReviewInput.FIELDS);
     }

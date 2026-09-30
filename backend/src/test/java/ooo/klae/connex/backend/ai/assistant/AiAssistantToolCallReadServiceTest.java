@@ -1576,6 +1576,48 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * Whether the clock was started or already existed is visible only with the requester's
+     * readable details, never to another participant or after the requester loses the target.
+     */
+    @Test
+    void aResponseDeadlineOutcomeWithholdsClockExistenceWhenDetailsAreUnreadable() {
+        for (boolean changed : List.of(true, false)) {
+            AiChatToolCall call = toolCall(
+                    95, USER_ID, "set_response_due", "confirm", "executed", "person", 31, 95,
+                    "{\"outcome\":{\"status\":\"executed\",\"recordType\":\"person\","
+                            + "\"dueInHours\":48,\"changed\":" + changed + "},"
+                            + "\"undo\":{\"status\":\"unavailable\"}}");
+            when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                    .thenReturn(List.of(call));
+            when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                    .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+            AiAssistantToolCallReadDto readable = service.list(SESSION_ID, false).getFirst();
+
+            assertEquals(changed ? "First-response deadline set"
+                    : "A first-response deadline was already set", readable.outcomeSummary());
+
+            call.setRequestedByUserId(USER_ID + 1);
+            AiAssistantToolCallReadDto shared = service.list(SESSION_ID, false).getFirst();
+
+            assertEquals("Ada Lovelace", shared.target().label());
+            assertEquals("Set a first-response deadline", shared.requestSummary());
+            assertEquals("Request completed", shared.outcomeSummary());
+            assertNull(shared.change());
+            assertEquals(List.of(), shared.outcomeValues());
+
+            call.setRequestedByUserId(USER_ID);
+            when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of());
+            AiAssistantToolCallReadDto inaccessible = service.list(SESSION_ID, false).getFirst();
+
+            assertNull(inaccessible.target().label());
+            assertEquals("Request completed", inaccessible.outcomeSummary());
+            assertNull(inaccessible.change());
+            assertEquals(List.of(), inaccessible.outcomeValues());
+        }
+    }
+
+    /**
      * A contact shared in from another workspace arrives with its own deadline column masked, so a
      * missing deadline there says nothing, and the clock service would refuse the approval: the
      * card states the current deadline as one it cannot show and offers no apply, rather than

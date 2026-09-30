@@ -56,22 +56,22 @@ class AiAssistantWriteToolRegistryTest {
      * target, and {@code detailsReadable} exists to withhold record state from them; a shared flag
      * passes that gate. So a flag may say only how the write went — {@code add_tag}'s
      * {@code changed}, whether this call created the association, {@code remove_tag}'s, whether
-     * this call removed it, and {@code set_response_due}'s, whether this call started a clock —
+     * this call removed it —
      * and never a property of the record, such as whether it is archived or restricted, or when
      * its deadline falls. Adding a flag, or a tool with one, is a reviewed edit here.
      *
      * <p>A {@code changed} flag that is false does imply what the record held when the write ran:
-     * the tag was already there, was already gone, or the contact already carried a first-response
-     * clock. That is a reviewed, accepted disclosure, not an oversight. The card names its target
+     * the tag was already there or was already gone. That is a reviewed, accepted disclosure,
+     * not an oversight. The card names its target
      * only to a viewer who can currently see the record, and the same fact is on the record itself
-     * for that viewer — its tags, and the contact's {@code firstResponseDueAt} on the ordinary
-     * contact read; a viewer who cannot see the record learns it of no named record. No flag may
-     * carry a value the record holds, such as the deadline itself.
+     * for that viewer — its tags; a viewer who cannot see the record learns it of no named record.
+     * {@code set_response_due} shares no outcome flags: whether a contact already carried a
+     * first-response clock is withheld along with its details. No flag may carry a value the
+     * record holds, such as the deadline itself.
      */
     private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS = Map.of(
             "add_tag", Set.of("changed"),
-            "remove_tag", Set.of("changed"),
-            "set_response_due", Set.of("changed"));
+            "remove_tag", Set.of("changed"));
 
     /**
      * The reviewed request flags each tool may share with a viewer who may not read its details.
