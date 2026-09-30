@@ -361,6 +361,7 @@ public class SecurityConfig {
                 .expiredSessionStrategy(event -> event.getResponse().setStatus(HttpServletResponse.SC_UNAUTHORIZED))
             )
             .headers(headers -> headers
+                .withObjectPostProcessor(new EagerSecurityHeaderWriter())
                 .httpStrictTransportSecurity(hsts -> hsts
                     .includeSubDomains(true)
                     .maxAgeInSeconds(31536000)

@@ -145,6 +145,7 @@ public class PublicApiSecurityConfig {
                 "insufficient_scope",
                 "The credential cannot access this resource")));
         http.headers(headers -> headers
+            .withObjectPostProcessor(new EagerSecurityHeaderWriter())
             .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
             .referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER))
             .contentSecurityPolicy(csp -> csp.policyDirectives(SecurityResponseHeaders.CONTENT_SECURITY_POLICY)));
