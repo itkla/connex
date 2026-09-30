@@ -192,7 +192,9 @@ class ModelFetchRetryTest(unittest.TestCase):
             "host": DownloadResponse(
                 self.content, "https://example.test/model.tar", str(len(self.content))
             ),
-            "hash": DownloadResponse(b"tampered", self.artifact.url, str(len(self.content))),
+            "hash": DownloadResponse(
+                b"t" * len(self.content), self.artifact.url, str(len(self.content))
+            ),
         }
         for name, response in cases.items():
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
@@ -204,6 +206,33 @@ class ModelFetchRetryTest(unittest.TestCase):
                         _fetch(self.artifact, Path(temporary) / "model.tar")
 
                 self.assertEqual(1, opener.call_count)
+
+    def test_a_body_that_ends_early_is_retried_and_still_verified(self) -> None:
+        short = DownloadResponse(
+            self.content[:4], self.artifact.url, str(len(self.content))
+        )
+        good = DownloadResponse(self.content, self.artifact.url, str(len(self.content)))
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "model.tar"
+            with self._opener([short, good]) as opener:
+                _fetch(self.artifact, destination)
+
+            self.assertEqual(2, opener.call_count)
+            self.assertEqual(self.content, destination.read_bytes())
+
+    def test_a_body_that_never_completes_fails_closed(self) -> None:
+        attempts = [
+            DownloadResponse(self.content[:4], self.artifact.url, str(len(self.content)))
+            for _ in range(4)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "model.tar"
+            with self._opener(attempts) as opener:
+                with self.assertRaises(OSError):
+                    _fetch(self.artifact, destination)
+
+            self.assertEqual(4, opener.call_count)
+            self.assertFalse(destination.exists())
 
     def test_client_errors_are_not_retried_but_server_errors_are(self) -> None:
         cases = ((404, 1), (429, 2), (503, 2))
