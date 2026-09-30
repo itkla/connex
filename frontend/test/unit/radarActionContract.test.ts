@@ -22,6 +22,8 @@ import {
     reduceOverlayRetention,
 } from '@/lib/overlay-lifecycle';
 
+import { installInteractiveDocument, type InteractiveText } from './helpers/interactiveDocument';
+
 type CapturedProps = Record<string, unknown>;
 type DynamicModule = { default: ComponentType<CapturedProps> };
 
@@ -42,6 +44,8 @@ type CaptureState = {
     importUnmounts: Map<string, number>;
     radarCardProps: Map<number, CapturedProps>;
     radarCardRenders: number;
+    radarCardMounts: Map<number, number>;
+    radarCardUnmounts: Map<number, number>;
     renderRealRadarCards: boolean;
     ownedUrlParams: Record<string, string | undefined> | null;
 };
@@ -56,6 +60,8 @@ const captures = vi.hoisted<CaptureState>(() => ({
     importUnmounts: new Map(),
     radarCardProps: new Map(),
     radarCardRenders: 0,
+    radarCardMounts: new Map(),
+    radarCardUnmounts: new Map(),
     renderRealRadarCards: false,
     ownedUrlParams: null,
 }));
@@ -266,10 +272,16 @@ vi.mock('@/app/components/radar/RadarSignalCard', async () => {
         typeof import('@/app/components/radar/RadarSignalCard')
     >('@/app/components/radar/RadarSignalCard');
     return {
-        default: (props: React.ComponentProps<typeof actual.default>) => {
+        default: function CapturedRadarCard(props: React.ComponentProps<typeof actual.default>) {
             const signal = props.signal;
             captures.radarCardProps.set(signal.id, { ...props });
             captures.radarCardRenders += 1;
+            React.useEffect(() => {
+                captures.radarCardMounts.set(signal.id, (captures.radarCardMounts.get(signal.id) ?? 0) + 1);
+                return () => {
+                    captures.radarCardUnmounts.set(signal.id, (captures.radarCardUnmounts.get(signal.id) ?? 0) + 1);
+                };
+            }, [signal.id]);
             return captures.renderRealRadarCards
                 ? React.createElement(actual.default, props)
                 : null;
@@ -371,316 +383,6 @@ function installMinimalDocument() {
     return {
         container: document.createElement('div'),
         setTimeoutSpy,
-    };
-}
-
-type InteractiveListener = {
-    callback: (event: unknown) => void;
-    capture: boolean;
-};
-
-type InteractiveText = {
-    nodeType: 3;
-    nodeName: '#text';
-    nodeValue: string;
-    parentNode: InteractiveElement | null;
-    ownerDocument: InteractiveDocument;
-};
-
-/**
- * The slice of `CSSStyleDeclaration` React writes through. Custom properties go through
- * `setProperty`, which `motion` also reaches for when it drives a layout thumb, so a bare object
- * literal is not a faithful enough stand-in to render the real control surfaces.
- */
-type InteractiveStyle = Record<string, unknown> & {
-    setProperty: (name: string, value: string) => void;
-    removeProperty: (name: string) => string;
-    getPropertyValue: (name: string) => string;
-};
-
-type InteractiveElement = {
-    nodeType: 1;
-    tagName: string;
-    nodeName: string;
-    namespaceURI: string;
-    ownerDocument: InteractiveDocument;
-    parentNode: InteractiveElement | null;
-    childNodes: Array<InteractiveElement | InteractiveText>;
-    attributes: Map<string, string>;
-    listeners: Map<string, InteractiveListener[]>;
-    style: InteractiveStyle;
-    disabled?: boolean;
-    id?: string;
-    type?: string;
-    value?: string;
-    addEventListener: (type: string, callback: (event: unknown) => void, options?: unknown) => void;
-    removeEventListener: (type: string, callback: (event: unknown) => void) => void;
-    appendChild: (child: InteractiveElement | InteractiveText) => InteractiveElement | InteractiveText;
-    insertBefore: (
-        child: InteractiveElement | InteractiveText,
-        before: InteractiveElement | InteractiveText | null,
-    ) => InteractiveElement | InteractiveText;
-    removeChild: (child: InteractiveElement | InteractiveText) => InteractiveElement | InteractiveText;
-    setAttribute: (name: string, value: string) => void;
-    removeAttribute: (name: string) => void;
-    getAttribute: (name: string) => string | null;
-    getBoundingClientRect: () => DOMRectInit;
-    focus: () => void;
-};
-
-type InteractiveDocument = {
-    nodeType: 9;
-    activeElement: InteractiveElement | null;
-    defaultView?: object;
-    documentElement?: InteractiveElement;
-    body?: InteractiveElement;
-    addEventListener: (type: string, callback: (event: unknown) => void, options?: unknown) => void;
-    removeEventListener: (type: string, callback: (event: unknown) => void) => void;
-    createElement: (tagName: string) => InteractiveElement;
-    createElementNS: (namespace: string, tagName: string) => InteractiveElement;
-    createTextNode: (value: string) => InteractiveText;
-    getElementById: (id: string) => InteractiveElement | null;
-};
-
-function eventUsesCapture(options: unknown): boolean {
-    if (typeof options === 'boolean') return options;
-    if (typeof options === 'object' && options !== null && 'capture' in options) {
-        return options.capture === true;
-    }
-    return false;
-}
-
-function installInteractiveDocument() {
-    class HtmlIFrameElement {}
-
-    const elements: InteractiveElement[] = [];
-    const documentListeners = new Map<string, InteractiveListener[]>();
-
-    function addListener(
-        listeners: Map<string, InteractiveListener[]>,
-        type: string,
-        callback: (event: unknown) => void,
-        options?: unknown,
-    ) {
-        const current = listeners.get(type) ?? [];
-        current.push({ callback, capture: eventUsesCapture(options) });
-        listeners.set(type, current);
-    }
-
-    function removeListener(
-        listeners: Map<string, InteractiveListener[]>,
-        type: string,
-        callback: (event: unknown) => void,
-    ) {
-        listeners.set(type, (listeners.get(type) ?? []).filter(
-            (listener) => listener.callback !== callback,
-        ));
-    }
-
-    function createInteractiveStyle(): InteractiveStyle {
-        const properties = new Map<string, string>();
-        return {
-            setProperty: (name, value) => {
-                properties.set(name, value);
-            },
-            removeProperty: (name) => {
-                const previous = properties.get(name) ?? '';
-                properties.delete(name);
-                return previous;
-            },
-            getPropertyValue: (name) => properties.get(name) ?? '',
-        };
-    }
-
-    function createInteractiveElement(tagName: string, namespaceURI = 'http://www.w3.org/1999/xhtml') {
-        const childNodes: Array<InteractiveElement | InteractiveText> = [];
-        const attributes = new Map<string, string>();
-        const listeners = new Map<string, InteractiveListener[]>();
-        const element: InteractiveElement = {
-            nodeType: 1,
-            tagName: tagName.toUpperCase(),
-            nodeName: tagName.toUpperCase(),
-            namespaceURI,
-            ownerDocument: documentTarget,
-            parentNode: null,
-            childNodes,
-            attributes,
-            listeners,
-            style: createInteractiveStyle(),
-            addEventListener: (type, callback, options) => {
-                addListener(listeners, type, callback, options);
-            },
-            removeEventListener: (type, callback) => {
-                removeListener(listeners, type, callback);
-            },
-            appendChild: (child) => {
-                child.parentNode = element;
-                childNodes.push(child);
-                return child;
-            },
-            insertBefore: (child, before) => {
-                child.parentNode = element;
-                const index = before === null ? -1 : childNodes.indexOf(before);
-                if (index < 0) childNodes.push(child);
-                else childNodes.splice(index, 0, child);
-                return child;
-            },
-            removeChild: (child) => {
-                const index = childNodes.indexOf(child);
-                if (index >= 0) childNodes.splice(index, 1);
-                child.parentNode = null;
-                return child;
-            },
-            setAttribute: (name, value) => {
-                attributes.set(name, String(value));
-                if (name === 'id') element.id = String(value);
-                if (name === 'type') element.type = String(value);
-                if (name === 'disabled') element.disabled = true;
-            },
-            removeAttribute: (name) => {
-                attributes.delete(name);
-                if (name === 'disabled') element.disabled = false;
-            },
-            getAttribute: (name) => attributes.get(name) ?? null,
-            getBoundingClientRect: () => ({
-                x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
-            }),
-            focus: () => {
-                documentTarget.activeElement = element;
-            },
-        };
-        Object.defineProperties(element, {
-            firstChild: { get: () => childNodes[0] ?? null },
-            lastChild: { get: () => childNodes.at(-1) ?? null },
-            textContent: {
-                get: () => '',
-                set: (value: string) => {
-                    childNodes.forEach((child) => {
-                        child.parentNode = null;
-                    });
-                    childNodes.length = 0;
-                    if (value.length > 0) {
-                        const child = documentTarget.createTextNode(value);
-                        child.parentNode = element;
-                        childNodes.push(child);
-                    }
-                },
-            },
-        });
-        elements.push(element);
-        return element;
-    }
-
-    const documentTarget: InteractiveDocument = {
-        nodeType: 9,
-        activeElement: null,
-        addEventListener: (type, callback, options) => {
-            addListener(documentListeners, type, callback, options);
-        },
-        removeEventListener: (type, callback) => {
-            removeListener(documentListeners, type, callback);
-        },
-        createElement: (tagName) => createInteractiveElement(tagName),
-        createElementNS: (namespace, tagName) => createInteractiveElement(tagName, namespace),
-        createTextNode: (value) => ({
-            nodeType: 3,
-            nodeName: '#text',
-            nodeValue: value,
-            parentNode: null,
-            ownerDocument: documentTarget,
-        }),
-        getElementById: (id) => elements.find((element) => element.id === id) ?? null,
-    };
-    const documentElement = createInteractiveElement('html');
-    const body = createInteractiveElement('body');
-    documentElement.appendChild(body);
-    const windowTarget = {
-        document: documentTarget,
-        event: undefined,
-        HTMLIFrameElement: HtmlIFrameElement,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        setTimeout: vi.fn(() => 1),
-        clearTimeout: vi.fn(),
-    };
-    Object.assign(documentTarget, {
-        defaultView: windowTarget,
-        documentElement,
-        body,
-    });
-    vi.stubGlobal('window', windowTarget);
-    vi.stubGlobal('self', windowTarget);
-    vi.stubGlobal('document', documentTarget);
-    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-        callback(0);
-        return 1;
-    }));
-    vi.stubGlobal('cancelAnimationFrame', vi.fn());
-    vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
-    vi.stubGlobal('cancelIdleCallback', vi.fn());
-    vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
-    vi.stubGlobal('IntersectionObserver', class {
-        observe = vi.fn();
-        unobserve = vi.fn();
-        disconnect = vi.fn();
-        takeRecords = vi.fn(() => []);
-    });
-    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    const container = document.createElement('div');
-    const containerNode = elements.at(-1);
-    if (!containerNode) throw new Error('Interactive root was not created');
-    body.appendChild(containerNode);
-
-    return {
-        container,
-        elements,
-        dispatch: (type: string, target: InteractiveElement) => {
-            let defaultPrevented = false;
-            let propagationStopped = false;
-            const event = {
-                type,
-                target,
-                currentTarget: containerNode,
-                bubbles: true,
-                cancelable: true,
-                defaultPrevented,
-                returnValue: true,
-                cancelBubble: false,
-                timeStamp: Date.now(),
-                preventDefault: () => {
-                    defaultPrevented = true;
-                    event.defaultPrevented = true;
-                    event.returnValue = false;
-                },
-                stopPropagation: () => {
-                    propagationStopped = true;
-                    event.cancelBubble = true;
-                },
-                stopImmediatePropagation: () => {
-                    propagationStopped = true;
-                    event.cancelBubble = true;
-                },
-                composedPath: () => {
-                    const path: InteractiveElement[] = [];
-                    let current: InteractiveElement | null = target;
-                    while (current !== null) {
-                        path.push(current);
-                        current = current.parentNode;
-                    }
-                    return path;
-                },
-            };
-            const listeners = containerNode.listeners.get(type) ?? [];
-            for (const listener of listeners.filter((candidate) => candidate.capture)) {
-                listener.callback(event);
-                if (propagationStopped) return !defaultPrevented;
-            }
-            for (const listener of listeners.filter((candidate) => !candidate.capture)) {
-                listener.callback(event);
-                if (propagationStopped) break;
-            }
-            return !defaultPrevented;
-        },
     };
 }
 
@@ -872,7 +574,7 @@ async function renderRadarBoard(initialPayload: RadarPayload) {
 }
 
 async function renderInteractiveRadarBoard(initialPayload: RadarPayload) {
-    const installed = installInteractiveDocument();
+    const installed = installInteractiveDocument('', { motion: true });
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(installed.container, { onCaughtError: vi.fn() });
     await act(async () => {
@@ -895,6 +597,8 @@ beforeEach(() => {
     captures.importUnmounts.clear();
     captures.radarCardProps.clear();
     captures.radarCardRenders = 0;
+    captures.radarCardMounts.clear();
+    captures.radarCardUnmounts.clear();
     captures.renderRealRadarCards = false;
     captures.ownedUrlParams = null;
     vi.clearAllMocks();
@@ -1248,7 +952,7 @@ describe('Radar action integration', () => {
         const taskModule = await vi.importActual<
             typeof import('@/app/components/activity/tasks/TaskDialog')
         >('@/app/components/activity/tasks/TaskDialog');
-        const installed = installInteractiveDocument();
+        const installed = installInteractiveDocument('', { motion: true });
         const { createRoot } = await import('react-dom/client');
         const root = createRoot(installed.container, { onCaughtError: vi.fn() });
         const abortController = new AbortController();
@@ -1346,12 +1050,25 @@ describe('Radar action integration', () => {
         expect(requiredProps(captures.radarCardProps.get(1), 'First Radar card').expanded).toBe(true);
         expect(requiredProps(captures.radarCardProps.get(2), 'Second Radar card').expanded).toBe(false);
 
-        api.getRadar.mockResolvedValue({ ...payload([first, second]), asOf: '2026-08-08T12:05:00Z' });
+        const requestsBeforeRefresh = api.getRadar.mock.calls.length;
+        for (const id of [1, 2]) {
+            expect(captures.radarCardMounts.get(id)).toBe(1);
+            expect(captures.radarCardUnmounts.get(id) ?? 0).toBe(0);
+        }
+        const refreshedAsOf = '2026-08-08T12:05:00Z';
+        api.getRadar.mockResolvedValue({ ...payload([first, second]), asOf: refreshedAsOf });
         await act(async () => {
             invoke(requiredProps(captures.radarCardProps.get(1), 'First Radar card'), 'onRefreshEvidence');
             await Promise.resolve();
             await Promise.resolve();
         });
+
+        expect(api.getRadar).toHaveBeenCalledTimes(requestsBeforeRefresh + 1);
+        for (const id of [1, 2]) {
+            expect(requiredProps(captures.radarCardProps.get(id), `Radar card ${id}`).pageAsOf).toBe(refreshedAsOf);
+            expect(captures.radarCardUnmounts.get(id)).toBe(1);
+            expect(captures.radarCardMounts.get(id)).toBe(2);
+        }
 
         expect(requiredProps(captures.radarCardProps.get(1), 'First Radar card').expanded).toBe(true);
         expect(requiredProps(captures.radarCardProps.get(2), 'Second Radar card').expanded).toBe(false);
@@ -1365,7 +1082,7 @@ describe('Radar action integration', () => {
         const { TooltipProvider } = await vi.importActual<
             typeof import('@/components/ui/tooltip')
         >('@/components/ui/tooltip');
-        const installed = installInteractiveDocument();
+        const installed = installInteractiveDocument('', { motion: true });
         const { createRoot } = await import('react-dom/client');
         const root = createRoot(installed.container, { onCaughtError: vi.fn() });
 
@@ -1410,7 +1127,7 @@ describe('Radar action integration', () => {
         const cardModule = await vi.importActual<
             typeof import('@/app/components/radar/RadarSignalCard')
         >('@/app/components/radar/RadarSignalCard');
-        const installed = installInteractiveDocument();
+        const installed = installInteractiveDocument('', { motion: true });
         const { createRoot } = await import('react-dom/client');
         const root = createRoot(installed.container, { onCaughtError: vi.fn() });
         const callbacks = {
@@ -1552,7 +1269,7 @@ describe('Radar action integration', () => {
         const taskModule = await vi.importActual<
             typeof import('@/app/components/activity/tasks/TaskDialog')
         >('@/app/components/activity/tasks/TaskDialog');
-        const installed = installInteractiveDocument();
+        const installed = installInteractiveDocument('', { motion: true });
         const { createRoot } = await import('react-dom/client');
         const root = createRoot(installed.container, { onCaughtError: vi.fn() });
         const onCloseComplete = vi.fn();

@@ -39,6 +39,7 @@ const axisCombos = new Set();
 const needsTriage = [];
 const knownFiled = new Map();
 const misdirected = [];
+const unverifiedLandings = [];
 
 /**
  * Splits a cell's recorded response failures into the ones a filed suppression covers and the ones
@@ -67,11 +68,25 @@ for (const entry of entries) {
     for (const failure of known) {
         knownFiled.set(failure.knownIssue, (knownFiled.get(failure.knownIssue) ?? 0) + 1);
     }
-    if (faults.length > 0 || unexpected.length > 0) needsTriage.push({ entry, faults, unexpected });
+    if (faults.length > 0 || unexpected.length > 0 || entry.readinessFailure) {
+        needsTriage.push({ entry, faults, unexpected });
+    }
 
     const finalPath = typeof entry.finalPath === 'string' ? entry.finalPath : null;
-    const requestedPath = String(entry.path).split('?')[0];
-    if (entry.state === 'unexpected-landing' || (finalPath !== null && finalPath !== requestedPath)) {
+    const requestedPath = new URL(String(entry.path), 'http://matrix.invalid').pathname;
+    const landing = entry.landing;
+    const hasLanding = landing !== null && typeof landing === 'object'
+        && typeof landing.ok === 'boolean'
+        && typeof landing.inAuthenticatedShell === 'boolean'
+        && Array.isArray(landing.acceptedPaths)
+        && landing.acceptedPaths.every((accepted) => typeof accepted === 'string')
+        && landing.requestedPath === requestedPath
+        && landing.finalPath === finalPath;
+    if (!hasLanding) unverifiedLandings.push(entry);
+    const rejected = hasLanding
+        ? !landing.ok || !landing.inAuthenticatedShell || !landing.acceptedPaths.includes(finalPath)
+        : finalPath !== null && finalPath !== requestedPath;
+    if (entry.state === 'unexpected-landing' || rejected) {
         misdirected.push({ entry, finalPath });
     }
 }
@@ -97,6 +112,12 @@ if (withoutFinalPath > 0) {
 }
 console.log('');
 
+console.log(`## Cells without verified landing metadata: ${unverifiedLandings.length}`);
+for (const entry of unverifiedLandings) {
+    console.log(`  ${entry.routeId}: legacy or invalid metadata; destination allowlist and authenticated shell are unverified`);
+}
+console.log('');
+
 console.log('## States exercised');
 for (const [state, count] of [...byState].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(count).padStart(4)}  ${state}`);
@@ -113,6 +134,7 @@ console.log(`## Cells needing triage: ${needsTriage.length}`);
 for (const { entry, faults, unexpected } of needsTriage) {
     const axes = `${entry.axes.viewport}/${entry.axes.locale}/${entry.axes.theme}`;
     console.log(`  ${entry.routeId} @ ${axes} [${entry.state}]`);
+    if (entry.readinessFailure) console.log(`      capture readiness: ${entry.readinessFailure}`);
     for (const fault of faults) console.log(`      ${fault.kind}: ${fault.text}`);
     for (const failure of unexpected) console.log(`      response: ${failure.status} ${failure.url}`);
 }
