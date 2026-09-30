@@ -612,7 +612,8 @@ class TenantExportServiceTest {
         assertEquals(2, timeouts.size());
         verify(execution, times(2)).boundedDeadlineNanos(Duration.ofMinutes(1));
         for (Duration timeout : timeouts) {
-            assertTrue(timeout.isPositive());
+            assertTrue(timeout.compareTo(Duration.ofMillis(100)) >= 0,
+                () -> "Expected at least 100 ms of provider budget, got " + timeout);
             assertTrue(timeout.compareTo(Duration.ofMinutes(1)) <= 0);
         }
     }
