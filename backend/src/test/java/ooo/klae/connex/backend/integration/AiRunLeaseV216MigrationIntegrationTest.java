@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
@@ -34,15 +33,12 @@ import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
  */
 class AiRunLeaseV216MigrationIntegrationTest {
 
-    private static final String SCRATCH_CATALOG =
-            "connex_ai_run_lease_v216_it_" + UUID.randomUUID().toString().replace("-", "");
     private static final int WORKSPACE_ID = 216216;
 
-    private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
     private static String password;
-    private static boolean created;
+    private static MySqlScratchCatalog scratchCatalog;
 
     @BeforeAll
     static void createV215Catalog() throws SQLException {
@@ -53,13 +49,10 @@ class AiRunLeaseV216MigrationIntegrationTest {
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(username != null && password != null,
                 "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping V216 migration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
-        scratchUrl = withCatalog(configuredUrl, SCRATCH_CATALOG);
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + SCRATCH_CATALOG
-                    + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
-            created = true;
+        try {
+            scratchCatalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_ai_run_lease_v216_it_", "utf8mb4", "utf8mb4_0900_ai_ci");
+            scratchUrl = scratchCatalog.url();
         } catch (SQLException exception) {
             assumeTrue(false,
                     "Cannot create V216 migration scratch catalog: " + exception.getMessage());
@@ -70,11 +63,8 @@ class AiRunLeaseV216MigrationIntegrationTest {
 
     @AfterAll
     static void dropScratchCatalog() throws SQLException {
-        if (created) {
-            try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                    Statement statement = connection.createStatement()) {
-                statement.execute("DROP DATABASE IF EXISTS `" + SCRATCH_CATALOG + "`");
-            }
+        if (scratchCatalog != null) {
+            scratchCatalog.close();
         }
     }
 
@@ -211,10 +201,4 @@ class AiRunLeaseV216MigrationIntegrationTest {
         return DriverManager.getConnection(scratchUrl, username, password);
     }
 
-    private static String withCatalog(String configuredUrl, String catalog) {
-        int queryIndex = configuredUrl.indexOf('?');
-        String query = queryIndex >= 0 ? configuredUrl.substring(queryIndex) : "";
-        String base = queryIndex >= 0 ? configuredUrl.substring(0, queryIndex) : configuredUrl;
-        return base.substring(0, base.lastIndexOf('/') + 1) + catalog + query;
-    }
 }

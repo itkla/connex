@@ -44,6 +44,7 @@ import javax.imageio.ImageIO;
 import jakarta.servlet.Filter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -132,7 +133,6 @@ class AttachmentUploadSecurityIntegrationTest {
     @Autowired private AttachmentScanWorker worker;
     @Autowired private TenantWorkScope workScope;
     @Autowired private TenantContext tenantContext;
-    @Autowired private PasswordEncoder passwords;
     @Autowired private ObjectMapper json;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -150,6 +150,13 @@ class AttachmentUploadSecurityIntegrationTest {
     private Company company;
     private WorkspaceRole role;
     private String storedKey;
+
+    private static String encodedFixturePassword;
+
+    @BeforeAll
+    static void encodeFixturePassword(@Autowired PasswordEncoder encoder) {
+        encodedFixturePassword = encoder.encode(PASSWORD);
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -912,7 +919,7 @@ class AttachmentUploadSecurityIntegrationTest {
         user.setDisplayName("Upload security member");
         user.setEmail(unique() + "@example.com");
         user.setTimezone("UTC");
-        user.setPasswordHash(passwords.encode(PASSWORD));
+        user.setPasswordHash(encodedFixturePassword);
         users.insert(user);
         workspaces.addMember(workspace.getId(), user.getId(), "member");
         return user;

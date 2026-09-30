@@ -15,6 +15,7 @@ import java.util.UUID;
 import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -57,10 +58,16 @@ class DealMemberScopeIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PipelineMapper pipelineMapper;
     @Autowired private DealMapper dealMapper;
-    @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
 
     private MockMvc mockMvc;
+
+    private static String encodedFixturePassword;
+
+    @BeforeAll
+    static void encodeFixturePassword(@Autowired PasswordEncoder encoder) {
+        encodedFixturePassword = encoder.encode(PASSWORD);
+    }
 
     @BeforeEach
     void setUp() {
@@ -269,7 +276,7 @@ class DealMemberScopeIntegrationTest {
         user.setUsername("member_scope_" + suffix);
         user.setDisplayName("Member Scope " + suffix);
         user.setEmail(suffix + "@example.com");
-        user.setPasswordHash(passwordEncoder.encode(PASSWORD));
+        user.setPasswordHash(encodedFixturePassword);
         user.setTimezone("UTC");
         userMapper.insert(user);
         return user;
