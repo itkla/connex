@@ -1,17 +1,26 @@
 package ooo.klae.connex.backend.connectedaccounts.capture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import ooo.klae.connex.backend.beans.ProviderCaptureSyncState;
 import ooo.klae.connex.backend.beans.ProviderConnection;
@@ -23,21 +32,23 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class ProviderCaptureWorkerTest {
 
-    @Test
-    void renewsTheOwnerBoundLeaseBetweenProviderCalls() {
-        ProviderCaptureMapper captureMapper = mock(ProviderCaptureMapper.class);
-        ProviderConnectionMapper connectionMapper =
-            mock(ProviderConnectionMapper.class);
-        ProviderCredentialService credentialService =
-            mock(ProviderCredentialService.class);
-        ProviderCapturePolicyService policyService =
-            mock(ProviderCapturePolicyService.class);
-        ProviderCapturePagePersistence pagePersistence =
-            mock(ProviderCapturePagePersistence.class);
-        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
-        ProviderCaptureAdapter adapter = mock(ProviderCaptureAdapter.class);
-        ConnectedCaptureProperties properties =
-            new ConnectedCaptureProperties();
+    private final ProviderCaptureMapper captureMapper = mock(ProviderCaptureMapper.class);
+    private final ProviderConnectionMapper connectionMapper =
+        mock(ProviderConnectionMapper.class);
+    private final ProviderCredentialService credentialService =
+        mock(ProviderCredentialService.class);
+    private final ProviderCapturePolicyService policyService =
+        mock(ProviderCapturePolicyService.class);
+    private final ProviderCapturePagePersistence pagePersistence =
+        mock(ProviderCapturePagePersistence.class);
+    private final TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+    private final ProviderCaptureAdapter adapter = mock(ProviderCaptureAdapter.class);
+    private final ConnectedCaptureProperties properties =
+        new ConnectedCaptureProperties();
+    private ProviderCaptureWorker worker;
+
+    @BeforeEach
+    void setUp() {
         ProviderCaptureSyncState state = new ProviderCaptureSyncState();
         state.setId(31);
         state.setWorkspaceId(7);
@@ -82,6 +93,19 @@ class ProviderCaptureWorkerTest {
                 List.of(),
                 1));
         when(adapter.provider()).thenReturn("google");
+        worker = new ProviderCaptureWorker(
+            captureMapper,
+            connectionMapper,
+            credentialService,
+            policyService,
+            pagePersistence,
+            properties,
+            tenantWorkScope,
+            List.of(adapter));
+    }
+
+    @Test
+    void renewsTheOwnerBoundLeaseBetweenProviderCalls() {
         when(adapter.fetch(any())).thenAnswer(invocation -> {
             ProviderCaptureRequest request = invocation.getArgument(0);
             request.lease().renew();
@@ -94,26 +118,75 @@ class ProviderCaptureWorkerTest {
             return new ProviderCapturePage(
                 List.of(), null, "calendar-cursor", null);
         });
-        ProviderCaptureWorker worker = new ProviderCaptureWorker(
-            captureMapper,
-            connectionMapper,
-            credentialService,
-            policyService,
-            pagePersistence,
-            properties,
-            tenantWorkScope,
-            List.of(adapter));
 
         worker.runPage(7, 31);
 
+        String owner = claimedOwner();
+        ArgumentCaptor<String> renewals = ArgumentCaptor.forClass(String.class);
         verify(captureMapper, atLeast(2)).renewSyncLease(
-            eq(7), eq(31L), anyString(), anyString(), anyString());
+            eq(7), eq(31L), renewals.capture(), anyString(), anyString());
+        for (String renewalOwner : renewals.getAllValues()) {
+            assertEquals(owner, renewalOwner);
+        }
+        ArgumentCaptor<String> committedOwner = ArgumentCaptor.forClass(String.class);
         verify(pagePersistence).commit(
             eq(7),
             eq(31L),
-            anyString(),
+            committedOwner.capture(),
             any(ProviderCapturePage.class),
             any(CaptureExecutionPolicy.class),
             eq("owner@example.test"));
+        assertEquals(owner, committedOwner.getValue());
+    }
+
+    @Test
+    void failedInitialRenewalStopsBeforeFetchingAndReportsTheClaimedOwner() {
+        when(captureMapper.renewSyncLease(
+                eq(7), eq(31L), anyString(), anyString(), anyString()))
+            .thenReturn(0);
+
+        worker.runPage(7, 31);
+
+        String owner = claimedOwner();
+        verify(captureMapper).renewSyncLease(
+            eq(7), eq(31L), eq(owner), anyString(), anyString());
+        verify(adapter, never()).fetch(any());
+        verifyNoInteractions(pagePersistence);
+        verify(captureMapper).saveSyncFailure(
+            eq(7), eq(31L), eq(owner), eq("retrying"), eq("lease_lost"), anyString());
+    }
+
+    @Test
+    void failedCallbackRenewalStopsThePageAndReportsTheClaimedOwner() {
+        when(captureMapper.renewSyncLease(
+                eq(7), eq(31L), anyString(), anyString(), anyString()))
+            .thenReturn(1, 0);
+        AtomicBoolean continued = new AtomicBoolean();
+        when(adapter.fetch(any())).thenAnswer(invocation -> {
+            ProviderCaptureRequest request = invocation.getArgument(0);
+            request.lease().renew();
+            continued.set(true);
+            return new ProviderCapturePage(List.of(), null, "calendar-cursor", null);
+        });
+
+        worker.runPage(7, 31);
+
+        String owner = claimedOwner();
+        verify(adapter).fetch(any());
+        verify(captureMapper, times(2)).renewSyncLease(
+            eq(7), eq(31L), eq(owner), anyString(), anyString());
+        assertFalse(continued.get());
+        verifyNoInteractions(pagePersistence);
+        verify(captureMapper).saveSyncFailure(
+            eq(7), eq(31L), eq(owner), eq("retrying"), eq("lease_lost"), anyString());
+    }
+
+    private String claimedOwner() {
+        ArgumentCaptor<String> owner = ArgumentCaptor.forClass(String.class);
+        verify(captureMapper).claimSync(
+            eq(7), eq(31L), owner.capture(), anyString(), anyString());
+        assertNotNull(owner.getValue());
+        assertFalse(owner.getValue().isBlank());
+        return owner.getValue();
     }
 }

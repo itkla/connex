@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.architecture;
 
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.collectSql;
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.resolve;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,7 +10,6 @@ import static ooo.klae.connex.backend.support.SqlQueryScopes.selectScope;
 import static ooo.klae.connex.backend.support.SqlQueryScopes.selectScopes;
 import static ooo.klae.connex.backend.support.SqlQueryScopes.withoutComments;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -25,18 +26,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
 
 import ooo.klae.connex.backend.tenant.ArchiveVisibilityRegistry;
 import ooo.klae.connex.backend.tenant.ArchiveVisibilityRegistry.ArchiveDisposition;
@@ -63,12 +58,6 @@ import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
  */
 class ArchiveVisibilityArchTest {
 
-    private static final String SPACE = " ";
-    private static final String INCLUDE_MARK = String.valueOf((char) 1);
-    private static final Pattern INCLUDE_REF = Pattern.compile(
-        Pattern.quote(INCLUDE_MARK) + "([^" + Pattern.quote(INCLUDE_MARK) + "]*)"
-            + Pattern.quote(INCLUDE_MARK));
-    private static final Pattern DOCTYPE = Pattern.compile("(?s)<!DOCTYPE.*?>");
     private static final Pattern RECORD_READ = Pattern.compile(
         "(?:FROM|JOIN)\\s+[`\"]?(?:person|company)[`\"]?(?:\\s|$)",
         Pattern.CASE_INSENSITIVE);
@@ -669,7 +658,8 @@ class ArchiveVisibilityArchTest {
     }
 
     private String fragment(String mapper, String fragmentId) throws Exception {
-        MapperXml parsed = parse("ooo.klae.connex.backend.mappers." + mapper, mapperXml(mapper));
+        MapperXml parsed = mapperInventory.get("ooo.klae.connex.backend.mappers." + mapper);
+        assertFalse(parsed == null, "Mapper absent from inventory: " + mapper);
         String body = parsed.fragments().get(fragmentId);
         assertFalse(body == null, mapper + " no longer declares the `" + fragmentId + "` fragment");
         return body;
@@ -687,7 +677,14 @@ class ArchiveVisibilityArchTest {
         return readers;
     }
 
-    private Map<String, MapperXml> allMapperXml() throws Exception {
+    private static Map<String, MapperXml> mapperInventory;
+
+    private Map<String, MapperXml> allMapperXml() {
+        return mapperInventory;
+    }
+
+    @BeforeAll
+    static void readMapperInventory() throws Exception {
         Map<String, MapperXml> byNamespace = new HashMap<>();
         Set<String> namespaces = new HashSet<>(TenantScopeInterceptor.SCOPED_NAMESPACES);
         namespaces.addAll(TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES);
@@ -695,12 +692,12 @@ class ArchiveVisibilityArchTest {
             String mapper = namespace.substring(namespace.lastIndexOf('.') + 1);
             byNamespace.put(namespace, parse(namespace, mapperXml(mapper)));
         }
-        return byNamespace;
+        mapperInventory = Map.copyOf(byNamespace);
     }
 
-    private String mapperXml(String mapper) throws IOException {
+    private static String mapperXml(String mapper) throws IOException {
         String resource = "mappers/" + mapper + ".xml";
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+        try (InputStream input = ArchiveVisibilityArchTest.class.getClassLoader().getResourceAsStream(resource)) {
             assertFalse(input == null, "Mapper XML not found on the classpath: " + resource);
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
@@ -712,31 +709,10 @@ class ArchiveVisibilityArchTest {
      * runs. Comments are dropped with the rest of the non-text nodes, so prose about the predicate
      * can never stand in as evidence for it.
      */
-    private MapperXml parse(String namespace, String xml) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        builder.setEntityResolver((publicId, systemId) ->
-            new InputSource(new ByteArrayInputStream(new byte[0])));
-        String withoutDoctype = DOCTYPE.matcher(xml).replaceFirst("");
-        Document document = builder.parse(
-            new InputSource(new ByteArrayInputStream(withoutDoctype.getBytes(StandardCharsets.UTF_8))));
-
-        Map<String, String> fragments = new LinkedHashMap<>();
-        List<Element> statementElements = new ArrayList<>();
-        NodeList children = document.getDocumentElement().getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() != Node.ELEMENT_NODE) {
-                continue;
-            }
-            Element element = (Element) node;
-            if ("sql".equals(element.getTagName())) {
-                fragments.put(element.getAttribute("id"), collectSql(element));
-            } else if (Set.of("select", "insert", "update", "delete").contains(element.getTagName())) {
-                statementElements.add(element);
-            }
-        }
+    private static MapperXml parse(String namespace, String xml) throws Exception {
+        ArchitectureMapperXml.Parsed parsed = ArchitectureMapperXml.parse(xml);
+        Map<String, String> fragments = parsed.fragments();
+        List<Element> statementElements = parsed.statements();
 
         Map<String, String> resolvedFragments = new LinkedHashMap<>();
         for (Map.Entry<String, String> fragment : fragments.entrySet()) {
@@ -752,41 +728,7 @@ class ArchiveVisibilityArchTest {
         for (String fragment : resolvedFragments.values()) {
             whole.append(fragment).append('\n');
         }
-        return new MapperXml(namespace, resolvedFragments, statements, whole.toString());
-    }
-
-    private String collectSql(Element element) {
-        StringBuilder sql = new StringBuilder();
-        NodeList children = element.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
-                sql.append(node.getNodeValue());
-            } else if (node.getNodeType() == Node.ELEMENT_NODE) {
-                Element child = (Element) node;
-                if ("include".equals(child.getTagName())) {
-                    sql.append(INCLUDE_MARK).append(child.getAttribute("refid")).append(INCLUDE_MARK);
-                } else {
-                    sql.append(' ').append(collectSql(child)).append(' ');
-                }
-            }
-        }
-        return sql.toString();
-    }
-
-    private String resolve(String sql, Map<String, String> fragments, int depth) {
-        if (depth > 16 || !sql.contains(INCLUDE_MARK)) {
-            return sql;
-        }
-        Matcher matcher = INCLUDE_REF.matcher(sql);
-        StringBuilder resolved = new StringBuilder();
-        while (matcher.find()) {
-            String body = fragments.getOrDefault(matcher.group(1), "");
-            matcher.appendReplacement(
-                resolved, Matcher.quoteReplacement(SPACE + resolve(body, fragments, depth + 1) + SPACE));
-        }
-        matcher.appendTail(resolved);
-        return resolved.toString();
+        return new MapperXml(namespace, Map.copyOf(resolvedFragments), List.copyOf(statements), whole.toString());
     }
 
     /** A wildcard's table binding and the SELECT scope that must carry its archive predicate. */
