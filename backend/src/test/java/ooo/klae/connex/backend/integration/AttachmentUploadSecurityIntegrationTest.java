@@ -784,6 +784,7 @@ class AttachmentUploadSecurityIntegrationTest {
             assertStreamedBodySucceeded(response);
             MvcResult completed = mvc.perform(asyncDispatch(response)).andReturn();
             assertEquals(200, completed.getResponse().getStatus(), failureDetail(completed));
+            assertDownloadHeadersAreSingleValued(completed);
             try (var stored = storage.get(storedKey)) {
                 assertNotNull(stored);
                 assertArrayEquals(stored.inputStream().readAllBytes(), completed.getResponse().getContentAsByteArray());
@@ -801,6 +802,28 @@ class AttachmentUploadSecurityIntegrationTest {
     private static void assertStreamedBodySucceeded(MvcResult response) {
         Object outcome = response.getAsyncResult(RACE_MILLIS);
         assertNull(outcome, () -> "Streamed body failed after the response committed: " + outcome);
+    }
+
+    /**
+     * A streamed download is where the security headers used to be written twice — once by the
+     * request thread unwinding {@code HeaderWriterFilter} and once by the async worker committing the
+     * response — so this is the response shape that proves the eager single write (#1761). The
+     * download also sets {@code Content-Security-Policy}, {@code X-Content-Type-Options} and
+     * {@code Cache-Control} itself, so a duplicate here would mean the chain and the controller both
+     * emitted one, and the sandbox value must survive rather than be replaced by the app-wide policy.
+     */
+    private static void assertDownloadHeadersAreSingleValued(MvcResult completed) {
+        var downloaded = completed.getResponse();
+        for (String name : List.of("Content-Security-Policy", "X-Content-Type-Options",
+                "Cache-Control", "Referrer-Policy", "X-Frame-Options")) {
+            assertEquals(1, downloaded.getHeaders(name).size(),
+                () -> name + " appeared " + downloaded.getHeaders(name).size()
+                    + " times on a streamed download: " + downloaded.getHeaders(name));
+        }
+        assertEquals("default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'",
+            downloaded.getHeader("Content-Security-Policy"),
+            "the download must keep its own sandbox policy");
+        assertEquals("no-store", downloaded.getHeader("Cache-Control"));
     }
 
     private void sweepThreeTimes() {
