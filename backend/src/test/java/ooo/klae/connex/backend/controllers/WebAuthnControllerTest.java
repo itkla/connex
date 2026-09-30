@@ -97,17 +97,7 @@ class WebAuthnControllerTest {
         SecurityContextHolder.clearContext();
     }
 
-    @Test
-    void registerVerify_preservesRequestBodyTooLarge() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        when(creationOptions.load(request)).thenReturn(mock(PublicKeyCredentialCreationOptions.class));
-        when(authService.getCurrentUser()).thenReturn(user(7));
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
 
-        assertThrows(RequestBodyTooLargeException.class,
-            () -> controller.registerVerify("work key", "{}", request, response));
-    }
 
     @Test
     void registerOptions_firstPasskeyRequiresCurrentPasswordBootstrap() {

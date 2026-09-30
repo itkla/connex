@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.slf4j.event.KeyValuePair;
@@ -51,8 +53,9 @@ class LoggingErrorReporterTest {
         }
     }
 
-    @Test
-    void independentlyTruncatesEveryTextFieldWithoutBrokenSurrogates() {
+    @ParameterizedTest(name = "surrogate pair starts {0} code units before the limit")
+    @ValueSource(ints = {0, 1})
+    void independentlyTruncatesEveryTextFieldWithoutBrokenSurrogates(int beforeLimit) {
         Logger logger = (Logger) LoggerFactory.getLogger(LoggingErrorReporter.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -61,18 +64,18 @@ class LoggingErrorReporterTest {
             String suffix = "\uD83D\uDE00";
             new LoggingErrorReporter().report(new ReportedError(
                     Source.SERVER,
-                    "c".repeat(64) + suffix,
+                    "c".repeat(64 - beforeLimit) + suffix,
                     null,
                     null,
-                    "m".repeat(1_000) + suffix,
-                    "d".repeat(8_192) + suffix,
+                    "m".repeat(1_000 - beforeLimit) + suffix,
+                    "d".repeat(8_192 - beforeLimit) + suffix,
                     "p".repeat(300) + suffix));
 
             Map<String, Object> keyed = keyValues(appender.list.getFirst());
 
-            assertEquals(64, ((String) keyed.get("correlationId")).length());
-            assertEquals(1_000, ((String) keyed.get("errorMessage")).length());
-            assertEquals(8_192, ((String) keyed.get("detail")).length());
+            assertEquals("c".repeat(64 - beforeLimit), keyed.get("correlationId"));
+            assertEquals("m".repeat(1_000 - beforeLimit), keyed.get("errorMessage"));
+            assertEquals("d".repeat(8_192 - beforeLimit), keyed.get("detail"));
             assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, keyed.get("path"));
             assertFalse(((String) keyed.get("errorMessage")).endsWith("\uD83D"));
             assertTrue(keyed.size() >= 7);

@@ -164,6 +164,7 @@ class SavedViewControllerTest {
             .andExpect(status().isNoContent());
         mockMvc.perform(delete("/api/saved-views/defaults/company"))
             .andExpect(status().isNoContent());
+        verify(service).resetDefault("company");
         mockMvc.perform(delete("/api/saved-views/42"))
             .andExpect(status().isNoContent());
     }
