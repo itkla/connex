@@ -6,21 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.framework;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Locale;
@@ -29,7 +20,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -38,20 +28,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.AiFeature;
-import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
-import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
-import ooo.klae.connex.backend.ai.AiInvocationService;
-import ooo.klae.connex.backend.ai.AiMediaAdmissionService;
-import ooo.klae.connex.backend.ai.AiOrganizationBudgetCoordinator;
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
-import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
@@ -59,12 +41,6 @@ import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
-import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
-import ooo.klae.connex.backend.ai.provider.AiCredentials;
-import ooo.klae.connex.backend.ai.provider.AiProvider;
-import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
-import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
-import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Organization;
@@ -73,20 +49,12 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
-import ooo.klae.connex.backend.mappers.ActivityMapper;
-import ooo.klae.connex.backend.mappers.SegmentMapper;
-import ooo.klae.connex.backend.services.DealRiskService;
-import ooo.klae.connex.backend.services.SavedViewService;
-import ooo.klae.connex.backend.services.ScoringService;
-import ooo.klae.connex.backend.services.SegmentService;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.services.AiProviderConfigService;
-import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -109,21 +77,14 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
 
     private Workspace workspace;
-    private final List<Object> fixtureMocks = new ArrayList<>();
-    private Optional<ProviderHarness> providerHarness = Optional.empty();
-    private Optional<ScopeHarness> scopeHarness = Optional.empty();
+    private AiAssistantMaskingTestSupport support;
 
     /** Releases request captures retained by Mockito's inline mock registry after each test. */
     @AfterEach
     void releaseFixtureMocks() {
-        fixtureMocks.forEach(value -> framework().clearInlineMock(value));
-        fixtureMocks.clear();
-    }
-
-    private <T> T fixtureMock(Class<T> type) {
-        T value = mock(type);
-        fixtureMocks.add(value);
-        return value;
+        if (support != null) {
+            support.releaseFixtureMocks();
+        }
     }
 
     @BeforeEach
@@ -137,6 +98,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         workspace.setSlug("masking-" + unique());
         workspace.setOrgId(organization.getId());
         workspaceMapper.insert(workspace);
+        support = new AiAssistantMaskingTestSupport(workspace.getId(), workspace.getOrgId());
     }
 
     /**
@@ -189,14 +151,14 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                     && "person".equals(resource.kind())), sample.toString());
             MaskingContext turnContext = new MaskingContext();
             resolver.seed(resolution, turnContext);
-            String turnPayload = mapper.writeValueAsString(firstProviderRequest(
-                    invocation(turn, turnContext, mapper), mapper).messages());
+            String turnPayload = mapper.writeValueAsString(support.firstProviderRequest(
+                    support.invocation(turn, turnContext, mapper), mapper).messages());
             assertNoBaseFragments(base, turnPayload, sample);
             OutboundLeakScan.assertNoLeakStrict(turnPayload, turnContext, mapper);
 
             MaskingContext scopeContext = new MaskingContext();
             AiChatResourceRegistry resources = new AiChatResourceRegistry(scopeContext);
-            AiAssistantToolResult scope = scopeResult(person, "x".repeat(498) + sample.text(), resources, mapper);
+            AiAssistantToolResult scope = support.scopeResult(person, "x".repeat(498) + sample.text(), resources, mapper);
             String activities = mapper.writeValueAsString(scope.data().get("activities"));
             assertNoBaseFragments(base, activities, sample);
             AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, scopeContext,
@@ -205,7 +167,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                             List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                             scopeContext, resources,
                             AiAssistantToolCatalog.ALL), 256, 0.1);
-            String scopePayload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
+            String scopePayload = mapper.writeValueAsString(support.firstProviderRequest(invocation, mapper).messages());
             assertNoBaseFragments(base, scopePayload, sample);
             OutboundLeakScan.assertNoLeakStrict(scopePayload, scopeContext, mapper);
         }
@@ -223,11 +185,11 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 order.forEach(value -> MaskingEngine.maskField(EntityKind.PERSON, value.getName(), context));
                 String masked = MaskingEngine.maskFreeText(candidate.getName(), context);
                 assertEquals(candidate.getName(), Demasker.demask(masked, context).text());
-                String payload = mapper.writeValueAsString(firstProviderRequest(
-                        invocation("Ask " + candidate.getName(), context, mapper), mapper).messages());
+                String payload = mapper.writeValueAsString(support.firstProviderRequest(
+                        support.invocation("Ask " + candidate.getName(), context, mapper), mapper).messages());
                 assertNoBaseFragments(base, payload, new LinkParityCase(candidate.getName(), candidate.getName()));
                 AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
-                AiAssistantToolResult scope = scopeResult(candidate,
+                AiAssistantToolResult scope = support.scopeResult(candidate,
                         "x".repeat(498) + candidate.getName(), resources, mapper);
                 assertTrue(mapper.writeValueAsString(scope.data().get("records")).contains(candidate.getName()));
                 assertNoBaseFragments(base, mapper.writeValueAsString(scope.data().get("activities")),
@@ -238,7 +200,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                                 List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                                 context, resources,
                                 AiAssistantToolCatalog.ALL), 256, 0.1);
-                String cappedPayload = mapper.writeValueAsString(firstProviderRequest(capped, mapper).messages());
+                String cappedPayload = mapper.writeValueAsString(support.firstProviderRequest(capped, mapper).messages());
                 assertNoBaseFragments(base, cappedPayload, new LinkParityCase(candidate.getName(), candidate.getName()));
                 OutboundLeakScan.assertNoLeakStrict(cappedPayload, context, mapper);
             }
@@ -307,8 +269,8 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         assertEquals(List.of(person.getId()), resolution.resources().stream().map(resource -> resource.id()).toList());
         MaskingContext turnContext = new MaskingContext();
         resolver.seed(resolution, turnContext);
-        String turnPayload = mapper.writeValueAsString(firstProviderRequest(
-                invocation(spelling, turnContext, mapper), mapper).messages());
+        String turnPayload = mapper.writeValueAsString(support.firstProviderRequest(
+                support.invocation(spelling, turnContext, mapper), mapper).messages());
         assertTrue(turnPayload.contains("{{P1}}"));
         assertFalse(turnPayload.contains("John"));
         assertFalse(turnPayload.contains("Smit"));
@@ -316,7 +278,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
 
         MaskingContext scopeContext = new MaskingContext();
         AiChatResourceRegistry resources = new AiChatResourceRegistry(scopeContext);
-        AiAssistantToolResult scope = scopeResult(person, "x".repeat(498) + spelling, resources, mapper);
+        AiAssistantToolResult scope = support.scopeResult(person, "x".repeat(498) + spelling, resources, mapper);
         assertTrue(mapper.writeValueAsString(scope.data().get("activities")).contains("\"notes\":\"[redacted]\""));
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, scopeContext,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
@@ -324,7 +286,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                         List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                         scopeContext, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
-        String scopePayload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
+        String scopePayload = mapper.writeValueAsString(support.firstProviderRequest(invocation, mapper).messages());
         assertFalse(scopePayload.contains("John"));
         assertFalse(scopePayload.contains("Smit"));
         OutboundLeakScan.assertNoLeakStrict(scopePayload, scopeContext, mapper);
@@ -332,18 +294,16 @@ class AiAssistantIdentifierMaskingIntegrationTest {
 
     private void assertUnsafeNestedTextRefused(Person person, String spelling, ObjectMapper mapper,
             AiAssistantIdentifierResolver resolver) {
-        if (providerHarness.isEmpty()) {
-            providerHarness = Optional.of(newProviderHarness(mapper));
-        }
+        AiAssistantMaskingTestSupport.ProviderHarness harness = support.providerHarness(mapper);
         AiAssistantLoopException exception = assertThrows(AiAssistantLoopException.class,
                 () -> resolver.resolve(spelling));
         assertEquals("malformed_output", exception.terminalReason());
         assertEquals("identifier_text_unsafe", exception.detailReason());
-        assertThrows(MaskingLeakException.class, () -> providerHarness.orElseThrow().service().complete(
-                invocation(spelling, new MaskingContext(), mapper)));
-        assertThrows(MaskingLeakException.class, () -> scopeResult(person, "x".repeat(498) + spelling,
+        assertThrows(MaskingLeakException.class, () -> harness.service().complete(
+                support.invocation(spelling, new MaskingContext(), mapper)));
+        assertThrows(MaskingLeakException.class, () -> support.scopeResult(person, "x".repeat(498) + spelling,
                 new AiChatResourceRegistry(new MaskingContext()), mapper));
-        verify(providerHarness.orElseThrow().provider(), never()).complete(any());
+        verify(harness.provider(), never()).complete(any());
     }
 
     @ParameterizedTest
@@ -372,7 +332,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
         String input = mapper.writeValueAsString(request.messages());
 
         assertTrue(input.contains("What is happening with {{P1}}?"));
@@ -417,7 +377,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
 
         assertTrue(mapper.writeValueAsString(request.messages()).contains("Ask {{P1}} today."));
         assertEquals(Set.of(name), context.identifierDictionary());
@@ -435,7 +395,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
 
         assertTrue(mapper.writeValueAsString(request.messages()).contains("Ask {{P1}} today."));
     }
@@ -449,7 +409,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         assertTrue(resolution.resources().isEmpty());
         assertTrue(resolution.identifiers().isEmpty());
         ObjectMapper mapper = JsonMapper.builder().build();
-        AiCompletionRequest request = firstProviderRequest(invocation("An unrelated turn", new MaskingContext(), mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation("An unrelated turn", new MaskingContext(), mapper), mapper);
         assertTrue(mapper.writeValueAsString(request.messages()).contains("An unrelated turn"));
     }
 
@@ -461,7 +421,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         MaskingContext context = new MaskingContext();
         AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
 
-        AiAssistantToolResult scope = scopeResult(person, "Routine update", resources, mapper);
+        AiAssistantToolResult scope = support.scopeResult(person, "Routine update", resources, mapper);
 
         assertEquals(Set.of(raw), context.identifierDictionary());
         assertEquals(1, scope.data().get("returnedActivities"));
@@ -471,7 +431,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                         List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
-        String payload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
+        String payload = mapper.writeValueAsString(support.firstProviderRequest(invocation, mapper).messages());
         assertTrue(payload.contains("[redacted]"));
         assertTrue(payload.contains("Routine update"));
         assertFalse(payload.contains("John"));
@@ -485,17 +445,17 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         assertThrows(MaskingLeakException.class,
                 () -> OutboundLeakScan.assertNoLeakStrict(literalMention, context, mapper));
-        String mentionPayload = mapper.writeValueAsString(firstProviderRequest(
-                invocation(literalMention, context, mapper), mapper).messages());
+        String mentionPayload = mapper.writeValueAsString(support.firstProviderRequest(
+                support.invocation(literalMention, context, mapper), mapper).messages());
         assertFalse(mentionPayload.contains("John"));
         assertFalse(mentionPayload.contains("Connor"));
         OutboundLeakScan.assertNoLeakStrict(mentionPayload, context, mapper);
 
         AiAssistantLoopException exception = assertThrows(AiAssistantLoopException.class, () -> resolver.resolve(raw));
         assertEquals("identifier_text_unsafe", exception.detailReason());
-        assertThrows(MaskingLeakException.class, () -> invocation(raw, context, mapper));
+        assertThrows(MaskingLeakException.class, () -> support.invocation(raw, context, mapper));
         assertThrows(MaskingLeakException.class,
-                () -> scopeResult(person, "x".repeat(498) + raw, resources, mapper));
+                () -> support.scopeResult(person, "x".repeat(498) + raw, resources, mapper));
     }
 
     @ParameterizedTest
@@ -517,7 +477,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
         String input = mapper.writeValueAsString(request.messages());
 
         assertTrue(input.contains("Ask {{P1}} today."));
@@ -525,33 +485,6 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         assertFalse(input.contains("Smith"));
         assertFalse(input.contains("person:"));
         assertFalse(input.contains("record:"));
-        OutboundLeakScan.assertNoLeakStrict(input, context, mapper);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"Johnathan [Smith](person:1)", "Johnathan [Smith](record:r9)"})
-    void bracketBearingNamesAreScreenedBeforeTheProductionCapAndFirstProviderRequest(String spelling)
-            throws Exception {
-        Person person = newPerson(newCompany("Fixture Parent"), "Johnathan [Smith]");
-        MaskingContext context = new MaskingContext();
-        AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
-        ObjectMapper mapper = JsonMapper.builder().build();
-        AiAssistantToolResult result = scopeResult(person, "x".repeat(498) + spelling, resources, mapper);
-        String scope = mapper.writeValueAsString(result.data().get("activities"));
-        assertTrue(scope.contains("\"notes\":\"[redacted]\""));
-        AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
-                new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
-                        List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
-                        context, resources,
-                        AiAssistantToolCatalog.ALL), 256, 0.1);
-
-        AiCompletionRequest request = firstProviderRequest(invocation, mapper);
-        String input = mapper.writeValueAsString(request.messages());
-
-        assertTrue(input.contains("[redacted]"));
-        assertFalse(input.contains("John"));
-        assertFalse(input.contains("Smit"));
         OutboundLeakScan.assertNoLeakStrict(input, context, mapper);
     }
 
@@ -570,7 +503,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(text, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(text, context, mapper), mapper);
         String providerInput = request.systemPrompt() + mapper.writeValueAsString(request.messages());
 
         for (String name : List.of(
@@ -595,7 +528,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(text, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(text, context, mapper), mapper);
         String providerInput = request.systemPrompt() + mapper.writeValueAsString(request.messages());
 
         assertFalse(providerInput.contains(person.getName()));
@@ -629,60 +562,13 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(text, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(text, context, mapper), mapper);
         String providerInput = request.systemPrompt() + mapper.writeValueAsString(request.messages());
 
         assertFalse(providerInput.contains(name));
         assertFalse(providerInput.contains(spelling));
         assertTrue(providerInput.contains("Ask {{P1}} today."));
         OutboundLeakScan.assertNoLeakStrict(providerInput, context, mapper);
-    }
-
-    @ParameterizedTest
-    @CsvSource(delimiter = '|', value = {
-            "Ipek Smith|\u0130pek Smith",
-            "IRMA Smith|\u0131rma smith",
-            "\u0130pek Smith|i\u0307pek Smith",
-            "i\u0307pek Smith|\u0130pek Smith"
-    })
-    void simpleUnicodeCaseVariantsAreScreenedBeforeTheProductionCapAndFirstProviderRequest(
-            String name, String spelling) throws Exception {
-        Person person = newPerson(newCompany("Fixture Parent"), name);
-        MaskingContext context = new MaskingContext();
-        AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
-        ObjectMapper mapper = JsonMapper.builder().build();
-        String note = "x".repeat(513 - spelling.length()) + spelling;
-        AiAssistantToolResult result = scopeResult(person, note, resources, mapper);
-        String scope = mapper.writeValueAsString(result.data().get("activities"));
-        assertTrue(scope.contains("\"notes\":\"[redacted]\""));
-        AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
-                new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
-                        List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
-                        context, resources,
-                        AiAssistantToolCatalog.ALL), 256, 0.1);
-
-        AiCompletionRequest request = firstProviderRequest(invocation, mapper);
-        String input = mapper.writeValueAsString(request.messages());
-
-        assertTrue(input.contains("[redacted]"));
-        assertFalse(input.contains(spelling.substring(0, 4)));
-        assertFalse(input.contains("Smith"));
-        assertFalse(input.contains("smith"));
-        OutboundLeakScan.assertNoLeakStrict(input, context, mapper);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"8085551", "80855512"})
-    void emailPhoneSuffixesCannotReachTheFirstProviderRequest(String suffix) throws Exception {
-        ObjectMapper mapper = JsonMapper.builder().build();
-        AiCompletionRequest request = firstProviderRequest(
-                invocation("Contact alice@example.com" + suffix, new MaskingContext(), mapper), mapper);
-        String providerInput = mapper.writeValueAsString(request.messages());
-
-        assertFalse(providerInput.contains("alice@example.com"));
-        assertFalse(providerInput.contains(suffix));
-        assertTrue(providerInput.contains("Contact [redacted]"));
     }
 
     @ParameterizedTest
@@ -699,26 +585,12 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(text, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(text, context, mapper), mapper);
         String providerInput = mapper.writeValueAsString(request.messages());
 
         assertFalse(providerInput.contains("John"));
         assertFalse(providerInput.contains("Connor"));
         assertTrue(providerInput.contains("What is happening with {{P1}}?"));
-    }
-
-    @Test
-    void explicitlySeededFullwidthDelimiterIdentifierCannotReachTheFirstProviderRequest() throws Exception {
-        String name = "John\uFF5B\uFF5B\uFF5D\uFF5Dathan Smith";
-        MaskingContext context = new MaskingContext();
-        MaskingEngine.maskField(EntityKind.PERSON, name, context);
-        ObjectMapper mapper = JsonMapper.builder().build();
-
-        AiCompletionRequest request = firstProviderRequest(invocation("Ask " + name + " today.", context, mapper), mapper);
-        String providerInput = mapper.writeValueAsString(request.messages());
-
-        assertFalse(providerInput.contains("Johnathan"));
-        assertTrue(providerInput.contains("Ask {{P1}} today."));
     }
 
     @ParameterizedTest
@@ -737,7 +609,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(text, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(text, context, mapper), mapper);
         String providerInput = mapper.writeValueAsString(request.messages());
 
         assertFalse(providerInput.contains("John"));
@@ -855,7 +727,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
         String input = mapper.writeValueAsString(request.messages());
 
         assertTrue(input.contains("Meeting with {{P1}} tomorrow"));
@@ -873,7 +745,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolver.resolve(turn), context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
         String expected = mapper.writeValueAsString("Config from {{P1}}: {\"retries\": 3} and code{}");
         assertTrue(request.messages().stream().anyMatch(message ->
                 message.content().contains(expected)));
@@ -891,7 +763,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
 
         assertTrue(mapper.writeValueAsString(request.messages()).contains("Met {{P1}} today."));
     }
@@ -912,7 +784,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         resolver.seed(resolution, context);
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation(turn, context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation(turn, context, mapper), mapper);
         String input = mapper.writeValueAsString(request.messages());
 
         assertTrue(input.contains("{{P1}}"));
@@ -935,7 +807,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         assertTrue(context.identifierDictionary().contains(name));
         AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
         ObjectMapper mapper = JsonMapper.builder().build();
-        AiAssistantToolResult result = scopeResult(person, "x".repeat(498) + spelling, resources, mapper);
+        AiAssistantToolResult result = support.scopeResult(person, "x".repeat(498) + spelling, resources, mapper);
         String scope = mapper.writeValueAsString(result.data().get("activities"));
         assertTrue(scope.contains("[redacted]"));
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
@@ -945,7 +817,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
 
-        AiCompletionRequest request = firstProviderRequest(invocation, mapper);
+        AiCompletionRequest request = support.firstProviderRequest(invocation, mapper);
         String input = mapper.writeValueAsString(request.messages());
 
         for (String word : List.of("Johnathan", "Smith")) {
@@ -967,7 +839,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         assertTrue(context.identifierDictionary().contains("User Content"));
         ObjectMapper mapper = JsonMapper.builder().build();
 
-        AiCompletionRequest request = firstProviderRequest(invocation("Ask User Content today.", context, mapper), mapper);
+        AiCompletionRequest request = support.firstProviderRequest(support.invocation("Ask User Content today.", context, mapper), mapper);
 
         assertTrue(mapper.writeValueAsString(request.messages()).contains("Ask {{C1}} today."));
     }
@@ -991,51 +863,6 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             assertThrows(MaskingLeakException.class,
                     () -> OutboundLeakScan.assertNoLeakStrict(payload, context, mapper));
         }
-    }
-
-    private AiAssistantToolResult scopeResult(
-            Person person, String note, AiChatResourceRegistry resources, ObjectMapper mapper) {
-        if (scopeHarness.isEmpty()) {
-            scopeHarness = Optional.of(newScopeHarness(mapper));
-        }
-        ScopeHarness harness = scopeHarness.orElseThrow();
-        reset(harness.people(), harness.activities());
-        when(harness.people().getAssistantProcessablePersonIds(workspace.getId())).thenReturn(List.of(person.getId()));
-        when(harness.people().getByIds(eq(workspace.getId()), anyList())).thenReturn(List.of(person));
-        when(harness.activities().countAiAssistantScopeActivities(
-                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean())).thenReturn(1L);
-        when(harness.activities().getAiAssistantScopeActivities(
-                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(),
-                anyBoolean(), anyInt(), anyInt())).thenReturn(List.of(
-                        new AiAssistantScopeActivity(1, person.getId(), "meeting", "Follow up", note,
-                                "2026-08-22 10:00:00", person.getId(), null)));
-        try {
-            return harness.service().scopeActivities(
-                    AiChatQueryScope.none(), "person", null, List.of(), 30, 50, 5, resources);
-        } finally {
-            clearInvocations(harness.mocks().toArray());
-        }
-    }
-
-    private ScopeHarness newScopeHarness(ObjectMapper mapper) {
-        int firstMock = fixtureMocks.size();
-        ActivityMapper activities = fixtureMock(ActivityMapper.class);
-        PersonMapper people = fixtureMock(PersonMapper.class);
-        WorkspaceService workspaceService = fixtureMock(WorkspaceService.class);
-        OrganizationWorkspaceScopeControlAccess scope = fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
-        when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
-                workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
-        AiAssistantScopeReadService service = new AiAssistantScopeReadService(
-                activities, fixtureMock(SegmentService.class), fixtureMock(SegmentMapper.class), fixtureMock(SavedViewService.class),
-                fixtureMock(ScoringService.class), fixtureMock(DealRiskService.class), people, companyMapper, dealMapper,
-                workspaceService, scope, mapper, Clock.systemUTC());
-        return new ScopeHarness(service, people, activities,
-                List.copyOf(fixtureMocks.subList(firstMock, fixtureMocks.size())));
-    }
-
-    private record ScopeHarness(AiAssistantScopeReadService service, PersonMapper people,
-            ActivityMapper activities, List<Object> mocks) {
     }
 
     /**
@@ -1071,78 +898,14 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         }
     }
 
-    private AiInvocation invocation(String text, MaskingContext context, ObjectMapper mapper) {
-        AiChatMessage message = new AiChatMessage();
-        message.setAuthorKind("user");
-        message.setContent(text);
-        return new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
-                new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
-                        List.of(message), new AiAssistantToolResult(Map.of(), List.of()), List.of(),
-                        context, new AiChatResourceRegistry(),
-                        AiAssistantToolCatalog.ALL), 256, 0.1);
-    }
-
     private AiAssistantIdentifierResolver resolver() {
-        WorkspaceService workspaceService = fixtureMock(WorkspaceService.class);
+        WorkspaceService workspaceService = support.fixtureMock(WorkspaceService.class);
         OrganizationWorkspaceScopeControlAccess scope =
-                fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
+                support.fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
         when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
                 workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
         return new AiAssistantIdentifierResolver(identifierMapper, workspaceService, scope);
-    }
-
-    private AiCompletionRequest firstProviderRequest(AiInvocation invocation, ObjectMapper mapper) {
-        if (providerHarness.isEmpty()) {
-            providerHarness = Optional.of(newProviderHarness(mapper));
-        }
-        ProviderHarness harness = providerHarness.orElseThrow();
-        try {
-            harness.service().complete(invocation);
-            ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
-            verify(harness.provider()).complete(request.capture());
-            return request.getValue();
-        } finally {
-            clearInvocations(harness.mocks().toArray());
-        }
-    }
-
-    private ProviderHarness newProviderHarness(ObjectMapper mapper) {
-        int firstMock = fixtureMocks.size();
-        AiProvider provider = fixtureMock(AiProvider.class);
-        when(provider.providerId()).thenReturn("deterministic");
-        when(provider.maxOutputTokens(any())).thenReturn(4_096);
-        when(provider.contextWindowTokens(any())).thenReturn(128_000);
-        when(provider.complete(any())).thenAnswer(call -> {
-            AiCompletionRequest request = call.getArgument(0);
-            String output = request.providerAttemptExecutor().execute(() -> "Ready");
-            return new AiCompletionResult(output, 1, 1, "stop");
-        });
-        WorkspaceService workspaceService = fixtureMock(WorkspaceService.class);
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
-        when(workspaceService.getCurrentOrgId()).thenReturn(workspace.getOrgId());
-        when(workspaceService.getCurrentUserId()).thenReturn(11);
-        AiProviderConfigService configService = fixtureMock(AiProviderConfigService.class);
-        when(configService.resolveForOrg(workspace.getOrgId(), 11)).thenReturn(new ResolvedAiProvider(
-                "deterministic", null, "deterministic-model", "https://provider.example.test/v1",
-                null, null, null, false, true, AiCredentials.of(Map.of())));
-        AiOrganizationBudgetCoordinator budget = fixtureMock(AiOrganizationBudgetCoordinator.class);
-        AiOrganizationBudgetCoordinator.Lease budgetLease = fixtureMock(AiOrganizationBudgetCoordinator.Lease.class);
-        when(budgetLease.deadline()).thenAnswer(call -> AiRequestDeadline.afterMillis(60_000));
-        when(budget.reserve(eq(workspace.getOrgId()), any(AiInvocation.class), anyString()))
-                .thenReturn(budgetLease);
-        AiFeatureGate gate = fixtureMock(AiFeatureGate.class);
-        when(gate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
-        AiInvocationService invocationService = new AiInvocationService(
-                gate, fixtureMock(AiInvocationAdmissionService.class), fixtureMock(AiMediaAdmissionService.class),
-                configService, new AiProviderRouter(List.of(provider)), new AiRestrictionEpoch(),
-                workspaceService, fixtureMock(AuditService.class), mapper, budget, Clock.systemUTC());
-
-        return new ProviderHarness(invocationService, provider,
-                List.copyOf(fixtureMocks.subList(firstMock, fixtureMocks.size())));
-    }
-
-    private record ProviderHarness(AiInvocationService service, AiProvider provider, List<Object> mocks) {
     }
 
     private Company newCompany(String name) {
