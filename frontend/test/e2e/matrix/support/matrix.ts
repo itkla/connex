@@ -462,6 +462,7 @@ export async function record(
         await settleForCapture(page, entry.state);
     } catch (error) {
         readinessFailure = { error, message: error instanceof Error ? error.message : String(error) };
+        await expandScrollContainers(page);
     }
     await page.screenshot({ path: target, fullPage: true, animations: 'disabled' });
     mkdirSync(MATRIX_ARTIFACT_DIR, { recursive: true });

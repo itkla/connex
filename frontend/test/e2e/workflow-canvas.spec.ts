@@ -376,7 +376,10 @@ test.describe("workflow canvas", () => {
         await (await rejectedSave).finished();
         await (await recoveredWorkflow).finished();
         await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
-        await expect(page.getByLabel("Description", { exact: true })).toHaveValue("Changed by another editor");
+        await page.locator('.react-flow__node[data-id="trigger"]').click();
+        const description = page.locator('textarea[data-workflow-node="trigger"][data-workflow-field="description"]');
+        await expect(description).toBeVisible();
+        await expect(description).toHaveValue("Changed by another editor");
         await expect(name).toHaveValue("Edited during conflict recovery");
     });
 

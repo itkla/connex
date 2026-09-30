@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "@playwright/test";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const capture = vi.hoisted(() => ({
     directory: "",
@@ -28,7 +28,7 @@ vi.mock("@playwright/test", () => {
             launch: async () => ({
                 newPage: async () => ({
                     locator: () => locator,
-                    evaluate: async () => undefined,
+                    evaluate: async (callback: () => void | Promise<void>) => callback(),
                     screenshot: capture.screenshot,
                 }),
             }),
@@ -66,14 +66,38 @@ const screenshot = "shots/dashboard__desktop-en-light__success.png";
 
 beforeEach(() => {
     rmSync(capture.directory, { recursive: true, force: true });
+    const shells = Array.from({ length: 2 }, () => ({
+        style: { height: "100dvh", maxHeight: "100dvh", overflow: "hidden" },
+    }));
+    const documentElement = { style: { height: "100%", overflow: "hidden" } };
+    const body = { style: { height: "100%" } };
+    vi.stubGlobal("document", {
+        querySelectorAll: () => shells,
+        documentElement,
+        body,
+        fonts: { ready: Promise.resolve() },
+    });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+        callback(0);
+        return 0;
+    });
     capture.visible.mockReset().mockResolvedValue(undefined);
     capture.skeletons.mockReset().mockResolvedValue(undefined);
     capture.settled.mockReset().mockResolvedValue(undefined);
     capture.screenshot.mockReset().mockImplementation(async (options) => {
+        for (const shell of shells) {
+            expect(shell.style).toEqual({ height: "auto", maxHeight: "none", overflow: "visible" });
+        }
+        expect(documentElement.style).toEqual({ height: "auto", overflow: "visible" });
+        expect(body.style.height).toBe("auto");
         const bytes = Buffer.from("captured page");
         writeFileSync(options.path, bytes);
         return bytes;
     });
+});
+
+afterEach(() => {
+    vi.unstubAllGlobals();
 });
 
 afterAll(() => {
