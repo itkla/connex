@@ -6,6 +6,9 @@ allowBuilds:
 overrides:
   # shadcn > cosmiconfig pulls js-yaml 4.3.1 (GHSA-2883-xcg3-v3hh, high).
   js-yaml: '>=4.3.2'
+  # wrangler/miniflare pull undici below 7.29.1 (GHSA-rfgv-xxqx-mfg5 and
+  # GHSA-w293-vg96-wgc3, both high). Caret keeps the 7.x line.
+  undici: ^7.29.1
 # Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
 # than one day and versions without registry publish time are refused, and a
 # package whose trust evidence (staged publish, trusted publisher, provenance)
