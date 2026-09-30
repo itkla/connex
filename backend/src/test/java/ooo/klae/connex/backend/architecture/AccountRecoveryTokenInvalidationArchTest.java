@@ -13,6 +13,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -34,6 +35,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 class AccountRecoveryTokenInvalidationArchTest {
 
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
+    private static ArchitectureSourceIndex sourceIndex;
+
+    @BeforeAll
+    static void readSourceSnapshot() throws IOException {
+        sourceIndex = ArchitectureSourceIndex.read(SOURCE_ROOT);
+    }
+
     private static final Path PASSWORD_RESET_SERVICE =
             Path.of("ooo/klae/connex/backend/services/PasswordResetService.java");
     private static final Path EMAIL_CHANGE_SERVICE =
@@ -79,7 +87,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         assertTrue(writers.size() >= 2,
                 "credential writers were renamed away from these guards; re-anchor them");
         for (Path writer : writers) {
-            String source = Files.readString(SOURCE_ROOT.resolve(writer));
+            String source = sourceIndex.source(SOURCE_ROOT.resolve(writer));
             assertCredentialWrites(writer, source);
         }
     }
@@ -91,7 +99,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         "private String field;\n\n    void resetPasswordByHash("
     })
     void credentialGuardRejectsUnrecognizedWriterSignatures(String signature) throws IOException {
-        String source = Files.readString(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE))
+        String source = sourceIndex.source(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE))
             .replace("public void resetPasswordByHash(", signature);
 
         assertThrows(AssertionError.class, () -> assertCredentialWrites(PASSWORD_RESET_SERVICE, source));
@@ -100,7 +108,7 @@ class AccountRecoveryTokenInvalidationArchTest {
     @ParameterizedTest
     @ValueSource(strings = {PASSWORD_WRITE, EMAIL_WRITE})
     void credentialGuardRejectsAdditionalWrites(String write) throws IOException {
-        String source = Files.readString(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE));
+        String source = sourceIndex.source(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE));
         String additionalWriter = "\n    public void additionalWriter() {\n        " + write + "1, value);\n    }\n";
         String changed = source.replace("\n}", additionalWriter + "\n}");
 
@@ -130,7 +138,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         assertEquals(List.of(USER_CONTROLLER), sourcesContaining(PROFILE_UPDATE),
                 "the profile update must stay reachable only from the self-service controller");
 
-        String userService = Files.readString(SOURCE_ROOT.resolve(USER_SERVICE));
+        String userService = sourceIndex.source(SOURCE_ROOT.resolve(USER_SERVICE));
         String profileUpdate = methodBodyContaining(
                 USER_SERVICE, userService, userService.indexOf(GENERAL_ACCOUNT_WRITE), "update");
         assertTrue(profileUpdate.contains("User profile = new User();"));
@@ -145,7 +153,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         assertFalse(update.contains("password_hash"), "profile SQL must never write a credential");
         assertFalse(update.contains("passwordHash"), "profile SQL must never bind a credential");
         for (Path source : List.of(USER_SERVICE, USER_CONTROLLER, USER_DTO)) {
-            assertFalse(Files.readString(SOURCE_ROOT.resolve(source)).contains(PASSWORD_HASH_ASSIGNMENT),
+            assertFalse(sourceIndex.source(SOURCE_ROOT.resolve(source)).contains(PASSWORD_HASH_ASSIGNMENT),
                     source + " must never populate a password hash on the bean handed to "
                         + GENERAL_ACCOUNT_WRITE + ", which would bypass the reset choke point");
         }
@@ -156,7 +164,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         for (String family : List.of("PasswordReset", "EmailChange")) {
             Path service = family.equals("PasswordReset") ? PASSWORD_RESET_SERVICE : EMAIL_CHANGE_SERVICE;
             String mapperName = family.equals("PasswordReset") ? "passwordResetTokenMapper" : "emailChangeTokenMapper";
-            String source = Files.readString(SOURCE_ROOT.resolve(service));
+            String source = sourceIndex.source(SOURCE_ROOT.resolve(service));
             String body = methodBodyContaining(service, source, source.indexOf(mapperName + ".insert("),
                     family.equals("PasswordReset") ? "requestReset" : "requestChange");
             assertOrdered(service, body, "userMapper.getUserByIdForShare(user.getId())",
@@ -174,14 +182,14 @@ class AccountRecoveryTokenInvalidationArchTest {
 
     @Test
     void everyEmailedTokenExchangeAndConfirmationChecksTheLockedAccountGeneration() throws IOException {
-        assertGenerationChecks(PASSWORD_RESET_SERVICE, Files.readString(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE)));
-        assertGenerationChecks(EMAIL_CHANGE_SERVICE, Files.readString(SOURCE_ROOT.resolve(EMAIL_CHANGE_SERVICE)));
+        assertGenerationChecks(PASSWORD_RESET_SERVICE, sourceIndex.source(SOURCE_ROOT.resolve(PASSWORD_RESET_SERVICE)));
+        assertGenerationChecks(EMAIL_CHANGE_SERVICE, sourceIndex.source(SOURCE_ROOT.resolve(EMAIL_CHANGE_SERVICE)));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"userMapper.getUserById(token.getUserId())", "userMapper.currentSessionEpoch(token.getUserId())"})
     void generationGuardRejectsUnlockedAccountReads(String replacement) throws IOException {
-        String source = Files.readString(SOURCE_ROOT.resolve(EMAIL_CHANGE_SERVICE))
+        String source = sourceIndex.source(SOURCE_ROOT.resolve(EMAIL_CHANGE_SERVICE))
             .replace(LOCKED_ACCOUNT_READ, replacement);
         assertThrows(AssertionError.class, () -> assertGenerationChecks(EMAIL_CHANGE_SERVICE, source));
     }
@@ -249,22 +257,7 @@ class AccountRecoveryTokenInvalidationArchTest {
         return content.substring(start, end);
     }
 
-    private static List<Path> sourcesContaining(String needle) throws IOException {
-        try (Stream<Path> files = Files.walk(SOURCE_ROOT)) {
-            return files
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> contains(path, needle))
-                    .map(SOURCE_ROOT::relativize)
-                    .sorted()
-                    .toList();
-        }
-    }
-
-    private static boolean contains(Path path, String needle) {
-        try {
-            return Files.readString(path).contains(needle);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not inspect the account recovery token boundary");
-        }
+    private static List<Path> sourcesContaining(String token) {
+        return sourceIndex.containing(token).stream().map(SOURCE_ROOT::relativize).toList();
     }
 }

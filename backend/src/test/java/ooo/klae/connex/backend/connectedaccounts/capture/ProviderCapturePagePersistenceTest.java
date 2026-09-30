@@ -239,6 +239,8 @@ class ProviderCapturePagePersistenceTest {
     @Test
     void privateItemWithdrawsPreviouslyAdmittedEvidence() {
         ProviderCapturedInteraction existing = new ProviderCapturedInteraction();
+        existing.setSubject("Previously admitted subject");
+        existing.setBody("Previously admitted body");
         existing.setId(101);
         existing.setWorkspaceId(7);
         existing.setVersion(3);

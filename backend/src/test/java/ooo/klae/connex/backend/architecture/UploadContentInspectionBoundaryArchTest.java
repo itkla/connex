@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.storage.UploadPolicy;
@@ -40,6 +41,13 @@ import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
  */
 class UploadContentInspectionBoundaryArchTest {
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
+    private static ArchitectureSourceIndex sourceIndex;
+
+    @BeforeAll
+    static void readSourceSnapshot() throws IOException {
+        sourceIndex = ArchitectureSourceIndex.read(SOURCE_ROOT);
+    }
+
     private static final Path REPOSITORY_ROOT = Path.of("..");
     private static final Path BOUNDARY_DOCUMENT =
         REPOSITORY_ROOT.resolve("docs/UPLOAD_CONTENT_INSPECTION.md");
@@ -128,21 +136,7 @@ class UploadContentInspectionBoundaryArchTest {
         }
     }
 
-    private static List<Path> sourcesContaining(String token) throws IOException {
-        try (var sources = Files.walk(SOURCE_ROOT)) {
-            return new ArrayList<>(sources
-                .filter(path -> path.toString().endsWith(".java"))
-                .filter(path -> read(path).contains(token))
-                .sorted()
-                .toList());
-        }
-    }
-
-    private static String read(Path path) {
-        try {
-            return Files.readString(path, StandardCharsets.UTF_8);
-        } catch (IOException exception) {
-            throw new IllegalStateException(exception);
-        }
+    private static List<Path> sourcesContaining(String token) {
+        return sourceIndex.containing(token);
     }
 }
