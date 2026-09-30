@@ -179,7 +179,7 @@ class DuplicateReviewServiceTest {
     }
 
     @Test
-    void liveStateReconciliationIsIdempotentWhenAppliedTwice() {
+    void liveStateReconciliationDispatchIsDeterministicWhenAppliedTwice() {
         LocalDateTime detectedAt = LocalDateTime.of(2026, 9, 2, 12, 0);
         String fingerprint = DuplicateReviewService.evidenceFingerprint(
             "person", "external_id", "source:person-41");

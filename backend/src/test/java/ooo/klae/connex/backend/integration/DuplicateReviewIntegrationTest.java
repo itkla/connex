@@ -624,6 +624,12 @@ class DuplicateReviewIntegrationTest {
                 "external-company-review");
         }
         identityBackfillTransaction.rebuildCollisionReport("default", workspace.getId());
+        var firstDecisions = persistedDecisionSnapshot();
+        assertEquals(3, firstDecisions.size());
+        assertTrue(firstDecisions.stream().allMatch(row -> "open".equals(row.get("state"))));
+        identityBackfillTransaction.rebuildCollisionReport("default", workspace.getId());
+        assertEquals(firstDecisions, persistedDecisionSnapshot());
+        assertEquals(3, currentDecisionCount());
         companyService.archiveCompany(companies.getFirst().getId());
         clearDirectAuthentication();
 
@@ -796,6 +802,18 @@ class DuplicateReviewIntegrationTest {
                   "note": null
                 }
                 """.formatted(first.getId(), second.getId(), fingerprint));
+    }
+
+    private List<java.util.Map<String, Object>> persistedDecisionSnapshot() {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT id, record_type, kind, evidence_fingerprint, low_company_id,
+                   high_company_id, evidence_company_identity_id, collision_size, state, is_current
+            FROM duplicate_review_decision
+            WHERE workspace_id = ?
+            ORDER BY id
+            """,
+            workspace.getId());
     }
 
     private int currentDecisionCount() {
