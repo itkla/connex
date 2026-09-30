@@ -13,7 +13,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -221,6 +220,7 @@ class AiChatAgentLoopServiceTest {
         when(clock.instant()).thenReturn(NOW);
     }
 
+    /** A closing attempt that still calls a tool preserves the original no-progress reason. */
     @Test
     void repeatedIdenticalToolCallsUseTheCacheThenStopForNoProgress() throws Exception {
         AiAssistantStep toolStep = new AiAssistantStep(
@@ -836,28 +836,6 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
-     * The closing step is offered once, and a turn that still cannot answer settles on the reason
-     * it originally met rather than on a new one invented by the retry.
-     */
-    @Test
-    void aClosingStepThatStillCallsAToolSettlesOnTheOriginalReason() throws Exception {
-        AiAssistantStep toolStep = toolStep(
-                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
-        when(invocationService.completeStructuredRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.class),
-                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
-                eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(toolStep));
-
-        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
-
-        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("no_progress", result.reason());
-        verify(persistenceService, never()).resolve(
-                eq(TURN), any(), any(), anyInt(), anyInt());
-    }
-
-    /**
      * An argument refusal is handed back to the model as a correctable error result instead of
      * ending the turn. This replays staging turn 87 — a warmth filter proposed for a deal cohort —
      * as recovery: the refused call fails durably, the corrected retry executes, and the turn
@@ -921,7 +899,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(toolStep(
+                .thenReturn(parsed(loadStep("analytics")), parsed(toolStep(
                         "aggregate_metric", "{\"metric\":\"pipeline_velocity\"}")),
                         parsed(toolStep(
                                 "aggregate_metric", "{\"metric\":\"deal_momentum\"}")),
@@ -934,6 +912,18 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService).resolve(
                 eq(TURN), eq("I could not compute that metric."), any(), anyInt(), anyInt());
+        verify(toolExecutor, times(2)).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, times(2)).failTool(
+                eq(TURN), anyInt(), contains("unknown_metric"));
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(4)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(List.of(
+                "ask_connex_step", "ask_connex_step", "ask_connex_step", "ask_connex_closing_step"),
+                schemas.getAllValues().stream().map(AiResponseSchema::name).toList());
     }
 
     /**
@@ -2281,8 +2271,47 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        verify(persistenceService, atMost(8)).proposeTool(
-                eq(TURN), anyInt(), anyInt(), eq("set_todos"), any());
+        assertTrue(step.get() >= 9, "The provider must be allowed to attempt the excess publication");
+        verify(toolExecutor, times(8)).execute(
+                eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, times(8)).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+    }
+
+    @Test
+    void aFreshPlanPreservesTheExistingNoProgressCount() throws Exception {
+        AiAssistantStep read = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep plan = toolStep(
+                "set_todos", "{\"items\":[\"Review results\"],\"statuses\":[\"active\"]}");
+        AiAssistantStep answer = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Here is what I found.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(read), parsed(read), parsed(plan), parsed(read), parsed(answer));
+        when(toolExecutor.execute(eq("set_todos"), any(), any(), eq(true), any()))
+                .thenReturn(new AiAssistantToolResult(
+                        Map.of("todos", List.of(new AiChatTodo("Review results", "active"))), List.of()));
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor).execute(eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        verify(toolExecutor).execute(eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Here is what I found."), any(), anyInt(), anyInt());
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(5)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(List.of(
+                "ask_connex_step", "ask_connex_step", "ask_connex_step", "ask_connex_step",
+                "ask_connex_closing_step"),
+                schemas.getAllValues().stream().map(AiResponseSchema::name).toList());
     }
 
     /**
@@ -3026,32 +3055,6 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), anyInt(), contains("unknown_handle"));
         verify(persistenceService, never()).finishTool(
                 eq(TURN), anyInt(), eq("executed"), any());
-    }
-
-    @Test
-    void historyCharacterBudgetKeepsWholeNewestMessagesAndOmitsOldestBoundary() {
-        AiChatMessage oldest = message(1, "a".repeat(60_000));
-        AiChatMessage recent = message(2, "b".repeat(20_000));
-        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(16_000));
-
-        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
-                null, List.of(oldest, recent, initiating), initiating, 64_000);
-
-        assertEquals(2, bounded.size());
-        assertEquals(recent.getContent(), bounded.get(0).getContent());
-        assertEquals(initiating.getContent(), bounded.get(1).getContent());
-    }
-
-    @Test
-    void oversizedNewestUserMessageRemainsIntactWhileAllOlderContentIsTrimmed() {
-        AiChatMessage oldest = message(1, "a".repeat(10_000));
-        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(80_000));
-
-        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
-                null, List.of(oldest, initiating), initiating, 64_000);
-
-        assertEquals(1, bounded.size());
-        assertEquals(initiating.getContent(), bounded.getFirst().getContent());
     }
 
     private void assertTerminal(String reason) {

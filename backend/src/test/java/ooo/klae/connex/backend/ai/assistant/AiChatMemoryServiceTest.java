@@ -64,35 +64,8 @@ class AiChatMemoryServiceTest {
      */
     @Test
     void ownershipIsRecheckedBeforeEveryCompactionRoundRatherThanOnlyOnEntry() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
-        AiInvocationAdmissionService.DirectAdmission admission =
-                mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(1_024);
-        var objectMapper = JsonMapper.builder().build();
-        var assembler = new AiAssistantPromptAssembler(
-                objectMapper, new AiAssistantToolCatalog());
-        var summaryGuard = new AiAssistantSummaryGuard();
-        var summarySchema = new AiAssistantSummarySchema(objectMapper);
-        var stepSchema = new AiAssistantStepSchema(
-                objectMapper, new AiAssistantToolCatalog());
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                admissionService,
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                summaryGuard,
-                summarySchema,
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         AiChatMessage early = message(
@@ -110,34 +83,34 @@ class AiChatMemoryServiceTest {
         firstStoredSummary.setStructuredJson(
                 "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
                         + "\"throughSeq\":1,\"resources\":[],\"identifiers\":[]}");
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         200_000,
                         50_000));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
-        when(persistenceService.loadHistory(turn, 100))
+        when(fixture.persistenceService().loadHistory(turn, 100))
                 .thenReturn(List.of(early, middle, recent, initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
-        when(persistenceService.loadCompactionCandidates(turn, 0, 4, 500))
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 4, 500))
                 .thenReturn(List.of(early));
-        when(admissionService.acquireDirect()).thenReturn(admission);
-        when(invocationService.completeStructuredRepairable(
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission), any(Runnable.class)))
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()), any(Runnable.class)))
                 .thenReturn(new AiStructuredRepairAttempt<>(
                         new AiStructuredOutcome.Parsed<>(
                                 new AiAssistantSummary(firstSummaryContent),
                                 0, 19, 7, "end_turn"),
                         Optional.empty()));
-        when(persistenceService.upsertHistorySummary(
+        when(fixture.persistenceService().upsertHistorySummary(
                 same(turn), isNull(), eq(0), anyString(), anyString(), eq(19), eq(7)))
                 .thenReturn(firstStoredSummary);
         AtomicInteger ownershipChecks = new AtomicInteger();
@@ -151,52 +124,25 @@ class AiChatMemoryServiceTest {
 
         AiAssistantLoopException stopped = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(
+                () -> fixture.service().prepare(
                         turn, new MaskingContext(), now.plusSeconds(70),
                         stopsAfterTheFirstRound));
 
         assertEquals(AiAssistantTerminalReasons.OWNER_LOST, stopped.terminalReason());
-        verify(invocationService, times(1)).completeStructuredRepairable(
+        verify(fixture.invocationService(), times(1)).completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission),
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()),
                 any(Runnable.class));
-        verify(persistenceService, never()).loadCompactionCandidates(turn, 1, 4, 500);
+        verify(fixture.persistenceService(), never()).loadCompactionCandidates(turn, 1, 4, 500);
     }
 
     @Test
     void compactsWholeEarlyMessagesAndReplaysDurableSummaryForContinuity() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
-        AiInvocationAdmissionService.DirectAdmission admission =
-                mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(1_024);
-        var objectMapper = JsonMapper.builder().build();
-        var assembler = new AiAssistantPromptAssembler(
-                objectMapper, new AiAssistantToolCatalog());
-        var summaryGuard = new AiAssistantSummaryGuard();
-        var summarySchema = new AiAssistantSummarySchema(objectMapper);
-        var stepSchema = new AiAssistantStepSchema(
-                objectMapper, new AiAssistantToolCatalog());
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                admissionService,
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                summaryGuard,
-                summarySchema,
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         AiChatMessage early = message(
@@ -234,32 +180,32 @@ class AiChatMemoryServiceTest {
                         + "\"throughSeq\":2,\"resources\":[],"
                         + "\"identifiers\":[{\"kind\":\"person\","
                         + "\"value\":\"quarterly planning\"}]}");
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         200_000,
                         50_000));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
-        when(persistenceService.loadHistory(turn, 100))
+        when(fixture.persistenceService().loadHistory(turn, 100))
                 .thenReturn(List.of(early, middle, recent, initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
-        when(persistenceService.loadCompactionCandidates(turn, 0, 4, 500))
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 4, 500))
                 .thenReturn(List.of(early));
-        when(persistenceService.loadCompactionCandidates(turn, 1, 4, 500))
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 1, 4, 500))
                 .thenReturn(List.of(middle));
-        when(persistenceService.loadCompactionCandidates(turn, 2, 4, 500))
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 2, 4, 500))
                 .thenReturn(List.of());
-        when(admissionService.acquireDirect()).thenReturn(admission);
-        when(invocationService.completeStructuredRepairable(
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission), any(Runnable.class)))
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()), any(Runnable.class)))
                 .thenReturn(new AiStructuredRepairAttempt<>(
                         new AiStructuredOutcome.Parsed<>(
                                 new AiAssistantSummary(firstSummaryContent),
@@ -271,24 +217,24 @@ class AiChatMemoryServiceTest {
                                                 "The user prefers quarterly planning and retained the second-batch fact."),
                                         0, 23, 9, "end_turn"),
                                 Optional.empty()));
-        when(persistenceService.upsertHistorySummary(
+        when(fixture.persistenceService().upsertHistorySummary(
                 same(turn), isNull(), eq(0), anyString(), anyString(), eq(19), eq(7)))
                 .thenReturn(firstStoredSummary);
-        when(persistenceService.upsertHistorySummary(
+        when(fixture.persistenceService().upsertHistorySummary(
                 same(turn), eq(105), eq(1), anyString(), anyString(), eq(23), eq(9)))
                 .thenReturn(storedSummary);
 
-        AiChatMemory memory = service.prepare(
+        AiChatMemory memory = fixture.service().prepare(
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         ArgumentCaptor<AiInvocation> summaryInvocation =
                 ArgumentCaptor.forClass(AiInvocation.class);
-        verify(invocationService, times(2)).completeStructuredRepairable(
+        verify(fixture.invocationService(), times(2)).completeStructuredRepairable(
                 summaryInvocation.capture(),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission),
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()),
                 any(Runnable.class));
         String firstCompactionPrompt = promptText(
                 summaryInvocation.getAllValues().getFirst().prompt());
@@ -312,14 +258,14 @@ class AiChatMemoryServiceTest {
         assertEquals(16, memory.outputTokens());
         assertFalse(memory.nativeTools());
         ArgumentCaptor<String> persistedMetadata = ArgumentCaptor.forClass(String.class);
-        verify(persistenceService).upsertHistorySummary(
+        verify(fixture.persistenceService()).upsertHistorySummary(
                 same(turn), isNull(), eq(0), anyString(), persistedMetadata.capture(), eq(19), eq(7));
         assertEquals(
                 "quarterly planning",
-                objectMapper.readTree(persistedMetadata.getValue())
+                fixture.objectMapper().readTree(persistedMetadata.getValue())
                         .path("identifiers").path(0).path("value").asString());
 
-        MaskedPrompt replay = assembler.assemble(
+        MaskedPrompt replay = fixture.assembler().assemble(
                 memory.history(),
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
@@ -334,33 +280,12 @@ class AiChatMemoryServiceTest {
 
     @Test
     void nativeProviderCapabilitySelectsTheNativeFixedEnvelope() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(8_192);
-        var objectMapper = JsonMapper.builder().build();
-        var catalog = new AiAssistantToolCatalog();
-        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
-        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                mock(AiInvocationAdmissionService.class),
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                new AiAssistantSummaryGuard(),
-                new AiAssistantSummarySchema(objectMapper),
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         AiChatMessage initiating = message(104, 4, "user", "Summarize the pipeline");
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
@@ -370,16 +295,16 @@ class AiChatMemoryServiceTest {
                         AiReasoningMode.NATIVE,
                         false,
                         4));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class),
-                same(stepSchema.finalResponseSchema()),
+                same(fixture.stepSchema().finalResponseSchema()),
                 eq(AiReasoningMode.NATIVE),
                 any(AiNativeToolRequest.class)))
                 .thenReturn(8_192);
-        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
 
-        AiChatMemory memory = service.prepare(
+        AiChatMemory memory = fixture.service().prepare(
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertTrue(memory.nativeTools());
@@ -389,14 +314,14 @@ class AiChatMemoryServiceTest {
                 "the turn snapshots the adapter's declared per-step call bound once");
         ArgumentCaptor<AiNativeToolRequest> nativeTools =
                 ArgumentCaptor.forClass(AiNativeToolRequest.class);
-        verify(invocationService).serializedPromptBytes(
+        verify(fixture.invocationService()).serializedPromptBytes(
                 any(MaskedPrompt.class),
-                same(stepSchema.finalResponseSchema()),
+                same(fixture.stepSchema().finalResponseSchema()),
                 eq(AiReasoningMode.NATIVE),
                 nativeTools.capture());
         assertEquals(
                 new AiAssistantToolCatalog().nativeDefinitions(
-                                objectMapper, new AiAssistantToolCatalog().reservationToolsets())
+                                fixture.objectMapper(), new AiAssistantToolCatalog().reservationToolsets())
                         .stream()
                         .map(definition -> definition.name())
                         .toList(),
@@ -405,7 +330,7 @@ class AiChatMemoryServiceTest {
                         .toList(),
                 "the one per-turn envelope is measured from the reservation, not the whole"
                         + " catalog and not the core-only set the first step sends");
-        verify(invocationService, never()).serializedPromptBytes(
+        verify(fixture.invocationService(), never()).serializedPromptBytes(
                 any(MaskedPrompt.class), any(AiResponseSchema.class),
                 eq(AiReasoningMode.TAGGED));
     }
@@ -420,32 +345,11 @@ class AiChatMemoryServiceTest {
      */
     @Test
     void aContextWindowBelowTheAssistantFloorRefusesPreparationBeforeAnyHistoryIsRead() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(8_192);
-        var objectMapper = JsonMapper.builder().build();
-        var catalog = new AiAssistantToolCatalog();
-        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
-        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                mock(AiInvocationAdmissionService.class),
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                new AiAssistantSummaryGuard(),
-                new AiAssistantSummarySchema(objectMapper),
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
@@ -454,11 +358,11 @@ class AiChatMemoryServiceTest {
 
         AiAssistantLoopException refused = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(turn, new MaskingContext(), now.plusSeconds(70), NO_STOP));
+                () -> fixture.service().prepare(turn, new MaskingContext(), now.plusSeconds(70), NO_STOP));
 
         assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
                 refused.terminalReason());
-        verifyNoInteractions(persistenceService);
+        verifyNoInteractions(fixture.persistenceService());
     }
 
     @Test
@@ -477,6 +381,45 @@ class AiChatMemoryServiceTest {
         assertEquals("INITIATING_MESSAGE_BEGIN_AND_END", bounded.getFirst().getContent());
     }
 
+    @Test
+    void historyCharacterBudgetKeepsWholeNewestMessagesAndOmitsOldestBoundary() {
+        AiChatMessage oldest = message(1, 0, "user", "a".repeat(60_000));
+        AiChatMessage recent = message(2, 0, "user", "b".repeat(20_000));
+        AiChatMessage initiating = message(19, 0, "user", "c".repeat(16_000));
+
+        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
+                null, List.of(oldest, recent, initiating), initiating, 64_000);
+
+        assertEquals(2, bounded.size());
+        assertEquals(recent.getContent(), bounded.get(0).getContent());
+        assertEquals(initiating.getContent(), bounded.get(1).getContent());
+    }
+
+    @Test
+    void oversizedNewestUserMessageRemainsIntactWhileAllOlderContentIsTrimmed() {
+        AiChatMessage oldest = message(1, 0, "user", "a".repeat(10_000));
+        AiChatMessage initiating = message(19, 0, "user", "c".repeat(80_000));
+
+        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
+                null, List.of(oldest, initiating), initiating, 64_000);
+
+        assertEquals(1, bounded.size());
+        assertEquals(initiating.getContent(), bounded.getFirst().getContent());
+    }
+
+    @Test
+    void boundedHistoryDoesNotAdmitOlderMessagesAcrossAnOversizedBoundary() {
+        AiChatMessage older = message(1, 1, "user", "12345");
+        AiChatMessage oversized = message(2, 2, "assistant", "123456789012345678901");
+        AiChatMessage initiating = message(3, 3, "user", "1234567890");
+
+        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
+                null, List.of(older, oversized, initiating), initiating, 20);
+
+        assertEquals(List.of(initiating), bounded);
+        assertEquals("1234567890", bounded.getFirst().getContent());
+    }
+
     /**
      * The compaction trigger and the verbatim reservation both multiply {@code historyBytes} by a
      * percentage before dividing, and that history allocation is derived from the provider's
@@ -486,47 +429,26 @@ class AiChatMemoryServiceTest {
      */
     @Test
     void aMillionTokenWindowFundsHistoryWithoutTrippingCompaction() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(16_384);
-        var objectMapper = JsonMapper.builder().build();
-        var catalog = new AiAssistantToolCatalog();
-        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
-        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                mock(AiInvocationAdmissionService.class),
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                new AiAssistantSummaryGuard(),
-                new AiAssistantSummarySchema(objectMapper),
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(16_384, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         String content = "a".repeat(60_000);
         AiChatMessage initiating = message(104, 4, "user", content);
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         1_000_000,
                         128_000));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(16_962);
-        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
 
-        AiChatMemory memory = service.prepare(
+        AiChatMemory memory = fixture.service().prepare(
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertEquals(1, memory.history().size());
@@ -538,7 +460,7 @@ class AiChatMemoryServiceTest {
         assertTrue(memory.budget().historyBytes() <= Integer.MAX_VALUE / 80);
         assertTrue(memory.budget().historyBytes() * 80 / 100 > 60_000);
         assertTrue(memory.budget().toolResultBytes() > 0);
-        verify(invocationService, never()).completeStructuredRepairable(
+        verify(fixture.invocationService(), never()).completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
                 any(),
@@ -549,47 +471,26 @@ class AiChatMemoryServiceTest {
 
     @Test
     void maximumLengthInitiatingMessageUsesAnEphemeralProviderOmission() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(8_192);
-        var objectMapper = JsonMapper.builder().build();
-        var catalog = new AiAssistantToolCatalog();
-        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
-        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                mock(AiInvocationAdmissionService.class),
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                emptyToolExecutor(),
-                new AiAssistantSummaryGuard(),
-                new AiAssistantSummarySchema(objectMapper),
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
         String originalContent = "界".repeat(16_000);
         AiChatMessage initiating = message(104, 4, "user", originalContent);
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
-        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
 
-        AiChatMemory memory = service.prepare(
+        AiChatMemory memory = fixture.service().prepare(
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertEquals(1, memory.history().size());
@@ -601,7 +502,7 @@ class AiChatMemoryServiceTest {
         assertTrue(memory.budget().fits(
                 memory.history().getFirst().getContent(), memory.budget().historyBytes()));
         assertEquals(originalContent, initiating.getContent());
-        MaskedPrompt providerPrompt = assembler.assemble(
+        MaskedPrompt providerPrompt = fixture.assembler().assemble(
                 memory.history(),
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
@@ -612,7 +513,7 @@ class AiChatMemoryServiceTest {
                 AiAssistantToolCatalog.ALL);
         assertFalse(promptText(providerPrompt).contains("界"));
         assertTrue(promptText(providerPrompt).contains("Current request omitted"));
-        verify(invocationService, never()).completeStructuredRepairable(
+        verify(fixture.invocationService(), never()).completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
                 any(),
@@ -623,67 +524,38 @@ class AiChatMemoryServiceTest {
 
     @Test
     void compactionChecksTheTurnDeadlineImmediatelyBeforeSummaryPersistence() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
-        AiInvocationAdmissionService.DirectAdmission admission =
-                mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
-        AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(1_024);
-        var objectMapper = JsonMapper.builder().build();
-        var assembler = new AiAssistantPromptAssembler(
-                objectMapper, new AiAssistantToolCatalog());
-        var summaryGuard = new AiAssistantSummaryGuard();
-        var summarySchema = new AiAssistantSummarySchema(objectMapper);
-        var stepSchema = new AiAssistantStepSchema(
-                objectMapper, new AiAssistantToolCatalog());
         Clock clock = mock(Clock.class);
         Instant start = Instant.parse("2026-08-12T00:00:00Z");
         Instant deadline = start.plusSeconds(70);
         when(clock.instant()).thenReturn(start, start, start, start, start, deadline);
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                admissionService,
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                toolExecutor,
-                summaryGuard,
-                summarySchema,
-                stepSchema,
-                persistenceService,
-                governanceService,
-                objectMapper,
-                clock);
+        MemoryFixture fixture = memoryFixture(1_024, clock);
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
         AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         200_000,
                         50_000));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
-        when(persistenceService.loadHistory(turn, 100))
+        when(fixture.persistenceService().loadHistory(turn, 100))
                 .thenReturn(List.of(early, initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
-        when(persistenceService.loadCompactionCandidates(turn, 0, 2, 500))
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500))
                 .thenReturn(List.of(early));
-        when(admissionService.acquireDirect()).thenReturn(admission);
-        when(governanceService.isEnabled(turn.workspaceId())).thenReturn(true);
-        when(invocationService.completeStructuredRepairable(
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.governanceService().isEnabled(turn.workspaceId())).thenReturn(true);
+        when(fixture.invocationService().completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission),
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()),
                 any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     Runnable providerGuard = invocation.getArgument(5, Runnable.class);
@@ -697,45 +569,17 @@ class AiChatMemoryServiceTest {
 
         AiAssistantLoopException exception = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(turn, new MaskingContext(), deadline, NO_STOP));
+                () -> fixture.service().prepare(turn, new MaskingContext(), deadline, NO_STOP));
 
         assertEquals("turn_deadline_exceeded", exception.terminalReason());
-        verify(persistenceService, never()).upsertHistorySummary(
+        verify(fixture.persistenceService(), never()).upsertHistorySummary(
                 any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
     }
 
     @Test
     void singleOversizedHistoricalMessageCompactsAsAWholeOmissionAndAdvances() {
-        AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
-        AiInvocationAdmissionService.DirectAdmission admission =
-                mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
-        AiProperties properties = new AiProperties();
-        properties.setAssistantMaxOutputTokens(1_024);
-        var objectMapper = JsonMapper.builder().build();
-        var assembler = new AiAssistantPromptAssembler(
-                objectMapper, new AiAssistantToolCatalog());
-        var summaryGuard = new AiAssistantSummaryGuard();
-        var summarySchema = new AiAssistantSummarySchema(objectMapper);
-        var stepSchema = new AiAssistantStepSchema(
-                objectMapper, new AiAssistantToolCatalog());
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        AiChatMemoryService service = new AiChatMemoryService(
-                invocationService,
-                admissionService,
-                properties,
-                assembler,
-                new AiAssistantToolCatalog(),
-                toolExecutor,
-                summaryGuard,
-                summarySchema,
-                stepSchema,
-                persistenceService,
-                mock(AiWorkspaceGovernanceService.class),
-                objectMapper,
-                Clock.fixed(now, ZoneOffset.UTC));
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
         String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(25_000);
@@ -746,30 +590,30 @@ class AiChatMemoryServiceTest {
         storedSummary.setStructuredJson(
                 "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
                         + "\"throughSeq\":1,\"resources\":[],\"identifiers\":[]}");
-        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
-        when(invocationService.serializedPromptBytes(
+        when(fixture.invocationService().serializedPromptBytes(
                 any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(0);
-        when(persistenceService.loadHistory(turn, 100))
+        when(fixture.persistenceService().loadHistory(turn, 100))
                 .thenReturn(List.of(oversized, initiating));
-        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
-        when(persistenceService.loadCompactionCandidates(turn, 0, 2, 500))
+        when(fixture.persistenceService().loadHistorySummary(turn)).thenReturn(null);
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500))
                 .thenReturn(List.of(oversized));
-        when(persistenceService.loadCompactionCandidates(turn, 1, 2, 500))
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 1, 2, 500))
                 .thenReturn(List.of());
-        when(admissionService.acquireDirect()).thenReturn(admission);
-        when(invocationService.completeStructuredRepairable(
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(
                 any(AiInvocation.class),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission),
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()),
                 any(Runnable.class)))
                 .thenReturn(
                         new AiStructuredRepairAttempt<>(
@@ -783,28 +627,28 @@ class AiChatMemoryServiceTest {
                                                 "One earlier message was omitted safely."),
                                         0, 11, 4, "end_turn"),
                                 Optional.empty()));
-        when(persistenceService.upsertHistorySummary(
+        when(fixture.persistenceService().upsertHistorySummary(
                 same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
                 .thenReturn(storedSummary);
 
         AiAssistantLoopException firstAttempt = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(
+                () -> fixture.service().prepare(
                         turn, new MaskingContext(), now.plusSeconds(70), NO_STOP));
         assertEquals("summary_compaction_failed", firstAttempt.terminalReason());
-        verify(persistenceService, never()).upsertHistorySummary(
+        verify(fixture.persistenceService(), never()).upsertHistorySummary(
                 any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
 
-        AiChatMemory memory = service.prepare(
+        AiChatMemory memory = fixture.service().prepare(
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(invocationService, times(2)).completeStructuredRepairable(
+        verify(fixture.invocationService(), times(2)).completeStructuredRepairable(
                 invocation.capture(),
                 eq(AiAssistantSummary.class),
-                same(summaryGuard),
-                same(summarySchema.responseSchema()),
-                same(admission),
+                same(fixture.summaryGuard()),
+                same(fixture.summarySchema().responseSchema()),
+                same(fixture.admission()),
                 any(Runnable.class));
         String compactionPrompt = promptText(invocation.getAllValues().getLast().prompt());
         assertFalse(compactionPrompt.contains(oversizedContent));
@@ -813,6 +657,44 @@ class AiChatMemoryServiceTest {
         assertEquals(List.of(storedSummary, initiating), memory.history());
         assertEquals(11, memory.inputTokens());
         assertEquals(4, memory.outputTokens());
+    }
+
+    private record MemoryFixture(
+            AiChatMemoryService service,
+            AiInvocationService invocationService,
+            AiInvocationAdmissionService admissionService,
+            AiInvocationAdmissionService.DirectAdmission admission,
+            AiChatTurnPersistenceService persistenceService,
+            AiWorkspaceGovernanceService governanceService,
+            JsonMapper objectMapper,
+            AiAssistantPromptAssembler assembler,
+            AiAssistantSummaryGuard summaryGuard,
+            AiAssistantSummarySchema summarySchema,
+            AiAssistantStepSchema stepSchema) {
+    }
+
+    private static MemoryFixture memoryFixture(int outputTokenLimit, Clock clock) {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
+        AiInvocationAdmissionService.DirectAdmission admission =
+                mock(AiInvocationAdmissionService.DirectAdmission.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(outputTokenLimit);
+        JsonMapper objectMapper = JsonMapper.builder().build();
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        AiAssistantSummaryGuard summaryGuard = new AiAssistantSummaryGuard();
+        AiAssistantSummarySchema summarySchema = new AiAssistantSummarySchema(objectMapper);
+        AiAssistantStepSchema stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService, admissionService, properties, assembler, catalog,
+                emptyToolExecutor(), summaryGuard, summarySchema, stepSchema, persistenceService,
+                governanceService, objectMapper, clock);
+        return new MemoryFixture(
+                service, invocationService, admissionService, admission, persistenceService,
+                governanceService, objectMapper, assembler, summaryGuard, summarySchema, stepSchema);
     }
 
     private static AiChatMessage message(int id, int seq, String author, String content) {
