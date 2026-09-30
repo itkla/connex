@@ -20,6 +20,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         stage: "Stage",
         tag: "Tag",
         responseDue: "First-response deadline",
+        taskStatus: "Status",
+        dueDate: "Due date",
     },
     changeValue: (field, value, side) => askConnexChangeValueText(
         field,
@@ -27,6 +29,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         side,
         "en",
         (hours) => `${hours} ${hours === 1 ? "hour" : "hours"} after it's applied`,
+        { open: "Open", done: "Done" },
     ),
     changeNotSet: "Not set",
     changeCurrentUnresolved: {
@@ -34,6 +37,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         stage: "A stage that no longer exists",
         tag: "A tag that no longer exists",
         responseDue: "A deadline that can't be shown",
+        taskStatus: "A status that can't be shown",
+        dueDate: "A due date that can't be shown",
     },
     changeProposedUnresolved: "No longer exists",
     changeStateForField: {
@@ -101,6 +106,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
     summaries: {
         createActivity: "Create an activity",
         createTask: "Create a task",
+        completeTask: "Complete the task",
+        rescheduleTask: "Reschedule the task",
         createNote: "Create a note",
         addTag: "Add an existing tag",
         removeTag: "Remove a tag",
@@ -118,6 +125,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         createdRecordRemoved: "Created record removed",
         activityCreated: "Activity created",
         taskCreated: "Task created",
+        taskCompleted: "Task completed",
+        taskRescheduled: "Task rescheduled",
         noteCreated: "Note created",
         tagAdded: "Tag added",
         tagAlreadyPresent: "Tag was already present",

@@ -32,6 +32,7 @@ import {
     askConnexToolCardStatus,
     askConnexToolOutcomeSummary,
     askConnexToolRequestSummary,
+    askConnexToolTargetHref,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     extractAskConnexAttachments,
@@ -65,6 +66,8 @@ import type {
 const TOOL_SUMMARY_LABELS = {
     createActivity: '活動を作成',
     createTask: 'タスクを作成',
+    completeTask: 'タスクを完了する',
+    rescheduleTask: 'タスクの期限を変更する',
     createNote: 'メモを作成',
     addTag: 'タグを追加',
     removeTag: 'タグを削除',
@@ -82,6 +85,8 @@ const TOOL_SUMMARY_LABELS = {
     createdRecordRemoved: '削除済み',
     activityCreated: '活動作成済み',
     taskCreated: 'タスク作成済み',
+    taskCompleted: 'タスクを完了しました',
+    taskRescheduled: 'タスクの期限を変更しました',
     noteCreated: 'メモ作成済み',
     tagAdded: 'タグ追加済み',
     tagAlreadyPresent: 'タグ追加済みでした',
@@ -520,6 +525,64 @@ describe('Ask Connex reasoning retention', () => {
 });
 
 describe('Ask Connex tool-call cards', () => {
+    it('localizes task requests and outcomes without a generic fallback', () => {
+        const completing: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'complete_task',
+            target: { kind: 'task', id: 19, label: 'Call Ada' },
+            requestSummary: 'Complete the task',
+            outcomeSummary: 'Task completed',
+        };
+        const rescheduling: AiAssistantToolCall = {
+            ...completing,
+            toolName: 'reschedule_task',
+            requestSummary: 'Reschedule the task',
+            outcomeSummary: 'Task rescheduled',
+        };
+        expect(askConnexToolRequestSummary(completing, TOOL_SUMMARY_LABELS))
+            .toBe('タスクを完了する');
+        expect(askConnexToolOutcomeSummary(completing, TOOL_SUMMARY_LABELS))
+            .toBe('タスクを完了しました');
+        expect(askConnexToolRequestSummary(rescheduling, TOOL_SUMMARY_LABELS))
+            .toBe('タスクの期限を変更する');
+        expect(askConnexToolOutcomeSummary(rescheduling, TOOL_SUMMARY_LABELS))
+            .toBe('タスクの期限を変更しました');
+        expect(askConnexToolOutcomeSummary(
+            { ...completing, status: 'failed' }, TOOL_SUMMARY_LABELS,
+        )).toBe(TOOL_SUMMARY_LABELS.requestFailed);
+        expect(askConnexToolOutcomeSummary(
+            { ...rescheduling, outcomeSummary: null }, TOOL_SUMMARY_LABELS,
+        )).toBeNull();
+    });
+
+    it('keeps task targets unlinked while preserving record detail links', () => {
+        expect(askConnexToolTargetHref({ kind: 'task', id: 19, label: 'Call Ada' })).toBeNull();
+        expect(askConnexToolTargetHref({ kind: 'person', id: 19, label: 'Ada' }))
+            .toBe('/records/contacts/19');
+        expect(askConnexToolTargetHref({ kind: 'company', id: 19, label: 'Acme' }))
+            .toBe('/records/companies/19');
+        expect(askConnexToolTargetHref({ kind: 'deal', id: 19, label: 'Renewal' }))
+            .toBe('/records/deals/19');
+    });
+
+    it.each(['en', 'ja'] as const)('localizes task diffs in %s', (locale) => {
+        const messages = locale === 'en' ? enCommon : jaCommon;
+        const t = createTranslator({ locale, messages, namespace: 'AskConnex' });
+        const statuses = {
+            open: t('toolCards.change.taskOpen'),
+            done: t('toolCards.change.taskDone'),
+        };
+        expect(askConnexChangeValueText(
+            'taskStatus', 'open', 'current', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'Open' : '未完了');
+        expect(askConnexChangeValueText(
+            'taskStatus', 'done', 'proposed', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'Done' : '完了');
+        expect(askConnexChangeValueText(
+            'dueDate', '2026-10-03', 'proposed', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'October 3, 2026' : '2026年10月3日');
+    });
+
     it('maps confirm proposals and live auto executions to distinct affordances', () => {
         const confirm = {
             ...TOOL_CALL,
