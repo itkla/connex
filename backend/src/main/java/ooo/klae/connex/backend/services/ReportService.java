@@ -409,6 +409,12 @@ public class ReportService {
      * report deletion and stays on its permission check alone, so the prompt appears only where the
      * cascade would destroy a gated object.
      *
+     * <p>The schedule is read after {@code lockDefinitions}, never before. That statement takes
+     * {@code FOR UPDATE} on every {@code report_definition} row in the workspace, so a concurrent
+     * {@code report_schedule} insert blocks on its own foreign-key check against the locked parent
+     * and cannot commit inside the window. Reading first would let a schedule created after the
+     * check ride the cascade out ungated.
+     *
      * @param id the report to delete
      */
     @Transactional
@@ -416,10 +422,6 @@ public class ReportService {
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
-        if (scheduleMapper.getByReport(workspaceId, id) != null
-                && privilegedAccountService.isPrivileged(actorId)) {
-            requireScheduleCascadeStepUp(actorId);
-        }
         int currentUserId = workspaceService.getCurrentUserId();
         boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
             workspaceId, currentUserId);
@@ -427,6 +429,10 @@ public class ReportService {
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
+        }
+        if (scheduleMapper.getByReport(workspaceId, id) != null
+                && privilegedAccountService.isPrivileged(actorId)) {
+            requireScheduleCascadeStepUp(actorId);
         }
         deletionPolicy.requireDeletable(definition.getCreatedBy(), builtInAdministrator);
         int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
@@ -807,7 +813,7 @@ public class ReportService {
         try {
             sessionSecurityService.requireRecentAuthentication(actorId);
         } catch (RecentAuthenticationRequiredException exception) {
-            auditService.recordExportStepUpRefused();
+            auditService.recordScheduledReportDeleteStepUpRefused();
             throw exception;
         }
     }

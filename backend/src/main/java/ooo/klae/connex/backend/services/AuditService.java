@@ -62,6 +62,8 @@ public class AuditService {
     public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
     public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
     public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
+    public static final String SCHEDULED_REPORT_DELETE_STEP_UP_SUMMARY =
+            "Recent MFA required to delete a scheduled report";
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -537,6 +539,22 @@ public class AuditService {
      * already holds that row {@code FOR UPDATE}; it would wait on its own lock.
      */
     public void recordExportStepUpRefused() {
+        recordStepUpRefused(EXPORT_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the refusal of a report deletion that would cascade a delivery schedule away.
+     *
+     * <p>Same action and reason as {@link #recordExportStepUpRefused()}, which the whole step-up
+     * control shares, but its summary names data export. No export is attempted here, so reusing it
+     * would describe a refused destructive deletion as a refused download to anyone reading the
+     * trail or alerting on it.
+     */
+    public void recordScheduledReportDeleteStepUpRefused() {
+        recordStepUpRefused(SCHEDULED_REPORT_DELETE_STEP_UP_SUMMARY);
+    }
+
+    private void recordStepUpRefused(String summary) {
         Integer actorId = null;
         String actorLabel = null;
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -546,7 +564,7 @@ public class AuditService {
             actorLabel = user.getDisplayName();
         }
         recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actorId, null, null, actorLabel,
-                EXPORT_STEP_UP_SUMMARY, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+                summary, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
     }
 
     private void requireExportStepUp() {

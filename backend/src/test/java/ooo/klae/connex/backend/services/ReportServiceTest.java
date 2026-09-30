@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.ai.AiGenerationService;
@@ -124,11 +126,12 @@ class ReportServiceTest {
      * boundary or a refused destructive attempt on a scheduled report leaves no audit trace (#1763).
      */
     @Test
-    void refusingTheParentDeleteStepUpIsAudited() {
+    void refusingTheParentDeleteStepUpIsAuditedAsADeletionAndDecidedBehindTheLock() {
         User actor = new User();
         actor.setId(ACTOR_ID);
         actor.setDisplayName("Scheduling Admin");
         when(authService.getCurrentUser()).thenReturn(actor);
+        when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
         when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
         when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(true);
         doThrow(new RecentAuthenticationRequiredException())
@@ -136,8 +139,12 @@ class ReportServiceTest {
 
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
 
-        verify(auditService).recordExportStepUpRefused();
-        verifyNoInteractions(reportMapper);
+        verify(auditService).recordScheduledReportDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
+        InOrder ordered = inOrder(reportMapper, scheduleMapper);
+        ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
+        ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 
     @Test
