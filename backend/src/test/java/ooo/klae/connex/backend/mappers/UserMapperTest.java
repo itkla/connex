@@ -34,14 +34,6 @@ class UserMapperTest extends AbstractMapperTest {
     @Autowired private SqlSessionTemplate sqlSession;
     @Autowired private WebauthnCredentialMapper webauthnCredentialMapper;
 
-    /**
-     * Inserts a new user and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        User user = newUser();
-        assertNotEquals(0, user.getId());
-    }
 
     /**
      * Gets a user by ID and checks if the returned user is not null.
@@ -49,6 +41,7 @@ class UserMapperTest extends AbstractMapperTest {
     @Test
     void getUserById_returnsInsertedRow() {
         User user = newUser();
+        assertNotEquals(0, user.getId());
 
         User found = userMapper.getUserById(user.getId());
 

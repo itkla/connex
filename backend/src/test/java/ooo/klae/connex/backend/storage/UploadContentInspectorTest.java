@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.storage;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,8 +21,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
@@ -467,16 +471,23 @@ class UploadContentInspectorTest {
 
     @Test
     void rejectsXmlEntityExpansionAndHighRatioPackage() throws Exception {
+        String document = defaultMainXml(UploadFormat.DOCX)
+            .replace("<w:body/>", "<w:body><w:p><w:r><w:t>&b;</w:t></w:r></w:p></w:body>");
         byte[] entityPackage = officePackage(
             UploadFormat.DOCX,
-            "<!DOCTYPE x [<!ENTITY a \"aaaaaaaaaa\"><!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\">]>"
-                + "<x>&b;</x>",
+            "<!DOCTYPE w:document [<!ENTITY a \"aaaaaaaaaa\"><!ENTITY b \"&a;&a;\">]>"
+                + document,
             null);
-        byte[] highRatioPackage = officePackage(
-            UploadFormat.DOCX,
-            defaultMainXml(UploadFormat.DOCX),
-            new byte[2 * 1024 * 1024]);
+        byte[] literalPackage = officePackage(
+            UploadFormat.DOCX, document.replace("&b;", "aaaaaaaaaaaaaaaaaaaa"), null);
+        byte[] png = PackageFixtures.png(2 * 1024 * 1024);
+        byte[] storedPackage = officePackageWithPng(png, true);
+        byte[] highRatioPackage = officePackageWithPng(png, false);
 
+        assertEquals(UploadFormat.DOCX, inspector.inspect(UploadPurpose.ATTACHMENT,
+            UploadSource.from("literal.docx", docxContentType(), literalPackage)).format());
+        assertEquals(UploadFormat.DOCX, inspector.inspect(UploadPurpose.ATTACHMENT,
+            UploadSource.from("stored.docx", docxContentType(), storedPackage)).format());
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.ATTACHMENT,
                 UploadSource.from("entity.docx", docxContentType(), entityPackage)));
@@ -919,7 +930,7 @@ class UploadContentInspectorTest {
 
     @ParameterizedTest
     @MethodSource("dangerousCsvFields")
-    void neutralizesSpreadsheetFormulaFieldsAcrossCsvPurposes(String csv) {
+    void neutralizesSpreadsheetFormulaFieldsAcrossCsvPurposes(String csv, String expectedCanonicalCsv) {
         byte[] content = csv.getBytes(StandardCharsets.UTF_8);
 
         for (UploadPurpose purpose : List.of(
@@ -930,6 +941,7 @@ class UploadContentInspectorTest {
                 purpose,
                 UploadSource.from("contacts.csv", "text/csv", content));
             assertFalse(java.util.Arrays.equals(content, inspected.content()));
+            assertEquals(expectedCanonicalCsv, new String(inspected.content(), StandardCharsets.UTF_8));
             assertArrayEquals(
                 inspected.content(),
                 inspector.inspect(
@@ -998,7 +1010,7 @@ class UploadContentInspectorTest {
     }
 
     @Test
-    void timeoutFailsClosed() {
+    void timeoutFailsClosed() throws Exception {
         UploadPolicy policy = new UploadPolicy(properties);
         BoundedImageValidationExecutor timeoutImageExecutor =
             new BoundedImageValidationExecutor();
@@ -1009,18 +1021,35 @@ class UploadContentInspectorTest {
             timeoutImageExecutor);
         ExecutorService executor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().daemon().name("upload-timeout-test").factory());
+        ExecutorService caller = Executors.newSingleThreadExecutor(
+            Thread.ofPlatform().daemon().name("upload-timeout-caller").factory());
+        CountDownLatch reading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch readFinished = new CountDownLatch(1);
         try (timeoutImageExecutor;
                 UploadContentInspector shortTimeoutInspector = new UploadContentInspector(
                 policy,
                 imageValidator,
                 new ObjectMapper(),
                 executor,
-                Duration.ofMillis(25))) {
+                Duration.ofMillis(250))) {
             UploadSource source = new UploadSource(
-                "slow.txt", "text/plain", 1, SlowInputStream::new);
+                "slow.txt", "text/plain", 1,
+                () -> new BlockedInputStream(reading, release, readFinished));
+            Future<UnsupportedUploadMediaTypeException> result = caller.submit(() ->
+                assertThrows(UnsupportedUploadMediaTypeException.class,
+                    () -> shortTimeoutInspector.inspect(UploadPurpose.ATTACHMENT, source)));
 
-            assertThrows(UnsupportedUploadMediaTypeException.class,
-                () -> shortTimeoutInspector.inspect(UploadPurpose.ATTACHMENT, source));
+            assertTrue(reading.await(5, TimeUnit.SECONDS));
+            assertNotNull(result.get(2, TimeUnit.SECONDS));
+            assertEquals(1, release.getCount());
+            assertEquals(1, readFinished.getCount());
+        } finally {
+            release.countDown();
+            caller.shutdownNow();
+            executor.shutdownNow();
+            assertTrue(caller.awaitTermination(5, TimeUnit.SECONDS));
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
     }
 
@@ -1128,18 +1157,21 @@ class UploadContentInspectorTest {
             Arguments.of(UploadPurpose.ASSISTANT_CONTEXT, "data.json", "application/json", "{".getBytes(StandardCharsets.UTF_8)));
     }
 
-    private static Stream<String> dangerousCsvFields() {
+    private static Stream<Arguments> dangerousCsvFields() {
         return Stream.of(
-            "=2+3",
-            "  +SUM(1,2)",
-            "\t-42",
-            "@command",
-            "\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
-            "\" \t@command\"",
-            "\"\r=HYPERLINK(\"\"https://example.invalid\"\")\"",
-            "\ufeff\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
-            "name;payload\r\nAda;=HYPERLINK(1)",
-            "name\tpayload\r\nAda\t@command");
+            Arguments.of("=2+3", "'=2+3"),
+            Arguments.of("  +SUM(1,2)", "  '+SUM(1,2)"),
+            Arguments.of("\t-42", "\t'-42"),
+            Arguments.of("@command", "'@command"),
+            Arguments.of("\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
+                "\"'=HYPERLINK(\"\"https://example.invalid\"\")\""),
+            Arguments.of("\" \t@command\"", "\" \t'@command\""),
+            Arguments.of("\"\r=HYPERLINK(\"\"https://example.invalid\"\")\"",
+                "\"\r'=HYPERLINK(\"\"https://example.invalid\"\")\""),
+            Arguments.of("\ufeff\"=HYPERLINK(\"\"https://example.invalid\"\")\"",
+                "\ufeff\"'=HYPERLINK(\"\"https://example.invalid\"\")\""),
+            Arguments.of("name;payload\r\nAda;=HYPERLINK(1)", "name;payload\r\nAda;'=HYPERLINK(1)"),
+            Arguments.of("name\tpayload\r\nAda\t@command", "name\tpayload\r\nAda\t'@command"));
     }
 
     private static byte[] image(String format) throws IOException {
@@ -1273,6 +1305,31 @@ class UploadContentInspectorTest {
             if (padding != null) {
                 put(zip, "docProps/padding.dat", padding);
             }
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] officePackageWithPng(byte[] png, boolean stored) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            put(zip, "[Content_Types].xml", contentTypesXml(UploadFormat.DOCX)
+                .getBytes(StandardCharsets.UTF_8));
+            put(zip, "_rels/.rels", relationshipsXml(UploadFormat.DOCX, "")
+                .getBytes(StandardCharsets.UTF_8));
+            put(zip, "word/document.xml", defaultMainXml(UploadFormat.DOCX)
+                .getBytes(StandardCharsets.UTF_8));
+            ZipEntry picture = new ZipEntry("word/media/image1.png");
+            if (stored) {
+                CRC32 crc = new CRC32();
+                crc.update(png);
+                picture.setMethod(ZipEntry.STORED);
+                picture.setSize(png.length);
+                picture.setCompressedSize(png.length);
+                picture.setCrc(crc.getValue());
+            }
+            zip.putNextEntry(picture);
+            zip.write(png);
+            zip.closeEntry();
         }
         return output.toByteArray();
     }
@@ -1639,16 +1696,39 @@ class UploadContentInspectorTest {
         return false;
     }
 
-    private static final class SlowInputStream extends InputStream {
+    private static final class BlockedInputStream extends InputStream {
+        private final CountDownLatch reading;
+        private final CountDownLatch release;
+        private final CountDownLatch readFinished;
         private boolean delivered;
+
+        private BlockedInputStream(
+                CountDownLatch reading, CountDownLatch release, CountDownLatch readFinished) {
+            this.reading = reading;
+            this.release = release;
+            this.readFinished = readFinished;
+        }
 
         @Override
         public int read() {
             if (delivered) {
                 return -1;
             }
-            waitForTimeout();
+            reading.countDown();
+            boolean interrupted = false;
+            while (true) {
+                try {
+                    release.await();
+                    break;
+                } catch (InterruptedException exception) {
+                    interrupted = true;
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
             delivered = true;
+            readFinished.countDown();
             return 'x';
         }
 
@@ -1660,17 +1740,6 @@ class UploadContentInspectorTest {
             }
             buffer[offset] = (byte) value;
             return 1;
-        }
-
-        private static void waitForTimeout() {
-            long expiresAt = System.nanoTime() + Duration.ofMillis(250).toNanos();
-            while (System.nanoTime() - expiresAt < 0) {
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException exception) {
-                    Thread.interrupted();
-                }
-            }
         }
     }
 }

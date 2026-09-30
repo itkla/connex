@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Activity;
@@ -60,7 +63,7 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
 
-        for (Workspace unauthorized : unauthorizedWorkspaces()) {
+        for (Workspace unauthorized : unauthorizedWorkspacesIncludingDefaultOrganization()) {
             assertNull(dealMapper.getDealById(unauthorized.getId(), deal.getId()));
             assertEquals(0, dealMapper.delete(unauthorized.getId(), deal.getId()));
         }
@@ -87,19 +90,22 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         assertNotNull(activityMapper.getActivityById(workspace.getId(), activity.getId()));
     }
 
-    @Test
-    void taskReadsAndMutationsAreRefusedInSiblingAndForeignOrganizationWorkspaces() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "2024-12-31")
+    void taskReadsAndMutationsAreRefusedInSiblingAndForeignOrganizationWorkspaces(String dueDate) {
         User actor = newUser();
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Tenant matrix " + unique());
         task.setCompleted(false);
         task.setStatus("todo");
+        task.setDueDate(dueDate);
         task.setPosition(0);
         task.setAssignedTo(actor);
         taskMapper.insert(task);
 
-        for (Workspace unauthorized : unauthorizedWorkspaces()) {
+        for (Workspace unauthorized : unauthorizedWorkspacesIncludingDefaultOrganization()) {
             assertNull(taskMapper.getTaskById(unauthorized.getId(), task.getId()));
             assertEquals(0, taskMapper.complete(
                     unauthorized.getId(), task.getId(), actor.getId(), 0));
@@ -125,6 +131,16 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         }
 
         assertNotNull(noteMapper.getNoteById(workspace.getId(), note.getId()));
+    }
+
+    private List<Workspace> unauthorizedWorkspacesIncludingDefaultOrganization() {
+        List<Workspace> unauthorized = new java.util.ArrayList<>(unauthorizedWorkspaces());
+        Workspace defaultOrganization = new Workspace();
+        defaultOrganization.setName("Other Workspace");
+        defaultOrganization.setSlug("other-" + unique());
+        workspaceMapper.insert(defaultOrganization);
+        unauthorized.add(defaultOrganization);
+        return unauthorized;
     }
 
     private List<Workspace> unauthorizedWorkspaces() {

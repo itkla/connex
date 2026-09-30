@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.storage;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,11 +12,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -31,6 +37,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,21 +58,22 @@ class S3ObjectStorageTest {
 
     @Test
     void readinessVerifiesWriteReadIntegrityAndDeletePermissions() {
-        when(client.headBucket(any(HeadBucketRequest.class)))
-            .thenReturn(HeadBucketResponse.builder().build());
-        when(client.getBucketVersioning(any(GetBucketVersioningRequest.class)))
-            .thenReturn(GetBucketVersioningResponse.builder().build());
-        when(client.getObject(any(GetObjectRequest.class))).thenAnswer(invocation -> {
-            GetObjectRequest request = invocation.getArgument(0);
-            byte[] content = request.key().getBytes(StandardCharsets.UTF_8);
-            return response(content);
-        });
+        readyBucket();
+        Map<String, byte[]> probe = captureProbe(false);
 
         assertTrue(storage.isReady());
 
-        verify(client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
-        verify(client).getObject(any(GetObjectRequest.class));
-        verify(client).deleteObject(any(DeleteObjectRequest.class));
+        verifyProbeLifecycle(probe);
+    }
+
+    @Test
+    void readinessFailsAndCleansUpWhenReadBytesAreCorruptedWithoutChangingLength() {
+        readyBucket();
+        Map<String, byte[]> probe = captureProbe(true);
+
+        assertFalse(storage.isReady());
+
+        verifyProbeLifecycle(probe);
     }
 
     @Test
@@ -132,6 +140,45 @@ class S3ObjectStorageTest {
         assertFalse(storage.isReady());
 
         verify(client, atLeast(2)).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    private Map<String, byte[]> captureProbe(boolean corruptRead) {
+        Map<String, byte[]> probe = new HashMap<>();
+        when(client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+            .thenAnswer(invocation -> {
+                PutObjectRequest request = invocation.getArgument(0);
+                RequestBody body = invocation.getArgument(1);
+                try (InputStream input = body.contentStreamProvider().newStream()) {
+                    probe.put(request.key(), input.readAllBytes());
+                }
+                return PutObjectResponse.builder().build();
+            });
+        when(client.getObject(any(GetObjectRequest.class))).thenAnswer(invocation -> {
+            GetObjectRequest request = invocation.getArgument(0);
+            byte[] uploaded = probe.get(request.key());
+            assertNotNull(uploaded);
+            byte[] returned = uploaded.clone();
+            if (corruptRead) {
+                returned[0] ^= 1;
+            }
+            return response(returned);
+        });
+        return probe;
+    }
+
+    private void verifyProbeLifecycle(Map<String, byte[]> probe) {
+        ArgumentCaptor<PutObjectRequest> put = ArgumentCaptor.forClass(PutObjectRequest.class);
+        ArgumentCaptor<GetObjectRequest> get = ArgumentCaptor.forClass(GetObjectRequest.class);
+        ArgumentCaptor<DeleteObjectRequest> delete = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(client).putObject(put.capture(), any(RequestBody.class));
+        verify(client).getObject(get.capture());
+        verify(client).deleteObject(delete.capture());
+        assertEquals(1, probe.size());
+        assertEquals("private-objects", put.getValue().bucket());
+        assertEquals(put.getValue().bucket(), get.getValue().bucket());
+        assertEquals(put.getValue().bucket(), delete.getValue().bucket());
+        assertEquals(put.getValue().key(), get.getValue().key());
+        assertEquals(put.getValue().key(), delete.getValue().key());
     }
 
     private void readyBucket() {

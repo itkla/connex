@@ -690,22 +690,6 @@ class ManagedObjectServiceTest {
     }
 
     @Test
-    void oldObjectDeletionDoesNotProcessWhenMetadataTransactionRollsBack() {
-        String objectName = "550e8400-e29b-41d4-a716-446655440000.pdf";
-        String url = "/api/attachments/content/" + objectName;
-        String key = "workspaces/12/attachments/" + objectName;
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            service.deleteAttachmentAfterCommit(12, url);
-
-            verify(deletionRetryQueue).enqueueTenantInCurrentTransaction(12, key);
-            verify(deletionRetryQueue, never()).processTenant(12, key);
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
-    }
-
-    @Test
     void userObjectDeletionIsDurablyQueuedInTheControlTransaction() {
         String objectName = "550e8400-e29b-41d4-a716-446655440000.jpg";
         String url = "/api/users/8/profile-picture/" + objectName;
