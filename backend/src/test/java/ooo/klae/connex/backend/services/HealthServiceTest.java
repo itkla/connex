@@ -15,6 +15,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
@@ -231,11 +233,15 @@ class HealthServiceTest {
         });
         when(connection.isValid(2)).thenReturn(true);
         stubMigrationsReady();
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        FutureTask<Readiness> second = new FutureTask<>(healthService::readiness);
+        Thread secondCaller = new Thread(second, "cold-readiness-caller");
         try {
             Future<Readiness> first = executor.submit(healthService::readiness);
-            entered.await(5, TimeUnit.SECONDS);
-            Future<Readiness> second = executor.submit(healthService::readiness);
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            secondCaller.start();
+            awaitColdProbeWait(secondCaller);
+            assertFalse(second.isDone());
             release.countDown();
 
             assertEquals(
@@ -247,8 +253,25 @@ class HealthServiceTest {
             verify(dataSource).getConnection();
             verify(flyway).info();
         } finally {
+            release.countDown();
+            secondCaller.join(TimeUnit.SECONDS.toMillis(5));
             executor.shutdownNow();
+            assertFalse(secondCaller.isAlive());
         }
+    }
+
+    private static void awaitColdProbeWait(Thread caller) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (System.nanoTime() < deadline) {
+            if (caller.getState() == Thread.State.WAITING
+                    && java.util.Arrays.stream(caller.getStackTrace()).anyMatch(frame ->
+                        frame.getClassName().equals(HealthService.class.getName())
+                            && frame.getMethodName().equals("readiness"))) {
+                return;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+        }
+        throw new AssertionError("Second cold caller did not wait inside readiness");
     }
 
     @Test

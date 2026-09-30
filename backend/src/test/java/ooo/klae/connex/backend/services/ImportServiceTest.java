@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -56,6 +57,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
+    @Autowired ooo.klae.connex.backend.mappers.PersonEmploymentMapper employmentMapper;
     @Autowired ExportService exportService;
     @Autowired DealService dealService;
     @Autowired DealLineItemService dealLineItemService;
@@ -86,13 +88,19 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     private ImportResult reviewAndCommitPersons(ImportRequest request) {
-        ImportPreviewResult preview = importService.previewPersons(request);
+        return commitReviewedPersons(request, importService.previewPersons(request));
+    }
+
+    private ImportResult commitReviewedPersons(ImportRequest request, ImportPreviewResult preview) {
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         return importService.commitPersons(request);
     }
 
     private ImportResult reviewAndCommitCompanies(ImportRequest request) {
-        ImportPreviewResult preview = importService.previewCompanies(request);
+        return commitReviewedCompanies(request, importService.previewCompanies(request));
+    }
+
+    private ImportResult commitReviewedCompanies(ImportRequest request, ImportPreviewResult preview) {
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         return importService.commitCompanies(request);
     }
@@ -644,6 +652,8 @@ class ImportServiceTest extends AbstractServiceTest {
         Map<Integer, Object> values = customFieldValueService.getForEntities("person", List.of(dave.getId()))
             .getOrDefault(dave.getId(), Map.of());
         assertTrue(values.containsKey(def.getId()));
+        assertEquals(0, new BigDecimal("5000").compareTo(
+            assertInstanceOf(BigDecimal.class, values.get(def.getId()))));
     }
 
     @Test
@@ -1357,7 +1367,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'person' AND entity_id = ?", shared.getId());
 
         ImportPreviewResult preview = importService.previewPersons(request);
-        ImportResult result = reviewAndCommitPersons(request);
+        ImportResult result = commitReviewedPersons(request, preview);
 
         assertEquals(1, preview.getInvalid());
         assertEquals(0, preview.getToUpdate());
@@ -1409,7 +1419,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE entity_type = 'company' AND entity_id = ?", shared.getId());
 
         ImportPreviewResult preview = importService.previewCompanies(request);
-        ImportResult result = reviewAndCommitCompanies(request);
+        ImportResult result = commitReviewedCompanies(request, preview);
 
         assertEquals(1, preview.getInvalid());
         assertEquals(0, preview.getToUpdate());
@@ -1444,9 +1454,9 @@ class ImportServiceTest extends AbstractServiceTest {
         Map<String, Object> companyBefore = companySnapshot(foreignWorkspace.getId(), foreignCompany.getId());
 
         ImportPreviewResult personPreview = importService.previewPersons(personRequest);
-        ImportResult personResult = reviewAndCommitPersons(personRequest);
+        ImportResult personResult = commitReviewedPersons(personRequest, personPreview);
         ImportPreviewResult companyPreview = importService.previewCompanies(companyRequest);
-        ImportResult companyResult = reviewAndCommitCompanies(companyRequest);
+        ImportResult companyResult = commitReviewedCompanies(companyRequest, companyPreview);
 
         assertEquals(1, personPreview.getInvalid());
         assertEquals(1, personResult.getFailed().size());
@@ -1476,9 +1486,9 @@ class ImportServiceTest extends AbstractServiceTest {
             Map.of(0, company.getId()));
 
         ImportPreviewResult personPreview = importService.previewPersons(personRequest);
-        ImportResult personResult = reviewAndCommitPersons(personRequest);
+        ImportResult personResult = commitReviewedPersons(personRequest, personPreview);
         ImportPreviewResult companyPreview = importService.previewCompanies(companyRequest);
-        ImportResult companyResult = reviewAndCommitCompanies(companyRequest);
+        ImportResult companyResult = commitReviewedCompanies(companyRequest, companyPreview);
 
         assertEquals(1, personPreview.getToUpdate());
         assertEquals(1, personResult.getUpdated());
@@ -1592,7 +1602,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "overwrite",
             Map.of(0, suspended.getId(), 1, provisionCeased.getId()));
         ImportPreviewResult preview = importService.previewPersons(request);
-        ImportResult result = reviewAndCommitPersons(request);
+        ImportResult result = commitReviewedPersons(request, preview);
 
         assertEquals(2, preview.getInvalid());
         assertEquals(0, result.getUpdated());
@@ -2398,7 +2408,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Object value = customFieldValueService.getForEntities("person", List.of(erin.getId()))
             .getOrDefault(erin.getId(), Map.of()).get(def.getId());
         assertNotNull(value);
-        assertTrue(String.valueOf(value).startsWith("5000"), "fill_empty must preserve 5000, got " + value);
+        assertEquals(0, new BigDecimal("5000").compareTo(assertInstanceOf(BigDecimal.class, value)));
     }
 
     @Test
@@ -2417,6 +2427,17 @@ class ImportServiceTest extends AbstractServiceTest {
             personMapper.findByEmails(workspace.getId(), List.of("gwen@x.test")).get(0).getId());
         assertNotNull(gwen.getCompany());
         assertEquals(b.getId(), gwen.getCompany().getId());
+        var history = employmentMapper.getByPersonId(workspace.getId(), gwen.getId());
+        assertEquals(2, history.size());
+        var closed = history.stream().filter(row -> Integer.valueOf(a.getId()).equals(row.getCompanyId()))
+            .findFirst().orElseThrow();
+        var current = history.stream().filter(row -> Integer.valueOf(b.getId()).equals(row.getCompanyId()))
+            .findFirst().orElseThrow();
+        assertNotNull(closed.getStartedAt());
+        assertNotNull(closed.getEndedAt());
+        assertNotNull(current.getStartedAt());
+        assertNull(current.getEndedAt());
+        assertEquals(closed.getEndedAt(), current.getStartedAt());
     }
 
     @Test
@@ -2586,7 +2607,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 Map.entry("Budget", "2"))),
             "fill_empty");
         ImportPreviewResult preview = importService.previewPersons(request);
-        ImportResult result = reviewAndCommitPersons(request);
+        ImportResult result = commitReviewedPersons(request, preview);
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, result.getCreated());
@@ -2613,7 +2634,7 @@ class ImportServiceTest extends AbstractServiceTest {
         memberWithPermissions("PERSON_CREATE", "COMPANY_CREATE", "TAG_MANAGE", "CUSTOM_FIELD_MANAGE");
 
         ImportPreviewResult preview = importService.previewPersons(request);
-        ImportResult result = reviewAndCommitPersons(request);
+        ImportResult result = commitReviewedPersons(request, preview);
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, result.getCreated());
@@ -2649,7 +2670,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "Tags", tagName,
             "Custom", "value")), "skip");
         ImportPreviewResult skippedPreview = importService.previewPersons(skipped);
-        ImportResult skippedResult = reviewAndCommitPersons(skipped);
+        ImportResult skippedResult = commitReviewedPersons(skipped, skippedPreview);
         ImportPreviewResult invalidPreview = importService.previewPersons(req(mapping, List.of(Map.of(
             "Name", "",
             "Email", unique() + "@x.test",
