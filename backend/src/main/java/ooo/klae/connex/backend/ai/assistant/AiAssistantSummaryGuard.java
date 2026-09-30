@@ -15,7 +15,7 @@ public class AiAssistantSummaryGuard implements AiRawOutputGuard {
     static final int MAX_SUMMARY_CHARS = 1_000;
     private static final Set<String> FIELDS = Set.of("summary");
     private static final Pattern RECORD_HANDLE = Pattern.compile(
-            "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
+            "(?<![\\p{L}\\p{N}_])[rt][1-9][0-9]*(?![\\p{L}\\p{N}_])");
 
     @Override
     public boolean permits(JsonNode output) {

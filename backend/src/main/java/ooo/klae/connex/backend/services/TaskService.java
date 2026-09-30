@@ -356,6 +356,32 @@ public class TaskService {
         return hydrate(workspaceId, completed);
     }
 
+    /**
+     * Canonical task semantics for an assistant proposal; board compaction is not an edit.
+     *
+     * <p>Neither position nor updatedAt participates, while reassignment and linked-record changes do.
+     */
+    public static String assistantStateVersion(Task task) {
+        java.util.Objects.requireNonNull(task, "task");
+        return WorkItemStateHash.sha256(
+            task.getId(), task.getDescription(), task.isCompleted(), task.getStatus(),
+            task.getDueDate(),
+            task.getAssignedTo() == null ? null : task.getAssignedTo().getId(),
+            task.getPerson() == null ? null : task.getPerson().getId(),
+            task.getDeal() == null ? null : task.getDeal().getId());
+    }
+
+    /** Reads canonical state before reference hydration can redact the task description. */
+    @Transactional(readOnly = true)
+    public String assistantStateVersion(int id) {
+        List<Task> tasks = taskMapper.getTaskSnapshotsIn(
+                workspaceService.getCurrentWorkspaceId(), List.of(id));
+        if (tasks.isEmpty()) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
+        return assistantStateVersion(tasks.getFirst());
+    }
+
     private static String workItemVersion(Task task) {
         return WorkItemStateHash.sha256(
             task.getId(),
@@ -464,6 +490,23 @@ public class TaskService {
         workspaceService.lockAndRequireMember(workspaceId, workspaceService.getCurrentUserId());
         lockTaskBoard(workspaceId);
         workspaceService.requirePermission(Permission.TASK_CREATE);
+    }
+
+    /** Retains the board before an assistant approval locks a task that completion may move. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    @RequirePermission(Permission.TASK_UPDATE)
+    public void lockBoardForUpdate() {
+        lockTaskBoard(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /** Locks the exact canonical task row and flushes pre-lock MyBatis reads. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Task lockTaskForUpdate(int id) {
+        Task task = taskMapper.getTaskByIdForUpdate(workspaceService.getCurrentWorkspaceId(), id);
+        if (task == null) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
+        return task;
     }
 
     private void lockTaskBoard(int workspaceId) {

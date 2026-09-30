@@ -750,4 +750,88 @@ class AiChatMemoryServiceTest {
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
     }
+    @Test
+    void aDemaskedTaskHandleInASummaryIsNeverPersisted() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
+        AiInvocationAdmissionService.DirectAdmission admission =
+                mock(AiInvocationAdmissionService.DirectAdmission.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
+        AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(1_024);
+        var objectMapper = JsonMapper.builder().build();
+        var assembler = new AiAssistantPromptAssembler(
+                objectMapper, new AiAssistantToolCatalog());
+        var summaryGuard = new AiAssistantSummaryGuard();
+        var summarySchema = new AiAssistantSummarySchema(objectMapper);
+        var stepSchema = new AiAssistantStepSchema(
+                objectMapper, new AiAssistantToolCatalog());
+        Clock clock = mock(Clock.class);
+        Instant start = Instant.parse("2026-08-12T00:00:00Z");
+        Instant deadline = start.plusSeconds(70);
+        when(clock.instant()).thenReturn(start);
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                admissionService,
+                properties,
+                assembler,
+                new AiAssistantToolCatalog(),
+                toolExecutor,
+                summaryGuard,
+                summarySchema,
+                stepSchema,
+                persistenceService,
+                governanceService,
+                objectMapper,
+                clock);
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+        AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        200_000,
+                        50_000));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
+                eq(AiReasoningMode.TAGGED)))
+                .thenReturn(8_192);
+        when(persistenceService.loadHistory(turn, 100))
+                .thenReturn(List.of(early, initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(persistenceService.loadCompactionCandidates(turn, 0, 2, 500))
+                .thenReturn(List.of(early));
+        when(admissionService.acquireDirect()).thenReturn(admission);
+        when(governanceService.isEnabled(turn.workspaceId())).thenReturn(true);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                same(summaryGuard),
+                same(summarySchema.responseSchema()),
+                same(admission),
+                any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    Runnable providerGuard = invocation.getArgument(5, Runnable.class);
+                    providerGuard.run();
+                    return new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(
+                                    new AiAssistantSummary("Discussed t1."),
+                                    0, 7, 3, "end_turn"),
+                            Optional.empty());
+                });
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.prepare(turn, new MaskingContext(), deadline, NO_STOP));
+
+        assertEquals("summary_compaction_failed", exception.terminalReason());
+        verify(persistenceService, never()).upsertHistorySummary(
+                any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
+
 }

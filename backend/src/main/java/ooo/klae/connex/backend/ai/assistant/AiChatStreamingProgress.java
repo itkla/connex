@@ -11,6 +11,8 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
 final class AiChatStreamingProgress {
     private static final int BATCH_CHARACTERS = 256;
+    private static final java.util.regex.Pattern TASK_PREFIX = java.util.regex.Pattern.compile(
+            "(?<![\\p{L}\\p{N}_])t(?:[1-9][0-9]*)?$");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
@@ -24,6 +26,7 @@ final class AiChatStreamingProgress {
     private long lastCheckNanos = System.nanoTime();
     private boolean excluded;
     private boolean streamTruncated;
+    private boolean taskHandle;
 
     /**
      * Creates the streaming batcher for one turn.
@@ -68,7 +71,7 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        if (excluded || streamTruncated) {
+        if (excluded || streamTruncated || taskHandle) {
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -79,6 +82,16 @@ final class AiChatStreamingProgress {
             return;
         }
         pending.append(decoded);
+        String accumulated = durable.toString() + pending;
+        int suffix = taskPrefixStart(accumulated);
+        String settled = suffix < 0 ? accumulated : accumulated.substring(0, suffix);
+        if (AiAssistantStepGuard.containsTaskHandle(settled)) {
+            persistenceService.resetPartialContent(turn, durable.length());
+            durable.setLength(0);
+            pending.setLength(0);
+            taskHandle = true;
+            return;
+        }
         if (SpecialCareTextScreen.screen(durable.toString() + pending).excluded()) {
             excluded = true;
             pending.setLength(0);
@@ -87,6 +100,12 @@ final class AiChatStreamingProgress {
         if (pending.length() >= BATCH_CHARACTERS) {
             flush();
         }
+    }
+
+    /** Holds an unfinished token until a following delimiter can distinguish t1 from t1alpha. */
+    private static int taskPrefixStart(String text) {
+        var match = TASK_PREFIX.matcher(text);
+        return match.find() ? match.start() : -1;
     }
 
     private void checkpoint() {
@@ -103,14 +122,24 @@ final class AiChatStreamingProgress {
     }
 
     private void flush() {
+        flush(false);
+    }
+
+    private void flush(boolean terminal) {
         if (pending.isEmpty()) {
             return;
         }
-        String batch = pending.toString();
+        int suffix = terminal ? -1 : taskPrefixStart(durable.toString() + pending);
+        int length = suffix < 0 ? pending.length() : suffix - durable.length();
+        if (length == 0) {
+            persistenceService.requireRunning(turn);
+            return;
+        }
+        String batch = pending.substring(0, length);
         int nextOffset = persistenceService.appendPartialBatch(
                 turn, durable.length(), batch);
         durable.append(batch);
-        pending.setLength(0);
+        pending.delete(0, length);
         if (durable.length() != nextOffset) {
             throw new IllegalStateException("Assistant stream offset diverged");
         }
@@ -132,6 +161,7 @@ final class AiChatStreamingProgress {
         pending.setLength(0);
         excluded = false;
         streamTruncated = false;
+        taskHandle = false;
         lastCheckNanos = System.nanoTime();
     }
 
@@ -194,7 +224,8 @@ final class AiChatStreamingProgress {
             String comparable = demasking
                     ? Demasker.demask(projected, maskingContext).text()
                     : projected;
-            if (!comparable.equals(expectedText)) {
+            if (taskHandle || AiAssistantStepGuard.containsTaskHandle(expectedText)
+                    || !comparable.equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
             if (excluded || SpecialCareTextScreen.screen(expectedText).excluded()) {
@@ -204,7 +235,7 @@ final class AiChatStreamingProgress {
             if (!streamTruncated && !(durable.toString() + pending).equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
-            flush();
+            flush(!streamTruncated);
             return expectedText;
         }
 

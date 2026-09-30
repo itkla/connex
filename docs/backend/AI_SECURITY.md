@@ -179,6 +179,23 @@ Native assistant tools are capability-declared transport choices, not a second a
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.
 
+### Task handles and proposals
+
+`list_tasks` issues per-turn `t1`, `t2`, … handles and `assignedToMe`, never task ids. Task handles
+have a separate counter and are excluded from record citation snapshots and replay mappings.
+`complete_task` and `reschedule_task` are CONFIRM tools in `write_followup`, require `TASK_UPDATE`,
+and delegate only to the existing task service. Completion remains assignee-only. Task cards have
+no record link. Their description follows task reference hydration and special-care screening;
+model outcomes use the same free-text masking path as task reads.
+
+A task handle belongs only in a tool argument. Final text, suggestions and titles are refused with
+`final_task_handle`; summaries refuse task handles, todo items refuse with `todo_contains_handle`,
+and narration containing one is dropped. Final text and summaries are checked again after
+identifier demasking. Streaming checks accumulated demasked text before persisting each fragment
+and withdraws the current partial answer if a handle is detected across fragment boundaries.
+No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
+keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.
+
 ### Adding an assistant write tool
 
 Adding an assistant write tool is one `AiAssistantWriteTool` bean, its catalog line and `description` arm, its record in the sealed `AiAssistantWriteToolRequest`, its two `AiChatProgressService` arms (`sourceForTool` and `resultCount`, forced by `AiChatProgressServiceTest`), its own permitted-method grants in `AiAssistantWriteToolSpiArchTest`, its request and outcome label arms in `frontend/app/lib/askConnex.ts` with EN and JA copy (forced by the same arch test), its toolset staying within that toolset's pinned ceiling in `AiAssistantPromptEnvelopeTest`, and its trajectory golden. A tool that changes an existing record is confirm-tier unless [`docs/PRODUCT.md`](../PRODUCT.md) enumerates it as an immediate write; a confirm-tier tool returns a `diff` for every card it can apply (the client never arms Apply without one) and resolves any name the model wrote through `resolve`, never inside `apply`, so the framework pins it. A card that states a column the target holds now as its before-value declares `ReviewInput.FIELDS` and reads it from `RecordSnapshot.fields`, which the card projection fills from the row it already loaded for the page (today a person's `firstResponseDueAt`, for `set_response_due`); a tool that does not declare it is handed an empty map. A shared-in row arrives with those columns masked, which `RecordSnapshot.sharedIn` states, so a missing field there is not a statement that the record holds none. A tool whose delegate writes only a record the workspace owns (the lead-response service behind `set_response_due`) declares `requiresOwnedTarget()`: the framework then refuses a contact shared in from another workspace recoverably with `unresolved_reference` when the proposal is prepared, so no card offers an approval the delegate could only refuse, and the registry refuses that declaration on any kind but a person. `AiAssistantRemoveTagWriteTool` is the reference for a new confirm-tier tool.

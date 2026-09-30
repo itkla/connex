@@ -292,6 +292,11 @@ public class AiAssistantToolExecutor {
      * anchored to the plan it just published.
      */
     private AiAssistantToolResult setTodos(JsonNode args) {
+        for (JsonNode item : args.path("items")) {
+            if (item.isString() && AiAssistantStepGuard.containsTaskHandle(item.asString())) {
+                throw AiAssistantLoopException.refusedArguments("todo_contains_handle");
+            }
+        }
         List<AiChatTodo> todos = AiChatTodo.from(args.get("items"), args.get("statuses"));
         if (todos.isEmpty()) {
             throw AiAssistantLoopException.refusedArguments("empty_plan");
@@ -420,7 +425,7 @@ public class AiAssistantToolExecutor {
         };
         List<Map<String, Object>> data = tasks.stream()
                 .limit(limit)
-                .map(AiAssistantToolExecutor::taskData)
+                .map(task -> taskData(task, resources, workspaceService.getCurrentUserId()))
                 .toList();
         return result(Map.of("handle", requiredText(args, "handle"), "tasks", data), List.of());
     }
@@ -718,8 +723,12 @@ public class AiAssistantToolExecutor {
         return data;
     }
 
-    private static Map<String, Object> taskData(Task task) {
+    private static Map<String, Object> taskData(
+            Task task, AiChatResourceRegistry resources, int actorId) {
         Map<String, Object> data = new LinkedHashMap<>();
+        data.put("handle", resources.registerTask(task.getId()));
+        data.put("assignedToMe", task.getAssignedTo() != null
+                && task.getAssignedTo().getId() == actorId);
         putIfPresent(data, "description", task.getDescription());
         putIfPresent(data, "status", task.getStatus());
         data.put("completed", task.isCompleted());

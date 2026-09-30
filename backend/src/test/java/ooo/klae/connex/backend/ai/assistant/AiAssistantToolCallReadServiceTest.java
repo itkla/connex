@@ -80,6 +80,7 @@ class AiAssistantToolCallReadServiceTest {
     private TagMapper tagMapper;
     private ActivityMapper activityMapper;
     private TaskMapper taskMapper;
+    private ooo.klae.connex.backend.services.ReferenceService referenceService;
     private NoteMapper noteMapper;
     private AiAssistantSessionReadAudit sessionReadAudit;
     private AiChatSession accessibleSession;
@@ -95,6 +96,9 @@ class AiAssistantToolCallReadServiceTest {
         tagMapper = mock(TagMapper.class);
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
+        referenceService = mock(ooo.klae.connex.backend.services.ReferenceService.class);
+        when(referenceService.hydrateTasks(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         noteMapper = mock(NoteMapper.class);
         sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
@@ -103,6 +107,7 @@ class AiAssistantToolCallReadServiceTest {
                 Permission.ACTIVITY_CREATE,
                 Permission.ACTIVITY_DELETE,
                 Permission.TASK_CREATE,
+                Permission.TASK_UPDATE,
                 Permission.TASK_DELETE,
                 Permission.NOTE_CREATE,
                 Permission.NOTE_DELETE,
@@ -127,6 +132,8 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 ownerTool()));
     }
@@ -148,7 +155,7 @@ class AiAssistantToolCallReadServiceTest {
                 noteMapper,
                 sessionReadAudit,
                 JsonMapper.builder().build(),
-                CLOCK);
+                CLOCK, referenceService);
     }
 
     private static AiAssistantCreateActivityWriteTool activityTool() {
@@ -1218,6 +1225,7 @@ class AiAssistantToolCallReadServiceTest {
                 .toList());
         stubVisibleDeal();
         stubVisiblePerson();
+        stubVisibleTask();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(99));
         List<AiAssistantToolCallReadDto> participant = echoing.list(SESSION_ID, false);
@@ -1280,6 +1288,8 @@ class AiAssistantToolCallReadServiceTest {
                     }
                 },
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
@@ -1316,6 +1326,8 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
@@ -1389,6 +1401,7 @@ class AiAssistantToolCallReadServiceTest {
                 .toList());
         stubVisibleDeal();
         stubVisiblePerson();
+        stubVisibleTask();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(USER_ID));
 
@@ -1396,7 +1409,8 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals(2 * AiAssistantDeclaredWriteTools.tools().size(), cards.size());
         for (AiAssistantToolCallReadDto card : cards) {
             assertTrue(card.requestSummary().contains(
-                    "deal".equals(card.target().kind()) ? "Acme renewal" : "Ada Lovelace"),
+                    "deal".equals(card.target().kind()) ? "Acme renewal"
+                            : "task".equals(card.target().kind()) ? "Agenda" : "Ada Lovelace"),
                     card.toolName());
             assertTrue(card.requestSummary().contains("secret request"), card.toolName());
         }
@@ -1843,6 +1857,8 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
@@ -1876,6 +1892,8 @@ class AiAssistantToolCallReadServiceTest {
                 stageTool(),
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
@@ -1923,6 +1941,8 @@ class AiAssistantToolCallReadServiceTest {
                 },
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
@@ -1957,6 +1977,8 @@ class AiAssistantToolCallReadServiceTest {
                 },
                 tagTool(),
                 removeTagTool(),
+                new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
                 ownerTool()));
         stubVisibleDeal();
@@ -1973,6 +1995,14 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("unresolved", change.state());
         verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
         verify(workspaceService, never()).getMembers(WORKSPACE_ID);
+    }
+
+    private void stubVisibleTask() {
+        ooo.klae.connex.backend.beans.Task task = new ooo.klae.connex.backend.beans.Task();
+        task.setId(73);
+        task.setDescription("Agenda");
+        task.setStatus("todo");
+        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73))).thenReturn(List.of(task));
     }
 
     private void stubVisiblePerson() {
@@ -2000,8 +2030,9 @@ class AiAssistantToolCallReadServiceTest {
         int id = 70;
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
             String tier = tool.tier().name().toLowerCase();
-            String kind = tool.acceptedTargetKinds().contains("deal") ? "deal" : "person";
-            int targetId = "deal".equals(kind) ? 41 : 31;
+            String kind = tool.acceptedTargetKinds().contains("task") ? "task"
+                    : tool.acceptedTargetKinds().contains("deal") ? "deal" : "person";
+            int targetId = "task".equals(kind) ? 73 : "deal".equals(kind) ? 41 : 31;
             for (String status : List.of("proposed", "executed")) {
                 AiChatToolCall card = toolCall(
                         id, requestedByUserId, tool.name(), tier, status, kind, targetId, id,
@@ -2017,6 +2048,7 @@ class AiAssistantToolCallReadServiceTest {
                         + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
                         + "\"description\":\"secret request\",\"owner\":\"secret request\","
                         + "\"tag\":\"secret request\"},"
+                        + "\"targetVersion\":\"snapshot\","
                         + "\"resolution\":{\"field\":\"stage\",\"id\":9},\"principals\":[55]}");
                 cards.add(card);
                 id++;
@@ -2074,6 +2106,11 @@ class AiAssistantToolCallReadServiceTest {
         @Override
         public Lock lock(String targetKind) {
             return delegate.lock(targetKind);
+        }
+
+        @Override
+        public Freshness freshness() {
+            return delegate.freshness();
         }
 
         @Override
@@ -2247,4 +2284,44 @@ class AiAssistantToolCallReadServiceTest {
         user.setUsername(username);
         return user;
     }
+    @Test
+    void taskCardsUseCanonicalVersionsAndHydratedLabelsAndWithholdOtherRequestersDetails() {
+        ooo.klae.connex.backend.beans.Task task = new ooo.klae.connex.backend.beans.Task();
+        task.setId(73);
+        task.setDescription("Private reference");
+        task.setStatus("todo");
+        task.setDueDate("2026-10-10");
+        User assignee = new User();
+        assignee.setId(USER_ID);
+        task.setAssignedTo(assignee);
+        String version = TaskService.assistantStateVersion(task);
+        AiChatToolCall proposal = toolCall(91, USER_ID, "complete_task", "confirm", "proposed", "task", 73, 91, null);
+        proposal.setArgumentsJson("{\"tool\":\"complete_task\",\"tier\":\"confirm\",\"restrictionEpoch\":1,"
+                + "\"target\":{\"kind\":\"task\",\"id\":73},\"request\":{\"handle\":\"t1\"},"
+                + "\"targetVersion\":\"" + version + "\",\"principals\":[]}");
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100)).thenReturn(List.of(proposal));
+        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73))).thenAnswer(invocation -> {
+            task.setDescription("Private reference");
+            return List.of(task);
+        });
+        when(referenceService.hydrateTasks(WORKSPACE_ID, List.of(task))).thenAnswer(invocation -> {
+            task.setDescription("[unavailable]");
+            return List.of(task);
+        });
+        AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
+        assertEquals("[unavailable]", ready.target().label());
+        assertEquals("ready", ready.change().state());
+        assertEquals("open", ready.change().currentValue());
+        assertEquals("done", ready.change().proposedValue());
+        task.setPosition(4);
+        task.setUpdatedAt("2099-01-01 00:00:00");
+        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
+        assignee.setId(USER_ID + 1);
+        assertEquals("recordChanged", service.list(SESSION_ID, false).getFirst().change().state());
+        proposal.setRequestedByUserId(USER_ID + 1);
+        assertNull(service.list(SESSION_ID, false).getFirst().change());
+        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73))).thenReturn(List.of());
+        assertNull(service.list(SESSION_ID, false).getFirst().target().id());
+    }
+
 }

@@ -112,8 +112,9 @@ class AiAssistantToolExecutorTest {
         Map<String, String> handles = Map.of(
                 "person", resources.register("person", 7),
                 "company", resources.register("company", 5),
-                "deal", resources.register("deal", 8));
-        Map<String, String> arguments = Map.of(
+                "deal", resources.register("deal", 8),
+                "task", resources.registerTask(9));
+        Map<String, String> arguments = new HashMap<>(Map.of(
                 "create_activity", ",\"type\":\"call\",\"subject\":\"Call\",\"start\":\"today\"",
                 "create_task", ",\"description\":\"Follow up\"",
                 "create_note", ",\"content\":\"Met\"",
@@ -123,8 +124,10 @@ class AiAssistantToolExecutorTest {
                 "change_deal_stage", ",\"stage\":\"Won\"",
                 "assign_owner", ",\"owner\":\"Ana\"",
                 "get_deal_brief", "",
-                "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\"");
-        Map<String, Set<String>> accepted = Map.of(
+                "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\""));
+        arguments.put("complete_task", "");
+        arguments.put("reschedule_task", ",\"due_date\":\"2026-10-15\"");
+        Map<String, Set<String>> accepted = new HashMap<>(Map.of(
                 "create_activity", Set.of("person", "deal"),
                 "create_task", Set.of("person", "deal"),
                 "create_note", Set.of("person", "deal"),
@@ -134,7 +137,9 @@ class AiAssistantToolExecutorTest {
                 "set_response_due", Set.of("person"),
                 "assign_owner", Set.of("person", "company", "deal"),
                 "get_deal_brief", Set.of("deal"),
-                "find_schedule_conflicts", Set.of("person"));
+                "find_schedule_conflicts", Set.of("person")));
+        accepted.put("complete_task", Set.of("task"));
+        accepted.put("reschedule_task", Set.of("task"));
         assertEquals(arguments.keySet(), accepted.keySet());
         Map<String, Set<String>> declared = new HashMap<>();
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
@@ -155,7 +160,8 @@ class AiAssistantToolExecutorTest {
                             AiAssistantLoopException.class,
                             () -> executor.validateReferences(tool.getKey(), args, resources),
                             tool.getKey() + " on a " + handle.getKey());
-                    assertEquals("wrong_handle_kind", refused.detailReason());
+                    assertEquals("task".equals(handle.getKey()) || tool.getValue().equals(Set.of("task"))
+                            ? "invalid_tool_arguments" : "wrong_handle_kind", refused.detailReason());
                 }
             }
         }
@@ -874,4 +880,35 @@ class AiAssistantToolExecutorTest {
         assertEquals("malformed_output", refused.terminalReason());
         assertFalse(refused.recoverable());
     }
+    @Test
+    void todosRefuseTaskHandlesRecoverably() throws Exception {
+        AiAssistantLoopException refusal = assertThrows(AiAssistantLoopException.class,
+                () -> executor.execute("set_todos", objectMapper.readTree(
+                        "{\"items\":[\"Complete t1\"]}"), new AiChatResourceRegistry(), false));
+        assertEquals("todo_contains_handle", refusal.detailReason());
+    }
+
+    @Test
+    void taskListsExposeOnlyTurnHandlesAndAssigneeBooleans() throws Exception {
+        Task task = new Task();
+        task.setId(73);
+        task.setDescription("Prepare the agenda");
+        task.setStatus("todo");
+        ooo.klae.connex.backend.beans.User assignee = new ooo.klae.connex.backend.beans.User();
+        assignee.setId(19);
+        task.setAssignedTo(assignee);
+        when(workspaceService.getCurrentUserId()).thenReturn(19);
+        when(companyService.getCompanyById(5)).thenReturn(new Company());
+        when(historyService.tasksForCompany(5, 10)).thenReturn(List.of(task));
+        AiChatResourceRegistry registry = new AiChatResourceRegistry();
+        registry.register("company", 5);
+        var result = executor.execute("list_tasks", objectMapper.readTree("{\"handle\":\"r1\"}"), registry, false);
+        var data = objectMapper.valueToTree(result.data()).path("tasks").path(0);
+        assertEquals("t1", data.path("handle").asString());
+        assertTrue(data.path("assignedToMe").asBoolean());
+        assertFalse(data.has("id"));
+        assertFalse(data.has("assignedToId"));
+        assertEquals(73, registry.resolve("t1").id());
+    }
+
 }

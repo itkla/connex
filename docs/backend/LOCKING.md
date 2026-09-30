@@ -359,6 +359,11 @@ Task creation/full update lock the requested active membership first. Mutations 
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
 
+Assistant completion retains the board through `TaskService.lockBoardForUpdate()` before taking
+its exact task through `TaskService.lockTaskForUpdate(int)`; assistant rescheduling takes only
+that exact row. `getTaskByIdForUpdate` flushes the MyBatis first-level cache, so a target gate
+following contention cannot reuse a pre-lock snapshot.
+
 Task-history imports retain their authorization and duplicate-decision roots first, then acquire
 that same board root before locking resolved people in ascending id order. Assistant task creation
 also acquires the board before its processable-record target and restriction fence. These callers
@@ -389,6 +394,20 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
 ### Assistant write tools
+
+Task targets declare `TASK_ROW` and `TARGET_FINGERPRINT` together. Completion declares the
+`task_board_lock` root as well: authority → session → tool call → board root → exact task.
+Rescheduling declares no board: authority → session → tool call → exact task. The task service
+retains its canonical completion hierarchy and assignee-only rule when the delegate re-enters.
+The framework's owner-scope gate reads the task after its lock, before the delegate writes.
+
+Task proposal freshness compares `targetVersion`, the SHA-256 from
+`TaskService.assistantStateVersion`, with the locked canonical row. It includes id, description,
+completed, status, due date, assignee, person and deal; it excludes position and updatedAt.
+Completing a sibling can compact positions without invalidating the proposal, but reassignment
+invalidates it. Card snapshots use the same hash before reference hydration redacts display text.
+Canonical snapshot reads flush cached hydrated rows, and an idempotent proposal replay retains
+its original stored fingerprint without taking a new baseline.
 
 Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
 `READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one

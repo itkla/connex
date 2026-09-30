@@ -2703,6 +2703,7 @@ class AiChatAgentLoopServiceTest {
         assertFalse(normalized.contains("\n"));
         assertEquals(80, normalized.codePointCount(0, normalized.length()));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Open r7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Complete t7"));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("System prompt review"));
     }
 
@@ -4749,4 +4750,51 @@ class AiChatAgentLoopServiceTest {
         message.setContent(content);
         return message;
     }
+    @Test
+    void narrationWithTaskHandlesIsDropped() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "Let me complete t1."))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce()).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
+        assertTrue(frames.getAllValues().stream().noneMatch(frame -> "narration".equals(frame.kind())));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), any(), metadata.capture(), anyInt(), anyInt());
+        assertFalse(objectMapper.readTree(metadata.getValue()).has("narration"));
+    }
+
+    @Test
+    void aDemaskedTaskHandleInFinalTextNeverReachesPersistence() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Task t1 is ready.", List.of())));
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
 }

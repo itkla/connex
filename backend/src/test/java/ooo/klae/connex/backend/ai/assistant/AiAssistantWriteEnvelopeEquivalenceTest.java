@@ -215,6 +215,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         tagService, personService, companyService, dealService),
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
+                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
@@ -511,6 +513,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -526,7 +530,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(NoteMapper.class),
                 mock(AiAssistantSessionReadAudit.class),
                 objectMapper,
-                CLOCK);
+                CLOCK, mock(ooo.klae.connex.backend.services.ReferenceService.class));
 
         assertEquals(
                 "[" + String.join(",", List.of(
@@ -932,6 +936,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -947,7 +953,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 noteMapper,
                 mock(AiAssistantSessionReadAudit.class),
                 objectMapper,
-                CLOCK);
+                CLOCK, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
         String deal44 = "\"target\":{\"kind\":\"deal\",\"id\":44,\"label\":\"Acme renewal\"},";
 
@@ -1175,6 +1181,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1190,7 +1198,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(NoteMapper.class),
                 mock(AiAssistantSessionReadAudit.class),
                 objectMapper,
-                CLOCK);
+                CLOCK, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
         String company52 =
                 "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
@@ -1463,6 +1471,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1478,7 +1488,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(NoteMapper.class),
                 mock(AiAssistantSessionReadAudit.class),
                 objectMapper,
-                CLOCK);
+                CLOCK, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         String company52 =
                 "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
         String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
@@ -1615,6 +1625,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
+                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1630,7 +1642,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(NoteMapper.class),
                 mock(AiAssistantSessionReadAudit.class),
                 objectMapper,
-                CLOCK);
+                CLOCK, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         String company52 =
                 "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
         String noUndo = "\"createdRecord\":null,\"messageId\":null,\"turnId\":17,"

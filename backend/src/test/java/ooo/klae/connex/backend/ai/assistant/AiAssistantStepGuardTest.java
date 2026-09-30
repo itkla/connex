@@ -151,4 +151,18 @@ class AiAssistantStepGuardTest {
                 .permits(objectMapper.readTree(
                         finalStep("Ask {{ P1 }}", "[]", "[]", "null"))));
     }
+    @Test
+    void everyFinalTextChannelRefusesTaskHandlesWithTheRepairReason() throws Exception {
+        assertEquals("final_task_handle", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Complete t2", "[]", "[]", "null"))));
+        assertEquals("final_task_handle", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[\"Complete t2\"]", "null"))));
+        assertEquals("final_task_handle", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "\"Task t2\""))));
+        assertEquals("final_citations", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"t2\"]", "[]", "null"))));
+        assertFalse(AiAssistantStepGuard.containsTaskHandle("part1 t0 t1_suffix"));
+        assertTrue(AiAssistantStepGuard.containsTaskHandle("(t123)"));
+    }
+
 }

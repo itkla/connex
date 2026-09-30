@@ -379,7 +379,17 @@ abstract class AbstractScriptedTrajectoryTest {
             String selector, String request, List<AiChatPageContextDto> pageContext) {
         authenticate();
         try {
-            int sessionId = session();
+            return runInSession(session(), selector, request, pageContext);
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    /** Runs a subsequent turn in a settled session to exercise history replay. */
+    final Trajectory runInSession(
+            int sessionId, String selector, String request, List<AiChatPageContextDto> pageContext) {
+        authenticate();
+        try {
             AiChatTurnAcceptedDto accepted = turnService.start(
                     sessionId,
                     new AiChatTurnCreateRequest(selector + " " + request, pageContext));

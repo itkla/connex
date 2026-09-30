@@ -36,6 +36,8 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantRescheduleTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
@@ -91,6 +93,8 @@ class AiAssistantWriteToolSpiArchTest {
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
+            "lockBoardForUpdate",
+            "lockTaskForUpdate",
             "lockProcessablePersonForUpdate",
             "lockProcessablePersonForShare",
             "lockOwnedCompanyForUpdate",
@@ -216,6 +220,10 @@ class AiAssistantWriteToolSpiArchTest {
                             PersonService.class, Set.of("updateOwner"),
                             CompanyService.class, Set.of("updateOwner"),
                             DealService.class, Set.of("updateOwner")),
+                    AiAssistantCompleteTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("complete")),
+                    AiAssistantRescheduleTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("reschedule")),
                     AiAssistantSetResponseDueWriteTool.class,
                     Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock")));
 
@@ -429,7 +437,11 @@ class AiAssistantWriteToolSpiArchTest {
                 List.of("AiAssistantSetResponseDueWriteTool calls "
                         + "leadResponseSlaService.clearFirstResponseClock"),
                 unpermittedToolUses(
-                        AiAssistantSetResponseDueWriteTool.class,
+                        AiAssistantCompleteTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("complete")),
+                    AiAssistantRescheduleTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("reschedule")),
+                    AiAssistantSetResponseDueWriteTool.class,
                         responseDueTool
                                 + "\nleadResponseSlaService.clearFirstResponseClock(7, 31);\n"));
         String ownerTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAssignOwnerWriteTool.java"));

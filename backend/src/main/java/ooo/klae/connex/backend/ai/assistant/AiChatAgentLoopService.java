@@ -523,7 +523,7 @@ public class AiChatAgentLoopService {
                     publishThinking(turn, stepNumber, attempt.reasoning());
                     stepNarration
                             .map(AiChatRecordLinkRewriter::stripDurableLinks)
-                            .filter(text -> !text.isBlank())
+                            .filter(text -> !text.isBlank() && !AiAssistantStepGuard.containsTaskHandle(text))
                             .filter(text -> narrationBytes.get() + text.length()
                                     <= MAX_TURN_NARRATION_CHARS)
                             .ifPresent(text -> {
@@ -643,7 +643,8 @@ public class AiChatAgentLoopService {
                 AiAssistantStep.FinalAnswer finalAnswer = step.finalAnswer();
                 if (finalAnswer == null || finalAnswer.text() == null
                         || finalAnswer.text().isBlank()
-                        || finalAnswer.text().length() > MAX_FINAL_CHARS) {
+                        || finalAnswer.text().length() > MAX_FINAL_CHARS
+                        || AiAssistantStepGuard.containsTaskHandle(finalAnswer.text())) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     if (closingAttempted) {
                         return AiGenerationTaskResult.failed("malformed_output");
@@ -1761,7 +1762,7 @@ public class AiChatAgentLoopService {
      */
     private void publishThinking(
             AiChatQueuedTurn turn, int stepNumber, Optional<String> reasoning) {
-        reasoning.filter(text -> !text.isBlank()).ifPresent(text ->
+        reasoning.filter(text -> !text.isBlank() && !AiAssistantStepGuard.containsTaskHandle(text)).ifPresent(text ->
                 realtimeDispatcher.userAfterCommit(turn.userId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stepNumber, "thinking", null, null, null, null, text)));

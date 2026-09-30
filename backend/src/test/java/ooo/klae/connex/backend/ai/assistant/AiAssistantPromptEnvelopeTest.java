@@ -721,4 +721,17 @@ class AiAssistantPromptEnvelopeTest {
      */
     private record EnvelopeCeiling(String key, int reactBytes, int nativeBytes) {
     }
+    @Test
+    void followupHasThePlannedWeightWithoutChangingItsLiteralCeilings() {
+        int weight = toolCatalog.tools(Set.of(Toolset.WRITE_FOLLOWUP)).stream()
+                .mapToInt(tool -> 1 + tool.arguments().size()
+                        + tool.arguments().stream().mapToInt(argument -> argument.values().size()).sum())
+                .sum();
+        assertEquals(8, weight);
+        int coreReact = reactEnvelopeBytes(AiAssistantToolCatalog.CORE);
+        int coreNative = nativeEnvelopeBytes(AiAssistantToolCatalog.CORE);
+        assertTrue(reactEnvelopeBytes(loaded(Toolset.WRITE_FOLLOWUP)) - coreReact <= 950);
+        assertTrue(nativeEnvelopeBytes(loaded(Toolset.WRITE_FOLLOWUP)) - coreNative <= 750);
+    }
+
 }

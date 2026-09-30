@@ -32,6 +32,9 @@ import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.services.TaskService;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
@@ -86,6 +89,7 @@ public class AiAssistantToolCallReadService {
     private final AiAssistantSessionReadAudit sessionReadAudit;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ReferenceService referenceService;
 
     /** Returns up to 100 safe write-tool cards in one authorized session. */
     @Transactional
@@ -293,7 +297,9 @@ public class AiAssistantToolCallReadService {
             }
             return new StoredToolCall(
                     toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"),
-                    AiAssistantProposalPins.read(root));
+                    AiAssistantProposalPins.read(root),
+                    tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
+                            ? text(root, "targetVersion") : null);
         } catch (JacksonException | IllegalArgumentException exception) {
             return null;
         }
@@ -333,6 +339,25 @@ public class AiAssistantToolCallReadService {
                         deal.getName(), deal.getPipelineId(), deal.getOwnerId(),
                         deal.getStageId(), deal.getUpdatedAt(), Map.of(),
                         deal.getWorkspaceId() != workspaceId));
+            }
+        }
+        List<Integer> taskIds = ids(requested, "task");
+        if (!taskIds.isEmpty()) {
+            List<Task> tasks = taskMapper.getTaskSnapshotsIn(workspaceId, taskIds);
+            Map<Integer, String> versions = new LinkedHashMap<>();
+            tasks.forEach(task -> versions.put(task.getId(), TaskService.assistantStateVersion(task)));
+            for (Task task : referenceService.hydrateTasks(workspaceId, tasks)) {
+                Map<String, String> fields = new LinkedHashMap<>();
+                fields.put("taskStatus", task.isCompleted() ? "done" : "open");
+                if (task.getDueDate() != null) {
+                    fields.put("dueDate", task.getDueDate());
+                }
+                putVisible(visible, "task", task.getId(), new RecordSnapshot(
+                        SpecialCareTextScreen.screen(task.getDescription()).excluded()
+                                ? "Task" : task.getDescription(), null,
+                        task.getAssignedTo() == null ? null : task.getAssignedTo().getId(),
+                        null, task.getUpdatedAt(), fields, false,
+                        versions.get(task.getId())));
             }
         }
         return Map.copyOf(visible);
@@ -704,8 +729,11 @@ public class AiAssistantToolCallReadService {
         if (unchanged) {
             return "unchanged";
         }
-        return AiAssistantProposalFreshness.changedSince(
-                target.updatedAt(), call.toolCall().getCreatedAt())
+        boolean changed = call.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
+                ? call.targetVersion() == null || !call.targetVersion().equals(target.targetVersion())
+                : AiAssistantProposalFreshness.changedSince(
+                        target.updatedAt(), call.toolCall().getCreatedAt());
+        return changed
                 ? "recordChanged"
                 : "ready";
     }
@@ -988,7 +1016,8 @@ public class AiAssistantToolCallReadService {
             int targetId,
             int turnId,
             JsonNode request,
-            AiAssistantProposalPins pins) {
+            AiAssistantProposalPins pins,
+            String targetVersion) {
     }
 
     private record RecordKey(String kind, int id) {

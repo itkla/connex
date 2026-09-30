@@ -33,9 +33,9 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due", "complete_task", "reschedule_task"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(18, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(20, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -109,7 +109,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(18, definitions.size());
+        assertEquals(20, definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -156,7 +156,7 @@ class AiAssistantToolCatalogTest {
                 byToolset.get(Toolset.WRITE_CONTENT));
         assertEquals(List.of("change_deal_stage", "assign_owner"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
-        assertEquals(List.of("set_response_due"), byToolset.get(Toolset.WRITE_FOLLOWUP));
+        assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
@@ -367,4 +367,27 @@ class AiAssistantToolCatalogTest {
         assertFalse(first.containsAll(AiAssistantToolCatalog.LOADABLE),
                 "reserving for the whole catalog would defeat the point of toolsets");
     }
+    @Test
+    void taskAndRecordArgumentNamespacesAreDisjointAndPatternsStayServerSide() throws Exception {
+        for (String tool : List.of("complete_task", "reschedule_task")) {
+            String date = "reschedule_task".equals(tool) ? ",\"due_date\":\"2026-10-15\"" : "";
+            assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier(tool));
+            assertTrue(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"t1\"" + date + "}")));
+            assertFalse(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"r1\"" + date + "}")));
+            assertFalse(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"t0\"" + date + "}")));
+        }
+        for (ToolSpec tool : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            for (var argument : tool.arguments()) {
+                if (argument.pattern() != null && argument.pattern().matcher("r1").matches()) {
+                    assertFalse(argument.pattern().matcher("t1").matches(), tool.name());
+                }
+            }
+        }
+        assertFalse(catalog.permitsArguments("get_records", objectMapper.readTree("{\"handles\":[\"t1\"]}")));
+        assertFalse(catalog.permitsArguments("reschedule_task", objectMapper.readTree(
+                "{\"handle\":\"t1\",\"due_date\":\"tomorrow\"}")));
+        catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL).forEach(definition ->
+                assertFalse(definition.parametersSchema().toString().contains("\"pattern\"")));
+    }
+
 }

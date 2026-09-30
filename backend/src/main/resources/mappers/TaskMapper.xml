@@ -312,7 +312,7 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="getTaskByIdForUpdate" resultMap="TaskResult">
+  <select id="getTaskByIdForUpdate" resultMap="TaskResult" flushCache="true">
     SELECT <include refid="taskColumns"/>
     FROM task FORCE INDEX (uq_task_workspace_id)
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -464,6 +464,15 @@
 
   <select id="getVisibleIdsIn" resultType="int">
     SELECT id
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
+  </select>
+
+  <select id="getTaskSnapshotsIn" resultMap="TaskResult" flushCache="true">
+    SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId}
       AND id IN

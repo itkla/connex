@@ -13,12 +13,13 @@ import ooo.klae.connex.backend.ai.masking.MaskingContext;
 
 /** Per-turn stable positional handles for tenant-local CRM records. */
 public final class AiChatResourceRegistry {
-    private static final Set<String> KINDS = Set.of("person", "company", "deal");
+    private static final Set<String> KINDS = Set.of("person", "company", "deal", "task");
 
     private final Map<String, ResourceRef> resources = new LinkedHashMap<>();
     private final Map<ResourceRef, String> handles = new LinkedHashMap<>();
     private final MaskingContext maskingContext;
     private int lastIssued;
+    private int lastTaskIssued;
 
     /** Creates a registry without a shared masked request context. */
     public AiChatResourceRegistry() {
@@ -40,13 +41,23 @@ public final class AiChatResourceRegistry {
 
     /** Allocates or returns the stable per-turn handle for one resource. */
     public String register(String kind, int id) {
-        ResourceRef resource = new ResourceRef(kind, id);
+        if ("task".equals(kind)) {
+            return registerTask(id);
+        }
+        return register(new ResourceRef(kind, id), false);
+    }
+
+    /** Issues a task argument handle, excluded from durable citations and record replay. */
+    public String registerTask(int id) {
+        return register(new ResourceRef("task", id), true);
+    }
+
+    private String register(ResourceRef resource, boolean task) {
         String existing = handles.get(resource);
         if (existing != null) {
             return existing;
         }
-        lastIssued++;
-        String handle = "r" + lastIssued;
+        String handle = task ? "t" + ++lastTaskIssued : "r" + ++lastIssued;
         handles.put(resource, handle);
         resources.put(handle, resource);
         return handle;
@@ -72,19 +83,26 @@ public final class AiChatResourceRegistry {
 
     /** Returns the fresh turn handle for one already-authorized resource identity. */
     public Optional<String> handleFor(String kind, int id) {
-        return Optional.ofNullable(handles.get(new ResourceRef(kind, id)));
+        return "task".equals(kind) ? Optional.empty()
+                : Optional.ofNullable(handles.get(new ResourceRef(kind, id)));
     }
 
     /** Requires every cited handle to resolve in this turn. */
     public void requireKnownCitations(Iterable<String> citations) {
         for (String citation : citations) {
-            resolve(citation);
+            resolve(citation, Set.of("person", "company", "deal"));
         }
     }
 
     /** @return immutable handle-to-resource snapshot for durable citation metadata */
     public Map<String, ResourceRef> snapshot() {
-        return Collections.unmodifiableMap(new LinkedHashMap<>(resources));
+        Map<String, ResourceRef> records = new LinkedHashMap<>();
+        resources.forEach((handle, resource) -> {
+            if (!"task".equals(resource.kind())) {
+                records.put(handle, resource);
+            }
+        });
+        return Collections.unmodifiableMap(records);
     }
 
     /**
@@ -103,6 +121,7 @@ public final class AiChatResourceRegistry {
         copy.resources.putAll(resources);
         copy.handles.putAll(handles);
         copy.lastIssued = lastIssued;
+        copy.lastTaskIssued = lastTaskIssued;
         return copy;
     }
 

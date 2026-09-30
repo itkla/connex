@@ -135,4 +135,67 @@ class AiChatStreamingProgressTest {
         assertEquals("Braces {{P1}} stay literal.", batches.getValue());
     }
 
+    @Test
+    void splitAndDemaskedTaskHandlesNeverRemainInDurablePartialContent() {
+        for (boolean masked : List.of(false, true)) {
+            AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+            when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                    invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+            MaskingContext context = new MaskingContext(masked ? AiPrivacyMode.MASKED : AiPrivacyMode.UNMASKED);
+            String token = masked ? MaskingEngine.maskField(EntityKind.PERSON, "t1", context) : "t1";
+            AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                    turn(context.privacyMode()), persistence, context);
+            var observer = progress.observer(true);
+            observer.onContentDelta("{\"text\":\"" + "Safe words. ".repeat(30));
+            if (masked) {
+                observer.onContentDelta(token);
+            } else {
+                observer.onContentDelta("t");
+                observer.onContentDelta("1");
+            }
+            observer.onContentDelta(" is done.\"}");
+            org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                    () -> observer.finish("Safe words. ".repeat(30) + "t1 is done."));
+            verify(persistence).resetPartialContent(any(), anyInt());
+            ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+            verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+            assertTrue(batches.getAllValues().stream().noneMatch(AiAssistantStepGuard::containsTaskHandle));
+        }
+    }
+
+    @Test
+    void aTaskLikePrefixMayFinishAsAnOrdinaryWordAcrossChunks() {
+        AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
+        var observer = progress.observer(true);
+        observer.onContentDelta("{\"text\":\"" + "Safe words. ".repeat(30) + "t1");
+        observer.onContentDelta("alpha is a name.\"}");
+        String expected = "Safe words. ".repeat(30) + "t1alpha is a name.";
+        assertEquals(expected, observer.finish(expected));
+        verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals(expected, String.join("", batches.getAllValues()));
+    }
+
+    @Test
+    void truncationNeverFlushesAHeldPrefixAsACompleteTaskHandle() {
+        AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
+        var observer = progress.observer(true);
+        String prefix = "x".repeat(15_995) + " ";
+        observer.onContentDelta("{\"text\":\"" + prefix + "t1");
+        observer.onContentDelta("alpha continues past the stream limit.\"}");
+        observer.finish(prefix + "t1alpha continues past the stream limit.");
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertTrue(!AiAssistantStepGuard.containsTaskHandle(String.join("", batches.getAllValues())));
+    }
+
 }
