@@ -25,6 +25,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -1019,13 +1021,26 @@ class UploadContentInspectorTest {
             policy,
             new ImageDecodeAdmissionService(properties),
             timeoutImageExecutor);
-        ExecutorService executor = Executors.newSingleThreadExecutor(
-            Thread.ofPlatform().daemon().name("upload-timeout-test").factory());
-        ExecutorService caller = Executors.newSingleThreadExecutor(
-            Thread.ofPlatform().daemon().name("upload-timeout-caller").factory());
         CountDownLatch reading = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch readFinished = new CountDownLatch(1);
+        ExecutorService executor = new ThreadPoolExecutor(
+            1, 1, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(),
+            Thread.ofPlatform().daemon().name("upload-timeout-test").factory()) {
+            @Override
+            public void execute(Runnable command) {
+                super.execute(command);
+                try {
+                    assertTrue(reading.await(10, TimeUnit.SECONDS),
+                        "Inspection worker did not enter the blocked read");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("Interrupted while waiting for the inspection worker", exception);
+                }
+            }
+        };
+        ExecutorService caller = Executors.newSingleThreadExecutor(
+            Thread.ofPlatform().daemon().name("upload-timeout-caller").factory());
         try (timeoutImageExecutor;
                 UploadContentInspector shortTimeoutInspector = new UploadContentInspector(
                 policy,
@@ -1040,7 +1055,7 @@ class UploadContentInspectorTest {
                 assertThrows(UnsupportedUploadMediaTypeException.class,
                     () -> shortTimeoutInspector.inspect(UploadPurpose.ATTACHMENT, source)));
 
-            assertTrue(reading.await(5, TimeUnit.SECONDS));
+            assertTrue(reading.await(10, TimeUnit.SECONDS));
             assertNotNull(result.get(2, TimeUnit.SECONDS));
             assertEquals(1, release.getCount());
             assertEquals(1, readFinished.getCount());
