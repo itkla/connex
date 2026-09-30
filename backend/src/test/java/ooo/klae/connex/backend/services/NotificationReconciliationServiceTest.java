@@ -696,7 +696,7 @@ class NotificationReconciliationServiceTest {
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(nudge, intro));
         when(scoringService.scoreContacts(eq(7), any(Instant.class)))
             .thenThrow(new IllegalStateException("scoring down"));
-        DealRiskService dealRiskService = noRiskService();
+        DealRiskService dealRiskService = fixture.dealRiskService;
 
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, true);
