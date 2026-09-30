@@ -98,33 +98,8 @@ class AiOrganizationBudgetCoordinatorTest {
     @Test
     void missingProviderUsageSettlesAtReservedCeiling() {
         AiBudgetControlOperations operations = mock(AiBudgetControlOperations.class);
-        AiBudgetControlAccess controlAccess = mock(AiBudgetControlAccess.class);
-        doAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(0);
-            return work.get();
-        }).when(controlAccess).execute(any());
-        when(operations.reserve(
-                eq(3),
-                any(LocalDate.class),
-                anyLong(),
-                anyString(),
-                any(LocalDateTime.class),
-                any(LocalDateTime.class)))
-                .thenReturn(new AiBudgetControlOperations.Reservation(
-                        "reservation", 3, LocalDate.of(2026, 8, 10), 100, true));
-        AiOrganizationBudgetCoordinator coordinator = new AiOrganizationBudgetCoordinator(
-                operations,
-                controlAccess,
-                Clock.fixed(Instant.parse("2026-08-10T00:00:00Z"), ZoneOffset.UTC), new AiProperties());
-        MaskingContext context = new MaskingContext();
-        AiInvocation invocation = new AiInvocation(
-                AiFeature.ASSISTANT_CHAT,
-                context,
-                PromptAssembly.builder(context).system("system").userTurn("user").build(),
-                64,
-                0.1);
-
-        AiOrganizationBudgetCoordinator.Lease lease = coordinator.reserve(3, invocation);
+        AiOrganizationBudgetCoordinator coordinator = meteredCoordinator(operations);
+        AiOrganizationBudgetCoordinator.Lease lease = coordinator.reserve(3, invocation());
         lease.settle(0, 0);
 
         verify(operations).settle("reservation", 100);
@@ -152,35 +127,11 @@ class AiOrganizationBudgetCoordinatorTest {
     @Test
     void failedSettlementIsRetriedByCloseInsteadOfReleased() {
         AiBudgetControlOperations operations = mock(AiBudgetControlOperations.class);
-        AiBudgetControlAccess controlAccess = mock(AiBudgetControlAccess.class);
-        doAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(0);
-            return work.get();
-        }).when(controlAccess).execute(any());
-        when(operations.reserve(
-                eq(3),
-                any(LocalDate.class),
-                anyLong(),
-                anyString(),
-                any(LocalDateTime.class),
-                any(LocalDateTime.class)))
-                .thenReturn(new AiBudgetControlOperations.Reservation(
-                        "reservation", 3, LocalDate.of(2026, 8, 10), 100, true));
+        AiOrganizationBudgetCoordinator coordinator = meteredCoordinator(operations);
         doThrow(new IllegalStateException("temporary database failure"))
                 .doNothing()
                 .when(operations).settle("reservation", 12);
-        AiOrganizationBudgetCoordinator coordinator = new AiOrganizationBudgetCoordinator(
-                operations,
-                controlAccess,
-                Clock.fixed(Instant.parse("2026-08-10T00:00:00Z"), ZoneOffset.UTC), new AiProperties());
-        MaskingContext context = new MaskingContext();
-        AiInvocation invocation = new AiInvocation(
-                AiFeature.ASSISTANT_CHAT,
-                context,
-                PromptAssembly.builder(context).system("system").userTurn("user").build(),
-                64,
-                0.1);
-        AiOrganizationBudgetCoordinator.Lease lease = coordinator.reserve(3, invocation);
+        AiOrganizationBudgetCoordinator.Lease lease = coordinator.reserve(3, invocation());
 
         assertThrows(IllegalStateException.class, () -> lease.settle(7, 5));
         lease.close();

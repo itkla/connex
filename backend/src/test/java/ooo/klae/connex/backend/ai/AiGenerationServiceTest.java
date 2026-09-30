@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
@@ -1058,7 +1059,7 @@ class AiGenerationServiceTest {
         long deadline = System.nanoTime() + window.toNanos();
         AiGenerationStatusDto current = service.status(handle);
         while (!expected.equals(current.status()) && System.nanoTime() < deadline) {
-            Thread.onSpinWait();
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
             current = service.status(handle);
         }
         assertEquals(expected, current.status());
@@ -1073,7 +1074,7 @@ class AiGenerationServiceTest {
             } catch (ResourceNotFoundException exception) {
                 return;
             }
-            Thread.onSpinWait();
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
         }
         throw new AssertionError("Generation handle remained available");
     }

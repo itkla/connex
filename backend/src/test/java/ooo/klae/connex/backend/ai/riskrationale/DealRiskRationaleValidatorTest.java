@@ -14,7 +14,7 @@ class DealRiskRationaleValidatorTest {
     @Test
     void validate_rejectsUnboundContent() {
         DealRiskRationaleContent content = new DealRiskRationaleContent(
-                "The deal is stalled.", List.of(), List.of(), null);
+                "The deal is stalled.", List.of(), contentWithActions(1).recommendedActions(), null);
 
         assertTrue(DealRiskRationaleValidator.validate(content, FACTOR_CODES).isEmpty());
     }

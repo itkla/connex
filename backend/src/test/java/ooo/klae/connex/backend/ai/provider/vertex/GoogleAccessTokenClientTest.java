@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hc.core5.http.ContentType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -68,20 +69,25 @@ class GoogleAccessTokenClientTest {
     private static final String PEM_HEADER = "-----BEGIN PRIVATE KEY-----";
     private static final String PEM_FOOTER = "-----END PRIVATE KEY-----";
 
+    private static KeyPair keyPair;
+    private static String privateKeyPem;
+
     private ObjectMapper objectMapper;
-    private KeyPair keyPair;
-    private String privateKeyPem;
     private MutableClock clock;
     private RestClient.Builder restClientBuilder;
     private MockRestServiceServer server;
 
-    @BeforeEach
-    void setUp() throws Exception {
-        objectMapper = new ObjectMapper();
+    @BeforeAll
+    static void createSigningKey() throws Exception {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         keyPair = generator.generateKeyPair();
         privateKeyPem = pem(keyPair);
+    }
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
         clock = new MutableClock(NOW);
         restClientBuilder = RestClient.builder();
         server = MockRestServiceServer.bindTo(restClientBuilder).build();
