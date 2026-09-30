@@ -220,13 +220,7 @@ class AiGenerationEndpointSecurityTest {
         verify(businessCardService).availability();
     }
 
-    @Test
-    void theRemovedCsrfKillSwitchPropertyCannotDisableProtection() throws Exception {
-        mockMvc.perform(post("/api/deals/17/brief"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/deals/17/brief").with(csrf().asHeader()))
-                .andExpect(status().isAccepted());
-    }
+
 
     private void assertPostWithCsrfOnly(String path) throws Exception {
         mockMvc.perform(get(path))

@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -207,7 +208,9 @@ class WorkflowControllerTest {
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody()))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.draftRevision").value(3));
         mockMvc.perform(post("/api/workflows/42/validate").with(csrf().asHeader()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.draftRevision").value(3))
@@ -235,19 +238,27 @@ class WorkflowControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.enabled").value(false));
         mockMvc.perform(post("/api/workflows/42/archive").with(csrf().asHeader()))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.draftRevision").value(3));
         mockMvc.perform(post("/api/workflows/42/restore").with(csrf().asHeader()))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.draftRevision").value(3));
         mockMvc.perform(post("/api/workflows/42/runtime/canonical")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedActiveVersionId\":88}"))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.draftRevision").value(3));
         mockMvc.perform(post("/api/workflows/42/runtime/legacy")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedActiveVersionId\":88}"))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(42))
+            .andExpect(jsonPath("$.draftRevision").value(3));
         mockMvc.perform(get("/api/workflows/42/versions"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].versionNumber").value(1));
@@ -270,6 +281,13 @@ class WorkflowControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("waiting"));
 
+        ArgumentCaptor<WorkflowDraftRequest> draft = ArgumentCaptor.forClass(WorkflowDraftRequest.class);
+        verify(workflowService).saveDraft(eq(42), draft.capture());
+        assertEquals(3, draft.getValue().getExpectedRevision());
+        verify(workflowService).archive(42);
+        verify(workflowService).restore(42);
+        verify(runtimeOwnershipService).cutOverToCanonical(42, 88L);
+        verify(runtimeOwnershipService).rollBackToLegacy(42, 88L);
         verify(workflowService).list(false);
         verify(workflowService).getById(42);
         verify(workflowService).versions(42);
