@@ -122,7 +122,6 @@ const TOOL_CALL: AiAssistantToolCall = {
     requestSummary: 'Create a task',
     outcomeSummary: 'Task created',
     change: null,
-    changes: [],
     outcomeValues: [],
     createdRecord: null,
     messageId: 22,

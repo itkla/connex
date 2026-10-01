@@ -8,12 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -863,15 +866,81 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
         AiChatToolCall proposal = proposal(trajectory, "update_record_fields");
         assertEquals("Old", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+        assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
         authenticate();
         try {
             assertEquals("ready", toolCallReadService.get(trajectory.sessionId(), proposal.getId()).change().state());
-            writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(1, fieldAuditRows("company", "company.update", target.getId()));
+            Map<String, Object> settled = jdbcTemplate.queryForMap("SELECT * FROM company WHERE id = ?", target.getId());
+            var replayed = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(approved.result(), replayed.result());
+            assertEquals(settled, jdbcTemplate.queryForMap("SELECT * FROM company WHERE id = ?", target.getId()));
+            assertEquals(1, fieldAuditRows("company", "company.update", target.getId()));
         } finally {
             clearAuthentication();
         }
         assertEquals(before, jdbcTemplate.queryForMap("SELECT name, website, phone, address FROM company WHERE id = ?", target.getId()));
         assertEquals("Software", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    @Test
+    void twoDealFieldsSettleOnceAndRetryPreservesTheRecordAndAudits() {
+        Deal target = documentDeal();
+        Map<String, Object> before = jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId());
+        Trajectory trajectory = run("connex_script_field_edit_deal_pair", "correct its value and close date",
+                List.of(new AiChatPageContextDto("deal", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "update_record_fields");
+        assertEquals(before, jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId()));
+        assertEquals(0, fieldAuditRows("deal", "deal.update", target.getId()));
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            assertEquals(List.of("ready", "ready"), card.changes().stream()
+                    .map(change -> change.state()).toList());
+            assertEquals("unresolved", card.change().state());
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Map<String, Object> settled = jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId());
+            assertEquals("1250.50", settled.get("value").toString());
+            assertEquals("2026-10-15", settled.get("expected_close_date").toString());
+            for (String field : List.of("name", "company_id", "currency", "owner_id", "stage_id", "pipeline_id")) {
+                assertEquals(before.get(field), settled.get(field), field);
+            }
+            assertEquals(2, fieldAuditRows("deal", "deal.update", target.getId()));
+            var replayed = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(approved.result(), replayed.result());
+            assertEquals(settled, jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId()));
+            assertEquals(2, fieldAuditRows("deal", "deal.update", target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "scripted-native,connex_script_field_edit_embedded_token",
+            "scripted-json,connex_script_field_edit_fullwidth_token"
+    })
+    void embeddedAndFullwidthIdentifiersAreRefusedWithoutAProposal(String capability, String selector) {
+        useCapabilityClass(capability);
+        Company target = company("Halvorsen Services");
+        Company source = company("source.example");
+        Trajectory trajectory = run(selector, "correct the first company's website",
+                List.of(new AiChatPageContextDto("company", target.getId()),
+                        new AiChatPageContextDto("company", source.getId())));
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertFieldRefused(trajectory, "identifier_from_another_record");
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+        assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
+    }
+
+    private int fieldAuditRows(String kind, String action, int recordId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?"
+                        + " AND entity_type = ? AND entity_id = ?",
+                Integer.class, workspaceId(), action, kind, recordId);
     }
 
     /** The host is also the source company's display identifier, seeded by real page context. */

@@ -1,3 +1,4 @@
+import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
@@ -8,17 +9,16 @@ import type {
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
-    AiChatTodo,
+    AiChatNarrationFrame,
     AiChatPageContext,
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
-    AiChatNarrationFrame,
     AiChatThinkingFrame,
+    AiChatTodo,
     Page,
 } from '@/app/lib/types';
 import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
-import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
 const RESOURCE_HANDLE = /(^|[^\p{L}\p{N}_])r[1-9]\d*($|[^\p{L}\p{N}_])/u;
@@ -430,13 +430,21 @@ function sameToolCallProjection(
     current: AskConnexToolCardState,
     incoming: AiAssistantToolCall,
 ): boolean {
+    const currentChanges = askConnexToolChanges(current);
+    const incomingChanges = askConnexToolChanges(incoming);
     return current.status === incoming.status
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt
-        && current.change?.state === incoming.change?.state
-        && current.change?.currentValue === incoming.change?.currentValue
-        && current.change?.proposedValue === incoming.change?.proposedValue;
+        && currentChanges.length === incomingChanges.length
+        && currentChanges.every((change, index) => {
+            const incomingChange = incomingChanges[index];
+            return change.field === incomingChange.field
+                && change.state === incomingChange.state
+                && change.currentValue === incomingChange.currentValue
+                && change.currentValueUnresolved === incomingChange.currentValueUnresolved
+                && change.proposedValue === incomingChange.proposedValue;
+        });
 }
 
 function compareToolCalls(
@@ -574,6 +582,25 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
     return change.state === 'ready';
 }
 
+/** Reads modern proposal rows, falling back to a legacy server's single change. */
+export function askConnexToolChanges(
+    card: Pick<AiAssistantToolCall, 'change' | 'changes'>,
+): AiAssistantToolCallChange[] {
+    return card.changes ?? (card.change ? [card.change] : []);
+}
+
+/** Selects the row explaining whether the complete proposal can be applied. */
+export function askConnexProposalChange(
+    card: Pick<AiAssistantToolCall, 'change' | 'changes'>,
+): AiAssistantToolCallChange | null {
+    const changes = askConnexToolChanges(card);
+    for (const state of ['unresolved', 'withheld', 'permissionLost', 'recordChanged'] as const) {
+        const blocking = changes.find((change) => change.state === state);
+        if (blocking) return blocking;
+    }
+    return changes.find((change) => change.state === 'ready') ?? changes[0] ?? null;
+}
+
 /**
  * Whether a tool's reviewed change takes a value off its record rather than writing one.
  *
@@ -597,8 +624,10 @@ export function askConnexToolProposesRemoval(
  * in, because retrying it is the whole point.
  */
 export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+    const changes = askConnexToolChanges(card);
     return (card.failure === null || card.failure === 'actionFailed')
-        && askConnexChangeApplicable(card.change);
+        && changes.some(askConnexChangeApplicable)
+        && changes.every((change) => change.state === 'ready' || change.state === 'unchanged');
 }
 
 /** How an executed action's undo window reads right now. */

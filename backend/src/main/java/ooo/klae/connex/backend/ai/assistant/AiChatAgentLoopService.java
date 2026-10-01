@@ -30,9 +30,9 @@ import ooo.klae.connex.backend.ai.AiNativeToolCompletion;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
-import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ExecutedReplay;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolBudgetAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
@@ -41,8 +41,10 @@ import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
-import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
@@ -53,14 +55,12 @@ import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
-import ooo.klae.connex.backend.ai.masking.MaskingEngine;
-import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
-import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
@@ -68,8 +68,8 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -389,8 +389,10 @@ public class AiChatAgentLoopService {
                 AiStructuredRepairAttempt<AiAssistantStep> attempt = null;
                 AiStructuredOutcome<AiAssistantStep> outcome = null;
                 Optional<AiAssistantStepCalls> nativeStepCalls = Optional.empty();
+                Set<String> rawIdentifierRefusals = new LinkedHashSet<>();
                 AiChatStreamingProgress.Observer streamingObserver = null;
                 while (outcome == null) {
+                    rawIdentifierRefusals.clear();
                     List<AiToolDefinition> nativeDefinitions = nativeTools
                             ? promptAssembler.nativeToolDefinitions(state.loadedToolsets)
                             : List.of();
@@ -449,11 +451,12 @@ public class AiChatAgentLoopService {
                         streamingObserver = streamingProgress.observer(nativeTools);
                         invocation = invocation.withStreamObserver(streamingObserver);
                     }
-                    AiRawOutputGuard outputGuard = stepGuard.forStep(
+                    AiRawOutputGuard outputGuard = writeToolService.guardRawIdentifiers(stepGuard.forStep(
                             state.loadedToolsets,
                             maskingContext.tokenBindings().stream()
                                     .map(Map.Entry::getKey)
-                                    .collect(Collectors.toUnmodifiableSet()));
+                                    .collect(Collectors.toUnmodifiableSet())),
+                            maskingContext, rawIdentifierRefusals);
                     boolean degradationEligible = nativeTools
                             && nativeProviderAttempts == 0
                             && state.toolTurns.isEmpty()
@@ -622,7 +625,7 @@ public class AiChatAgentLoopService {
                             : executeStepCall(
                                     toolContext, stepNumber, closingAttempted, nativeTools,
                                     stepCalls.calls().getFirst(), state, SOLE_CALL_PROGRESS,
-                                    toolContext.resources());
+                                    toolContext.resources(), rawIdentifierRefusals.contains(step.tool().name()));
                     switch (callOutcome) {
                         case StepCallOutcome.Continue settled -> { }
                         case StepCallOutcome.Close close -> {
@@ -835,7 +838,7 @@ public class AiChatAgentLoopService {
             for (AiAssistantStepCalls.Call call : stepCalls.calls()) {
                 StepCallOutcome outcome = executeStepCall(
                         context, stepNumber, closingAttempted, true, call, state, progress,
-                        issuedResources);
+                        issuedResources, false);
                 if (!(outcome instanceof StepCallOutcome.Continue)) {
                     discardStep(context, state, admitted);
                     return outcome;
@@ -1013,6 +1016,8 @@ public class AiChatAgentLoopService {
      *     only call, and once for the whole step for a call of a batch
      * @param references the handles this call's arguments may name: the live registry for a
      *     step's only call, and the handles issued when its batch was admitted for a call of a batch
+     * @param rawIdentifierRefused whether an identifier argument contained an issued placeholder
+     *     before demasking; write batches are refused before reaching this method
      * @return what the step loop must do next
      */
     private StepCallOutcome executeStepCall(
@@ -1023,7 +1028,8 @@ public class AiChatAgentLoopService {
             AiAssistantStepCalls.Call call,
             TurnToolState state,
             ProgressLedger progress,
-            AiChatResourceRegistry references) {
+            AiChatResourceRegistry references,
+            boolean rawIdentifierRefused) {
         AiChatQueuedTurn turn = context.turn();
         if (context.ownership().isStopped()) {
             return new StepCallOutcome.Fail(AiAssistantTerminalReasons.OWNER_LOST);
@@ -1041,6 +1047,9 @@ public class AiChatAgentLoopService {
             requireToolsetLoaded(state.loadedToolsets, toolName);
             recordNativeCall(nativeTools, state.nativeCalls, callRef, call.providerCall());
             toolExecutor.validateReferences(toolName, call.tool().args(), references);
+            if (rawIdentifierRefused) {
+                throw AiAssistantLoopException.refusedArguments("identifier_from_another_record");
+            }
         } catch (AiAssistantLoopException exception) {
             if (!exception.recoverable()) {
                 throw exception;

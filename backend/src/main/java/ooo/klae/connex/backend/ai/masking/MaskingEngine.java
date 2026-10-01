@@ -586,6 +586,17 @@ public final class MaskingEngine {
         return "{{" + tokenBody + "}}";
     }
 
+    /** Recognizes issued placeholders in raw text, including compatibility-width delimiters. */
+    public static boolean containsIssuedPlaceholder(String text, MaskingContext context) {
+        Matcher matcher = PLACEHOLDER.matcher(Normalizer.normalize(text, Normalizer.Form.NFKC));
+        while (matcher.find()) {
+            if (context.originalValueForToken(canonicalToken(matcher.group(1))) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean sensitiveValueCrossesIssuedPlaceholder(
             String text,
             List<Integer> issuedPlaceholderOffsets,

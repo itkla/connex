@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 import {
     ArrowPathIcon,
     CheckCircleIcon,
@@ -15,13 +14,16 @@ import {
     XCircleIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
     ANSWER_ROW_PLACEHOLDER,
     askConnexCreatedRecordHref,
+    askConnexProposalChange,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
+    askConnexToolChanges,
     askConnexToolOutcomeSummary,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
@@ -412,7 +414,8 @@ export default function AskConnexToolCard({
     const outcomeSummary = askConnexToolOutcomeSummary(card, labels.summaries);
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
-    const proposal = status === 'proposed' ? card.change : null;
+    const changes = askConnexToolChanges(card);
+    const proposal = status === 'proposed' ? askConnexProposalChange(card) : null;
     const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'
@@ -554,7 +557,7 @@ export default function AskConnexToolCard({
                     {proposal !== null ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
-                            {card.changes.map((change) => (
+                            {changes.map((change) => (
                                 <AskConnexChangeRow key={change.field} change={change} removal={removal} labels={labels} />
                             ))}
                             <AskConnexChangeNotice

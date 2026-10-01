@@ -3521,7 +3521,7 @@ export type AiAssistantToolCall = {
     requestSummary: string;
     outcomeSummary: string | null;
     change: AiAssistantToolCallChange | null;
-    changes: AiAssistantToolCallChange[];
+    changes?: AiAssistantToolCallChange[];
     outcomeValues: AiAssistantToolCallOutcomeValue[];
     createdRecord: AiAssistantToolCallCreatedRecord | null;
     messageId: number | null;

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,14 +14,19 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
@@ -78,6 +84,135 @@ class AiAssistantUpdateRecordFieldsWriteToolTest extends AbstractAiAssistantWrit
                     resources, TURN.restrictionEpoch());
         }
         verifyNoInteractions(chatMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{{C1}}", "target.example/{{C1}}/path", "{{C1}}.example", "target.example/{{C1}}",
+            "target.example/{{ C1 }}/path", "target.example/｛｛C1｝｝/path",
+            "target.example/｛｛ Ｃ１ ｝｝/path"
+    })
+    void rawIssuedIdentifiersAreCapturedBeforeDemaskingAndValidation(String website) {
+        MaskingContext masking = new MaskingContext();
+        masking.tokenFor(EntityKind.COMPANY, "{{}}");
+        var args = objectMapper.createObjectNode().put("handle", "r1").put("website", website);
+        var output = objectMapper.createObjectNode();
+        output.putObject("tool").put("name", "update_record_fields").set("args", args);
+        output.putNull("final");
+        Set<String> refused = new HashSet<>();
+        var schema = new AiAssistantStepGuard(catalog).forStep(
+                Set.of(AiAssistantToolCatalog.Toolset.CORE, AiAssistantToolCatalog.Toolset.WRITE_FIELDS),
+                Set.of("{{C1}}"));
+        AiAssistantWriteToolService service = service();
+
+        assertTrue(MaskingEngine.containsIssuedPlaceholder(website, masking));
+        assertNull(service.guardRawIdentifiers(schema, masking, refused).rejectionReason(output));
+        assertEquals(Set.of("update_record_fields"), refused);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(masking);
+        resources.register("company", 52);
+        AiAssistantLoopException error = assertThrows(AiAssistantLoopException.class,
+                () -> service.prepare("update_record_fields", args, resources, TURN.restrictionEpoch()));
+        assertEquals("identifier_from_another_record", error.detailReason());
+        assertTrue(error.recoverable());
+        verifyNoInteractions(chatMapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "other.example", "target.example/other.example/path", "other.example.example",
+            "target.example/other.example", "target.example/OTHER.EXAMPLE"
+    })
+    void demaskedSeededIdentifierSubstringsAreRefused(String website) {
+        MaskingContext masking = new MaskingContext();
+        masking.tokenFor(EntityKind.COMPANY, "other.example");
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(masking);
+        resources.register("company", 52);
+        var args = objectMapper.createObjectNode().put("handle", "r1").put("website", website);
+
+        AiAssistantLoopException error = assertThrows(AiAssistantLoopException.class,
+                () -> service().prepare("update_record_fields", args, resources, TURN.restrictionEpoch()));
+
+        assertEquals("identifier_from_another_record", error.detailReason());
+        assertTrue(error.recoverable());
+        verifyNoInteractions(chatMapper);
+    }
+
+    @Test
+    void rawIdentifierCaptureIgnoresUnissuedTokensAndUnmaskedTurnsAndPreservesSchemaRefusals() {
+        AiAssistantWriteToolService service = service();
+        for (AiPrivacyMode mode : AiPrivacyMode.values()) {
+            MaskingContext masking = new MaskingContext(mode);
+            masking.tokenFor(EntityKind.COMPANY, "source.example");
+            Set<String> refused = new HashSet<>();
+            var schema = new AiAssistantStepGuard(catalog).forStep(
+                    Set.of(AiAssistantToolCatalog.Toolset.CORE, AiAssistantToolCatalog.Toolset.WRITE_FIELDS),
+                    Set.of("{{C1}}"));
+            var guard = service.guardRawIdentifiers(schema, masking, refused);
+            var output = objectMapper.readTree(
+                    "{\"tool\":{\"name\":\"update_record_fields\",\"args\":{\"handle\":\"r1\","
+                            + "\"website\":\"target.example/{{C9}}\"}},\"final\":null}");
+            assertNull(guard.rejectionReason(output));
+            assertTrue(refused.isEmpty());
+            assertFalse(MaskingEngine.containsIssuedPlaceholder("target.example/{{C9}}", masking));
+            if (mode == AiPrivacyMode.UNMASKED) {
+                var issued = objectMapper.readTree(objectMapper.writeValueAsString(output).replace("C9", "C1"));
+                assertNull(guard.rejectionReason(issued));
+                assertTrue(refused.isEmpty());
+            }
+            assertEquals("top_level_fields", guard.rejectionReason(objectMapper.createObjectNode()));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"person", "company", "dealValue", "dealDate"})
+    void divergentReturnedRecordIdsAreRecordedOutsideTheModelOutcome(String branch) throws Exception {
+        String kind;
+        String fields;
+        if ("person".equals(branch)) {
+            kind = "person";
+            fields = "\"title\":\"Director\"";
+            Person before = new Person();
+            before.setId(31);
+            Person after = new Person();
+            after.setId(99);
+            after.setTitle("Director");
+            when(personService.getPersonById(31)).thenReturn(before);
+            when(personService.update(eq(31), any())).thenReturn(after);
+        } else if ("company".equals(branch)) {
+            kind = "company";
+            fields = "\"industry\":\"Software\"";
+            Company before = new Company();
+            before.setId(31);
+            Company after = new Company();
+            after.setId(99);
+            after.setIndustry("Software");
+            when(companyService.getCompanyById(31)).thenReturn(before);
+            when(companyService.updateCompany(eq(31), any())).thenReturn(after);
+        } else {
+            kind = "deal";
+            fields = "dealValue".equals(branch)
+                    ? "\"value\":\"1250.50\"" : "\"expected_close_date\":\"2026-10-15\"";
+            Deal before = new Deal();
+            before.setId(31);
+            Deal after = new Deal();
+            after.setId(99);
+            when(dealService.getDealById(31)).thenReturn(before);
+            if ("dealValue".equals(branch)) {
+                when(dealService.updateValue(31, new BigDecimal("1250.50"))).thenReturn(after);
+            } else {
+                when(dealService.reschedule(31, "2026-10-15")).thenReturn(after);
+            }
+        }
+        AiAssistantWriteToolService service = service();
+        propose(service, "update_record_fields", "{\"handle\":\"r1\"," + fields + "}", kind, 31);
+
+        var approved = service.approve(TURN.sessionId(), TOOL_CALL_ID);
+
+        var verification = objectMapper.readTree(capturedExecutedResult()).path("verification");
+        assertEquals("recordId", verification.path("field").asString());
+        assertEquals(31, verification.path("requested").asInt());
+        assertEquals(99, verification.path("applied").asInt());
+        assertFalse(approved.result().has("verification"));
     }
 
     @Test

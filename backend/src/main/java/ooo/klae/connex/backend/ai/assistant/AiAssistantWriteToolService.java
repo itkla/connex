@@ -21,6 +21,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Authority;
@@ -161,10 +162,10 @@ public class AiAssistantWriteToolService {
         AiAssistantWriteTool tool = writeToolRegistry.find(name)
                 .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
         requireNoRedactedValues(tool, args);
+        requireNoSeededIdentifiers(tool, args, resources.maskingContext());
         AiAssistantWriteToolRequest request = readRequest(tool, args);
         ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
         tool.validateFor(target.kind(), args);
-        requireNoSeededIdentifiers(tool, args, resources.maskingContext());
         if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
             requireOwnedTarget(target);
         }
@@ -238,10 +239,45 @@ public class AiAssistantWriteToolService {
         for (String field : tool.identifierValueFields()) {
             JsonNode value = args.get(field);
             if (value != null && value.isString()
-                    && context.isSeededIdentifierValue(value.asString())) {
+                    && (MaskingEngine.containsIssuedPlaceholder(value.asString(), context)
+                            || context.containsSeededIdentifierValue(value.asString()))) {
                 throw AiAssistantLoopException.refusedArguments("identifier_from_another_record");
             }
         }
+    }
+
+    /**
+     * Records raw identifier substitutions for recoverable refusal at tool execution, before
+     * demasking erases their provenance. Schema refusals retain their existing repair behavior.
+     */
+    AiRawOutputGuard guardRawIdentifiers(
+            AiRawOutputGuard guard, MaskingContext context, Set<String> refusedTools) {
+        return new AiRawOutputGuard() {
+            @Override
+            public boolean permits(JsonNode output) {
+                return rejectionReason(output) == null;
+            }
+
+            @Override
+            public String rejectionReason(JsonNode output) {
+                String reason = guard.rejectionReason(output);
+                if (reason != null && !"bare_placeholder".equals(reason)) {
+                    return reason;
+                }
+                JsonNode rawTool = output.path("tool");
+                Optional<AiAssistantWriteTool> tool = writeToolRegistry.find(rawTool.path("name").asString());
+                if (tool.isPresent() && context.privacyMode() != AiPrivacyMode.UNMASKED) {
+                    for (String field : tool.get().identifierValueFields()) {
+                        JsonNode value = rawTool.path("args").path(field);
+                        if (value.isString() && MaskingEngine.containsIssuedPlaceholder(value.asString(), context)) {
+                            refusedTools.add(tool.get().name());
+                            return null;
+                        }
+                    }
+                }
+                return reason;
+            }
+        };
     }
 
     /**

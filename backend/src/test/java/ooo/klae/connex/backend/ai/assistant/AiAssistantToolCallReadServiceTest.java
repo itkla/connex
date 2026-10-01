@@ -2204,7 +2204,7 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
-    void fieldRowsUseBatchedColumnsAndAggregateUnchangedOnlyWhenEveryRowMatches() {
+    void multiFieldRowsStayCompleteWhileLegacyClientsCannotApplyThem() {
         Company company = fieldCompany();
         AiChatToolCall call = fieldProposal("{\"industry\":\"Old\",\"address\":\"Osaka\"}");
         when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(company));
@@ -2214,7 +2214,7 @@ class AiAssistantToolCallReadServiceTest {
         AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
         assertEquals(List.of("industry", "address"), card.changes().stream().map(AiAssistantToolCallReadDto.Change::field).toList());
         assertEquals(List.of("unchanged", "ready"), card.changes().stream().map(AiAssistantToolCallReadDto.Change::state).toList());
-        assertEquals("ready", card.change().state());
+        assertEquals("unresolved", card.change().state());
         assertEquals("Tokyo", card.changes().get(1).currentValue());
         verify(companyMapper).getByIds(WORKSPACE_ID, List.of(52));
 
@@ -2225,6 +2225,22 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("recordChanged", service.list(SESSION_ID, false).getFirst().change().state());
         when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID)).thenReturn(Set.of());
         assertEquals("permissionLost", service.list(SESSION_ID, false).getFirst().change().state());
+    }
+
+    @Test
+    void singleFieldLegacyProjectionIsByteIdenticalToItsOnlyModernRow() {
+        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(fieldCompany()));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(fieldProposal("{\"industry\":\"Software\"}")));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        var mapper = JsonMapper.builder().build();
+        assertEquals("{\"field\":\"industry\",\"currentValue\":\"Old\","
+                        + "\"currentValueUnresolved\":false,\"proposedValue\":\"Software\",\"state\":\"ready\"}",
+                mapper.writeValueAsString(card.change()));
+        assertEquals(1, card.changes().size());
+        assertEquals(mapper.writeValueAsString(card.change()), mapper.writeValueAsString(card.changes().getFirst()));
     }
 
     @Test

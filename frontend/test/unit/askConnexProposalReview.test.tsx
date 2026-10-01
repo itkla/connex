@@ -17,6 +17,7 @@ import {
     askConnexProposalGroups,
     askConnexToolCardAffordances,
     askConnexUndoWindow,
+    mergeAskConnexToolCalls,
     toggleAskConnexProposalExclusion,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
@@ -73,6 +74,91 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it("renders and applies a legacy proposal without changes on both review surfaces", () => {
+        const legacy = card({ change: change({ currentValue: "Discovery", proposedValue: "Proposal" }) });
+        delete legacy.changes;
+        expect(legacy).not.toHaveProperty("changes");
+        expect(askConnexToolCardAffordances(legacy, NOW)).toContain("approve");
+        const [group] = askConnexProposalGroups(
+            [legacy, card({ id: 32 }), card({ id: 33 })], new Set([legacy.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(legacy), review]) {
+            expect(markup).toContain("Discovery");
+            expect(markup).toContain("Proposal");
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(1);
+        }
+        expect(group.selected).toBe(1);
+    });
+
+    it("does not arm Apply or render rows when neither response shape has a change", () => {
+        const legacy = card({ change: null });
+        delete legacy.changes;
+        expect(renderCard(legacy)).not.toContain("space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border");
+        expect(askConnexToolCardAffordances(legacy, NOW)).not.toContain("approve");
+        expect(askConnexProposalAppliable(legacy)).toBe(false);
+    });
+
+    it("uses modern rows when the legacy projection disarms older clients", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({
+            toolName: "update_record_fields",
+            change: { ...industry, state: "unresolved" },
+            changes: [industry, address],
+        });
+        expect(askConnexChangeApplicable(proposal.change)).toBe(false);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        expect(group.selected).toBe(1);
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup).toContain("Software");
+            expect(markup).toContain("Osaka");
+            expect(markup).not.toContain(escaped(cardLabels.changeState.unresolved));
+        }
+        expect(askConnexProposalAppliable(card({ ...proposal, changes: [] }))).toBe(false);
+        expect(askConnexProposalAppliable(card({
+            ...proposal, changes: [{ ...industry, state: "unchanged" }, address],
+        }))).toBe(true);
+        expect(askConnexProposalAppliable(card({
+            ...proposal,
+            changes: [{ ...industry, state: "unchanged" }, { ...address, state: "unchanged" }],
+        }))).toBe(false);
+    });
+
+    it("refreshes later rows even when the legacy projection and timestamp stay the same", () => {
+        const industry = change({ field: "industry" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ change: { ...industry, state: "unresolved" }, changes: [industry, address] });
+        const incoming = { ...proposal, changes: [industry, { ...address, state: "permissionLost" as const }] };
+        const [merged] = mergeAskConnexToolCalls([proposal], [incoming]);
+        expect(merged.changes).toEqual(incoming.changes);
+        expect(askConnexProposalAppliable(merged)).toBe(false);
+    });
+
     it("renders every field in the existing row markup and withholds the whole proposal", () => {
         const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
         const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
@@ -691,7 +777,8 @@ describe("grouped proposal review", () => {
     });
 
     it("leaves a proposal whose record moved out of the batch the button commits to", () => {
-        const moved = { ...second, change: change({ field: "stage", state: "recordChanged" }) };
+        const movedChange = change({ field: "stage", state: "recordChanged" });
+        const moved = { ...second, change: movedChange, changes: [movedChange] };
         const [group] = askConnexProposalGroups([first, moved, blocked], actionable, new Set());
         const markup = render(
             <AskConnexProposalReview
@@ -777,11 +864,13 @@ describe("grouped proposal review", () => {
     });
 
     it("says so plainly when nothing in the batch can be applied", () => {
+        const unresolved = change({ state: "unresolved" });
+        const unchanged = change({ field: "stage", state: "unchanged" });
         const [group] = askConnexProposalGroups(
             [
                 blocked,
-                { ...first, change: change({ state: "unresolved" }) },
-                { ...second, change: change({ field: "stage", state: "unchanged" }) },
+                { ...first, change: unresolved, changes: [unresolved] },
+                { ...second, change: unchanged, changes: [unchanged] },
             ],
             actionable,
             new Set(),

@@ -649,6 +649,9 @@ public class AiAssistantToolCallReadService {
         if (changes.isEmpty()) {
             return null;
         }
+        if (changes.size() == 1) {
+            return changes.getFirst();
+        }
         String state = "ready";
         for (String candidate : List.of(
                 "unresolved", "withheld", "permissionLost", "unchanged", "recordChanged")) {
@@ -662,7 +665,8 @@ public class AiAssistantToolCallReadService {
         }
         AiAssistantToolCallReadDto.Change first = changes.getFirst();
         return new AiAssistantToolCallReadDto.Change(first.field(), first.currentValue(),
-                first.currentValueUnresolved(), first.proposedValue(), state);
+                first.currentValueUnresolved(), first.proposedValue(),
+                "ready".equals(state) ? "unresolved" : state);
     }
 
     /**

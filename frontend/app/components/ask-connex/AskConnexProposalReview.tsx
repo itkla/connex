@@ -8,13 +8,15 @@ import {
 import Link from 'next/link';
 
 import {
-    askConnexFailureMessage,
     AskConnexChangeNotice,
     AskConnexChangeRow,
+    askConnexFailureMessage,
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import {
     askConnexProposalAppliable,
+    askConnexProposalChange,
+    askConnexToolChanges,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
@@ -173,6 +175,8 @@ export default function AskConnexProposalReview({
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
                     const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card);
+                    const changes = askConnexToolChanges(card);
+                    const proposal = askConnexProposalChange(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
                     return (
@@ -213,9 +217,9 @@ export default function AskConnexProposalReview({
                                         </span>
                                     )}
                                 </div>
-                                {card.change !== null ? (
+                                {proposal !== null ? (
                                     <>
-                                        {card.changes.map((change) => (
+                                        {changes.map((change) => (
                                             <AskConnexChangeRow
                                                 key={change.field}
                                                 change={change}
@@ -224,9 +228,9 @@ export default function AskConnexProposalReview({
                                             />
                                         ))}
                                         <AskConnexChangeNotice
-                                            field={card.change.field}
-                                            state={card.change.state}
-                                            currentValue={card.change.currentValue}
+                                            field={proposal.field}
+                                            state={proposal.state}
+                                            currentValue={proposal.currentValue}
                                             removal={removal}
                                             labels={cardLabels}
                                         />

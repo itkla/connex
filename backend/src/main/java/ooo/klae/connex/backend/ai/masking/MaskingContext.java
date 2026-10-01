@@ -189,6 +189,19 @@ public final class MaskingContext {
         return false;
     }
 
+    /** Detects identifier reuse anywhere in a value, including short structured identifiers. */
+    public boolean containsSeededIdentifierValue(String value) {
+        String candidate = OutboundLeakScan.normalizeForScan(value);
+        for (String original : originalValueToToken.keySet()) {
+            CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(original);
+            if (!stored.literal().isEmpty() && candidate.contains(stored.literal())
+                    || !stored.label().isEmpty() && candidate.contains(stored.label())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Raw identifiers collected for request-local leak scanning.
      * @return ordered immutable identifier dictionary
