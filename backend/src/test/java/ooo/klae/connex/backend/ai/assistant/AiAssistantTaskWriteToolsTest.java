@@ -8,9 +8,13 @@ import java.util.EnumSet;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -106,6 +110,33 @@ class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
         assertThrows(ResourceNotFoundException.class,
                 () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
         verify(taskService, never()).complete(anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"complete_task", "reschedule_task"})
+    void linkedRecordsAreReauthorizedAfterTheTaskLockBeforeEitherDelegate(String tool) throws Exception {
+        Task task = task();
+        Person person = new Person();
+        person.setId(31);
+        task.setPerson(person);
+        Deal deal = new Deal();
+        deal.setId(41);
+        task.setDeal(deal);
+        when(taskService.assistantStateVersion(73)).thenReturn(TaskService.assistantStateVersion(task));
+        AiAssistantWriteToolService service = service();
+        String date = "reschedule_task".equals(tool) ? ",\"due_date\":\"2026-10-15\"" : "";
+        propose(service, tool, "{\"handle\":\"t1\"" + date + "}", "task", 73);
+        clearInvocations(taskService, personService, dealService);
+        when(dealService.getDealById(41)).thenThrow(new ResourceNotFoundException("Deal unavailable"));
+        assertThrows(ResourceNotFoundException.class,
+                () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
+        InOrder order = inOrder(taskService, personService, dealService);
+        order.verify(taskService).lockTaskForUpdate(73);
+        order.verify(taskService).getTaskById(73);
+        order.verify(personService).getPersonById(31);
+        order.verify(dealService).getDealById(41);
+        verify(taskService, never()).complete(anyInt());
+        verify(taskService, never()).reschedule(anyInt(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test

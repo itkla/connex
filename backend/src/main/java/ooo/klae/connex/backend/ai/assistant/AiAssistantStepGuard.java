@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.databind.JsonNode;
 
@@ -275,7 +276,8 @@ public class AiAssistantStepGuard {
     }
 
     static boolean containsTaskHandle(String value) {
-        return value != null && TASK_HANDLE_REFERENCE.matcher(value).find();
+        return value != null && (TASK_HANDLE_REFERENCE.matcher(value).find()
+                || TASK_HANDLE_REFERENCE.matcher(MaskingEngine.prepareConversationalText(value)).find());
     }
 
     static boolean containsHandle(String value) {

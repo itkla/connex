@@ -543,7 +543,15 @@ public class AiAssistantWriteToolService {
             case "person" -> personService.getPersonById(write.targetId());
             case "company" -> companyService.getCompanyById(write.targetId());
             case "deal" -> dealService.getDealById(write.targetId());
-            case "task" -> taskService.getTaskById(write.targetId());
+            case "task" -> {
+                var task = taskService.getTaskById(write.targetId());
+                if (task.getPerson() != null) {
+                    personService.getPersonById(task.getPerson().getId());
+                }
+                if (task.getDeal() != null) {
+                    dealService.getDealById(task.getDeal().getId());
+                }
+            }
             default -> throw new BadRequestException("Unsupported assistant record kind");
         }
     }

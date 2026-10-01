@@ -26,7 +26,7 @@
       "protocol": "native",
       "emit": {
         "kind": "final",
-        "text": "{\"text\":\"The task t2 needs attention.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+        "text": "{\"text\":\"[t](record:r1)1\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
       }
     },
     {

@@ -2294,6 +2294,14 @@ class AiAssistantToolCallReadServiceTest {
         User assignee = new User();
         assignee.setId(USER_ID);
         task.setAssignedTo(assignee);
+        Person linkedPerson = person(31, "Visible person");
+        task.setPerson(linkedPerson);
+        Deal linkedDeal = new Deal();
+        linkedDeal.setId(41);
+        linkedDeal.setName("Visible deal");
+        task.setDeal(linkedDeal);
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(linkedPerson));
+        when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of(linkedDeal));
         String version = TaskService.assistantStateVersion(task);
         AiChatToolCall proposal = toolCall(91, USER_ID, "complete_task", "confirm", "proposed", "task", 73, 91, null);
         proposal.setArgumentsJson("{\"tool\":\"complete_task\",\"tier\":\"confirm\",\"restrictionEpoch\":1,"
@@ -2313,6 +2321,12 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("ready", ready.change().state());
         assertEquals("open", ready.change().currentValue());
         assertEquals("done", ready.change().proposedValue());
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of());
+        assertNull(service.list(SESSION_ID, false).getFirst().change());
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(linkedPerson));
+        when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of());
+        assertNull(service.list(SESSION_ID, false).getFirst().change());
+        when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of(linkedDeal));
         task.setPosition(4);
         task.setUpdatedAt("2099-01-01 00:00:00");
         assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());

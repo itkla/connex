@@ -72,7 +72,7 @@ public class AiAssistantToolCatalog {
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
         WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
         WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments"),
-        WRITE_FOLLOWUP("write_followup", "Set response deadlines, complete or reschedule tasks");
+        WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks");
 
         private final String key;
         private final String summary;
@@ -573,8 +573,8 @@ public class AiAssistantToolCatalog {
             case "remove_tag" -> "Propose a tag removal that requires human confirmation.";
             case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
-            case "complete_task" -> "Propose completing an assigned task handle, with human confirmation.";
-            case "reschedule_task" -> "Propose a task due date (YYYY-MM-DD), with human confirmation.";
+            case "complete_task" -> "Complete assigned task";
+            case "reschedule_task" -> "Reschedule task: YYYY-MM-DD";
             case "set_response_due" -> "Propose a contact's first-response deadline, in hours "
                     + "from approval, that requires human confirmation.";
             default -> throw new IllegalStateException("Assistant native tool description is missing");

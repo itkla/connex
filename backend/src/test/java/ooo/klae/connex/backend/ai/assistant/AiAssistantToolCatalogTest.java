@@ -377,10 +377,38 @@ class AiAssistantToolCatalogTest {
             assertFalse(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"t0\"" + date + "}")));
         }
         for (ToolSpec tool : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            if (Set.of("complete_task", "reschedule_task").contains(tool.name())) {
+                continue;
+            }
             for (var argument : tool.arguments()) {
-                if (argument.pattern() != null && argument.pattern().matcher("r1").matches()) {
-                    assertFalse(argument.pattern().matcher("t1").matches(), tool.name());
+                if (!Set.of("handle", "handles").contains(argument.name())) {
+                    continue;
                 }
+                var args = objectMapper.createObjectNode();
+                for (var required : tool.arguments()) {
+                    if (!required.required()) {
+                        continue;
+                    }
+                    String value = required.values().stream().sorted().findFirst()
+                            .orElse("x".repeat(Math.max(1, required.minimum())));
+                    switch (required.kind()) {
+                        case STRING -> args.put(required.name(), value);
+                        case INTEGER -> args.put(required.name(), required.minimum());
+                        case STRING_LIST, TEXT_LIST -> args.putArray(required.name()).add(value);
+                    }
+                }
+                if ("handles".equals(argument.name())) {
+                    args.putArray(argument.name()).add("r1");
+                } else {
+                    args.put(argument.name(), "r1");
+                }
+                assertTrue(catalog.permitsArguments(tool.name(), args), tool.name());
+                if ("handles".equals(argument.name())) {
+                    args.putArray(argument.name()).add("t1");
+                } else {
+                    args.put(argument.name(), "t1");
+                }
+                assertFalse(catalog.permitsArguments(tool.name(), args), tool.name());
             }
         }
         assertFalse(catalog.permitsArguments("get_records", objectMapper.readTree("{\"handles\":[\"t1\"]}")));

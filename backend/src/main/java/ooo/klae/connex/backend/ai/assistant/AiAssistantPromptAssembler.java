@@ -1714,11 +1714,14 @@ public class AiAssistantPromptAssembler {
         }
         if ("assistant".equals(message.getAuthorKind())) {
             ReplayAnswer replay = reauthorizeAnswer(message, resources);
-            if (replay == null) {
+            if (replay == null || AiAssistantStepGuard.containsTaskHandle(replay.content())) {
                 return;
             }
             String masked = MaskingEngine.maskConversationalFreeText(
                     replay.content(), context, replay.handles());
+            if (AiAssistantStepGuard.containsTaskHandle(masked)) {
+                return;
+            }
             prompt.assistantTurn(serialize(Map.of(
                     "content", masked,
                     "citations", replay.citations())));

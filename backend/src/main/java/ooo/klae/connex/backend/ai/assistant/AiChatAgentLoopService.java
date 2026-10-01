@@ -680,6 +680,16 @@ public class AiChatAgentLoopService {
                     persistedText = AiChatRecordLinkRewriter.rewrite(
                             persistedText, citedResources, Set.copyOf(citations));
                 }
+                if (AiAssistantStepGuard.containsTaskHandle(persistedText)) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    if (closingAttempted) {
+                        return AiGenerationTaskResult.failed("malformed_output");
+                    }
+                    closingAttempted = true;
+                    closingPending = true;
+                    closingReason = "malformed_output";
+                    continue steps;
+                }
                 String metadata = promptAssembler.finalMetadata(
                         turn.turnId(), citations, suggestions, citedResources,
                         citationProjector.observe(
@@ -1670,11 +1680,11 @@ public class AiChatAgentLoopService {
                 || AiAssistantStepGuard.containsControlInstruction(normalized)) {
             return null;
         }
-        if (normalized.codePointCount(0, normalized.length()) <= MAX_GENERATED_TITLE_CHARS) {
-            return normalized;
+        if (normalized.codePointCount(0, normalized.length()) > MAX_GENERATED_TITLE_CHARS) {
+            int end = normalized.offsetByCodePoints(0, MAX_GENERATED_TITLE_CHARS);
+            normalized = normalized.substring(0, end).stripTrailing();
         }
-        int end = normalized.offsetByCodePoints(0, MAX_GENERATED_TITLE_CHARS);
-        return normalized.substring(0, end).stripTrailing();
+        return AiAssistantStepGuard.containsHandle(normalized) ? null : normalized;
     }
 
     private void requireCurrentAccess(AiChatQueuedTurn turn) {

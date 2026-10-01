@@ -191,7 +191,9 @@ model outcomes use the same free-text masking path as task reads.
 A task handle belongs only in a tool argument. Final text, suggestions and titles are refused with
 `final_task_handle`; summaries refuse task handles, todo items refuse with `todo_contains_handle`,
 and narration containing one is dropped. Final text and summaries are checked again after
-identifier demasking. Streaming checks accumulated demasked text before persisting each fragment
+identifier demasking. Task-handle checks cover both raw text and the canonical link-stripped
+conversation form; final text is checked again after link rewriting, and assistant history is
+checked before and after replay preparation. Streaming checks accumulated demasked text before persisting each fragment
 and withdraws the current partial answer if a handle is detected across fragment boundaries.
 No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
 keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.

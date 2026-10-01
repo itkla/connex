@@ -399,7 +399,8 @@ Task targets declare `TASK_ROW` and `TARGET_FINGERPRINT` together. Completion de
 `task_board_lock` root as well: authority → session → tool call → board root → exact task.
 Rescheduling declares no board: authority → session → tool call → exact task. The task service
 retains its canonical completion hierarchy and assignee-only rule when the delegate re-enters.
-The framework's owner-scope gate reads the task after its lock, before the delegate writes.
+The framework's owner-scope gate reads the task and reauthorizes its linked person and deal
+through their scoped domain getters after the task lock, before the delegate writes.
 
 Task proposal freshness compares `targetVersion`, the SHA-256 from
 `TaskService.assistantStateVersion`, with the locked canonical row. It includes id, description,

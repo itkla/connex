@@ -311,6 +311,17 @@ public class AiAssistantToolCallReadService {
         stored.stream()
                 .map(call -> new RecordKey(call.targetKind(), call.targetId()))
                 .forEach(requested::add);
+        List<Integer> taskIds = ids(requested, "task");
+        List<Task> tasks = taskIds.isEmpty()
+                ? List.of() : taskMapper.getTaskSnapshotsIn(workspaceId, taskIds);
+        for (Task task : tasks) {
+            if (task.getPerson() != null) {
+                requested.add(new RecordKey("person", task.getPerson().getId()));
+            }
+            if (task.getDeal() != null) {
+                requested.add(new RecordKey("deal", task.getDeal().getId()));
+            }
+        }
         Map<RecordKey, RecordSnapshot> visible = new LinkedHashMap<>();
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
@@ -341,12 +352,16 @@ public class AiAssistantToolCallReadService {
                         deal.getWorkspaceId() != workspaceId));
             }
         }
-        List<Integer> taskIds = ids(requested, "task");
-        if (!taskIds.isEmpty()) {
-            List<Task> tasks = taskMapper.getTaskSnapshotsIn(workspaceId, taskIds);
+        if (!tasks.isEmpty()) {
             Map<Integer, String> versions = new LinkedHashMap<>();
             tasks.forEach(task -> versions.put(task.getId(), TaskService.assistantStateVersion(task)));
             for (Task task : referenceService.hydrateTasks(workspaceId, tasks)) {
+                if (task.getPerson() != null
+                        && !visible.containsKey(new RecordKey("person", task.getPerson().getId()))
+                        || task.getDeal() != null
+                        && !visible.containsKey(new RecordKey("deal", task.getDeal().getId()))) {
+                    continue;
+                }
                 Map<String, String> fields = new LinkedHashMap<>();
                 fields.put("taskStatus", task.isCompleted() ? "done" : "open");
                 if (task.getDueDate() != null) {

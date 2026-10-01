@@ -163,6 +163,10 @@ class AiAssistantStepGuardTest {
                 finalStep("Ready", "[\"t2\"]", "[]", "null"))));
         assertFalse(AiAssistantStepGuard.containsTaskHandle("part1 t0 t1_suffix"));
         assertTrue(AiAssistantStepGuard.containsTaskHandle("(t123)"));
+        assertEquals("final_task_handle", guard.rejectionReason(objectMapper.readTree(
+                finalStep("[t](record:r1)1", "[\"r1\"]", "[]", "null"))));
+        assertTrue(AiAssistantStepGuard.containsTaskHandle("[t](person:42)1"));
+        assertTrue(AiAssistantStepGuard.containsTaskHandle("ｔ１"));
     }
 
 }

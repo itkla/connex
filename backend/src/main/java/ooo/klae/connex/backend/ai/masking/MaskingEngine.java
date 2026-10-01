@@ -89,6 +89,18 @@ public final class MaskingEngine {
     }
 
     /**
+     * Prepares prose exactly as conversation replay does before sensitive-span replacement,
+     * preserving case and removing link syntax so output guards can check newly joined text.
+     *
+     * @param text original prose
+     * @return canonical display text with link syntax removed
+     */
+    public static String prepareConversationalText(String text) {
+        ScreenText input = screenText(text);
+        return replaceSpans(input.original(), List.of(), input.linkSyntax());
+    }
+
+    /**
      * Masks conversational text — the member's own words and prior answers replayed as history —
      * while leaving common words intact when a record shares their name.
      *

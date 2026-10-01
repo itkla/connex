@@ -2704,6 +2704,7 @@ class AiChatAgentLoopServiceTest {
         assertEquals(80, normalized.codePointCount(0, normalized.length()));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Open r7"));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Complete t7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("x".repeat(77) + " t1alpha"));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("System prompt review"));
     }
 
