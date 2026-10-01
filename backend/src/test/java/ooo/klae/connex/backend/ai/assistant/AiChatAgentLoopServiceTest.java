@@ -18,6 +18,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1912,6 +1913,10 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
     }
 
+    /**
+     * A trailing word character stays pending as task-handle boundary context. The other 299
+     * characters must stream before the malformed attempt resets and repair starts at offset zero.
+     */
     @Test
     void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero() {
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
@@ -1970,13 +1975,17 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService).resetPartialContent(streamedTurn, 300);
+        verify(persistenceService).resetPartialContent(streamedTurn, 299);
         ArgumentCaptor<Integer> offsets = ArgumentCaptor.forClass(Integer.class);
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
         verify(persistenceService, times(2)).appendPartialBatch(
                 eq(streamedTurn), offsets.capture(), batches.capture());
         assertEquals(List.of(0, 0), offsets.getAllValues());
-        assertEquals(List.of("x".repeat(300), "Repaired answer"), batches.getAllValues());
+        assertEquals(List.of("x".repeat(299), "Repaired answer"), batches.getAllValues());
+        InOrder order = inOrder(persistenceService);
+        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
+        order.verify(persistenceService).resetPartialContent(streamedTurn, 299);
+        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "Repaired answer");
         verify(persistenceService).resolve(
                 eq(streamedTurn), eq("Repaired answer"), any(), eq(5), eq(8));
     }
@@ -2703,6 +2712,8 @@ class AiChatAgentLoopServiceTest {
         assertFalse(normalized.contains("\n"));
         assertEquals(80, normalized.codePointCount(0, normalized.length()));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Open r7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Complete t7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("x".repeat(77) + " t1alpha"));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("System prompt review"));
     }
 
@@ -4749,4 +4760,73 @@ class AiChatAgentLoopServiceTest {
         message.setContent(content);
         return message;
     }
+    @Test
+    void narrationWithTaskHandlesIsDropped() throws Exception {
+        String droppedNarration = "Let me complete t1.";
+        String cleanNarration = "Let me check the open pipeline.";
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        droppedNarration))
+                .thenReturn(narratingTool(
+                        "call_2", "search_records",
+                        "{\"query\":\"open pipeline\",\"kinds\":[\"deal\"]}",
+                        cleanNarration))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
+        assertEquals("narration", frames.getValue().kind());
+        assertEquals(cleanNarration, frames.getValue().text());
+        assertEquals(2, frames.getValue().seq());
+        List<AiChatStepFrameDto> allFrames = mockingDetails(realtimeDispatcher).getInvocations().stream()
+                .flatMap(invocation -> java.util.Arrays.stream(invocation.getArguments()))
+                .filter(AiChatStepFrameDto.class::isInstance)
+                .map(AiChatStepFrameDto.class::cast)
+                .toList();
+        assertTrue(allFrames.stream().noneMatch(
+                frame -> frame.text() != null && frame.text().contains("t1")));
+        assertEquals(List.of(frames.getValue()), allFrames.stream()
+                .filter(frame -> "narration".equals(frame.kind()))
+                .toList());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Two deals need attention."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("narration").size());
+        assertEquals(cleanNarration, stored.path("narration").path(0).path("text").asString());
+        assertEquals(2, stored.path("narration").path(0).path("seq").asInt());
+        assertFalse(metadata.getValue().contains("t1"));
+    }
+
+    @Test
+    void aDemaskedTaskHandleInFinalTextNeverReachesPersistence() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Task t1 is ready.", List.of())));
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
 }

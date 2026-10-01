@@ -52,8 +52,10 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -61,13 +63,14 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
+import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
@@ -93,6 +96,9 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private DealService dealService;
+    @Autowired private TaskService taskService;
+    @Autowired private TaskMapper taskMapper;
+    @MockitoSpyBean private TaskMapper taskMapperSpy;
     @MockitoSpyBean private AiChatMapper chatMapperSpy;
     @MockitoSpyBean private DealMapper dealMapperSpy;
     @MockitoSpyBean private PersonMapper personMapperSpy;
@@ -943,4 +949,86 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             int toolCallId,
             AiChatQueuedTurn turn) {
     }
+    @Test
+    void reciprocalInteractiveTaskEditsAndCompletionApprovalsDoNotDeadlock() throws Exception {
+        for (boolean reverse : List.of(false, true)) {
+            User approver = reverse ? secondActor : firstActor;
+            User editor = reverse ? firstActor : secondActor;
+            Task target = task(approver, "Approval target");
+            Task sibling = task(editor, "Interactive target");
+            authenticate(approver);
+            ToolFixture fixture;
+            try {
+                AiChatResourceRegistry resources = new AiChatResourceRegistry();
+                resources.registerTask(target.getId());
+                AiAssistantPreparedWrite write = writeToolService.prepare(
+                        "complete_task", objectMapper.readTree("{\"handle\":\"t1\"}"),
+                        resources, restrictionEpoch.current(workspace.getId()));
+                AiChatSession session = session(approver);
+                fixture = new ToolFixture(session.getId(), toolCall(message(session, approver), write).getId(), null);
+            } finally {
+                clearAuthentication();
+            }
+            CountDownLatch boardHeld = new CountDownLatch(1);
+            CountDownLatch approvalWaiting = new CountDownLatch(1);
+            CountDownLatch releaseEdit = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<Thread> editing = new java.util.concurrent.atomic.AtomicReference<>();
+            TaskMapper real = sqlSessionTemplate.getMapper(TaskMapper.class);
+            doAnswer(invocation -> {
+                if (Thread.currentThread() == editing.get()) {
+                    real.lockTaskBoard(workspace.getId());
+                    boardHeld.countDown();
+                    assertTrue(releaseEdit.await(10, TimeUnit.SECONDS));
+                } else {
+                    approvalWaiting.countDown();
+                    real.lockTaskBoard(workspace.getId());
+                }
+                return null;
+            }).when(taskMapperSpy).lockTaskBoard(workspace.getId());
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> edit = executor.submit(() -> {
+                    editing.set(Thread.currentThread());
+                    authenticate(editor);
+                    try {
+                        sibling.setDescription("Edited by the member");
+                        taskService.update(sibling.getId(), sibling);
+                    } finally {
+                        clearAuthentication();
+                    }
+                });
+                assertTrue(boardHeld.await(10, TimeUnit.SECONDS));
+                Future<?> approval = executor.submit(() -> {
+                    authenticate(approver);
+                    try {
+                        writeToolService.approve(fixture.sessionId(), fixture.toolCallId());
+                    } finally {
+                        clearAuthentication();
+                    }
+                });
+                assertTrue(approvalWaiting.await(10, TimeUnit.SECONDS));
+                releaseEdit.countDown();
+                edit.get(20, TimeUnit.SECONDS);
+                approval.get(20, TimeUnit.SECONDS);
+            } finally {
+                releaseEdit.countDown();
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+                org.mockito.Mockito.reset(taskMapperSpy);
+            }
+            assertTrue(taskMapper.getTaskById(workspace.getId(), target.getId()).isCompleted());
+            assertEquals("Edited by the member", taskMapper.getTaskById(workspace.getId(), sibling.getId()).getDescription());
+        }
+    }
+
+    private Task task(User assignee, String description) {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription(description);
+        task.setStatus("todo");
+        task.setAssignedTo(assignee);
+        taskMapper.insert(task);
+        return task;
+    }
+
 }

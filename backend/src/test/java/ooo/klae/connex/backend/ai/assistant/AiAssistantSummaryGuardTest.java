@@ -26,4 +26,12 @@ class AiAssistantSummaryGuardTest {
         assertEquals("summary_placeholder", guard.rejectionReason(objectMapper.readTree(
                 "{\"summary\":\"The user discussed P1.\"}")));
     }
+    @Test
+    void summariesRefuseTaskHandlesAlongsideRecordHandles() throws Exception {
+        for (String handle : java.util.List.of("t1", "t42", "r1")) {
+            assertEquals("summary_record_handle", guard.rejectionReason(objectMapper.readTree(
+                    "{\"summary\":\"Discussed " + handle + ".\"}")));
+        }
+    }
+
 }

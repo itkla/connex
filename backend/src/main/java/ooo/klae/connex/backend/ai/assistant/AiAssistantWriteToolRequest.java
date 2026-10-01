@@ -18,6 +18,7 @@ import jakarta.validation.constraints.Size;
  */
 public sealed interface AiAssistantWriteToolRequest {
     String HANDLE = "r[1-9][0-9]*";
+    String TASK_HANDLE = "t[1-9][0-9]*";
 
     /** Provider-visible handle resolved to a server-side target before persistence. */
     String handle();
@@ -91,6 +92,18 @@ public sealed interface AiAssistantWriteToolRequest {
             @NotBlank @Pattern(regexp = HANDLE) String handle,
             @JsonProperty("due_in_hours")
             @NotNull @Min(1) @Max(8_760) Integer dueInHours)
+            implements AiAssistantWriteToolRequest {
+    }
+    /** Typed completion proposal for a task issued in the current turn. */
+    record CompleteTask(@NotBlank @Pattern(regexp = TASK_HANDLE) String handle)
+            implements AiAssistantWriteToolRequest {
+    }
+
+    /** Typed calendar-date proposal for a task issued in the current turn. */
+    record RescheduleTask(
+            @NotBlank @Pattern(regexp = TASK_HANDLE) String handle,
+            @JsonProperty("due_date")
+            @NotBlank @Pattern(regexp = "[0-9]{4}-[0-9]{2}-[0-9]{2}") String dueDate)
             implements AiAssistantWriteToolRequest {
     }
 }

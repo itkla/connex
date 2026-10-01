@@ -30,11 +30,13 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantAddTagWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantAssignOwnerWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantRescheduleTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
@@ -91,6 +93,8 @@ class AiAssistantWriteToolSpiArchTest {
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
+            "lockBoardForUpdate",
+            "lockTaskForUpdate",
             "lockProcessablePersonForUpdate",
             "lockProcessablePersonForShare",
             "lockOwnedCompanyForUpdate",
@@ -216,6 +220,10 @@ class AiAssistantWriteToolSpiArchTest {
                             PersonService.class, Set.of("updateOwner"),
                             CompanyService.class, Set.of("updateOwner"),
                             DealService.class, Set.of("updateOwner")),
+                    AiAssistantCompleteTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("complete")),
+                    AiAssistantRescheduleTaskWriteTool.class,
+                    Map.of(TaskService.class, Set.of("reschedule")),
                     AiAssistantSetResponseDueWriteTool.class,
                     Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock")));
 

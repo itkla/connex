@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -42,6 +43,8 @@ public class AiAssistantStepGuard {
             "\\]\\((?:person|company|deal)\\s*:", Pattern.CASE_INSENSITIVE);
     private static final Pattern HANDLE_REFERENCE = Pattern.compile(
             "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
+    private static final Pattern TASK_HANDLE_REFERENCE = Pattern.compile(
+            "(?<![\\p{L}\\p{N}_])t[1-9][0-9]*(?![\\p{L}\\p{N}_])");
     private static final Pattern CONTROL_INSTRUCTION = Pattern.compile(
             "ignore\\s+(?:all\\s+)?(?:previous|prior|above)\\s+instructions?"
                     + "|system\\s+prompt|developer\\s+(?:message|instructions?)"
@@ -165,6 +168,15 @@ public class AiAssistantStepGuard {
                 || !isNullableText(title, 200)) {
             return "final_shape";
         }
+        if (containsTaskHandle(text.asString())
+                || (title.isString() && containsTaskHandle(title.asString()))) {
+            return "final_task_handle";
+        }
+        for (JsonNode suggestion : suggestions) {
+            if (suggestion.isString() && containsTaskHandle(suggestion.asString())) {
+                return "final_task_handle";
+            }
+        }
         if (citations.size() > MAX_CITATIONS) {
             return "final_citations";
         }
@@ -263,8 +275,13 @@ public class AiAssistantStepGuard {
                 && !containsControlInstruction(value);
     }
 
+    static boolean containsTaskHandle(String value) {
+        return value != null && (TASK_HANDLE_REFERENCE.matcher(value).find()
+                || TASK_HANDLE_REFERENCE.matcher(MaskingEngine.prepareConversationalText(value)).find());
+    }
+
     static boolean containsHandle(String value) {
-        return value != null && HANDLE_REFERENCE.matcher(value).find();
+        return value != null && (HANDLE_REFERENCE.matcher(value).find() || containsTaskHandle(value));
     }
 
     static boolean containsControlInstruction(String value) {

@@ -17,7 +17,7 @@ import type {
     AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
-import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -339,6 +339,8 @@ export type AskConnexToolSummaryLabels = {
     assignOwner: string;
     assignOwnerTo: (value: string) => string;
     removeOwner: string;
+    completeTask: string;
+    rescheduleTask: string;
     setResponseDue: string;
     setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
@@ -347,6 +349,8 @@ export type AskConnexToolSummaryLabels = {
     createdRecordRemoved: string;
     activityCreated: string;
     taskCreated: string;
+    taskCompleted: string;
+    taskRescheduled: string;
     noteCreated: string;
     tagAdded: string;
     tagAlreadyPresent: string;
@@ -733,7 +737,7 @@ export function toggleAskConnexProposalExclusion(
 
 /** Resolves a viewer-authorized assistant tool target to its record-detail route. */
 export function askConnexToolTargetHref(target: AiAssistantToolCall['target']): string | null {
-    if (target.id === null) return null;
+    if (target.id === null || target.kind === 'task') return null;
     if (target.kind === 'person') return `/records/contacts/${target.id}`;
     if (target.kind === 'company') return `/records/companies/${target.id}`;
     return `/records/deals/${target.id}`;
@@ -798,8 +802,9 @@ function summaryValue(summary: string, prefix: string): string | null {
  * the database stores, and is read as UTC exactly as the contact's own lead panel reads it, so the
  * two surfaces print the same deadline. The deadline a proposal would start arrives as the whole
  * hours from the approval the server will count them from, and is stated in the member's words.
- * A value that does not parse stands as it is. Every other reviewed value is a name the workspace
- * already wrote in its own words, and stands as it is.
+ * Task dates and completion states use the reader's locale. A value that does not parse stands
+ * as it is. Every other reviewed value is a name the workspace already wrote in its own words,
+ * and stands as it is.
  */
 export function askConnexChangeValueText(
     field: AiAssistantToolCallChangeField,
@@ -807,7 +812,12 @@ export function askConnexChangeValueText(
     side: 'current' | 'proposed',
     locale: string,
     responseDueInHours: (hours: number) => string,
+    taskStatus?: Readonly<Record<'open' | 'done', string>>,
 ): string {
+    if (field === 'dueDate') return formatDate(value, locale);
+    if (field === 'taskStatus' && (value === 'open' || value === 'done')) {
+        return taskStatus?.[value] ?? value;
+    }
     if (field !== 'responseDue') return value;
     if (side === 'current') return formatUtcDateTime(value, locale, value);
     const hours = Number(value);
@@ -821,6 +831,8 @@ export function askConnexToolRequestSummary(
 ): string {
     if (toolCall.toolName === 'create_activity') return labels.createActivity;
     if (toolCall.toolName === 'create_task') return labels.createTask;
+    if (toolCall.toolName === 'complete_task') return labels.completeTask;
+    if (toolCall.toolName === 'reschedule_task') return labels.rescheduleTask;
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
     if (toolCall.toolName === 'remove_tag') {
@@ -857,6 +869,8 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.status === 'undone') return labels.createdRecordRemoved;
     if (toolCall.toolName === 'create_activity') return labels.activityCreated;
     if (toolCall.toolName === 'create_task') return labels.taskCreated;
+    if (toolCall.toolName === 'complete_task') return labels.taskCompleted;
+    if (toolCall.toolName === 'reschedule_task') return labels.taskRescheduled;
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;

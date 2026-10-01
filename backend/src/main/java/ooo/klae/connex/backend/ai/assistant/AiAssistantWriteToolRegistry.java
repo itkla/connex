@@ -40,7 +40,7 @@ import ooo.klae.connex.backend.tenant.Permission;
  */
 @Component
 public class AiAssistantWriteToolRegistry {
-    private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal");
+    private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal", "task");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");
     private static final Pattern FLAG_NAME = Pattern.compile("[a-z][A-Za-z]*");
 
@@ -135,6 +135,9 @@ public class AiAssistantWriteToolRegistry {
         if (tool.requiresOwnedTarget() && !kinds.equals(Set.of("person"))) {
             throw refused(name, "requires an owned target, which is checked only for a person");
         }
+        if (tool.freshness() == null || tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+            throw refused(name, "declares unsupported freshness");
+        }
         for (String kind : kinds) {
             Set<Permission> permissions = tool.requiredPermissions(kind);
             if (permissions == null || permissions.isEmpty()) {
@@ -143,6 +146,11 @@ public class AiAssistantWriteToolRegistry {
             Lock lock = tool.lock(kind);
             if (lock == null) {
                 throw refused(name, "declares no lock for " + kind);
+            }
+            if ("task".equals(kind) != (lock.target() == TargetLock.TASK_ROW)
+                    || "task".equals(kind) != (tool.freshness()
+                            == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT)) {
+                throw refused(name, "task targets require TASK_ROW and TARGET_FINGERPRINT");
             }
             if (lock.target() == TargetLock.PERSON_SHARE && !"person".equals(kind)) {
                 throw refused(name, "declares a shared person lock for " + kind);

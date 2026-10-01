@@ -209,6 +209,7 @@ public class AiChatMemoryService {
                 }
                 String generated = parsedSummary.summary().strip();
                 if (generated.isBlank()
+                        || AiAssistantStepGuard.containsHandle(generated)
                         || AiGeneratedContentScreen.containsPlaceholder(generated)
                         || AiGeneratedContentScreen.rejectionReason(generated) != null) {
                     throw new AiAssistantLoopException(

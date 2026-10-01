@@ -367,4 +367,33 @@ class TaskServiceTest extends AbstractServiceTest {
         update.setDeal(task.getDeal());
         return update;
     }
+    @Test
+    void assistantFingerprintIgnoresBoardBookkeepingButCoversEverySemanticField() {
+        Task task = new Task();
+        task.setId(73);
+        task.setDescription("Agenda");
+        task.setStatus("todo");
+        String original = TaskService.assistantStateVersion(task);
+        task.setPosition(12);
+        task.setUpdatedAt("2099-01-01 00:00:00");
+        org.junit.jupiter.api.Assertions.assertEquals(original, TaskService.assistantStateVersion(task));
+        java.util.List<java.util.function.Consumer<Task>> changes = java.util.List.of(
+                value -> value.setId(74),
+                value -> value.setDescription("Changed"),
+                value -> value.setCompleted(true),
+                value -> value.setStatus("in_progress"),
+                value -> value.setDueDate("2026-10-15"),
+                value -> { User user = new User(); user.setId(99); value.setAssignedTo(user); },
+                value -> { ooo.klae.connex.backend.beans.Person person = new ooo.klae.connex.backend.beans.Person(); person.setId(99); value.setPerson(person); },
+                value -> { ooo.klae.connex.backend.beans.Deal deal = new ooo.klae.connex.backend.beans.Deal(); deal.setId(99); value.setDeal(deal); });
+        for (java.util.function.Consumer<Task> change : changes) {
+            Task candidate = new Task();
+            candidate.setId(73);
+            candidate.setDescription("Agenda");
+            candidate.setStatus("todo");
+            change.accept(candidate);
+            org.junit.jupiter.api.Assertions.assertNotEquals(original, TaskService.assistantStateVersion(candidate));
+        }
+    }
+
 }

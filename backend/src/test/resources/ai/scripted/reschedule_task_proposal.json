@@ -1,0 +1,51 @@
+{
+  "id": "reschedule_task_proposal",
+  "selector": "connex_script_reschedule_task_proposal",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Taskhandle\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "list_tasks",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_followup\"}"
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "reschedule_task",
+        "arguments": "{\"handle\":\"t1\",\"due_date\":\"2026-10-15\"}"
+      }
+    },
+    {
+      "afterToolCalls": 4,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"The task change is ready for your approval.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

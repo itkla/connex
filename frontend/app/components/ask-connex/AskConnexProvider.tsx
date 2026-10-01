@@ -2498,6 +2498,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         side,
         locale,
         (hours) => t('toolCards.change.responseDueInHours', { hours }),
+        { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
     ), [locale, t]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
@@ -2656,6 +2657,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 stage: t('toolCards.change.fieldStage'),
                 tag: t('toolCards.change.fieldTag'),
                 responseDue: t('toolCards.change.fieldResponseDue'),
+                taskStatus: t('toolCards.change.fieldTaskStatus'),
+                dueDate: t('toolCards.change.fieldDueDate'),
             },
             changeValue: changeValueText,
             changeNotSet: t('toolCards.change.notSet'),
@@ -2664,6 +2667,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 stage: t('toolCards.change.currentUnresolvedStage'),
                 tag: t('toolCards.change.currentUnresolvedTag'),
                 responseDue: t('toolCards.change.currentUnresolvedResponseDue'),
+                taskStatus: t('toolCards.change.currentUnresolvedTaskStatus'),
+                dueDate: t('toolCards.change.currentUnresolvedDueDate'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
@@ -2732,6 +2737,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             summaries: {
                 createActivity: t('toolCards.summaries.createActivity'),
                 createTask: t('toolCards.summaries.createTask'),
+                completeTask: t('toolCards.summaries.completeTask'),
+                rescheduleTask: t('toolCards.summaries.rescheduleTask'),
                 createNote: t('toolCards.summaries.createNote'),
                 addTag: t('toolCards.summaries.addTag'),
                 removeTag: t('toolCards.summaries.removeTag'),
@@ -2750,6 +2757,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 createdRecordRemoved: t('toolCards.summaries.createdRecordRemoved'),
                 activityCreated: t('toolCards.summaries.activityCreated'),
                 taskCreated: t('toolCards.summaries.taskCreated'),
+                taskCompleted: t('toolCards.summaries.taskCompleted'),
+                taskRescheduled: t('toolCards.summaries.taskRescheduled'),
                 noteCreated: t('toolCards.summaries.noteCreated'),
                 tagAdded: t('toolCards.summaries.tagAdded'),
                 tagAlreadyPresent: t('toolCards.summaries.tagAlreadyPresent'),

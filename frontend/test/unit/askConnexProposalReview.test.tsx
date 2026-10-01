@@ -110,6 +110,57 @@ describe("assistant proposal review", () => {
         expect(markup).toContain("Apply the proposed change to Acme renewal");
     });
 
+    it("reviews task completion without fabricating a task target link", () => {
+        const task = card({
+            target: { kind: "task", id: 19, label: "Call Ada" },
+            toolName: "complete_task",
+            requestSummary: "Complete the task",
+            change: change({ field: "taskStatus", currentValue: "open", proposedValue: "done" }),
+        });
+        const markup = renderCard(task);
+        expect(markup).toContain("Complete the task");
+        expect(markup).toContain("Status");
+        expect(markup).toContain(">Open<");
+        expect(markup).toContain(">Done<");
+        expect(markup).toContain("Apply the proposed change to Call Ada");
+        expect(markup).not.toContain('href=');
+        expect(markup).not.toContain("Change it on the record");
+
+        const completed = renderCard({
+            ...task,
+            change: change({
+                field: "taskStatus", currentValue: "done", proposedValue: "done", state: "unchanged",
+            }),
+        });
+        expect(completed).toContain(cardLabels.changeState.unchanged);
+        expect(completed).not.toContain("Apply the proposed change to Call Ada");
+    });
+
+    it("reviews the task due date and blocks approval after a target change", () => {
+        const task = card({
+            target: { kind: "task", id: 19, label: "Call Ada" },
+            toolName: "reschedule_task",
+            requestSummary: "Reschedule the task",
+            change: change({ field: "dueDate", currentValue: null, proposedValue: "2026-10-03" }),
+        });
+        const markup = renderCard(task);
+        expect(markup).toContain("Reschedule the task");
+        expect(markup).toContain("Due date");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain("October 3, 2026");
+        expect(markup).toContain("Apply the proposed change to Call Ada");
+        expect(markup).not.toContain('href=');
+
+        const changed = renderCard({
+            ...task,
+            change: change({
+                field: "dueDate", currentValue: null, proposedValue: "2026-10-03", state: "recordChanged",
+            }),
+        });
+        expect(changed).toContain(cardLabels.changeState.recordChanged);
+        expect(changed).not.toContain("Apply the proposed change to Call Ada");
+    });
+
     it("states a response deadline in the reader's words rather than the stored tokens", () => {
         const first = renderCard(card({
             target: { kind: "person", id: 31, label: "Ada Lovelace" },

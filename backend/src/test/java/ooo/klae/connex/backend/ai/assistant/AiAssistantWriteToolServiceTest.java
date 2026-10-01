@@ -160,6 +160,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService),
+                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(leadResponseSlaService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,

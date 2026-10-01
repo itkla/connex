@@ -84,4 +84,25 @@ class AiChatResourceRegistryTest {
         assertEquals(Map.of(), resources.snapshot());
         assertEquals(17, copy.resolve("r1").id());
     }
+    @Test
+    void taskHandlesHaveTheirOwnCounterAndNeverEnterCitationsOrReplay() {
+        AiChatResourceRegistry registry = new AiChatResourceRegistry();
+        assertEquals("t1", registry.registerTask(42));
+        assertEquals("r1", registry.register("person", 42));
+        assertEquals("t1", registry.registerTask(42));
+        assertEquals(Optional.empty(), registry.handleFor("task", 42));
+        assertEquals(Set.of("r1"), registry.snapshot().keySet());
+        assertThrows(AiAssistantLoopException.class, () -> registry.requireKnownCitations(List.of("t1")));
+        var checkpoint = registry.checkpoint();
+        var issued = registry.issued();
+        registry.registerTask(43);
+        registry.register("deal", 43);
+        assertThrows(AiAssistantLoopException.class, () -> issued.resolve("t2"));
+        registry.restore(checkpoint);
+        assertThrows(AiAssistantLoopException.class, () -> registry.resolve("t2"));
+        assertThrows(AiAssistantLoopException.class, () -> registry.resolve("r2"));
+        assertEquals("t3", registry.registerTask(44));
+        assertEquals("r3", registry.register("deal", 44));
+    }
+
 }

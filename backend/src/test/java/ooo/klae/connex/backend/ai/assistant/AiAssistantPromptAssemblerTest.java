@@ -161,6 +161,30 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void historicalAnswersThatAssembleTaskHandlesAreNotReplayed() {
+        AiChatMessage unsafe = new AiChatMessage();
+        unsafe.setAuthorKind("assistant");
+        unsafe.setContent("[t](person:42)1");
+        AiChatMessage safe = new AiChatMessage();
+        safe.setAuthorKind("assistant");
+        safe.setContent("The second task needs attention.");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(unsafe, safe),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
+
+        var answers = prompt.getMessages().stream()
+                .filter(message -> "assistant".equals(message.getRole())).toList();
+        assertEquals(1, answers.size());
+        assertTrue(answers.getFirst().getContent().contains(safe.getContent()));
+        assertFalse(AiAssistantStepGuard.containsTaskHandle(answers.getFirst().getContent()));
+    }
+
+    @Test
     void replayAndInjectedCrmStringsStayMaskedEscapedAndOutsideSystemPolicy() throws Exception {
         AiChatMessage replayed = new AiChatMessage();
         replayed.setAuthorKind("user");

@@ -180,6 +180,8 @@ abstract class AbstractAiAssistantWriteToolTest {
         declared.add(removeTagTool());
         declared.add(assignOwnerTool());
         declared.add(setResponseDueTool());
+        declared.add(new AiAssistantCompleteTaskWriteTool(taskService));
+        declared.add(new AiAssistantRescheduleTaskWriteTool(taskService));
         return framework(declared);
     }
 

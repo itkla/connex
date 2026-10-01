@@ -166,7 +166,7 @@ public class AiAssistantWriteToolService {
                         ? storedPins(storedArgumentsJson.get())
                         : pins(tool, new Target(target.kind(), target.id()), request);
         ObjectNode storedRequest = objectMapper.valueToTree(request);
-        storedRequest.put("handle", "r1");
+        storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
         Map<String, Object> targetData = new LinkedHashMap<>();
         targetData.put("kind", target.kind());
         targetData.put("id", target.id());
@@ -176,6 +176,16 @@ public class AiAssistantWriteToolService {
         durable.put("restrictionEpoch", expectedRestrictionEpoch);
         durable.put("target", targetData);
         durable.put("request", storedRequest);
+        if (tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
+            String version;
+            if (storedArgumentsJson.isPresent()) {
+                version = text(objectMapper.readTree(storedArgumentsJson.get()), "targetVersion");
+            } else {
+                version = taskService.assistantStateVersion(target.id());
+                taskService.getTaskById(target.id());
+            }
+            durable.put("targetVersion", version);
+        }
         if (pins != null) {
             pins.writeTo(durable);
         }
@@ -350,7 +360,7 @@ public class AiAssistantWriteToolService {
                 actor.workspaceId(), write.restrictionEpoch())) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
-        requireTargetUnchangedSinceProposal(toolCall, mutation);
+        requireTargetUnchangedSinceProposal(write, toolCall, mutation);
         requirePermissions(authorized.authority(), actor.userId(), write);
         ExecutionOutcome outcome = execute(
                 write,
@@ -533,6 +543,15 @@ public class AiAssistantWriteToolService {
             case "person" -> personService.getPersonById(write.targetId());
             case "company" -> companyService.getCompanyById(write.targetId());
             case "deal" -> dealService.getDealById(write.targetId());
+            case "task" -> {
+                var task = taskService.getTaskById(write.targetId());
+                if (task.getPerson() != null) {
+                    personService.getPersonById(task.getPerson().getId());
+                }
+                if (task.getDeal() != null) {
+                    dealService.getDealById(task.getDeal().getId());
+                }
+            }
             default -> throw new BadRequestException("Unsupported assistant record kind");
         }
     }
@@ -700,7 +719,11 @@ public class AiAssistantWriteToolService {
             throw new ConflictException(PROPOSAL_CHANGED);
         }
         if (lock.taskBoard()) {
-            taskService.lockBoardForCreation();
+            if (lock.target() == AiAssistantWriteTool.TargetLock.TASK_ROW) {
+                taskService.lockBoardForUpdate();
+            } else {
+                taskService.lockBoardForCreation();
+            }
         }
         return switch (lock.target()) {
             case PERSON_SHARE -> {
@@ -712,6 +735,8 @@ public class AiAssistantWriteToolService {
                         resolution,
                         updatedAt(personService.lockProcessablePersonForShare(write.targetId())));
             }
+            case TASK_ROW -> new PreparedMutation(null, resolution, null,
+                    TaskService.assistantStateVersion(taskService.lockTaskForUpdate(write.targetId())));
             case RECORD_UPDATE -> new PreparedMutation(null, resolution, lockTargetForUpdate(write));
             case DEAL_STAGE_CHANGE -> {
                 if (resolution == null) {
@@ -762,7 +787,14 @@ public class AiAssistantWriteToolService {
      * member never saw.
      */
     private static void requireTargetUnchangedSinceProposal(
-            AiChatToolCall toolCall, PreparedMutation mutation) {
+            StoredWrite write, AiChatToolCall toolCall, PreparedMutation mutation) {
+        if (write.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
+            if (write.targetVersion() == null
+                    || !write.targetVersion().equals(mutation.targetVersion())) {
+                throw new ConflictException(PROPOSAL_CHANGED);
+            }
+            return;
+        }
         if (AiAssistantProposalFreshness.changedSince(
                 mutation.targetUpdatedAt(), toolCall.getCreatedAt())) {
             throw new ConflictException(PROPOSAL_CHANGED);
@@ -816,7 +848,9 @@ public class AiAssistantWriteToolService {
             AiAssistantWriteToolRequest typedRequest = readRequest(tool, request);
             return new StoredWrite(
                     tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest,
-                    AiAssistantProposalPins.read(root));
+                    AiAssistantProposalPins.read(root),
+                    tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
+                            ? text(root, "targetVersion") : null);
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
@@ -1057,13 +1091,19 @@ public class AiAssistantWriteToolService {
             int targetId,
             long restrictionEpoch,
             AiAssistantWriteToolRequest typedRequest,
-            AiAssistantProposalPins pins) {
+            AiAssistantProposalPins pins,
+            String targetVersion) {
     }
 
     private record PreparedMutation(
             DealService.LockedStageChange stageChange,
             Resolution resolution,
-            String targetUpdatedAt) {
+            String targetUpdatedAt,
+            String targetVersion) {
+        private PreparedMutation(
+                DealService.LockedStageChange stageChange, Resolution resolution, String updatedAt) {
+            this(stageChange, resolution, updatedAt, null);
+        }
     }
 
     private record ExecutionOutcome(

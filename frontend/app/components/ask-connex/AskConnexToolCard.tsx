@@ -58,6 +58,8 @@ export type AskConnexChangeFieldLabels = {
     stage: string;
     tag: string;
     responseDue: string;
+    taskStatus: string;
+    dueDate: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -72,6 +74,8 @@ export type AskConnexUnresolvedValueLabels = {
     stage: string;
     tag: string;
     responseDue: string;
+    taskStatus: string;
+    dueDate: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */

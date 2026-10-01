@@ -804,7 +804,13 @@
         "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made.",
         "stateUnresolvedRemoval": "What this would remove has changed since it was proposed, so this change can't be made.",
         "stateUnchangedResponseDue": "This contact already has a first-response deadline, and an existing deadline is never moved, so applying this would change nothing.",
-        "stateUnresolvedResponseDue": "This contact belongs to another workspace, so only that workspace can set its first-response deadline."
+        "stateUnresolvedResponseDue": "This contact belongs to another workspace, so only that workspace can set its first-response deadline.",
+        "fieldTaskStatus": "Status",
+        "fieldDueDate": "Due date",
+        "taskOpen": "Open",
+        "taskDone": "Done",
+        "currentUnresolvedTaskStatus": "A status that can't be shown",
+        "currentUnresolvedDueDate": "A due date that can't be shown"
       },
       "actions": {
         "undo": "Undo",
@@ -856,7 +862,11 @@
         "ownerAssigned": "Owner assigned",
         "responseDueSet": "First-response deadline set",
         "responseDueAlreadySet": "A first-response deadline was already set",
-        "requestCompleted": "Request completed"
+        "requestCompleted": "Request completed",
+        "completeTask": "Complete the task",
+        "rescheduleTask": "Reschedule the task",
+        "taskCompleted": "Task completed",
+        "taskRescheduled": "Task rescheduled"
       },
       "outcomeFields": {
         "type": "Type",

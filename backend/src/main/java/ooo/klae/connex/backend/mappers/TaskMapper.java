@@ -116,6 +116,9 @@ public interface TaskMapper {
         @Param("workspaceId") int workspaceId,
         @Param("ids") List<Integer> ids
     );
+    /** Batched canonical task snapshots with the same visibility predicate as getVisibleIdsIn. */
+    List<Task> getTaskSnapshotsIn(
+        @Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Task> search(
         @Param("workspaceId") int workspaceId,
         @Param("query") String query,

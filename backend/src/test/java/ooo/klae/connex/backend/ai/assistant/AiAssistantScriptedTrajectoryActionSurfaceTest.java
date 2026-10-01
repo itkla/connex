@@ -25,14 +25,18 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -73,6 +77,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTrajectoryTest {
 
+    @Autowired private TaskMapper taskMapper;
+    @Autowired private TaskService taskService;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PersonMapper personMapper;
@@ -96,6 +102,8 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     @AfterEach
     void removeSharedInContacts() {
         for (Integer personId : sharedPeople) {
+            jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ? AND person_id = ?",
+                    workspaceId(), personId);
             jdbcTemplate.update("DELETE FROM person_share WHERE person_id = ?", personId);
             jdbcTemplate.update("DELETE FROM person WHERE id = ?", personId);
         }
@@ -808,4 +816,185 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         workspaceMapper.addMember(workspaceId(), user.getId(), "member");
         return user;
     }
+    @Test
+    void completeTaskAssigneeProposalRejectsReassignmentButNotSiblingCompaction() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task sibling = task(contact, "Earlier board row", "2026-10-12", 0);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 1);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "list_tasks", "find_tools", "complete_task"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        assertFalse(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(0, taskAuditRows("task.complete", target.getId()));
+        authenticate();
+        try {
+            taskService.complete(sibling.getId());
+            assertEquals(0, taskMapper.getTaskById(workspaceId(), target.getId()).getPosition());
+            var card = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertEquals("ready", card.change().state());
+            assertEquals(0, taskAuditRows("task.complete", target.getId()));
+            var settled = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Task completed = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(settled, writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(completed, taskMapper.getTaskById(workspaceId(), target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+        assertTrue(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(1, taskAuditRows("task.complete", target.getId()));
+        assertEquals(2, auditRows("task.complete"));
+    }
+
+    @Test
+    void completeTaskReassignmentFailsTheFrameworkFingerprint() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        User other = extraMember("Task colleague");
+        jdbcTemplate.update("UPDATE task SET assigned_to_id = ? WHERE workspace_id = ? AND id = ?",
+                other.getId(), workspaceId(), target.getId());
+        authenticate();
+        try {
+            assertEquals("recordChanged", toolCallReadService.list(trajectory.sessionId(), true).getFirst().change().state());
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertFalse(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(0, auditRows("task.complete"));
+    }
+
+    @Test
+    void rescheduleTaskProposalLeavesTheDateAloneUntilApproval() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_reschedule_task_proposal", "move the first item to October fifteenth");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "reschedule_task");
+        assertEquals("2026-10-10", taskMapper.getTaskById(workspaceId(), target.getId()).getDueDate());
+        assertEquals(0, taskAuditRows("task.update", target.getId()));
+        authenticate();
+        try {
+            var card = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertEquals("dueDate", card.change().field());
+            assertEquals("ready", card.change().state());
+            var settled = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Task rescheduled = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(settled, writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(rescheduled, taskMapper.getTaskById(workspaceId(), target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals("2026-10-15", taskMapper.getTaskById(workspaceId(), target.getId()).getDueDate());
+        assertEquals(1, taskAuditRows("task.update", target.getId()));
+    }
+
+    @Test
+    void taskApprovalAndCardLoseAccessWhenTheLinkedPersonShareIsRevoked() {
+        Workspace owner = siblingWorkspace();
+        Person shared = new Person();
+        shared.setWorkspaceId(owner.getId());
+        shared.setName("Taskhandle Contact");
+        personMapper.insert(shared);
+        sharedPeople.add(shared.getId());
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)",
+                shared.getId(), workspaceId()));
+        Task target = task(shared, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        authenticate();
+        try {
+            assertEquals("ready", toolCallReadService.list(trajectory.sessionId(), true)
+                    .getFirst().change().state());
+            Task before = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(1, jdbcTemplate.update(
+                    "DELETE FROM person_share WHERE person_id = ? AND workspace_id = ?",
+                    shared.getId(), workspaceId()));
+            var hidden = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertNull(hidden.change());
+            assertNull(hidden.target().id());
+            assertThrows(ResourceNotFoundException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(before, taskMapper.getTaskById(workspaceId(), target.getId()));
+            assertEquals("proposed", jdbcTemplate.queryForObject(
+                    "SELECT status FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), proposal.getId()));
+            assertEquals(0, taskAuditRows("task.complete", target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    /**
+     * Replays the untouched repaired answer after changing task order. Only the first member
+     * message's harness selector is removed: the fixture loader refuses two selectors in history,
+     * so the second turn can then use the completion fixture without changing any model text.
+     */
+    @Test
+    void taskHandleTwoTurnsRepairsTextAndUsesOnlyTheSecondTurnsIssuedTask() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task first = task(contact, "First item", "2026-10-10", 0);
+        Task second = task(contact, "Second item", "2026-10-12", 1);
+        Trajectory initial = run("connex_script_task_handle_two_turns", "review these tasks");
+        assertEquals("resolved", initial.status(), initial.terminalReason());
+        assertEquals("The second task needs attention.", initial.answer());
+        assertFalse(AiAssistantStepGuard.containsTaskHandle(initial.answer()));
+        assertTrue(journal().dispatched().stream().anyMatch(request ->
+                request.nativeTools() != null && request.nativeTools().repairMessage() != null
+                        && request.nativeTools().repairMessage().contains("final_task_handle")));
+        jdbcTemplate.update("UPDATE task SET due_date = '2026-10-09' WHERE workspace_id = ? AND id = ?",
+                workspaceId(), second.getId());
+        jdbcTemplate.update(
+                "UPDATE ai_chat_message SET content = REPLACE(content, ?, '')"
+                        + " WHERE workspace_id = ? AND session_id = ? AND author_kind = 'user'",
+                "connex_script_task_handle_two_turns", workspaceId(), initial.sessionId());
+        journal().clear();
+        Trajectory next = runInSession(initial.sessionId(), "connex_script_complete_task_assignee",
+                "finish the first item in the fresh list", List.of());
+        assertEquals("resolved", next.status(), next.terminalReason());
+        var replayedAnswers = journal().dispatched().getFirst().messages().stream()
+                .filter(message -> "assistant".equals(message.role())).toList();
+        assertTrue(replayedAnswers.stream().anyMatch(message -> message.content().contains(initial.answer())),
+                "turn two must actually replay turn one's repaired answer");
+        assertTrue(replayedAnswers.stream().noneMatch(message ->
+                AiAssistantStepGuard.containsTaskHandle(message.content())));
+        AiChatToolCall proposal = proposal(next, "complete_task");
+        assertEquals(second.getId(), objectMapper.readTree(proposal.getArgumentsJson()).path("target").path("id").asInt());
+        authenticate();
+        try {
+            writeToolService().approve(next.sessionId(), proposal.getId());
+        } finally {
+            clearAuthentication();
+        }
+        assertFalse(taskMapper.getTaskById(workspaceId(), first.getId()).isCompleted());
+        assertTrue(taskMapper.getTaskById(workspaceId(), second.getId()).isCompleted());
+    }
+
+    private int taskAuditRows(String action, int taskId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?"
+                        + " AND entity_type = 'task' AND entity_id = ?",
+                Integer.class, workspaceId(), action, taskId);
+    }
+
+    private Task task(Person person, String description, String dueDate, int position) {
+        Task task = new Task();
+        task.setWorkspaceId(workspaceId());
+        task.setDescription(description);
+        task.setStatus("todo");
+        task.setPosition(position);
+        task.setDueDate(dueDate);
+        task.setPerson(person);
+        task.setAssignedTo(member());
+        taskMapper.insert(task);
+        return task;
+    }
+
 }

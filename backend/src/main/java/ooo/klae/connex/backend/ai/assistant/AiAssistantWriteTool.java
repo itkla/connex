@@ -87,6 +87,14 @@ public interface AiAssistantWriteTool {
      */
     Lock lock(String targetKind);
 
+    /** The state comparison approval and its card share for this target. */
+    default Freshness freshness() {
+        return Freshness.TARGET_UPDATED_AT;
+    }
+
+    /** Proposal freshness policies; NONE is reserved for future structural creates. */
+    enum Freshness { TARGET_UPDATED_AT, TARGET_FINGERPRINT, NONE }
+
     /**
      * The members this write will name, resolved once before any lock.
      *
@@ -439,7 +447,9 @@ public interface AiAssistantWriteTool {
         /** The target person, company or deal {@code FOR UPDATE}. */
         RECORD_UPDATE,
         /** The ordered board rows of a deal stage change toward the resolved stage. */
-        DEAL_STAGE_CHANGE
+        DEAL_STAGE_CHANGE,
+        /** The exact task row, after the board root when the write changes positions. */
+        TASK_ROW
     }
 
     /**
@@ -634,7 +644,15 @@ public interface AiAssistantWriteTool {
             Integer stageId,
             String updatedAt,
             Map<String, String> fields,
-            boolean sharedIn) {
+            boolean sharedIn,
+            String targetVersion) {
+
+        /** Record targets retain timestamp freshness and carry no semantic fingerprint. */
+        public RecordSnapshot(
+                String label, Integer pipelineId, Integer ownerId, Integer stageId,
+                String updatedAt, Map<String, String> fields, boolean sharedIn) {
+            this(label, pipelineId, ownerId, stageId, updatedAt, fields, sharedIn, null);
+        }
 
         public RecordSnapshot {
             fields = fields == null
@@ -654,7 +672,7 @@ public interface AiAssistantWriteTool {
         /** @return this snapshot with no reviewable field values, for a tool that read none */
         public RecordSnapshot withoutFields() {
             return new RecordSnapshot(
-                    label, pipelineId, ownerId, stageId, updatedAt, Map.of(), sharedIn);
+                    label, pipelineId, ownerId, stageId, updatedAt, Map.of(), sharedIn, targetVersion);
         }
     }
 

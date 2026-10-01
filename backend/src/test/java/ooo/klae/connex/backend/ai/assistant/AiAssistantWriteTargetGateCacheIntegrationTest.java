@@ -26,12 +26,14 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
@@ -48,6 +50,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class AiAssistantWriteTargetGateCacheIntegrationTest {
+    @Autowired private TaskMapper taskMapper;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private DealMapper dealMapper;
     @Autowired private OrganizationMapper organizationMapper;
@@ -112,6 +115,7 @@ class AiAssistantWriteTargetGateCacheIntegrationTest {
     @AfterEach
     void cleanUp() {
         if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM deal WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM stage WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM pipeline WHERE workspace_id = ?", workspace.getId());
@@ -186,4 +190,46 @@ class AiAssistantWriteTargetGateCacheIntegrationTest {
         assertEquals(reads[0], reads[1], "the unlocked re-read is answered from the session cache");
         assertEquals(renamed, reads[2], "the gate after the " + table + " lock read the cached row");
     }
+    @Test
+    void theTaskLockFlushesThePreLockSnapshot() {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Before concurrent edit");
+        task.setStatus("todo");
+        taskMapper.insert(task);
+        TransactionTemplate decision = new TransactionTemplate(transactionManager);
+        decision.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        TransactionTemplate concurrent = new TransactionTemplate(transactionManager);
+        concurrent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        decision.executeWithoutResult(status -> {
+            assertEquals("Before concurrent edit", taskMapper.getTaskById(workspace.getId(), task.getId()).getDescription());
+            concurrent.executeWithoutResult(inner -> jdbcTemplate.update(
+                    "UPDATE task SET description = ? WHERE workspace_id = ? AND id = ?",
+                    "Committed edit", workspace.getId(), task.getId()));
+            assertEquals("Before concurrent edit", taskMapper.getTaskById(workspace.getId(), task.getId()).getDescription());
+            taskMapper.getTaskByIdForUpdate(workspace.getId(), task.getId());
+            assertEquals("Committed edit", taskMapper.getTaskById(workspace.getId(), task.getId()).getDescription());
+        });
+    }
+
+    @Test
+    void canonicalTaskSnapshotsNeverHashAHydratedCachedDescription() {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Canonical reference text");
+        task.setStatus("todo");
+        taskMapper.insert(task);
+        TransactionTemplate read = new TransactionTemplate(transactionManager);
+        read.executeWithoutResult(status -> {
+            Task hydrated = taskMapper.getTaskById(workspace.getId(), task.getId());
+            hydrated.setDescription("[unavailable]");
+            Task snapshot = taskMapper.getTaskSnapshotsIn(workspace.getId(), java.util.List.of(task.getId())).getFirst();
+            assertEquals("Canonical reference text", snapshot.getDescription());
+            String version = ooo.klae.connex.backend.services.TaskService.assistantStateVersion(snapshot);
+            snapshot.setDescription("[unavailable]");
+            Task fresh = taskMapper.getTaskSnapshotsIn(workspace.getId(), java.util.List.of(task.getId())).getFirst();
+            assertEquals(version, ooo.klae.connex.backend.services.TaskService.assistantStateVersion(fresh));
+        });
+    }
+
 }

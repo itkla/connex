@@ -115,13 +115,15 @@ class AiAssistantWriteToolRegistryTest {
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("assign_owner", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                 tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
+                new AiAssistantCompleteTaskWriteTool(null),
+                new AiAssistantRescheduleTaskWriteTool(null),
                 tool("set_response_due", ToolTier.CONFIRM, Set.of("person")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due", "complete_task", "reschedule_task"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -139,9 +141,11 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null),
+                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(null)));
 
-        assertEquals(8, registry.tools().size());
+        assertEquals(10, registry.tools().size());
     }
 
     @Test
@@ -169,7 +173,7 @@ class AiAssistantWriteToolRegistryTest {
     @Test
     void refusesAnAcceptedKindOutsideTheRecordKinds() {
         assertRefused("create_task must accept a non-empty subset", List.of(
-                tool("create_task", ToolTier.AUTO, Set.of("person", "task"))));
+                tool("create_task", ToolTier.AUTO, Set.of("person", "workspace"))));
         assertRefused("create_task must accept a non-empty subset", List.of(
                 tool("create_task", ToolTier.AUTO, Set.of())));
     }
@@ -529,6 +533,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
+                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -548,6 +554,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
+                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -634,4 +642,22 @@ class AiAssistantWriteToolRegistryTest {
             return List.of();
         }
     }
+    @Test
+    void taskDeclarationsRequireTheExactLockAndFingerprintFreshnessTogether() {
+        AiAssistantCompleteTaskWriteTool wrongLock = new AiAssistantCompleteTaskWriteTool(null) {
+            @Override
+            public Lock lock(String kind) {
+                return new Lock(true, TargetLock.RECORD_UPDATE);
+            }
+        };
+        assertRefused("task targets require TASK_ROW and TARGET_FINGERPRINT", List.of(wrongLock));
+        AiAssistantCompleteTaskWriteTool wrongFreshness = new AiAssistantCompleteTaskWriteTool(null) {
+            @Override
+            public Freshness freshness() {
+                return Freshness.TARGET_UPDATED_AT;
+            }
+        };
+        assertRefused("task targets require TASK_ROW and TARGET_FINGERPRINT", List.of(wrongFreshness));
+    }
+
 }

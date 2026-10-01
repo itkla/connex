@@ -1,0 +1,42 @@
+{
+  "id": "task_handle_two_turns",
+  "selector": "connex_script_task_handle_two_turns",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Taskhandle\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "list_tasks",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"[t](record:r1)1\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"The second task needs attention.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      },
+      "onRepair": true
+    }
+  ]
+}

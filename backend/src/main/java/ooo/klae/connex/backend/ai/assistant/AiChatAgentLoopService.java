@@ -523,7 +523,7 @@ public class AiChatAgentLoopService {
                     publishThinking(turn, stepNumber, attempt.reasoning());
                     stepNarration
                             .map(AiChatRecordLinkRewriter::stripDurableLinks)
-                            .filter(text -> !text.isBlank())
+                            .filter(text -> !text.isBlank() && !AiAssistantStepGuard.containsTaskHandle(text))
                             .filter(text -> narrationBytes.get() + text.length()
                                     <= MAX_TURN_NARRATION_CHARS)
                             .ifPresent(text -> {
@@ -643,7 +643,8 @@ public class AiChatAgentLoopService {
                 AiAssistantStep.FinalAnswer finalAnswer = step.finalAnswer();
                 if (finalAnswer == null || finalAnswer.text() == null
                         || finalAnswer.text().isBlank()
-                        || finalAnswer.text().length() > MAX_FINAL_CHARS) {
+                        || finalAnswer.text().length() > MAX_FINAL_CHARS
+                        || AiAssistantStepGuard.containsTaskHandle(finalAnswer.text())) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     if (closingAttempted) {
                         return AiGenerationTaskResult.failed("malformed_output");
@@ -678,6 +679,16 @@ public class AiChatAgentLoopService {
                 if (!omitted) {
                     persistedText = AiChatRecordLinkRewriter.rewrite(
                             persistedText, citedResources, Set.copyOf(citations));
+                }
+                if (AiAssistantStepGuard.containsTaskHandle(persistedText)) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    if (closingAttempted) {
+                        return AiGenerationTaskResult.failed("malformed_output");
+                    }
+                    closingAttempted = true;
+                    closingPending = true;
+                    closingReason = "malformed_output";
+                    continue steps;
                 }
                 String metadata = promptAssembler.finalMetadata(
                         turn.turnId(), citations, suggestions, citedResources,
@@ -1669,11 +1680,11 @@ public class AiChatAgentLoopService {
                 || AiAssistantStepGuard.containsControlInstruction(normalized)) {
             return null;
         }
-        if (normalized.codePointCount(0, normalized.length()) <= MAX_GENERATED_TITLE_CHARS) {
-            return normalized;
+        if (normalized.codePointCount(0, normalized.length()) > MAX_GENERATED_TITLE_CHARS) {
+            int end = normalized.offsetByCodePoints(0, MAX_GENERATED_TITLE_CHARS);
+            normalized = normalized.substring(0, end).stripTrailing();
         }
-        int end = normalized.offsetByCodePoints(0, MAX_GENERATED_TITLE_CHARS);
-        return normalized.substring(0, end).stripTrailing();
+        return AiAssistantStepGuard.containsHandle(normalized) ? null : normalized;
     }
 
     private void requireCurrentAccess(AiChatQueuedTurn turn) {
@@ -1761,7 +1772,7 @@ public class AiChatAgentLoopService {
      */
     private void publishThinking(
             AiChatQueuedTurn turn, int stepNumber, Optional<String> reasoning) {
-        reasoning.filter(text -> !text.isBlank()).ifPresent(text ->
+        reasoning.filter(text -> !text.isBlank() && !AiAssistantStepGuard.containsTaskHandle(text)).ifPresent(text ->
                 realtimeDispatcher.userAfterCommit(turn.userId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stepNumber, "thinking", null, null, null, null, text)));
