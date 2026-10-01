@@ -35,7 +35,7 @@
     "@tiptap/extension-text-align": "3.30.5",
     "@tiptap/pm": "3.30.5",
     "@tiptap/react": "3.30.5",
-    "@tiptap/starter-kit": "3.30.5",
+    "@tiptap/starter-kit": "3.31.3",
     "@tiptap/suggestion": "3.30.5",
     "@xyflow/react": "^12.11.2",
     "class-variance-authority": "^0.7.1",
