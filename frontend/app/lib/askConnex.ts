@@ -344,6 +344,8 @@ export type AskConnexToolSummaryLabels = {
     removeOwner: string;
     completeTask: string;
     rescheduleTask: string;
+    updateRecordFields: string;
+    recordFieldsUpdated: string;
     setResponseDue: string;
     setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
@@ -783,6 +785,11 @@ export const ASK_CONNEX_OUTCOME_FIELDS = [
     'description',
     'dueDate',
     'title',
+    'website',
+    'industry',
+    'address',
+    'value',
+    'expectedCloseDate',
     'visibility',
     'tag',
     'stage',
@@ -847,6 +854,7 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'create_task') return labels.createTask;
     if (toolCall.toolName === 'complete_task') return labels.completeTask;
     if (toolCall.toolName === 'reschedule_task') return labels.rescheduleTask;
+    if (toolCall.toolName === 'update_record_fields') return labels.updateRecordFields;
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
     if (toolCall.toolName === 'remove_tag') {
@@ -889,6 +897,7 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'create_task') return labels.taskCreated;
     if (toolCall.toolName === 'complete_task') return labels.taskCompleted;
     if (toolCall.toolName === 'reschedule_task') return labels.taskRescheduled;
+    if (toolCall.toolName === 'update_record_fields') return labels.recordFieldsUpdated;
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;

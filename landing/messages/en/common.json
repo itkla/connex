@@ -813,7 +813,16 @@
         "taskOpen": "Open",
         "taskDone": "Done",
         "currentUnresolvedTaskStatus": "A status that can't be shown",
-        "currentUnresolvedDueDate": "A due date that can't be shown"
+        "currentUnresolvedDueDate": "A due date that can't be shown",
+        "fieldTitle": "Job title",
+        "fieldWebsite": "Website",
+        "fieldIndustry": "Industry",
+        "fieldAddress": "Address",
+        "fieldValue": "Value",
+        "fieldExpectedCloseDate": "Expected close date",
+        "currentUnresolvedField": "A value that cannot be shown",
+        "proposedWithheld": "Withheld",
+        "stateWithheld": "This proposed value cannot be shown. Make this change on the record."
       },
       "actions": {
         "undo": "Undo",
@@ -872,7 +881,9 @@
         "completeTask": "Complete the task",
         "rescheduleTask": "Reschedule the task",
         "taskCompleted": "Task completed",
-        "taskRescheduled": "Task rescheduled"
+        "taskRescheduled": "Task rescheduled",
+        "updateRecordFields": "Update record fields",
+        "recordFieldsUpdated": "Record fields updated"
       },
       "outcomeFields": {
         "type": "Type",

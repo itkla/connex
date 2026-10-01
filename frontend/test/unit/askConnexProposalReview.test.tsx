@@ -73,6 +73,65 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it("renders every field in the existing row markup and withholds the whole proposal", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ toolName: "update_record_fields", change: industry, changes: [industry, address] });
+        const markup = renderCard(proposal);
+        expect(markup).toContain("Consulting");
+        expect(markup).toContain("Software");
+        expect(markup).toContain("Tokyo");
+        expect(markup).toContain("Osaka");
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(2);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+
+        const withheld = change({ ...address, proposedValue: null, state: "withheld" });
+        const blocked = card({ ...proposal, change: { ...industry, state: "withheld" }, changes: [industry, withheld] });
+        const blockedMarkup = renderCard(blocked);
+        expect(blockedMarkup).toContain("Withheld");
+        expect(blockedMarkup).toContain(escaped(cardLabels.changeState.withheld));
+        expect(askConnexToolCardAffordances(blocked, NOW)).not.toContain("approve");
+        expect(askConnexProposalAppliable(blocked)).toBe(false);
+    });
+
+    it("renders all fields in the full review while excluding withheld proposals from Apply", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ id: 51, toolName: "update_record_fields", change: industry, changes: [industry, address] });
+        const withheld = change({ ...address, proposedValue: null, state: "withheld" });
+        const blocked = card({
+            ...proposal,
+            id: 52,
+            change: { ...industry, state: "withheld" },
+            changes: [industry, withheld],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, blocked, card({ id: 53, change: change() })], new Set([51, 52, 53]), new Set(),
+        );
+        const markup = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+
+        expect(markup).toContain("Consulting");
+        expect(markup).toContain("Software");
+        expect(markup).toContain("Tokyo");
+        expect(markup).toContain("Osaka");
+        expect(markup).toContain("Withheld");
+        expect(markup).toContain(escaped(cardLabels.changeState.withheld));
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(5);
+        expect(group.selected).toBe(2);
+        expect(group.applicable).toBe(2);
+        expect(markup).toContain("Apply 2 changes");
+    });
+
     it("states the exact current and proposed values before anything is applied", () => {
         const markup = renderCard(card({ change: change() }));
 

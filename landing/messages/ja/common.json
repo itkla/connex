@@ -813,7 +813,16 @@
         "taskOpen": "未完了",
         "taskDone": "完了",
         "currentUnresolvedTaskStatus": "表示できないステータス",
-        "currentUnresolvedDueDate": "表示できない期限"
+        "currentUnresolvedDueDate": "表示できない期限",
+        "fieldTitle": "役職",
+        "fieldWebsite": "ウェブサイト",
+        "fieldIndustry": "業種",
+        "fieldAddress": "住所",
+        "fieldValue": "金額",
+        "fieldExpectedCloseDate": "受注予定日",
+        "currentUnresolvedField": "表示できない値",
+        "proposedWithheld": "非表示",
+        "stateWithheld": "提案された値は表示できません。レコードで直接変更してください。"
       },
       "actions": {
         "undo": "取り消す",
@@ -872,7 +881,9 @@
         "completeTask": "タスクを完了する",
         "rescheduleTask": "タスクの期限を変更する",
         "taskCompleted": "タスクを完了しました",
-        "taskRescheduled": "タスクの期限を変更しました"
+        "taskRescheduled": "タスクの期限を変更しました",
+        "updateRecordFields": "レコードの項目を更新する",
+        "recordFieldsUpdated": "レコードの項目を更新しました"
       },
       "outcomeFields": {
         "type": "種別",

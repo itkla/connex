@@ -215,11 +215,14 @@ export default function AskConnexProposalReview({
                                 </div>
                                 {card.change !== null ? (
                                     <>
-                                        <AskConnexChangeRow
-                                            change={card.change}
-                                            removal={removal}
-                                            labels={cardLabels}
-                                        />
+                                        {card.changes.map((change) => (
+                                            <AskConnexChangeRow
+                                                key={change.field}
+                                                change={change}
+                                                removal={removal}
+                                                labels={cardLabels}
+                                            />
+                                        ))}
                                         <AskConnexChangeNotice
                                             field={card.change.field}
                                             state={card.change.state}

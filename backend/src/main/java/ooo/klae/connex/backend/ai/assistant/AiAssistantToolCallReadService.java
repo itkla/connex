@@ -235,6 +235,9 @@ public class AiAssistantToolCallReadService {
                     tool, call, status, readable, visibleTarget, assignableOwners, stages,
                     tags, targetTags.getOrDefault(targetKey, List.of()), templates,
                     documentVersions.getOrDefault(call.targetId(), Map.of()), withheld);
+            List<AiAssistantToolCallReadDto.Change> changes = readable
+                    ? changes(call, status, visibleTarget, viewerPermissions, review)
+                    : List.of();
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
@@ -245,9 +248,8 @@ public class AiAssistantToolCallReadService {
                             review, withheld, tool::requestSummary,
                             tool.screensDetailedRequestSummary()),
                     outcomeSummary(status, tool, review, withheld),
-                    readable
-                            ? change(call, status, visibleTarget, viewerPermissions, review)
-                            : null,
+                    aggregateChange(changes),
+                    changes,
                     readable
                             ? outcomeValues(call, status)
                             : List.of(),
@@ -335,12 +337,13 @@ public class AiAssistantToolCallReadService {
                     || !holdsRequiredText(tool, root.get("request"))) {
                 return null;
             }
+            tool.validateFor(targetKind, root.get("request"));
             return new StoredToolCall(
                     toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"),
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                             ? text(root, "targetVersion") : null);
-        } catch (JacksonException | IllegalArgumentException exception) {
+        } catch (JacksonException | IllegalArgumentException | AiAssistantLoopException exception) {
             return null;
         }
     }
@@ -380,7 +383,7 @@ public class AiAssistantToolCallReadService {
             for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
                 putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
-                        company.getUpdatedAt(), Map.of(),
+                        company.getUpdatedAt(), companyFields(company),
                         company.getWorkspaceId() != workspaceId));
             }
         }
@@ -388,7 +391,7 @@ public class AiAssistantToolCallReadService {
             for (Deal deal : dealMapper.getByIds(workspaceId, dealIds)) {
                 putVisible(visible, "deal", deal.getId(), new RecordSnapshot(
                         deal.getName(), deal.getPipelineId(), deal.getOwnerId(),
-                        deal.getStageId(), deal.getUpdatedAt(), Map.of(),
+                        deal.getStageId(), deal.getUpdatedAt(), dealFields(deal),
                         deal.getWorkspaceId() != workspaceId));
             }
         }
@@ -420,16 +423,37 @@ public class AiAssistantToolCallReadService {
 
     /**
      * The person's reviewable column values, read off the row the snapshot was already built from,
-     * so a card that states them as its before-value costs no read of its own. A row shared in from
-     * another workspace arrives with these columns masked, which its snapshot's {@code sharedIn}
-     * says.
+     * so a card that states them as its before-value costs no read of its own. The snapshot's
+     * {@code sharedIn} flag keeps missing owner-only columns from being mistaken for unset values.
      */
     private static Map<String, String> personFields(Person person) {
         Map<String, String> fields = new LinkedHashMap<>();
+        putField(fields, "title", person.getTitle());
         if (person.getFirstResponseDueAt() != null) {
             fields.put("firstResponseDueAt", person.getFirstResponseDueAt().toString());
         }
         return fields;
+    }
+
+    private static Map<String, String> companyFields(Company company) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        putField(fields, "website", company.getWebsite());
+        putField(fields, "industry", company.getIndustry());
+        putField(fields, "address", company.getAddress());
+        return fields;
+    }
+
+    private static Map<String, String> dealFields(Deal deal) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        putField(fields, "value", deal.getValue() == null ? null : deal.getValue().toPlainString());
+        putField(fields, "expectedCloseDate", deal.getExpectedCloseDate());
+        return fields;
+    }
+
+    private static void putField(Map<String, String> fields, String name, String value) {
+        if (value != null) {
+            fields.put(name, value);
+        }
     }
 
     /**
@@ -588,39 +612,57 @@ public class AiAssistantToolCallReadService {
     }
 
     /**
-     * The exact before and after values one pending proposal would write, or null when there is no
-     * such change to state.
+     * The before/after rows a pending proposal would write, screened before either projection.
      *
-     * <p>Every value here is workspace record data resolved server-side, never a value the model
-     * chose: each tool matches its proposed value against the workspace's own data, and an
-     * unmatched one is reported as unresolved rather than echoed back. The caller has
-     * already established that the viewer requested this proposal and can currently read its target,
-     * which is what keeps a before-value out of a shared participant's transcript.
+     * <p>Model-authored proposed values are screened in full and excluded values become withheld
+     * with no proposed text. Server-resolved values keep their existing treatment. The caller has
+     * already established that the viewer requested the proposal and can currently read its target.
      */
-    private AiAssistantToolCallReadDto.Change change(
+    private List<AiAssistantToolCallReadDto.Change> changes(
             StoredToolCall call,
             String status,
             RecordSnapshot target,
             Set<Permission> viewerPermissions,
             Review review) {
         if (call.tier() != ToolTier.CONFIRM || !PROPOSED.equals(status)) {
+            return List.of();
+        }
+        List<AiAssistantToolCallReadDto.Change> changes = new ArrayList<>();
+        for (Diff diff : call.tool().diffs(review)) {
+            boolean withheld = call.tool().modelAuthoredDiffFields().contains(diff.field())
+                    && diff.proposedValue() != null
+                    && SpecialCareTextScreen.screen(diff.proposedValue()).excluded();
+            changes.add(new AiAssistantToolCallReadDto.Change(
+                    diff.field(), diff.currentValue(), diff.currentValueUnresolved(),
+                    withheld ? null : diff.proposedValue(),
+                    diff.state() == DiffState.UNRESOLVED ? "unresolved"
+                            : withheld ? "withheld"
+                            : changeState(call, target, diff.state() == DiffState.UNCHANGED,
+                                    viewerPermissions,
+                                    call.tool().requiredPermissions(call.targetKind()))));
+        }
+        return List.copyOf(changes);
+    }
+
+    private static AiAssistantToolCallReadDto.Change aggregateChange(
+            List<AiAssistantToolCallReadDto.Change> changes) {
+        if (changes.isEmpty()) {
             return null;
         }
-        Diff diff = call.tool().diff(review);
-        if (diff == null) {
-            return null;
+        String state = "ready";
+        for (String candidate : List.of(
+                "unresolved", "withheld", "permissionLost", "unchanged", "recordChanged")) {
+            boolean matches = "unchanged".equals(candidate)
+                    ? changes.stream().allMatch(change -> candidate.equals(change.state()))
+                    : changes.stream().anyMatch(change -> candidate.equals(change.state()));
+            if (matches) {
+                state = candidate;
+                break;
+            }
         }
-        return new AiAssistantToolCallReadDto.Change(
-                diff.field(),
-                diff.currentValue(),
-                diff.currentValueUnresolved(),
-                diff.proposedValue(),
-                diff.state() == DiffState.UNRESOLVED
-                        ? "unresolved"
-                        : changeState(
-                                call, target, diff.state() == DiffState.UNCHANGED,
-                                viewerPermissions,
-                                call.tool().requiredPermissions(call.targetKind())));
+        AiAssistantToolCallReadDto.Change first = changes.getFirst();
+        return new AiAssistantToolCallReadDto.Change(first.field(), first.currentValue(),
+                first.currentValueUnresolved(), first.proposedValue(), state);
     }
 
     /**

@@ -851,6 +851,68 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
                 "a refused load must leave the offered vocabulary unwidened");
     }
 
+    @Test
+    void companyFieldApprovalPreservesAllUnrequestedColumns() {
+        Company target = company("Halvorsen Services");
+        jdbcTemplate.update("UPDATE company SET website = ?, phone = ?, address = ?, industry = ?,"
+                        + " updated_at = DATE_SUB(NOW(), INTERVAL 10 SECOND) WHERE id = ?",
+                "halvorsen.example", "+81 03 1234 5678", "Tokyo 100-0001", "Old", target.getId());
+        var before = jdbcTemplate.queryForMap("SELECT name, website, phone, address FROM company WHERE id = ?", target.getId());
+        Trajectory trajectory = run("connex_script_update_record_fields_overlay", "correct its industry",
+                List.of(new AiChatPageContextDto("company", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "update_record_fields");
+        assertEquals("Old", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+        authenticate();
+        try {
+            assertEquals("ready", toolCallReadService.get(trajectory.sessionId(), proposal.getId()).change().state());
+            writeToolService().approve(trajectory.sessionId(), proposal.getId());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before, jdbcTemplate.queryForMap("SELECT name, website, phone, address FROM company WHERE id = ?", target.getId()));
+        assertEquals("Software", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    /** The host is also the source company's display identifier, seeded by real page context. */
+    @Test
+    void aMaskedWebsiteCopiedFromAnotherCompanyPlaceholderCreatesNoProposal() {
+        Company target = company("Halvorsen Services");
+        Company source = company("source.example");
+        jdbcTemplate.update("UPDATE company SET website = ? WHERE id = ?", "source.example", source.getId());
+        Trajectory trajectory = run("connex_script_update_record_fields_masked_identifier", "correct the first company's website",
+                List.of(new AiChatPageContextDto("company", target.getId()), new AiChatPageContextDto("company", source.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertFieldRefused(trajectory, "identifier_from_another_record");
+        assertTrue(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("{{C2}}")));
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    @Test
+    void aMemberUrlIsRedactedBeforeEgressAndTheFaithfulMarkerTranscriptionIsRefused() {
+        Company target = company("Halvorsen Services");
+        Trajectory trajectory = run("connex_script_update_record_fields_redacted_value",
+                "set its website to https://acme.example",
+                List.of(new AiChatPageContextDto("company", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertTrue(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("set its website to [redacted]")));
+        assertFalse(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("https://acme.example")));
+        assertFieldRefused(trajectory, "redacted_value");
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    private void assertFieldRefused(Trajectory trajectory, String reason) {
+        List<AiChatToolCall> calls = trajectory.toolCalls().stream()
+                .filter(call -> "update_record_fields".equals(call.getToolName())).toList();
+        assertEquals(1, calls.size());
+        assertEquals("failed", calls.getFirst().getStatus());
+        assertTrue(calls.getFirst().getResultJson().contains(reason));
+        assertFalse(trajectory.toolCalls().stream().anyMatch(call -> "proposed".equals(call.getStatus())));
+    }
+
     private int storeOwnerProposal(Company company, String owner) {
         return storeWriteProposal(
                 WRITE_STEP, "assign_owner",

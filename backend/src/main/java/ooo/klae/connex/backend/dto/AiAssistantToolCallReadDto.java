@@ -15,6 +15,7 @@ public record AiAssistantToolCallReadDto(
         String requestSummary,
         String outcomeSummary,
         Change change,
+        List<Change> changes,
         List<OutcomeValue> outcomeValues,
         CreatedRecord createdRecord,
         Integer messageId,

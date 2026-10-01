@@ -5,13 +5,6 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import ooo.klae.connex.backend.mappers.CompanyMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.mappers.ActivityMapper;
-import ooo.klae.connex.backend.mappers.NoteMapper;
-import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -19,29 +12,36 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
-import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
-import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
-import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
-import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
-import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -371,6 +371,11 @@ public class CompanyService {
         Company company = companyMapper.getCompanyById(workspaceId, id);
         if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
+    }
+
+    /** Whether the current workspace owns the active company rather than seeing a shared row. */
+    public boolean isOwnedByCurrentWorkspace(int id) {
+        return companyMapper.existsOwned(workspaceService.getCurrentWorkspaceId(), id);
     }
 
     /** Locks one writable company for a mutation that retains a later commit fence. */

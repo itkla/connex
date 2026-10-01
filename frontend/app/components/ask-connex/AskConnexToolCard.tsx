@@ -61,6 +61,12 @@ export type AskConnexChangeFieldLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -78,6 +84,12 @@ export type AskConnexUnresolvedValueLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
@@ -101,6 +113,7 @@ export type AskConnexToolCardLabels = {
     changeCurrentUnresolved: AskConnexUnresolvedValueLabels;
     /** What the proposal asked for, when that value no longer exists in this workspace. */
     changeProposedUnresolved: string;
+    changeProposedWithheld: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
     /**
      * Field-specific review context, including non-blocking context for an applicable change. A
@@ -243,6 +256,7 @@ const CHANGE_STATE_ICON: Record<
     recordChanged: ClockIcon,
     permissionLost: LockClosedIcon,
     unresolved: ExclamationTriangleIcon,
+    withheld: ExclamationTriangleIcon,
 };
 
 function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
@@ -313,7 +327,9 @@ export function AskConnexChangeRow({
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
-                    {change.state === 'unresolved' && !removal && change.proposedValue === null
+                    {change.state === 'withheld'
+                        ? labels.changeProposedWithheld
+                        : change.state === 'unresolved' && !removal && change.proposedValue === null
                         ? labels.changeProposedUnresolved
                         : change.proposedValue !== null
                             ? labels.changeValue(change.field, change.proposedValue, 'proposed')
@@ -353,7 +369,7 @@ export function AskConnexChangeNotice({
             : labels.changeStateForField[field]?.[state] ?? labels.changeState[state];
     if (!notice) return null;
     const NoticeIcon = state === 'ready' ? InformationCircleIcon : CHANGE_STATE_ICON[state];
-    const blocking = state === 'permissionLost' || state === 'unresolved';
+    const blocking = state === 'permissionLost' || state === 'unresolved' || state === 'withheld';
     return (
         <p className={cn(
             'flex items-start gap-2 text-xs leading-relaxed',
@@ -538,7 +554,9 @@ export default function AskConnexToolCard({
                     {proposal !== null ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
-                            <AskConnexChangeRow change={proposal} removal={removal} labels={labels} />
+                            {card.changes.map((change) => (
+                                <AskConnexChangeRow key={change.field} change={change} removal={removal} labels={labels} />
+                            ))}
                             <AskConnexChangeNotice
                                 field={proposal.field}
                                 state={proposal.state}

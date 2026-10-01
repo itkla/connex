@@ -22,6 +22,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.AfterEach;
@@ -55,6 +56,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -69,6 +71,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -96,6 +99,8 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private DealService dealService;
+    @Autowired private PersonService personService;
+    @MockitoSpyBean private OrganizationMapper organizationMapperSpy;
     @Autowired private TaskService taskService;
     @Autowired private TaskMapper taskMapper;
     @MockitoSpyBean private TaskMapper taskMapperSpy;
@@ -1019,6 +1024,106 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             assertTrue(taskMapper.getTaskById(workspace.getId(), target.getId()).isCompleted());
             assertEquals("Edited by the member", taskMapper.getTaskById(workspace.getId(), sibling.getId()).getDescription());
         }
+    }
+
+    /** Both actor directions exercise the actual mutex/record cycle, on the same person. */
+    @Test
+    void reciprocalInteractivePersonEditsAndFieldApprovalsDoNotDeadlock() throws Exception {
+        for (boolean reverse : List.of(false, true)) {
+            User approver = reverse ? secondActor : firstActor;
+            User editor = reverse ? firstActor : secondActor;
+            String memberTitle = reverse ? "Second member title" : "First member title";
+            jdbcTemplate.update("UPDATE person SET updated_at = DATE_SUB(NOW(), INTERVAL 10 SECOND) WHERE id = ?", person.getId());
+            authenticate(approver);
+            ToolFixture fixture;
+            try {
+                AiChatResourceRegistry resources = new AiChatResourceRegistry();
+                resources.register("person", person.getId());
+                AiAssistantPreparedWrite write = writeToolService.prepare("update_record_fields",
+                        objectMapper.readTree("{\"handle\":\"r1\",\"title\":\"Assistant title\"}"),
+                        resources, restrictionEpoch.current(workspace.getId()));
+                AiChatSession session = session(approver);
+                fixture = new ToolFixture(session.getId(), toolCall(message(session, approver), write).getId(), null);
+                jdbcTemplate.update("UPDATE ai_chat_tool_call SET created_at = DATE_SUB(NOW(), INTERVAL 5 SECOND) WHERE id = ?", fixture.toolCallId());
+            } finally {
+                clearAuthentication();
+            }
+            CountDownLatch mutexHeld = new CountDownLatch(1);
+            CountDownLatch releaseEdit = new CountDownLatch(1);
+            AtomicReference<Thread> editing = new AtomicReference<>();
+            AtomicLong blockingConnection = new AtomicLong();
+            OrganizationMapper real = sqlSessionTemplate.getMapper(OrganizationMapper.class);
+            doAnswer(invocation -> {
+                int locked = real.lockDuplicateDecision(organization.getId());
+                if (Thread.currentThread() == editing.get()) {
+                    Long connection = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
+                    assertNotNull(connection);
+                    blockingConnection.set(connection);
+                    mutexHeld.countDown();
+                    assertTrue(releaseEdit.await(10, TimeUnit.SECONDS));
+                }
+                return locked;
+            }).when(organizationMapperSpy).lockDuplicateDecision(organization.getId());
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> edit = executor.submit(() -> {
+                    editing.set(Thread.currentThread());
+                    authenticate(editor);
+                    try {
+                        Person patch = new Person();
+                        patch.setTitle(memberTitle);
+                        personService.update(person.getId(), patch);
+                    } finally {
+                        clearAuthentication();
+                    }
+                });
+                assertTrue(mutexHeld.await(10, TimeUnit.SECONDS));
+                Future<ConflictException> approval = executor.submit(() -> {
+                    authenticate(approver);
+                    try {
+                        return assertThrows(ConflictException.class,
+                                () -> writeToolService.approve(fixture.sessionId(), fixture.toolCallId()));
+                    } finally {
+                        clearAuthentication();
+                    }
+                });
+                assertTrue(awaitDuplicateDecisionWait(approval, blockingConnection.get()));
+                releaseEdit.countDown();
+                edit.get(20, TimeUnit.SECONDS);
+                assertEquals("Assistant proposal target changed", approval.get(20, TimeUnit.SECONDS).getMessage());
+                assertEquals(memberTitle, jdbcTemplate.queryForObject("SELECT title FROM person WHERE id = ?", String.class, person.getId()));
+                assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId()).getStatus());
+            } finally {
+                releaseEdit.countDown();
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+                org.mockito.Mockito.reset(organizationMapperSpy);
+            }
+        }
+    }
+
+    private boolean awaitDuplicateDecisionWait(Future<?> approval, long blockingConnection) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline && !approval.isDone()) {
+            Integer waiting = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits lock_wait
+                    JOIN performance_schema.data_locks requested
+                      ON requested.ENGINE = lock_wait.ENGINE
+                     AND requested.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.threads blocking_thread
+                      ON blocking_thread.THREAD_ID = lock_wait.BLOCKING_THREAD_ID
+                    WHERE blocking_thread.PROCESSLIST_ID = ?
+                      AND requested.OBJECT_SCHEMA = DATABASE()
+                      AND requested.OBJECT_NAME = 'organization_duplicate_decision_lock'
+                      AND requested.LOCK_STATUS = 'WAITING'
+                    """, Integer.class, blockingConnection);
+            if (waiting != null && waiting > 0) {
+                return true;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+        }
+        return false;
     }
 
     private Task task(User assignee, String description) {

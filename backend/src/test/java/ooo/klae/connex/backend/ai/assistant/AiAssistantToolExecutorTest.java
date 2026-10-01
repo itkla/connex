@@ -128,6 +128,7 @@ class AiAssistantToolExecutorTest {
         arguments.put("draft_document", ",\"template\":\"Quote\"");
         arguments.put("complete_task", "");
         arguments.put("reschedule_task", ",\"due_date\":\"2026-10-15\"");
+        arguments.put("update_record_fields", ",\"title\":\"Director\"");
         Map<String, Set<String>> accepted = new HashMap<>(Map.of(
                 "create_activity", Set.of("person", "deal"),
                 "create_task", Set.of("person", "deal"),
@@ -142,6 +143,7 @@ class AiAssistantToolExecutorTest {
         accepted.put("draft_document", Set.of("deal"));
         accepted.put("complete_task", Set.of("task"));
         accepted.put("reschedule_task", Set.of("task"));
+        accepted.put("update_record_fields", Set.of("person", "company", "deal"));
         assertEquals(arguments.keySet(), accepted.keySet());
         Map<String, Set<String>> declared = new HashMap<>();
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {

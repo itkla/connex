@@ -76,6 +76,7 @@ abstract class AbstractAiAssistantWriteToolTest {
     PersonService personService;
     CompanyService companyService;
     DealService dealService;
+    ooo.klae.connex.backend.services.DuplicateDecisionLockService duplicateDecisionLockService;
     TaskService taskService;
     DealDocumentService documentService;
     DocumentTemplateService templateService;
@@ -105,6 +106,8 @@ abstract class AbstractAiAssistantWriteToolTest {
         personService = mock(PersonService.class);
         when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         companyService = mock(CompanyService.class);
+        when(companyService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
+        duplicateDecisionLockService = mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
         documentService = mock(DealDocumentService.class);
@@ -189,6 +192,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         declared.add(new AiAssistantCompleteTaskWriteTool(taskService));
         declared.add(new AiAssistantRescheduleTaskWriteTool(taskService));
         declared.add(draftDocumentTool());
+        declared.add(new AiAssistantUpdateRecordFieldsWriteTool(personService, companyService, dealService));
         return framework(declared);
     }
 
@@ -225,6 +229,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 personService,
                 companyService,
                 dealService,
+                duplicateDecisionLockService,
                 restrictionEpoch,
                 governanceService,
                 objectMapper,

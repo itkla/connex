@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRescheduleTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantUpdateRecordFieldsWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
@@ -190,6 +191,10 @@ class AiAssistantWriteToolSpiArchTest {
      * granted: the tool has no inverse, and the framework reads the contact through its own scoped
      * gate.
      *
+     * <p>{@code update_record_fields} reads only its framework-locked target, then calls the
+     * audited person patch, company overlay, or single-field deal writes. Reads preserve columns
+     * the full-row company mapper and person company-link mapper would otherwise overwrite.
+     *
      * <p>{@code assign_owner} is granted exactly the call its legacy arm made: each record service's
      * {@code updateOwner}, which asserts its own update permission, locks the named owner's
      * membership, records its audit row and returns the updated record the tool reads the owner id
@@ -238,7 +243,12 @@ class AiAssistantWriteToolSpiArchTest {
                     Map.entry(AiAssistantRescheduleTaskWriteTool.class,
                             Map.of(TaskService.class, Set.of("reschedule"))),
                     Map.entry(AiAssistantSetResponseDueWriteTool.class,
-                            Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock"))));
+                            Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock"))),
+                    Map.entry(AiAssistantUpdateRecordFieldsWriteTool.class,
+                            Map.of(
+                                    PersonService.class, Set.of("getPersonById", "update"),
+                                    CompanyService.class, Set.of("getCompanyById", "updateCompany"),
+                                    DealService.class, Set.of("updateValue", "reschedule"))));
 
     /**
      * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved

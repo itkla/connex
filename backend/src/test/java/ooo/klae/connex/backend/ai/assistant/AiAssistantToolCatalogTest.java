@@ -50,9 +50,10 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(21, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).size() - 1L,
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -126,7 +127,8 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(21, definitions.size());
+        assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                .filter(ToolSpec::executable).count(), definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -174,6 +176,7 @@ class AiAssistantToolCatalogTest {
         assertEquals(List.of("change_deal_stage", "assign_owner", "draft_document"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
         assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
+        assertEquals(List.of("update_record_fields"), byToolset.get(Toolset.WRITE_FIELDS));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
@@ -213,11 +216,11 @@ class AiAssistantToolCatalogTest {
     void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
         assertEquals(
                 List.of("core", "analytics", "schedule",
-                        "write_activity", "write_content", "write_pipeline", "write_followup"),
+                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields"),
                 Arrays.stream(Toolset.values()).map(Toolset::key).toList());
         assertEquals(
                 List.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup"),
+                        "write_pipeline", "write_followup", "write_fields"),
                 AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
         assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
         for (Map.Entry<Toolset, String> entry : catalog.directory()) {
@@ -227,7 +230,7 @@ class AiAssistantToolCatalogTest {
                     entry.getKey().key() + " needs a server-authored summary");
         }
         assertEquals(Set.of(Toolset.CORE), AiAssistantToolCatalog.CORE);
-        assertEquals(7, AiAssistantToolCatalog.ALL.size());
+        assertEquals(Toolset.values().length, AiAssistantToolCatalog.ALL.size());
     }
 
     /** Both prompt-facing views narrow to the loaded set and keep stable catalog order. */
@@ -282,7 +285,7 @@ class AiAssistantToolCatalogTest {
         assertTrue(argument.required());
         assertEquals(
                 Set.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup"),
+                        "write_pipeline", "write_followup", "write_fields"),
                 argument.values());
         assertFalse(argument.values().contains("core"));
     }
