@@ -148,7 +148,7 @@ Architecture tests are enforcement, not obstacles. If a migration or mapper chan
 
 ## Verification
 
-Use targeted local verification. The required `Backend — build & test` CI job owns the exhaustive backend corpus.
+Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` checks complete, disjoint, non-empty coverage. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
 
 For a material backend change:
 

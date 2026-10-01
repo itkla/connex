@@ -161,16 +161,47 @@ jobs:
       - name: Integrity, redaction, and transport regression tests
         run: bash deploy/support-bundle/tests/run-tests.sh
 
-  backend:
-    name: Backend — build & test
+  backend-unit:
+    name: Backend — unit tests
     needs: classify
     if: needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # `test` alone measured 46-48 minutes on the last runs before scriptedTrajectoryTest joined
-    # this step, which left under ten minutes of headroom under the previous 60-minute ceiling.
-    # A job cancelled on the timeout produces no test failure and reads as a hang, so the budget
-    # is raised rather than left to convert a slow-runner day into an unexplained cancellation.
-    timeout-minutes: 75
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up JDK 26
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: gradle
+      # unitTest supplies unusable DB credentials so a misplaced DB test fails instead of skipping.
+      - name: Verify partition and run DB-free tests
+        working-directory: backend
+        run: bash gradlew verifyTestPartition unitTest --no-daemon --stacktrace
+      - name: Upload backend unit test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backend-test-reports-unit
+          path: |
+            backend/build/reports/tests
+            backend/build/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  backend-db:
+    name: Backend — DB tests (shard ${{ matrix.shard }}/2)
+    needs: classify
+    if: needs.classify.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    # Matrix jobs each own a MySQL service; parallel DB forks on one service would exceed
+    # its connection budget. Preserve headroom for slow hosted runners within each shard.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
@@ -198,12 +229,16 @@ jobs:
           cache: gradle
       - name: Allow non-SUPER routine creation under binary logging
         run: mysql -h 127.0.0.1 -P 3306 -uroot -pci-${{ github.run_id }}-${{ github.run_attempt }}-root -e "SET GLOBAL log_bin_trust_function_creators = 1;"
-      # scriptedTrajectoryTest owns the one Spring context that activates the ai-scripted-provider
-      # profile and is therefore excluded from `test`. It must be named here as well: a Gradle task
-      # no required job runs proves nothing, and these are the end-to-end agent trajectories.
-      - name: Test (runs Flyway migrations, arch tests, tenant-isolation tests)
+      - name: Test database shard 1
+        if: matrix.shard == 1
         working-directory: backend
-        run: bash gradlew test scriptedTrajectoryTest --no-daemon --stacktrace
+        run: bash gradlew dbTestShard1 --no-daemon --stacktrace
+      # The scripted provider has its own Spring context and task. Shard 2 must name it:
+      # a task no required job runs proves nothing about the end-to-end agent trajectories.
+      - name: Test database shard 2 and scripted trajectories
+        if: matrix.shard == 2
+        working-directory: backend
+        run: bash gradlew dbTestShard2 scriptedTrajectoryTest --no-daemon --stacktrace
       # Spring reports one failed context load as failures for every test sharing that context.
       # Surface MySQL's capacity counter separately so connection exhaustion cannot mimic a product regression.
       - name: Diagnose MySQL connection capacity
@@ -225,16 +260,35 @@ jobs:
       # Gradle's console prints only an assertion's first line, so a failure message that carries
       # the diagnosis - the throwable a streamed body raised, a context-load cause - dies with the
       # runner. #1761 went four main failures without a diagnosis for exactly this reason.
-      - name: Upload backend test reports on failure
-        if: failure()
+      - name: Upload backend database test reports
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: backend-test-reports
+          name: backend-test-reports-db-${{ matrix.shard }}
           path: |
             backend/build/reports/tests
             backend/build/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  backend:
+    name: Backend — build & test
+    needs: [classify, backend-unit, backend-db]
+    # Keep the required check stable and fail closed even when a dependency fails or is cancelled.
+    if: always() && needs.classify.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require unit tests and every database shard to succeed
+        env:
+          UNIT_RESULT: ${{ needs.backend-unit.result }}
+          DB_RESULT: ${{ needs.backend-db.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$UNIT_RESULT" != success || "$DB_RESULT" != success ]]; then
+            echo "::error::Backend tests did not all succeed: unit=$UNIT_RESULT, database=$DB_RESULT"
+            exit 1
+          fi
 
   frontend:
     name: Frontend — typecheck & lint

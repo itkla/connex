@@ -125,9 +125,113 @@ tasks.withType(JavaCompile).configureEach {
 // The scripted trajectory harness is the one test context that activates the ai-scripted-provider
 // Spring profile, so it is a context key nothing else in the suite shares. It runs in its own fork
 // with its own context cache and connection budget instead of evicting a hot context out of the
-// shared one. The required Backend CI job runs `test scriptedTrajectoryTest`: a task nothing runs
-// proves nothing.
+// shared one. The required Backend CI path names `scriptedTrajectoryTest` alongside the DB shards:
+// a task nothing runs proves nothing.
 def scriptedTrajectoryPattern = '**/*ScriptedTrajectory*Test.class'
+
+// Parse once at configuration time so all CI tasks share the same source inventory. The JDK parser
+// distinguishes top-level classes from nested fixtures, comments and text blocks without loading
+// test classes or resolving their dependencies. Abstract harnesses contribute inherited markers,
+// but JUnit does not run them as test classes in their own right.
+def testSources = [:]
+def testCompiler = javax.tools.ToolProvider.systemJavaCompiler
+def parseDiagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
+testCompiler.getStandardFileManager(parseDiagnostics, null, java.nio.charset.StandardCharsets.UTF_8).withCloseable { manager ->
+	def sources = manager.getJavaFileObjectsFromFiles(fileTree('src/test/java') {
+		include '**/*.java'
+	}.files.sort())
+	def compilation = testCompiler.getTask(null, manager, parseDiagnostics, ['-proc:none'], null, sources)
+	compilation.parse().each { unit ->
+		def source = unit.sourceFile.getCharContent(true).toString()
+		def packageName = unit.packageName?.toString() ?: ''
+		def imports = unit.imports.findAll { !it.static }.collect { it.qualifiedIdentifier.toString() }
+		unit.typeDecls.findAll { it.kind == com.sun.source.tree.Tree.Kind.CLASS }.each { declaration ->
+			def name = declaration.simpleName.toString()
+			def qualifiedName = packageName ? "${packageName}.${name}".toString() : name
+			testSources[qualifiedName] = [
+				source: source,
+				packageName: packageName,
+				imports: imports,
+				superclass: declaration.extendsClause?.toString()?.replaceAll(/<.*>/, ''),
+				runnable: unit.sourceFile.name ==~ /.*Tests?\.java/ &&
+					!declaration.modifiers.flags.contains(javax.lang.model.element.Modifier.ABSTRACT)
+			]
+		}
+	}
+}
+def parseErrors = parseDiagnostics.diagnostics.findAll { it.kind == javax.tools.Diagnostic.Kind.ERROR }
+if (!parseErrors.empty) {
+	throw new GradleException("Cannot partition test sources: ${parseErrors.join('\n')}")
+}
+
+def databaseMarkers = [
+	'@SpringBootTest', '@WebMvcTest', '@SpringJUnitConfig', '@SpringJUnitWebConfig',
+	'@ContextConfiguration', '@DataJdbcTest', '@MybatisTest', 'DriverManager', 'CONNEX_DB_',
+	'DataSource', 'JdbcTemplate', 'HikariDataSource', '@Sql', 'TestTransaction', '@Transactional'
+]
+def databaseClassification = [:]
+def isDatabaseBacked
+isDatabaseBacked = { String name, Set visiting ->
+	if (databaseClassification.containsKey(name)) {
+		return databaseClassification[name]
+	}
+	def source = testSources[name]
+	if (source == null || !visiting.add(name)) {
+		return true
+	}
+	def backed = databaseMarkers.any { source.source.contains(it) }
+	if (!backed && source.superclass != null) {
+		def parent = source.superclass
+		def candidates = [parent, "${source.packageName}.${parent}".toString()]
+		source.imports.each { imported ->
+			if (imported.endsWith(".${parent}")) {
+				candidates.add(imported)
+			} else if (imported.endsWith('.*')) {
+				candidates.add(imported.dropRight(1) + parent)
+			}
+		}
+		def parents = candidates.findAll { testSources.containsKey(it) }.toSet()
+		// Unresolved, ambiguous or cyclic inheritance is not evidence that a test is DB-free.
+		backed = parents.size() != 1 || isDatabaseBacked(parents.first(), visiting)
+	}
+	visiting.remove(name)
+	databaseClassification[name] = backed
+	return backed
+}
+def fullTestClasses = testSources.findAll { name, source -> source.runnable }.keySet().toSorted()
+def testPartition = [unitTest: new TreeSet(), dbTestShard1: new TreeSet(),
+	dbTestShard2: new TreeSet(), scriptedTrajectoryTest: new TreeSet()]
+fullTestClasses.each { name ->
+	def classPath = name.replace('.', '/') + '.class'
+	if (org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(scriptedTrajectoryPattern, classPath)) {
+		testPartition.scriptedTrajectoryTest.add(name)
+	} else if (!isDatabaseBacked(name, new HashSet())) {
+		testPartition.unitTest.add(name)
+	} else if (classPath.startsWith('ooo/klae/connex/backend/services/')) {
+		testPartition.dbTestShard1.add(name)
+	} else {
+		testPartition.dbTestShard2.add(name)
+	}
+}
+
+tasks.register('verifyTestPartition') {
+	group = 'verification'
+	description = 'Checks that every backend test class belongs to exactly one non-empty CI partition.'
+	doLast {
+		def selected = testPartition.values().flatten()
+		def duplicates = selected.countBy { it }.findAll { name, count -> count > 1 }.keySet()
+		def missing = fullTestClasses - selected
+		def unexpected = selected - fullTestClasses
+		def empty = testPartition.findAll { name, classes -> classes.empty }.keySet()
+		logger.lifecycle("Test partition: total=${fullTestClasses.size()}, " + testPartition.collect {
+			name, classes -> "${name}=${classes.size()}"
+		}.join(', '))
+		if (duplicates || missing || unexpected || empty) {
+			throw new GradleException("Invalid test partition: missing=${missing}, unexpected=${unexpected}, " +
+				"overlapping=${duplicates}, empty=${empty}")
+		}
+	}
+}
 
 tasks.named('test') {
 	useJUnitPlatform()
@@ -235,4 +339,46 @@ tasks.named('test') {
 		'../docs/backend/api-surface.tsv', '../docs/backend/api-surface-policy.txt',
 		'../docs/backend/api-lifecycle.tsv')
 	inputs.property('apiLifecycleDate', java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())
+}
+
+// The new CI tasks retain the local test task's system properties, source/ledger/date inputs and
+// seeder isolation probe. Otherwise a split could silently drop that guard or reuse stale results.
+['unitTest', 'dbTestShard1', 'dbTestShard2'].each { taskName ->
+	tasks.register(taskName, Test) {
+		def localTest = tasks.named('test', Test).get()
+		group = 'verification'
+		description = taskName == 'unitTest' ? 'Runs DB-free backend tests.' :
+			"Runs isolated backend database shard ${taskName.takeRight(1)} of 2."
+		testClassesDirs = sourceSets.test.output.classesDirs
+		classpath = sourceSets.test.runtimeClasspath
+		useJUnitPlatform()
+		systemProperties localTest.systemProperties
+		inputs.files(fileTree('src/main/java') { include '**/*.java' })
+		inputs.files('build.gradle', '../frontend/next.config.ts',
+			'../docs/backend/api-surface.tsv', '../docs/backend/api-surface-policy.txt',
+			'../docs/backend/api-lifecycle.tsv')
+		inputs.property('apiLifecycleDate', java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())
+		dependsOn verifySeederDevtoolsIsolation
+		forkEvery = localTest.forkEvery
+		exclude scriptedTrajectoryPattern
+		// Exact outer names plus their nested classes avoid prefix collisions between partitions.
+		setIncludes(testPartition[taskName].collectMany { name ->
+			def path = name.replace('.', '/')
+			[path + '.class', path + '$*.class']
+		})
+		if (taskName == 'unitTest') {
+			// Two DB-free forks share the old heap budget. Non-empty, unusable credentials turn
+			// accidental DB dependencies into failures instead of missing-credential skips.
+			maxParallelForks = 2
+			maxHeapSize = '1536m'
+			environment 'CONNEX_DB_URL', 'jdbc:mysql://127.0.0.1:1/no_database_in_unit_task'
+			environment 'CONNEX_DB_USERNAME', 'unit-task-has-no-database'
+			environment 'CONNEX_DB_PASSWORD', 'unit-task-has-no-database'
+		} else {
+			// Each shard has its own MySQL service in CI. Keep the serial fork and ten-context
+			// cache budget: two DB forks against one service would exceed its connection cap.
+			maxParallelForks = localTest.maxParallelForks
+			maxHeapSize = localTest.maxHeapSize
+		}
+	}
 }

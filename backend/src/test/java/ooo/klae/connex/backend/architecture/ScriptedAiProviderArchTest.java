@@ -419,6 +419,53 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void requiredBackendInvocationsResolveDependencyJobIds() {
+        String workflow = """
+                jobs:
+                  backend-db:
+                    name: Database matrix
+                    steps:
+                      - run: bash gradlew dbTestShard2 scriptedTrajectoryTest
+                  backend:
+                    name: Backend — build & test
+                    needs: [classify, backend-unit, backend-db]
+                  backend-unit:
+                    name: Unit tests
+                    steps:
+                      - run: bash gradlew verifyTestPartition unitTest
+                  unrelated:
+                    steps:
+                      - run: bash gradlew unrelatedTest
+                """;
+
+        assertEquals(List.of(
+                        "- run: bash gradlew verifyTestPartition unitTest",
+                        "- run: bash gradlew dbTestShard2 scriptedTrajectoryTest"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void unrelatedJobsAndCommentsCannotSatisfyTheRequiredBackendPath() {
+        String workflow = """
+                jobs:
+                  backend:
+                    name: Backend — build & test
+                    needs: backend-db
+                    # run: bash gradlew scriptedTrajectoryTest
+                  backend-db:
+                    steps:
+                      # run: bash gradlew scriptedTrajectoryTest
+                      - run: bash gradlew dbTestShard2
+                  unrelated:
+                    steps:
+                      - run: bash gradlew scriptedTrajectoryTest
+                """;
+
+        assertEquals(List.of("- run: bash gradlew dbTestShard2"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
     void noShippedOperatorTemplateActivatesTheScriptedProvider() throws IOException {
         List<String> violations = new ArrayList<>();
         for (Path template : operatorTemplates()) {
@@ -760,42 +807,55 @@ class ScriptedAiProviderArchTest {
     }
 
     /**
-     * Returns the Gradle commands run by the required backend job alone.
+     * Returns the Gradle commands run by the required backend job and its direct dependencies.
      *
      * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
      * searching the whole file would stay satisfied after the required job stopped running the
      * goldens. Only uncommented lines inside the job whose display name branch protection requires
-     * are returned.
+     * and the job IDs listed in its {@code needs:} entry are returned.
      *
      * @param workflow the CI workflow source
-     * @return the required backend job's Gradle command lines, stripped
+     * @return the required backend path's Gradle command lines, stripped
      */
     private static List<String> requiredBackendJobGradleInvocations(String workflow) {
-        List<String> invocations = new ArrayList<>();
-        List<String> current = new ArrayList<>();
-        boolean requiredJob = false;
+        Map<String, List<String>> jobs = new LinkedHashMap<>();
+        String currentJob = null;
+        String requiredJob = null;
         for (String line : workflow.split("\\R")) {
-            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
-                if (requiredJob) {
-                    invocations.addAll(current);
-                }
-                current = new ArrayList<>();
-                requiredJob = false;
-                continue;
-            }
             String stripped = line.strip();
-            if (stripped.startsWith("#")) {
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                currentJob = stripped.substring(0, stripped.length() - 1);
+                jobs.put(currentJob, new ArrayList<>());
                 continue;
             }
-            if (stripped.equals("name: " + REQUIRED_BACKEND_JOB)) {
-                requiredJob = true;
+            if (currentJob == null || stripped.startsWith("#")) {
+                continue;
             }
-            if (stripped.contains("gradlew")) {
-                current.add(stripped);
+            jobs.get(currentJob).add(stripped);
+            if (line.equals("    name: " + REQUIRED_BACKEND_JOB)) {
+                requiredJob = currentJob;
             }
         }
-        if (requiredJob) {
-            invocations.addAll(current);
+        if (requiredJob == null) {
+            return List.of();
+        }
+        List<String> requiredJobs = new ArrayList<>(List.of(requiredJob));
+        for (String line : jobs.get(requiredJob)) {
+            if (line.startsWith("needs: ")) {
+                String dependencies = line.substring("needs: ".length())
+                        .replace("[", "").replace("]", "");
+                for (String dependency : dependencies.split(",")) {
+                    requiredJobs.add(dependency.strip());
+                }
+            }
+        }
+        List<String> invocations = new ArrayList<>();
+        for (String job : requiredJobs) {
+            for (String line : jobs.getOrDefault(job, List.of())) {
+                if (line.contains("gradlew")) {
+                    invocations.add(line);
+                }
+            }
         }
         return invocations;
     }
