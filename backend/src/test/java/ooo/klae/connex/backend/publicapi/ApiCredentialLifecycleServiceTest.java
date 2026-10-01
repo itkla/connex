@@ -28,15 +28,16 @@ import ooo.klae.connex.backend.services.AuditService;
 
 class ApiCredentialLifecycleServiceTest {
 
+    private final ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
+    private final WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+    private final OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
+    private final AuditService auditService = mock(AuditService.class);
+    private final ApiCredentialLifecycleService service =
+        new ApiCredentialLifecycleService(
+            mapper, workspaceMapper, organizationMapper, auditService);
+
     @Test
     void accountErasureSortsWorkspaceRootsAndExactCredentialChildrenBeforeDeletion() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         ApiCredential later = credential(22, 9, 4, 17);
         ApiCredential first = credential(11, 3, 2, 17);
         ApiCredential middle = credential(12, 3, 2, 17);
@@ -100,13 +101,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void membershipCleanupStillDeletesAndAuditsWhileWorkspaceIsTearingDown() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         ApiCredential credential = credential(11, 3, 2, 17);
         when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(2);
         when(organizationMapper.lockByIdForShare(2)).thenReturn(2);
@@ -151,13 +145,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void membershipCleanupSkipsCredentialChildrenWhenWorkspaceRootIsGone() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(null);
 
         service.deleteForMembership(3, 17);
@@ -169,13 +156,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void membershipCleanupSkipsCredentialChildrenWhenOrganizationRootIsGone() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(2);
         when(organizationMapper.lockByIdForShare(2)).thenReturn(null);
 
@@ -187,13 +167,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void accountErasureSkipsCredentialChildThatVanishedAfterRootDiscovery() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         ApiCredential vanished = credential(11, 3, 2, 17);
         ApiCredential surviving = credential(12, 3, 2, 17);
         when(mapper.listByAccountReference(17)).thenReturn(List.of(vanished, surviving));
@@ -218,13 +191,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void accountErasureConvergesWhenEveryPlannedCredentialWasDeletedByAnotherErasure() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         when(mapper.listByAccountReference(17)).thenReturn(
             List.of(credential(11, 3, 2, 17), credential(12, 3, 2, 17)));
 
@@ -240,13 +206,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void accountErasureDeletesRevokerCredentialWhileWorkspaceIsTearingDown() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         ApiCredential credential = credential(11, 3, 2, 99);
         credential.setRevokedById(17);
         when(mapper.listByAccountReference(17)).thenReturn(List.of(credential));
@@ -274,13 +233,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void discoverAccountReferenceRootsIsAscendingAndDistinct() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         when(mapper.listAccountReferenceRoots(17)).thenReturn(List.of(
             new ApiCredentialReferenceRoot(9, 4),
             new ApiCredentialReferenceRoot(3, 2),
@@ -295,13 +247,6 @@ class ApiCredentialLifecycleServiceTest {
 
     @Test
     void accountErasureRejectsCredentialOutsideTheLockedRootPairs() {
-        ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-        OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        ApiCredentialLifecycleService service =
-            new ApiCredentialLifecycleService(
-                mapper, workspaceMapper, organizationMapper, auditService);
         when(mapper.listByAccountReference(17)).thenReturn(List.of(credential(11, 3, 2, 17)));
 
         IllegalStateException failure = assertThrows(

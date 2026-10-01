@@ -1,6 +1,11 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.ATTAINMENT_BODY;
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.REPORT_BODY;
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.commercialReportBody;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,6 +32,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +41,9 @@ import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -52,6 +60,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
@@ -61,6 +71,7 @@ import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.integration.ReportTestFixtures.CommercialWidget;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -71,6 +82,12 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
@@ -88,34 +105,7 @@ class ReportKpiIntegrationTest {
 
     private static final String PASSWORD = "Report-Kpi-Test-Pw1!";
     private static final Instant FIXED_NOW = Instant.parse("2026-07-12T12:00:00Z");
-    private static final String REPORT_BODY = """
-        {
-          "name": "January Activity",
-          "description": "Monthly activity review",
-          "cadence": "custom",
-          "templateKey": null,
-          "config": {
-            "widgets": [{
-              "id": "activity-total",
-              "title": "Activity total",
-              "dataSource": "activities",
-              "measure": "count",
-              "groupBy": "none",
-              "chartType": "kpi"
-            }],
-            "filters": {
-              "pipelineIds": null,
-              "ownerIds": null,
-              "statuses": null,
-              "tagIds": null,
-              "warmthBands": null
-            },
-            "range": {"start": "2026-01-01", "end": "2026-01-31"},
-            "bucket": "day",
-            "layout": [{"widgetId": "activity-total", "x": 0, "y": 0, "width": 6, "height": 4}]
-          }
-        }
-        """;
+
     private static final String NETWORK_REPORT_BODY = commercialReportBody(List.of(
             new CommercialWidget(
                     "reachable-pipeline", "companies", "warm_intro_opportunity_value", "none", "kpi"),
@@ -125,47 +115,6 @@ class ReportKpiIntegrationTest {
                     "reverse_intro_weighted_opportunities",
                     "none",
                     "kpi")));
-    private static final String ATTAINMENT_BODY = """
-        {
-          "name": "July Quota Attainment",
-          "description": "Revenue targets and actuals",
-          "cadence": "monthly",
-          "templateKey": "quota-attainment",
-          "config": {
-            "widgets": [
-              {
-                "id": "owner-attainment",
-                "title": "Attainment by owner",
-                "dataSource": "deals",
-                "measure": "attainment",
-                "groupBy": "owner",
-                "chartType": "bar"
-              },
-              {
-                "id": "workspace-attainment",
-                "title": "Overall attainment",
-                "dataSource": "deals",
-                "measure": "attainment",
-                "groupBy": "none",
-                "chartType": "kpi"
-              }
-            ],
-            "filters": {
-              "pipelineIds": null,
-              "ownerIds": null,
-              "statuses": null,
-              "tagIds": null,
-              "warmthBands": null
-            },
-            "range": null,
-            "bucket": "month",
-            "layout": [
-              {"widgetId": "owner-attainment", "x": 0, "y": 0, "width": 6, "height": 4},
-              {"widgetId": "workspace-attainment", "x": 6, "y": 0, "width": 6, "height": 4}
-            ]
-          }
-        }
-        """;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -178,6 +127,10 @@ class ReportKpiIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private Clock clock;
+    @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private TenantLifecycleMapper lifecycleMapper;
+    @Autowired private TenantLifecycleControlMapper lifecycleControlMapper;
+    @Autowired private TenantContext tenantContext;
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
     @MockitoBean private AiGenerationService aiGenerationService;
@@ -188,6 +141,10 @@ class ReportKpiIntegrationTest {
     @MockitoSpyBean private PersonEdgeMapper personEdgeMapper;
     @MockitoSpyBean private ReportNetworkService reportNetworkService;
 
+    private final List<Workspace> fixtureWorkspaces = new ArrayList<>();
+    private final List<Organization> fixtureOrganizations = new ArrayList<>();
+    private final List<User> fixtureUsers = new ArrayList<>();
+    private final List<MockHttpSession> fixtureSessions = new ArrayList<>();
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -202,6 +159,62 @@ class ReportKpiIntegrationTest {
         when(aiReportNarrativeService.cachedNarrative(
                 anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList()))
                 .thenReturn(ReportNarrativeDto.unavailable("not_cached"));
+    }
+
+    @AfterEach
+    void cleanCommittedFixtures() {
+        RequestContextHolder.resetRequestAttributes();
+        tenantContext.clear();
+        List<Executable> cleanup = new ArrayList<>();
+        for (MockHttpSession session : fixtureSessions) {
+            cleanup.add(() -> {
+                if (!session.isInvalid()) {
+                    session.invalidate();
+                }
+            });
+        }
+        for (Workspace workspace : fixtureWorkspaces) {
+            cleanup.add(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                List<TableLifecycle> tables = TenantLifecycleRegistry.declarations().values().stream()
+                    .filter(TableLifecycle::direct)
+                    .sorted(Comparator.comparingInt(TableLifecycle::deleteOrder)).toList();
+                for (TableLifecycle table : tables) {
+                    for (var preparation : table.preparations()) {
+                        if (preparation instanceof NullifyReference reference) {
+                            lifecycleMapper.nullifyReference(workspace.getId(), table, reference);
+                        }
+                    }
+                }
+                for (TableLifecycle table : tables) {
+                    while (lifecycleMapper.deleteDirectBatch(workspace.getId(), table, 100) > 0) {
+                    }
+                }
+                for (TableLifecycle table : TenantLifecycleRegistry.declarations().values()) {
+                    assertEquals(0, lifecycleMapper.countRows(workspace.getId(), table), table.table());
+                }
+                lifecycleControlMapper.markWorkspaceTearingDown(workspace.getOrgId(), workspace.getId());
+                lifecycleControlMapper.deleteWorkspace(workspace.getOrgId(), workspace.getId());
+                assertEquals(0, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM workspace WHERE id = ?", Integer.class, workspace.getId()));
+                assertTrue(workspaceMapper.getMembers(workspace.getId()).isEmpty());
+                assertTrue(roleMapper.findRolesByWorkspace(workspace.getId()).isEmpty());
+            }));
+        }
+        for (Organization organization : fixtureOrganizations) {
+            cleanup.add(() -> {
+                assertEquals(0, lifecycleControlMapper.countWorkspaces(organization.getId()));
+                lifecycleControlMapper.markOrganizationTearingDown(organization.getId());
+                lifecycleControlMapper.deleteOrganization(organization.getId());
+                assertNull(organizationMapper.getById(organization.getId()));
+            });
+        }
+        for (User user : fixtureUsers) {
+            cleanup.add(() -> {
+                userMapper.delete(user.getId());
+                assertNull(userMapper.getUserById(user.getId()));
+            });
+        }
+        assertAll("Committed KPI fixture cleanup", cleanup);
     }
 
     @Test
@@ -889,50 +902,6 @@ class ReportKpiIntegrationTest {
                 "SELECT COUNT(*) FROM " + table + " WHERE workspace_id = ?", Integer.class, workspaceId);
     }
 
-    private record CommercialWidget(
-            String id, String dataSource, String measure, String groupBy, String chartType) {
-    }
-
-    private static String commercialReportBody(List<CommercialWidget> widgets) {
-        StringBuilder widgetJson = new StringBuilder();
-        StringBuilder layoutJson = new StringBuilder();
-        for (int index = 0; index < widgets.size(); index++) {
-            CommercialWidget widget = widgets.get(index);
-            if (index > 0) {
-                widgetJson.append(',');
-                layoutJson.append(',');
-            }
-            widgetJson.append(("{\"id\": \"%s\", \"title\": null, \"dataSource\": \"%s\", "
-                    + "\"measure\": \"%s\", \"groupBy\": \"%s\", \"chartType\": \"%s\"}").formatted(
-                    widget.id(), widget.dataSource(), widget.measure(),
-                    widget.groupBy(), widget.chartType()));
-            layoutJson.append(
-                    "{\"widgetId\": \"%s\", \"x\": %d, \"y\": %d, \"width\": 6, \"height\": 4}"
-                            .formatted(widget.id(), index % 2 * 6, index / 2 * 4));
-        }
-        return """
-            {
-              "name": "Commercial documents",
-              "description": "Quote, approval, and discount metrics",
-              "cadence": "custom",
-              "templateKey": null,
-              "config": {
-                "widgets": [%s],
-                "filters": {
-                  "pipelineIds": null,
-                  "ownerIds": null,
-                  "statuses": null,
-                  "tagIds": null,
-                  "warmthBands": null
-                },
-                "range": {"start": "2026-01-01", "end": "2026-01-31"},
-                "bucket": "day",
-                "layout": [%s]
-              }
-            }
-            """.formatted(widgetJson, layoutJson);
-    }
-
     private Workspace newWorkspaceInOrg(int organizationId) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         Workspace workspace = new Workspace();
@@ -940,6 +909,7 @@ class ReportKpiIntegrationTest {
         workspace.setSlug("report-kpi-" + suffix);
         workspace.setOrgId(organizationId);
         workspaceMapper.insert(workspace);
+        fixtureWorkspaces.add(workspace);
         return workspace;
     }
 
@@ -949,6 +919,7 @@ class ReportKpiIntegrationTest {
         organization.setName("Report KPI Org " + suffix);
         organization.setSlug("report-kpi-org-" + suffix);
         organizationMapper.insert(organization);
+        fixtureOrganizations.add(organization);
         return organization;
     }
 
@@ -961,6 +932,7 @@ class ReportKpiIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         user.setTimezone("UTC");
         userMapper.insert(user);
+        fixtureUsers.add(user);
         addReportMember(workspace, user, permissions);
         return user;
     }
@@ -990,6 +962,7 @@ class ReportKpiIntegrationTest {
             .andReturn();
         MockHttpSession session = (MockHttpSession) result.getRequest().getSession(false);
         assertNotNull(session, "login did not establish a report KPI test session");
+        fixtureSessions.add(session);
         return session;
     }
 

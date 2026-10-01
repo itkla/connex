@@ -74,15 +74,8 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         Trajectory trajectory = run(
                 "connex_script_multi_step_read", "check this contact before I call them");
 
-        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
-        assertEquals(List.of("search_records", "get_record"), trajectory.toolNames());
-        assertEquals(
-                List.of("executed", "executed"),
-                trajectory.toolCalls().stream().map(AiChatToolCall::getStatus).toList());
-        assertTrue(
-                trajectory.answer().contains("](person:" + contact.getId() + ")"),
-                "the cited handle must be rewritten into a durable record link: "
-                        + trajectory.answer());
+        assertGroundedRead(trajectory, contact);
+        assertSoleCallCorrelation(trajectory);
     }
 
     @Test
@@ -281,6 +274,18 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 "the cited handle must become a durable record link: " + answer);
     }
 
+    private static void assertGroundedRead(Trajectory trajectory, Person contact) {
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "get_record"), trajectory.toolNames());
+        assertEquals(
+                List.of("executed", "executed"),
+                trajectory.toolCalls().stream().map(AiChatToolCall::getStatus).toList());
+        assertTrue(
+                trajectory.answer().contains("](person:" + contact.getId() + ")"),
+                "the cited handle must be rewritten into a durable record link: "
+                        + trajectory.answer());
+    }
+
     /**
      * A real multi-step native turn still correlates one call per step, on the wire and on disk.
      *
@@ -291,13 +296,7 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
      * the sole-call ordinal, and every durable row keeps the unsuffixed {@code turn-N-step-M} key
      * the progress projection and the write-proposal replay look up verbatim.
      */
-    @Test
-    void aNativeTurnKeepsOneUnsuffixedCallPerStepOnTheWireAndInItsDurableRows() {
-        person("Kestrel Marlow", "kestrel.marlow@example.invalid", null);
-
-        Trajectory trajectory = run(
-                "connex_script_multi_step_read", "check this contact before I call them");
-
+    private void assertSoleCallCorrelation(Trajectory trajectory) {
         assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
         assertEquals(
                 List.of(

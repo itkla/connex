@@ -22,7 +22,6 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
@@ -93,7 +92,7 @@ class SeederGuardTest {
     @ParameterizedTest
     @ValueSource(strings = {"CoNnEx_PuB", "CoNnExDb"})
     void refusesProtectedConfiguredDatabaseBeforeOpeningAConnection(String database) {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/" + database + "?sslMode=DISABLED"
         );
@@ -239,7 +238,7 @@ class SeederGuardTest {
             "spring.datasource.hikari.jdbcUrl",
             "spring.datasource.hikari.jdbc_url"
         }) {
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty(
                     "spring.datasource.url",
                     "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -295,7 +294,7 @@ class SeederGuardTest {
         for (String propertyKey : UNSAFE_PRECONNECTION_DRIVER_PROPERTY_KEY_ALIASES) {
             String propertyPrefix = propertyPrefixes[propertyIndex % propertyPrefixes.length];
             String propertyName = propertyPrefix + "." + propertyKey;
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty(
                     "spring.datasource.url",
                     "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -323,7 +322,7 @@ class SeederGuardTest {
 
     @Test
     void permitsSafeHikariAndFlywayDriverProperties() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -350,7 +349,7 @@ class SeederGuardTest {
             "spring.datasource.hikari.connectionInitSql",
             "spring.datasource.hikari.connection_init_sql"
         }) {
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty(
                     "spring.datasource.url",
                     "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -378,7 +377,7 @@ class SeederGuardTest {
 
     @Test
     void permitsProjectDefaultHikariConnectionInitSqlAfterStripping() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -404,7 +403,7 @@ class SeederGuardTest {
             "spring.datasource.hikari.connectionTestQuery",
             "spring.datasource.hikari.connection_test_query"
         }) {
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty(
                     "spring.datasource.url",
                     "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -432,7 +431,7 @@ class SeederGuardTest {
 
     @Test
     void permitsOnlyAbsentHikariConnectionTestQuery() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -462,7 +461,7 @@ class SeederGuardTest {
 
     @Test
     void requiresDatasourceUrlAsTheBaselineBeforeOpeningAConnection() {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.hikari.jdbc_url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -486,11 +485,11 @@ class SeederGuardTest {
         MockEnvironment noProfile = new MockEnvironment()
             .withProperty("connex.maintenance.mode", "seeder")
             .withProperty("spring.main.web-application-type", "none");
-        MockEnvironment servingProcess = seederEnvironment()
+        MockEnvironment servingProcess = SeederTestSupport.seederEnvironment()
             .withProperty("spring.main.web-application-type", "servlet");
-        MockEnvironment wrongMaintenanceMode = seederEnvironment()
+        MockEnvironment wrongMaintenanceMode = SeederTestSupport.seederEnvironment()
             .withProperty("connex.maintenance.mode", "off");
-        MockEnvironment routedTenancy = seederEnvironment()
+        MockEnvironment routedTenancy = SeederTestSupport.seederEnvironment()
             .withProperty("connex.tenancy.routing.mode", "catalog-per-placement");
 
         for (MockEnvironment environment
@@ -511,7 +510,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywaySchemaThatIsNotTheConfiguredTargetDatabase() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -532,7 +531,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywaySchemaNamingTheProtectedProductionDatabase() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -554,7 +553,7 @@ class SeederGuardTest {
     @Test
     void refusesEveryExplicitlyConfiguredDeploymentProfile() {
         for (String profile : new String[] {"saas", "silo", "on-prem"}) {
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty("connex.deployment.profile", profile);
             SeederGuard guard = new SeederGuard(
                 environment,
@@ -574,7 +573,7 @@ class SeederGuardTest {
     @ValueSource(strings = {"CoNnEx_PuB", "CoNnExDb"})
     void refusesEffectiveProtectedCatalogEvenWithLoopbackUrl(
             String effectiveCatalog) throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -604,7 +603,7 @@ class SeederGuardTest {
             new IllegalStateException("jdbc:mysql://secret.example/connex_pub")
         );
         SeederGuard guard = new SeederGuard(
-            seederEnvironment().withProperty(
+            SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             ),
@@ -629,7 +628,7 @@ class SeederGuardTest {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.getMetaData()).thenReturn(null);
         SeederGuard guard = new SeederGuard(
-            seederEnvironment().withProperty(
+            SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             ),
@@ -658,7 +657,7 @@ class SeederGuardTest {
             new IllegalArgumentException("driver exposed a sensitive target")
         );
         SeederGuard guard = new SeederGuard(
-            seederEnvironment().withProperty(
+            SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             ),
@@ -688,7 +687,7 @@ class SeederGuardTest {
             .when(connection)
             .close();
         SeederGuard guard = new SeederGuard(
-            seederEnvironment().withProperty(
+            SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             ),
@@ -718,7 +717,7 @@ class SeederGuardTest {
             .when(connection)
             .close();
         SeederGuard guard = new SeederGuard(
-            seederEnvironment().withProperty(
+            SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             ),
@@ -738,7 +737,7 @@ class SeederGuardTest {
 
     @Test
     void refusesConfiguredUrlsThatAgreeOnDatabaseButNameDifferentPorts() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -762,7 +761,7 @@ class SeederGuardTest {
 
     @Test
     void refusesConfiguredUrlsThatNameDifferentRemoteHostsEvenWithOverride() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://db-one.example.test:3306/connex_seeder?sslMode=VERIFY_IDENTITY"
@@ -787,7 +786,7 @@ class SeederGuardTest {
 
     @Test
     void refusesTextualLocalhostBeforeComparingConfiguredTargets() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://localhost:3306/connex_seeder?sslMode=DISABLED"
@@ -811,7 +810,7 @@ class SeederGuardTest {
 
     @Test
     void permitsConfiguredUrlsThatOnlyDifferOnTheImplicitDefaultPort() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1/connex_seeder?sslMode=DISABLED"
@@ -832,7 +831,7 @@ class SeederGuardTest {
 
     @Test
     void refusesConfiguredUrlsWithCaseOnlyDatabaseMismatch() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3306/Connex_Seeder?sslMode=DISABLED"
@@ -856,7 +855,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywayDefaultSchemaThatIsNotTheConfiguredTargetDatabase() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -877,7 +876,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywaySchemasDeclaredAsAnIndexedList() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -898,7 +897,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywaySchemaWithCaseOnlyDatabaseMismatch() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/Connex_Seeder?sslMode=DISABLED"
@@ -920,7 +919,7 @@ class SeederGuardTest {
     @Test
     void permitsCommaBearingScalarFlywayDefaultSchemaWhenItExactlyMatchesTarget()
             throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder,archive?sslMode=DISABLED"
@@ -942,7 +941,7 @@ class SeederGuardTest {
 
     @Test
     void refusesCommaSeparatedFlywaySchemasWhenAnyEntryDiffers() {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -963,7 +962,7 @@ class SeederGuardTest {
 
     @Test
     void permitsFlywaySchemaThatIsTheConfiguredTargetDatabase() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -983,7 +982,7 @@ class SeederGuardTest {
     @Test
     void permitsExactMixedCaseDatabaseAgreementAndCaseInsensitiveHostAgreement()
             throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://DB.EXAMPLE.TEST:3306/Connex_Seeder?sslMode=VERIFY_IDENTITY"
@@ -1011,7 +1010,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywayInitSqlThatCouldSwitchTheSessionDatabase() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -1032,7 +1031,7 @@ class SeederGuardTest {
 
     @Test
     void refusesFlywayInitSqlDeclaredAsAnIndexedList() throws SQLException {
-        MockEnvironment environment = seederEnvironment()
+        MockEnvironment environment = SeederTestSupport.seederEnvironment()
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
@@ -1059,7 +1058,7 @@ class SeederGuardTest {
             "jdbc:mysql://127.0.0.1:3313/connex_dev?sslMode=DISABLED",
             "jdbc:mysql://127.0.0.1:3313/CONNEX_SEEDER?sslMode=DISABLED"
         }) {
-            MockEnvironment environment = seederEnvironment().withProperty(
+            MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             );
@@ -1085,7 +1084,7 @@ class SeederGuardTest {
             "jdbc:mysql://127.0.0.1:3313/connex_dev?sslMode=DISABLED",
             "jdbc:mysql://127.0.0.1:3313/CONNEX_SEEDER?sslMode=DISABLED"
         }) {
-            MockEnvironment environment = seederEnvironment().withProperty(
+            MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
             );
@@ -1112,7 +1111,7 @@ class SeederGuardTest {
 
     @Test
     void refusesEffectiveCatalogThatIsNotTheConfiguredTargetDatabase() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -1135,7 +1134,7 @@ class SeederGuardTest {
 
     @Test
     void refusesCaseOnlyCurrentCatalogMismatch() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/Connex_Seeder?sslMode=DISABLED"
         );
@@ -1159,7 +1158,7 @@ class SeederGuardTest {
     @Test
     void refusesFlywayDataSourceAttachedToAnotherCatalogThanTheApplicationTarget()
             throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -1183,7 +1182,7 @@ class SeederGuardTest {
 
     @Test
     void refusesEffectiveConnectionThatReportsNoCurrentDatabase() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -1202,7 +1201,7 @@ class SeederGuardTest {
 
     @Test
     void permitsMatchingServerDatabaseWhenCachedCatalogIsAbsent() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -1222,7 +1221,7 @@ class SeederGuardTest {
 
     @Test
     void checksSharedApplicationAndFlywayDatasourceOnlyOnce() throws SQLException {
-        MockEnvironment environment = seederEnvironment().withProperty(
+        MockEnvironment environment = SeederTestSupport.seederEnvironment().withProperty(
             "spring.datasource.url",
             "jdbc:mysql://127.0.0.1:3313/connex_seeder?sslMode=DISABLED"
         );
@@ -1238,21 +1237,6 @@ class SeederGuardTest {
         guard.verify(sharedDataSource);
 
         verify(sharedDataSource).getConnection();
-    }
-
-    private static MockEnvironment seederEnvironment() {
-        MockEnvironment environment = new MockEnvironment()
-            .withProperty("connex.seeder.enabled", "true")
-            .withProperty("connex.maintenance.mode", "seeder")
-            .withProperty("spring.main.web-application-type", "none")
-            .withProperty("connex.tenancy.routing.mode", "single-database")
-            .withProperty("connex.object-storage.legacy-migration.mode", "off");
-        environment.getPropertySources().addLast(new MapPropertySource(
-            "Config resource 'class path resource [application-seeder.yml]'",
-            SeederStartupConfigurationValidatorTest.safeRepositoryProperties()
-        ));
-        environment.setActiveProfiles("seeder");
-        return environment;
     }
 
     private static DataSource seederDataSource(String url) throws SQLException {

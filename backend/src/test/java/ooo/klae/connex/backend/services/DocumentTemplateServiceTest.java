@@ -14,11 +14,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -77,40 +80,22 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
             .build();
     }
 
-    @Test
-    void rejectsInlineLineItemsOnCreateAndUpdateWithoutPersisting() throws Exception {
+    @ParameterizedTest
+    @MethodSource("malformedBodyCases")
+    void rejectsMalformedBodiesOnCreateAndUpdateWithoutPersisting(String body, String message) throws Exception {
         mockMvc.perform(post("/api/document-templates")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(templateRequest(INLINE_BODY)))
+                .content(templateRequest(body)))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(
-                "Line items must appear as a block, outside paragraphs and other text containers"));
+            .andExpect(jsonPath("$.message").value(message));
         assertTrue(templateService.getAll().isEmpty());
 
         DocumentTemplate saved = templateService.create(template(BLOCK_BODY));
         mockMvc.perform(put("/api/document-templates/{id}", saved.getId())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(templateRequest(INLINE_BODY)))
-            .andExpect(status().isBadRequest());
-        assertEquals(objectMapper.readTree(BLOCK_BODY),
-            objectMapper.readTree(templateService.getById(saved.getId()).getBody()));
-    }
-
-    @Test
-    void rejectsMalformedMarksOnCreateAndUpdateWithNodePathWithoutPersisting() throws Exception {
-        mockMvc.perform(post("/api/document-templates")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(templateRequest(MALFORMED_MARKS_BODY)))
+                .content(templateRequest(body)))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(MALFORMED_MARKS_MESSAGE));
-        assertTrue(templateService.getAll().isEmpty());
-
-        DocumentTemplate saved = templateService.create(template(BLOCK_BODY));
-        mockMvc.perform(put("/api/document-templates/{id}", saved.getId())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(templateRequest(MALFORMED_MARKS_BODY)))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(MALFORMED_MARKS_MESSAGE));
+            .andExpect(jsonPath("$.message").value(message));
         assertEquals(objectMapper.readTree(BLOCK_BODY),
             objectMapper.readTree(templateService.getById(saved.getId()).getBody()));
     }
@@ -164,26 +149,11 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
         }
     }
 
-    @Test
-    void refusesDeliveryOfPreviouslyStoredInlineLineItems() throws Exception {
+    @ParameterizedTest
+    @MethodSource("malformedBodyCases")
+    void refusesDeliveryOfPreviouslyStoredMalformedBodies(String body, String message) throws Exception {
         DocumentFixture fixture = monetaryDocument(BLOCK_BODY);
-        installLegacyBody(fixture, INLINE_BODY);
-
-        mockMvc.perform(post("/api/deals/{dealId}/documents/{documentId}/delivery",
-                    fixture.deal().getId(), fixture.document().id())
-                .header("Idempotency-Key", UUID.randomUUID().toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of(
-                    "provider", "in_app", "recipients", List.of(signer("signer@example.test", 1))))))
-            .andExpect(status().isBadRequest());
-        assertTrue(deliveryService.getForDocument(fixture.deal().getId(), fixture.document().id()).isEmpty());
-        assertEquals("final", documentService.getOne(fixture.deal().getId(), fixture.document().id()).status());
-    }
-
-    @Test
-    void refusesDeliveryOfPreviouslyStoredMalformedMarksWithNodePath() throws Exception {
-        DocumentFixture fixture = monetaryDocument(BLOCK_BODY);
-        installLegacyBody(fixture, MALFORMED_MARKS_BODY);
+        installLegacyBody(fixture, body);
 
         mockMvc.perform(post("/api/deals/{dealId}/documents/{documentId}/delivery",
                     fixture.deal().getId(), fixture.document().id())
@@ -192,7 +162,7 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
                 .content(objectMapper.writeValueAsString(Map.of(
                     "provider", "in_app", "recipients", List.of(signer("signer@example.test", 1))))))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(MALFORMED_MARKS_MESSAGE));
+            .andExpect(jsonPath("$.message").value(message));
         assertTrue(deliveryService.getForDocument(fixture.deal().getId(), fixture.document().id()).isEmpty());
         assertEquals("final", documentService.getOne(fixture.deal().getId(), fixture.document().id()).status());
     }
@@ -227,6 +197,13 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
             """,
             Integer.class, workspace.getId(), delivery.id()));
         assertEquals("sent", documentService.getOne(fixture.deal().getId(), fixture.document().id()).status());
+    }
+
+    private static Stream<Arguments> malformedBodyCases() {
+        return Stream.of(
+            Arguments.of(INLINE_BODY,
+                "Line items must appear as a block, outside paragraphs and other text containers"),
+            Arguments.of(MALFORMED_MARKS_BODY, MALFORMED_MARKS_MESSAGE));
     }
 
     private DocumentFixture monetaryDocument(String body) throws Exception {

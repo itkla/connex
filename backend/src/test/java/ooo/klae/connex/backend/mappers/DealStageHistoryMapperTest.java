@@ -41,18 +41,6 @@ class DealStageHistoryMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void insert_assignsGeneratedId() {
-        Pipeline pipeline = newPipeline();
-        Stage stage = newStage(pipeline, 0);
-        Company company = newCompany();
-        Deal deal = newDeal(pipeline, stage, company);
-
-        DealStageHistory history = record(deal.getId(), stage.getId(), "2024-06-01 10:00:00");
-
-        assertNotEquals(0, history.getId());
-    }
-
-    @Test
     void databaseDefaultKeepsLegacyWriterHistoryIneligible() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -110,7 +98,8 @@ class DealStageHistoryMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, first, company);
 
         record(deal.getId(), second.getId(), "2024-06-03 09:00:00");
-        record(deal.getId(), first.getId(), "2024-06-01 09:00:00");
+        DealStageHistory inserted = record(deal.getId(), first.getId(), "2024-06-01 09:00:00");
+        assertNotEquals(0, inserted.getId());
 
         List<DealStageHistory> history = historyMapper.getByDealId(workspace.getId(), deal.getId());
 

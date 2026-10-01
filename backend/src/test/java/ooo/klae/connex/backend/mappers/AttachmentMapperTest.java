@@ -39,18 +39,6 @@ class AttachmentMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Inserts a new attachment and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Attachment a = build(workspace.getId(), "doc.pdf", "deal", 1, newUser());
-
-        attachmentMapper.insert(a);
-
-        assertNotEquals(0, a.getId());
-    }
-
-    /**
      * Gets an attachment by ID and checks the round-tripped fields.
      */
     @Test
@@ -58,6 +46,7 @@ class AttachmentMapperTest extends AbstractMapperTest {
         User user = newUser();
         Attachment a = build(workspace.getId(), "report.pdf", "company", 7, user);
         attachmentMapper.insert(a);
+        assertNotEquals(0, a.getId());
 
         Attachment found = attachmentMapper.getById(workspace.getId(), a.getId());
 

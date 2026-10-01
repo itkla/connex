@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Person;
@@ -126,8 +128,9 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
             () -> recordCommentService.addReaction(ownerCommentId, "heart"));
     }
 
-    @Test
-    void indicatorCountsStayWithinTheActiveWorkspace() {
+    @ParameterizedTest
+    @CsvSource({"1, 1", "2, 1"})
+    void indicatorCountsStayWithinTheActiveWorkspace(int ownerCount, int granteeCount) {
         WorkspaceMembershipDto owner = workspaceService.createWorkspace(
             "Indicator Isolation Owner " + unique(), currentUser.getId());
         authenticateAs(currentUser, owner.getId());
@@ -137,22 +140,25 @@ class RecordCommentTenantIsolationTest extends AbstractServiceTest {
         assertEquals(1, shareMapper.sharePerson(
             person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false,
                 orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
-        recordCommentService.createThread("person", person.getId(), "Owner one", token());
-        recordCommentService.createThread("person", person.getId(), "Owner two", token());
+        for (int index = 0; index < ownerCount; index++) {
+            recordCommentService.createThread("person", person.getId(), "Owner " + index, token());
+        }
 
         authenticateAs(currentUser, grantee.getId());
-        recordCommentService.createThread("person", person.getId(), "Grantee one", token());
+        for (int index = 0; index < granteeCount; index++) {
+            recordCommentService.createThread("person", person.getId(), "Grantee " + index, token());
+        }
 
         List<RecordCommentIndicatorDto> granteeIndicators = recordCommentService.getIndicators(
             "person", List.of(person.getId()));
         assertEquals(1, granteeIndicators.size());
-        assertEquals(1, granteeIndicators.getFirst().openThreads());
+        assertEquals(granteeCount, granteeIndicators.getFirst().openThreads());
 
         authenticateAs(currentUser, owner.getId());
         List<RecordCommentIndicatorDto> ownerIndicators = recordCommentService.getIndicators(
             "person", List.of(person.getId()));
         assertEquals(1, ownerIndicators.size());
-        assertEquals(2, ownerIndicators.getFirst().openThreads());
+        assertEquals(ownerCount, ownerIndicators.getFirst().openThreads());
     }
 
     private Person personIn(int workspaceId) {

@@ -11,12 +11,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 
 import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldValueType;
@@ -28,8 +30,14 @@ import tools.jackson.databind.json.JsonMapper;
 
 class RecordCreationDtoValidationTest {
 
-    private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+    private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
+    private static final Validator VALIDATOR = FACTORY.getValidator();
     private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
+
+    @AfterAll
+    static void closeValidatorFactory() {
+        FACTORY.close();
+    }
 
     @Test
     void requiredCollectionsRejectNull() {
@@ -38,8 +46,8 @@ class RecordCreationDtoValidationTest {
         RecordCreationTemplateGroupDto group = new RecordCreationTemplateGroupDto(
             "basics", new LocalizedTextDto("Basics", "基本情報"), null, null);
 
-        assertFalse(validator.validate(definition).isEmpty());
-        assertFalse(validator.validate(group).isEmpty());
+        assertFalse(VALIDATOR.validate(definition).isEmpty());
+        assertFalse(VALIDATOR.validate(group).isEmpty());
     }
 
     @Test
@@ -53,7 +61,7 @@ class RecordCreationDtoValidationTest {
                 false,
                 -1);
 
-        var paths = validator.validate(invalid).stream()
+        var paths = VALIDATOR.validate(invalid).stream()
             .map(violation -> violation.getPropertyPath().toString())
             .toList();
 
@@ -108,7 +116,7 @@ class RecordCreationDtoValidationTest {
             null,
             java.util.stream.IntStream.rangeClosed(1, 21).boxed().toList());
 
-        assertFalse(validator.validate(tooMany).isEmpty());
+        assertFalse(VALIDATOR.validate(tooMany).isEmpty());
     }
 
     @Test
@@ -128,10 +136,10 @@ class RecordCreationDtoValidationTest {
             2,
             7);
 
-        assertTrue(validator.validate(defaults).stream()
+        assertTrue(VALIDATOR.validate(defaults).stream()
             .anyMatch(violation -> violation.getPropertyPath().toString()
                 .equals("referenceIds[1].<list element>")));
-        assertTrue(validator.validate(impact).stream()
+        assertTrue(VALIDATOR.validate(impact).stream()
             .anyMatch(violation -> violation.getPropertyPath().toString()
                 .equals("removedFieldKeys[1].<list element>")));
     }
@@ -141,7 +149,7 @@ class RecordCreationDtoValidationTest {
         GuidedPersonCreateRequestDto invalid = new GuidedPersonCreateRequestDto(
             null, null, null, null);
 
-        var paths = validator.validate(invalid).stream()
+        var paths = VALIDATOR.validate(invalid).stream()
             .map(violation -> violation.getPropertyPath().toString())
             .toList();
 
@@ -167,7 +175,7 @@ class RecordCreationDtoValidationTest {
             templateUse(RecordCreationRecordType.company),
             customFields,
             tagIds);
-        assertTrue(validator.validate(request).isEmpty());
+        assertTrue(VALIDATOR.validate(request).isEmpty());
 
         customFields.clear();
         customFields.put(fieldId, nullCustomField ? null : objectMapper.valueToTree("invalid"));
@@ -175,7 +183,7 @@ class RecordCreationDtoValidationTest {
             tagIds.add(null);
         }
 
-        assertEquals(List.of(expectedPath), validator.validate(request).stream()
+        assertEquals(List.of(expectedPath), VALIDATOR.validate(request).stream()
             .map(violation -> violation.getPropertyPath().toString())
             .toList());
     }
@@ -197,9 +205,9 @@ class RecordCreationDtoValidationTest {
             Map.of(),
             List.of());
 
-        assertTrue(validator.validate(valid).isEmpty());
+        assertTrue(VALIDATOR.validate(valid).isEmpty());
         assertEquals(LocalDate.parse("2026-12-31"), valid.record().expectedCloseDate());
-        assertTrue(validator.validate(invalid).stream()
+        assertTrue(VALIDATOR.validate(invalid).stream()
                 .anyMatch(violation -> violation.getPropertyPath().toString().equals("record.value")));
 
         for (String value : List.of("1.001", "10000000000000.00")) {
@@ -211,7 +219,7 @@ class RecordCreationDtoValidationTest {
                 Map.of(),
                 List.of());
 
-            assertEquals(List.of("record.value"), validator.validate(request).stream()
+            assertEquals(List.of("record.value"), VALIDATOR.validate(request).stream()
                 .map(violation -> violation.getPropertyPath().toString())
                 .distinct()
                 .toList());
@@ -229,7 +237,7 @@ class RecordCreationDtoValidationTest {
                 """.formatted(extreme), GuidedDealCreateRequestDto.class);
 
             assertEquals(new BigDecimal(extreme), request.record().value());
-            assertEquals(List.of("record.value"), validator.validate(request).stream()
+            assertEquals(List.of("record.value"), VALIDATOR.validate(request).stream()
                 .map(violation -> violation.getPropertyPath().toString())
                 .toList(), extreme);
         }
@@ -251,7 +259,7 @@ class RecordCreationDtoValidationTest {
             Map.of(),
             List.of());
 
-        assertTrue(validator.validate(request).isEmpty());
+        assertTrue(VALIDATOR.validate(request).isEmpty());
         assertEquals(new BigDecimal("0.00"), request.record().value());
         assertEquals("USD", request.record().currency());
         assertEquals(3, request.record().pipeline());

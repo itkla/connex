@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
@@ -503,9 +504,20 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         note.setBody("Automated follow-up");
         RuleDto rule = entityChangeRule("deal", note, null, "deal.won");
 
+        List<Integer> before = noteMapper.getNotesByDealId(workspace.getId(), deal.getId())
+            .stream().map(Note::getId).toList();
+
         ruleEngineService.onEntityChange(workspace.getId(), "deal", deal.getId(), "deal.won");
 
         assertEquals(1, matchedExecutions(rule.getId()));
+        List<Note> created = noteMapper.getNotesByDealId(workspace.getId(), deal.getId())
+            .stream().filter(saved -> !before.contains(saved.getId())).toList();
+        assertEquals(1, created.size());
+        Note saved = noteMapper.getNoteById(workspace.getId(), created.getFirst().getId());
+        assertEquals("Automated follow-up", saved.getContent());
+        assertEquals(workspace.getId(), saved.getWorkspaceId());
+        assertEquals(deal.getId(), saved.getDeal().getId());
+        assertEquals(currentUser.getId(), saved.getAuthor().getId());
     }
 
     @Test

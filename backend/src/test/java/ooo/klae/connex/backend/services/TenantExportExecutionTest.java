@@ -105,26 +105,30 @@ class TenantExportExecutionTest {
         try (ExecutionExecutors executors = new ExecutionExecutors()) {
             CountDownLatch sinkCloseEntered = new CountDownLatch(1);
             CountDownLatch releaseSink = new CountDownLatch(1);
-            CountDownLatch providerClosed = new CountDownLatch(1);
-            CountDownLatch statementClosed = new CountDownLatch(1);
-            TenantExportExecution execution = executors.execution(
-                Duration.ofSeconds(5),
-                failure -> failure);
-            execution.begin();
-            execution.track(() -> {
-                sinkCloseEntered.countDown();
-                await(releaseSink);
-            });
-            execution.track(providerClosed::countDown);
-            execution.track(statementClosed::countDown);
+            try {
+                CountDownLatch providerClosed = new CountDownLatch(1);
+                CountDownLatch statementClosed = new CountDownLatch(1);
+                TenantExportExecution execution = executors.execution(
+                    Duration.ofSeconds(5),
+                    failure -> failure);
+                execution.begin();
+                execution.track(() -> {
+                    sinkCloseEntered.countDown();
+                    await(releaseSink);
+                });
+                execution.track(providerClosed::countDown);
+                execution.track(statementClosed::countDown);
 
-            execution.cancel();
+                execution.cancel();
 
-            assertTrue(statementClosed.await(1, TimeUnit.SECONDS));
-            assertTrue(providerClosed.await(1, TimeUnit.SECONDS));
-            assertTrue(sinkCloseEntered.await(1, TimeUnit.SECONDS));
-            releaseSink.countDown();
-            execution.writerFinished(null);
+                assertTrue(statementClosed.await(1, TimeUnit.SECONDS));
+                assertTrue(providerClosed.await(1, TimeUnit.SECONDS));
+                assertTrue(sinkCloseEntered.await(1, TimeUnit.SECONDS));
+                releaseSink.countDown();
+                execution.writerFinished(null);
+            } finally {
+                releaseSink.countDown();
+            }
         }
     }
 
@@ -134,31 +138,7 @@ class TenantExportExecutionTest {
                 ExecutorService caller = Executors.newSingleThreadExecutor()) {
             CountDownLatch closeEntered = new CountDownLatch(1);
             CountDownLatch releaseClose = new CountDownLatch(1);
-            TenantExportExecution execution = executors.execution(
-                Duration.ofSeconds(5),
-                failure -> failure);
-            execution.begin();
-            execution.track(() -> {
-                closeEntered.countDown();
-                await(releaseClose);
-            });
-
-            Future<?> cancellation = caller.submit(execution::cancel);
-
-            cancellation.get(250, TimeUnit.MILLISECONDS);
-            assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
-            releaseClose.countDown();
-            execution.writerFinished(null);
-        }
-    }
-
-    @Test
-    void fourAdmittedCancellationsSaturateWorkersWithoutDuplicateDispatch() throws Exception {
-        try (ExecutionExecutors executors = new ExecutionExecutors()) {
-            CountDownLatch closeEntered = new CountDownLatch(4);
-            CountDownLatch releaseClose = new CountDownLatch(1);
-            List<TenantExportExecution> executions = new ArrayList<>();
-            for (int index = 0; index < 4; index++) {
+            try {
                 TenantExportExecution execution = executors.execution(
                     Duration.ofSeconds(5),
                     failure -> failure);
@@ -167,16 +147,48 @@ class TenantExportExecutionTest {
                     closeEntered.countDown();
                     await(releaseClose);
                 });
-                executions.add(execution);
-                execution.cancel();
-                execution.cancel();
-            }
 
-            assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
-            assertTrue(executors.cancellation().getQueue().isEmpty());
-            releaseClose.countDown();
-            for (TenantExportExecution execution : executions) {
+                Future<?> cancellation = caller.submit(execution::cancel);
+
+                cancellation.get(250, TimeUnit.MILLISECONDS);
+                assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
+                releaseClose.countDown();
                 execution.writerFinished(null);
+            } finally {
+                releaseClose.countDown();
+            }
+        }
+    }
+
+    @Test
+    void fourAdmittedCancellationsSaturateWorkersWithoutDuplicateDispatch() throws Exception {
+        try (ExecutionExecutors executors = new ExecutionExecutors()) {
+            CountDownLatch closeEntered = new CountDownLatch(4);
+            CountDownLatch releaseClose = new CountDownLatch(1);
+            try {
+                List<TenantExportExecution> executions = new ArrayList<>();
+                for (int index = 0; index < 4; index++) {
+                    TenantExportExecution execution = executors.execution(
+                        Duration.ofSeconds(5),
+                        failure -> failure);
+                    execution.begin();
+                    execution.track(() -> {
+                        closeEntered.countDown();
+                        await(releaseClose);
+                    });
+                    executions.add(execution);
+                    execution.cancel();
+                    execution.cancel();
+                }
+
+                assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
+                assertTrue(executors.cancellation().getQueue().isEmpty());
+                releaseClose.countDown();
+                for (TenantExportExecution execution : executions) {
+                    execution.writerFinished(null);
+                }
+            } finally {
+                releaseClose.countDown();
             }
         }
     }
@@ -187,48 +199,52 @@ class TenantExportExecutionTest {
         try (ExecutionExecutors executors = new ExecutionExecutors()) {
             CountDownLatch closeEntered = new CountDownLatch(1);
             CountDownLatch releaseClose = new CountDownLatch(1);
-            AtomicBoolean closed = new AtomicBoolean();
-            AtomicBoolean cleanupBeforeClose = new AtomicBoolean();
-            AtomicBoolean interruptRestored = new AtomicBoolean();
-            AtomicReference<Throwable> writerFailure = new AtomicReference<>();
-            CountDownLatch writerEntered = new CountDownLatch(1);
-            TenantExportExecution execution = executors.execution(
-                Duration.ofSeconds(5),
-                failure -> {
-                    cleanupBeforeClose.set(!closed.get());
-                    return failure;
+            try {
+                AtomicBoolean closed = new AtomicBoolean();
+                AtomicBoolean cleanupBeforeClose = new AtomicBoolean();
+                AtomicBoolean interruptRestored = new AtomicBoolean();
+                AtomicReference<Throwable> writerFailure = new AtomicReference<>();
+                CountDownLatch writerEntered = new CountDownLatch(1);
+                TenantExportExecution execution = executors.execution(
+                    Duration.ofSeconds(5),
+                    failure -> {
+                        cleanupBeforeClose.set(!closed.get());
+                        return failure;
+                    });
+                execution.begin();
+                execution.track(() -> {
+                    closeEntered.countDown();
+                    await(releaseClose);
+                    closed.set(true);
                 });
-            execution.begin();
-            execution.track(() -> {
-                closeEntered.countDown();
-                await(releaseClose);
-                closed.set(true);
-            });
-            execution.cancel();
-            assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
+                execution.cancel();
+                assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
 
-            Thread writer = Thread.ofPlatform().start(() -> {
-                Thread.currentThread().interrupt();
-                writerEntered.countDown();
-                try {
-                    execution.writerFinished(null);
-                } catch (Throwable failure) {
-                    writerFailure.set(failure);
-                }
-                interruptRestored.set(Thread.currentThread().isInterrupted());
-            });
+                Thread writer = executors.startWriter(() -> {
+                    Thread.currentThread().interrupt();
+                    writerEntered.countDown();
+                    try {
+                        execution.writerFinished(null);
+                    } catch (Throwable failure) {
+                        writerFailure.set(failure);
+                    }
+                    interruptRestored.set(Thread.currentThread().isInterrupted());
+                });
 
-            assertTrue(writerEntered.await(1, TimeUnit.SECONDS));
-            awaitWaiting(writer);
-            assertTrue(writer.isAlive());
-            assertFalse(cleanupBeforeClose.get());
-            releaseClose.countDown();
-            writer.join(2_000);
+                assertTrue(writerEntered.await(1, TimeUnit.SECONDS));
+                awaitWaiting(writer);
+                assertTrue(writer.isAlive());
+                assertFalse(cleanupBeforeClose.get());
+                releaseClose.countDown();
+                writer.join(2_000);
 
-            assertFalse(writer.isAlive());
-            assertNull(writerFailure.get());
-            assertFalse(cleanupBeforeClose.get());
-            assertTrue(interruptRestored.get());
+                assertFalse(writer.isAlive());
+                assertNull(writerFailure.get());
+                assertFalse(cleanupBeforeClose.get());
+                assertTrue(interruptRestored.get());
+            } finally {
+                releaseClose.countDown();
+            }
         }
     }
 
@@ -260,7 +276,7 @@ class TenantExportExecutionTest {
                 execution.cancel();
                 executors.cancellation().shutdown();
 
-                Thread writer = Thread.ofPlatform().start(() -> {
+                Thread writer = executors.startWriter(() -> {
                     writerEntered.countDown();
                     try {
                         execution.writerFinished(null);
@@ -291,24 +307,28 @@ class TenantExportExecutionTest {
         try (ExecutionExecutors executors = new ExecutionExecutors()) {
             CountDownLatch closeEntered = new CountDownLatch(1);
             CountDownLatch releaseClose = new CountDownLatch(1);
-            CountDownLatch schedulerAdvanced = new CountDownLatch(1);
-            TenantExportExecution execution = executors.execution(
-                Duration.ofMillis(20),
-                failure -> failure);
-            execution.begin();
-            execution.track(() -> {
-                closeEntered.countDown();
-                await(releaseClose);
-            });
-            executors.deadline().schedule(
-                schedulerAdvanced::countDown,
-                40,
-                TimeUnit.MILLISECONDS);
+            try {
+                CountDownLatch schedulerAdvanced = new CountDownLatch(1);
+                TenantExportExecution execution = executors.execution(
+                    Duration.ofMillis(20),
+                    failure -> failure);
+                execution.begin();
+                execution.track(() -> {
+                    closeEntered.countDown();
+                    await(releaseClose);
+                });
+                executors.deadline().schedule(
+                    schedulerAdvanced::countDown,
+                    40,
+                    TimeUnit.MILLISECONDS);
 
-            assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
-            assertTrue(schedulerAdvanced.await(1, TimeUnit.SECONDS));
-            releaseClose.countDown();
-            execution.writerFinished(null);
+                assertTrue(closeEntered.await(1, TimeUnit.SECONDS));
+                assertTrue(schedulerAdvanced.await(1, TimeUnit.SECONDS));
+                releaseClose.countDown();
+                execution.writerFinished(null);
+            } finally {
+                releaseClose.countDown();
+            }
         }
     }
 
@@ -408,6 +428,7 @@ class TenantExportExecutionTest {
                 assertThrows(IllegalStateException.class, execution::begin);
             } finally {
                 inlineDeadline.shutdownNow();
+                assertTrue(inlineDeadline.awaitTermination(5, TimeUnit.SECONDS));
             }
         }
     }
@@ -433,9 +454,11 @@ class TenantExportExecutionTest {
     }
 
     private static void await(CountDownLatch latch) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (true) {
             try {
-                latch.await();
+                assertTrue(latch.await(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS),
+                    "Fixture release latch was not opened");
                 return;
             } catch (InterruptedException exception) {
                 if (latch.getCount() == 0) {
@@ -457,14 +480,24 @@ class TenantExportExecutionTest {
     }
 
     private static final class ExecutionExecutors implements AutoCloseable {
+        private final List<Thread> writers = new ArrayList<>();
+
+        private Thread startWriter(Runnable work) {
+            Thread writer = Thread.ofPlatform().daemon().unstarted(work);
+            writers.add(writer);
+            writer.start();
+            return writer;
+        }
+
         private final ScheduledThreadPoolExecutor deadline =
-            new ScheduledThreadPoolExecutor(1);
+            new ScheduledThreadPoolExecutor(1, Thread.ofPlatform().daemon().factory());
         private final ThreadPoolExecutor cancellation = new ThreadPoolExecutor(
             4,
             4,
             0,
             TimeUnit.NANOSECONDS,
-            new ArrayBlockingQueue<>(4));
+            new ArrayBlockingQueue<>(4),
+            Thread.ofPlatform().daemon().factory());
 
         private ExecutionExecutors() {
             deadline.setRemoveOnCancelPolicy(true);
@@ -491,13 +524,29 @@ class TenantExportExecutionTest {
         @Override
         public void close() {
             deadline.shutdownNow();
-            cancellation.shutdownNow();
+            cancellation.shutdown();
+            try {
+                boolean cancellationFinished = cancellation.awaitTermination(5, TimeUnit.SECONDS);
+                if (!cancellationFinished) {
+                    cancellation.shutdownNow();
+                }
+                assertTrue(cancellationFinished, "Accepted cancellation work must drain");
+                for (Thread writer : writers) {
+                    writer.join(2_000);
+                    assertFalse(writer.isAlive(), "Writer must terminate after fixture release");
+                }
+                assertTrue(deadline.awaitTermination(5, TimeUnit.SECONDS));
+                assertTrue(cancellation.awaitTermination(5, TimeUnit.SECONDS));
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Executor teardown was interrupted", failure);
+            }
         }
     }
 
     private static final class InlineDeadlineExecutor extends ScheduledThreadPoolExecutor {
         private InlineDeadlineExecutor() {
-            super(1);
+            super(1, Thread.ofPlatform().daemon().factory());
             setRemoveOnCancelPolicy(true);
         }
 

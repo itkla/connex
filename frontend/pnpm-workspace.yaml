@@ -14,8 +14,11 @@ overrides:
   hono: 4.13.5
   '@modelcontextprotocol/sdk': ^1.30.0
   '@hono/node-server': ^2.0.5
-  'brace-expansion@1': 1.1.18
-  'brace-expansion@>=3': '>=5.0.9'
+  # GHSA-6j4f-fj2g-mc7p (<1.1.19) and GHSA-qhr7-859c-m2p7 (<1.1.20), both high.
+  'brace-expansion@1': 1.1.21
+  # The same two advisories on the 4.x/5.x line: <5.0.10 and <5.0.11. Caret, not a bare
+  # floor, so a future major cannot be pulled in the way >= did for fast-uri (#1873).
+  'brace-expansion@>=3': ^5.0.11
   'qs@<6.16.0': 6.16.0
   'baseline-browser-mapping@<2.11.0': 2.11.0
   # React's optional menu ranges otherwise select releases with newer exact core/PM peers.

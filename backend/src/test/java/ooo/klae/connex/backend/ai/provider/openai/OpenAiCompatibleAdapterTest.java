@@ -1018,16 +1018,7 @@ class OpenAiCompatibleAdapterTest {
      */
     @Test
     void complete_finalOnlyNativeRequestSendsToolChoiceNone() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
-                .thenReturn("""
-                        {
-                          "choices": [{
-                            "message": {"content": "{\\"text\\":\\"Done.\\"}"},
-                            "finish_reason": "stop"
-                          }],
-                          "usage": {"prompt_tokens": 5, "completion_tokens": 2}
-                        }
-                        """);
+        providerAnswers();
         JsonNode parameters = objectMapper.readTree("""
                 {"type":"object","properties":{"handle":{"type":"string"}},
                  "required":["handle"],"additionalProperties":false}
@@ -1038,28 +1029,9 @@ class OpenAiCompatibleAdapterTest {
                 List.of(),
                 null,
                 true);
-        AiCompletionRequest base = schemaRequest();
-        AiCompletionRequest request = new AiCompletionRequest(
-                base.target(),
-                base.credentials(),
-                base.systemPrompt(),
-                base.messages(),
-                base.images(),
-                base.outputMode(),
-                base.responseSchema(),
-                nativeTools,
-                AiReasoningMode.NATIVE,
-                base.providerAttemptExecutor(),
-                base.maxTokens(),
-                base.temperature());
 
-        adapter.complete(request);
+        JsonNode body = nativeBody(nativeTools);
 
-        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(openAiCompatibleClient).complete(
-                any(URI.class), anyBoolean(), any(AiCredentials.class), bodyCaptor.capture(),
-                any(AiRequestDeadline.class), any(Runnable.class));
-        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("none", body.path("tool_choice").asString());
         assertEquals("get_record",
                 body.path("tools").path(0).path("function").path("name").asString());

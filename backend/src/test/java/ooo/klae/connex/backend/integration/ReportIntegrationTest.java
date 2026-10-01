@@ -1,7 +1,12 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.ATTAINMENT_BODY;
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.REPORT_BODY;
+import static ooo.klae.connex.backend.integration.ReportTestFixtures.commercialReportBody;
 import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -55,6 +60,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -76,6 +82,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.integration.ReportTestFixtures.CommercialWidget;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -97,6 +104,7 @@ import ooo.klae.connex.backend.services.ApprovalPolicyService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.ReportDeliveryScheduler;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -112,34 +120,7 @@ class ReportIntegrationTest {
 
     private static final String PASSWORD = "Report-Test-Pw1!";
     private static final Instant FIXED_NOW = Instant.parse("2026-07-12T12:00:00Z");
-    private static final String REPORT_BODY = """
-        {
-          "name": "January Activity",
-          "description": "Monthly activity review",
-          "cadence": "custom",
-          "templateKey": null,
-          "config": {
-            "widgets": [{
-              "id": "activity-total",
-              "title": "Activity total",
-              "dataSource": "activities",
-              "measure": "count",
-              "groupBy": "none",
-              "chartType": "kpi"
-            }],
-            "filters": {
-              "pipelineIds": null,
-              "ownerIds": null,
-              "statuses": null,
-              "tagIds": null,
-              "warmthBands": null
-            },
-            "range": {"start": "2026-01-01", "end": "2026-01-31"},
-            "bucket": "day",
-            "layout": [{"widgetId": "activity-total", "x": 0, "y": 0, "width": 6, "height": 4}]
-          }
-        }
-        """;
+
     private static final String RELATIONSHIP_HEALTH_BODY = """
         {
           "name": "January Relationship Health",
@@ -466,49 +447,9 @@ class ReportIntegrationTest {
           }
         }
         """;
-    private static final String ATTAINMENT_BODY = """
-        {
-          "name": "July Quota Attainment",
-          "description": "Revenue targets and actuals",
-          "cadence": "monthly",
-          "templateKey": "quota-attainment",
-          "config": {
-            "widgets": [
-              {
-                "id": "owner-attainment",
-                "title": "Attainment by owner",
-                "dataSource": "deals",
-                "measure": "attainment",
-                "groupBy": "owner",
-                "chartType": "bar"
-              },
-              {
-                "id": "workspace-attainment",
-                "title": "Overall attainment",
-                "dataSource": "deals",
-                "measure": "attainment",
-                "groupBy": "none",
-                "chartType": "kpi"
-              }
-            ],
-            "filters": {
-              "pipelineIds": null,
-              "ownerIds": null,
-              "statuses": null,
-              "tagIds": null,
-              "warmthBands": null
-            },
-            "range": null,
-            "bucket": "month",
-            "layout": [
-              {"widgetId": "owner-attainment", "x": 0, "y": 0, "width": 6, "height": 4},
-              {"widgetId": "workspace-attainment", "x": 6, "y": 0, "width": 6, "height": 4}
-            ]
-          }
-        }
-        """;
 
     @Autowired private WebApplicationContext context;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -757,6 +698,81 @@ class ReportIntegrationTest {
             .andExpect(status().isForbidden());
     }
 
+    /**
+     * Pins the satisfied half of #1763 over HTTP: a privileged account carrying a fresh WebAuthn
+     * step-up opens and redirects a delivery schedule, and the schedule then keeps delivering with no
+     * session at all.
+     *
+     * <p>It is therefore a guard against over-gating rather than a proof of the gate: it fails if the
+     * gate ever refuses a satisfied privileged session, or if delivery itself acquires a step-up
+     * requirement it cannot meet.
+     *
+     * <p>The refused half is not asserted here. Its refusal audit is an independent
+     * {@code REQUIRES_NEW} append that re-takes the actor's {@code app_user} row {@code FOR SHARE},
+     * and this class is {@code @Transactional}, so that append would wait out
+     * {@code innodb_lock_wait_timeout} on the fixture's own uncommitted actor row. The refusal is
+     * covered by {@code ScheduleStepUpTest}, and its 403 wire shape by
+     * {@code GlobalExceptionHandlerTest}.
+     */
+    @Test
+    void aPrivilegedAccountWithAFreshStepUpSchedulesAndKeepsDeliveringUnattended() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User owner = newMember(workspace, "owner");
+        MockHttpSession session = login(owner.getUsername());
+        int reportId = createReport(session, workspace);
+        assertTrue(userMapper.isPrivilegedAccount(owner.getId()));
+
+        markRecentlyAuthenticated(session, owner.getId());
+        int scheduleId = createSchedule(session, workspace, reportId, owner.getId());
+        mockMvc.perform(put("/api/reports/{id}/schedule", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleBody(owner.getId(), "monthly", 10))
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cadence").value("monthly"));
+
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        assertEquals("scheduled", jdbcTemplate.queryForObject(
+                "SELECT origin FROM report_snapshot WHERE workspace_id = ? AND id = ?",
+                String.class, workspace.getId(),
+                latestScheduledSnapshotId(workspace.getId(), scheduleId)));
+    }
+
+    /**
+     * A member that administers no other principal is unaffected by the schedule step-up gate, so an
+     * ordinary password session still schedules a report.
+     */
+    @Test
+    void anUnprivilegedMemberSchedulesWithoutAFreshStepUp() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        WorkspaceRole reportManager = new WorkspaceRole();
+        reportManager.setWorkspaceId(workspace.getId());
+        reportManager.setName("Report manager " + UUID.randomUUID().toString().substring(0, 8));
+        roleMapper.insertRole(reportManager);
+        roleMapper.insertPermissions(workspace.getId(), reportManager.getId(),
+                List.of("REPORT_READ", "REPORT_CREATE", "REPORT_UPDATE"));
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), member.getId(), reportManager.getId());
+
+        assertFalse(userMapper.isPrivilegedAccount(member.getId()));
+        int scheduleId = createSchedule(session, workspace, reportId, member.getId());
+        mockMvc.perform(put("/api/reports/{id}/schedule", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleBody(member.getId(), "monthly", 11))
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(scheduleId));
+    }
+
     @Test
     void forcedDeliveriesCreateDistinctScheduledSnapshots() throws Exception {
         RequestContextHolder.resetRequestAttributes();
@@ -797,14 +813,15 @@ class ReportIntegrationTest {
         int manualSnapshotId = responseId(manualResult);
         int scheduleId = createSchedule(session, workspace, reportId, member.getId());
 
-        forceScheduledDelivery(workspace.getId(), scheduleId);
-        int orphanSnapshotId = latestScheduledSnapshotId(workspace.getId(), scheduleId);
+        seedHistoricalSnapshots(workspace.getId(), reportId, member.getId(), 26, 26, scheduleId);
+        int orphanSnapshotId = jdbcTemplate.queryForObject(
+            "SELECT id FROM report_snapshot WHERE workspace_id = ? AND report_schedule_id = ? "
+                + "AND origin = 'scheduled' ORDER BY generated_at ASC, id ASC LIMIT 1",
+            Integer.class, workspace.getId(), scheduleId);
         assertEquals(1, jdbcTemplate.update(
                 "UPDATE report_snapshot SET report_schedule_id = NULL WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), orphanSnapshotId));
-        for (int delivery = 1; delivery < 27; delivery++) {
-            forceScheduledDelivery(workspace.getId(), scheduleId);
-        }
+        forceScheduledDelivery(workspace.getId(), scheduleId);
 
         assertEquals(26, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM report_snapshot "
@@ -1071,21 +1088,102 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)
                 .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(adminSession);
+        sessionSecurityService.markStepUp(stepUpRequest, admin.getId());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
     }
 
     @Test
-    void relationshipHealthTemplateIsAvailable() throws Exception {
+    void reportTemplateCatalogPreservesCanonicalDefinitions() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User member = newMember(workspace, "member");
         MockHttpSession session = login(member.getUsername());
-
-        mockMvc.perform(get("/api/reports/templates")
+        MvcResult result = mockMvc.perform(get("/api/reports/templates")
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty());
+            .andReturn();
+        JsonNode catalog = objectMapper.readTree(result.getResponse().getContentAsString());
+
+        assertAll("report template catalog",
+            () -> assertAll("relationship-health", () -> {
+                jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty().match(result);
+            }),
+            () -> assertAll("network-warm-intros", () -> {
+                jsonPath("$[?(@.key == 'network-warm-intros')]").isNotEmpty().match(result);
+                JsonNode template = findTemplate(
+                        catalog, "network-warm-intros");
+                assertNotNull(template);
+                List<String> measures = new ArrayList<>();
+                for (JsonNode widget : template.get("config").get("widgets")) {
+                    measures.add(widget.get("measure").asText());
+                }
+                assertTrue(measures.containsAll(List.of(
+                        "warm_intro_opportunity_value",
+                        "warm_intro_reachable_account_count",
+                        "reverse_intro_weighted_opportunities")));
+            }),
+            () -> assertAll("employment-moves", () -> {
+                jsonPath("$[?(@.key == 'employment-moves')]").isNotEmpty().match(result);
+                JsonNode template = findTemplate(
+                        catalog, "employment-moves");
+                assertNotNull(template);
+                assertEquals("monthly", template.get("cadence").asText());
+                Set<String> measures = new java.util.HashSet<>();
+                Set<String> groups = new java.util.HashSet<>();
+                for (JsonNode widget : template.get("config").get("widgets")) {
+                    assertEquals("people", widget.get("dataSource").asText());
+                    measures.add(widget.get("measure").asText());
+                    groups.add(widget.get("groupBy").asText());
+                }
+                assertEquals(Set.of("employment_departure_count", "employment_arrival_count"), measures);
+                assertEquals(Set.of("none", "date", "company", "person"), groups);
+            }),
+            () -> assertAll("forecasting", () -> {
+                jsonPath("$[?(@.key == 'forecasting')]").isNotEmpty().match(result);
+                JsonNode forecasting = findTemplate(
+                        catalog, "forecasting");
+                assertNotNull(forecasting);
+                assertEquals("quarterly", forecasting.get("cadence").asText());
+                assertEquals("month", forecasting.get("config").get("bucket").asText());
+                List<String> measures = new ArrayList<>();
+                for (JsonNode widget : forecasting.get("config").get("widgets")) {
+                    measures.add(widget.get("measure").asText());
+                }
+                assertTrue(measures.containsAll(List.of("forecast_best", "forecast_weighted", "forecast_worst")));
+            }),
+            () -> assertAll("commercial-documents", () -> {
+                jsonPath("$[?(@.key == 'commercial-documents')]").isNotEmpty().match(result);
+                JsonNode template = findTemplate(
+                        catalog, "commercial-documents");
+                assertNotNull(template);
+                assertEquals("monthly", template.get("cadence").asText());
+                assertEquals("month", template.get("config").get("bucket").asText());
+                Set<String> sources = new java.util.HashSet<>();
+                Set<String> measures = new java.util.HashSet<>();
+                Set<String> groups = new java.util.HashSet<>();
+                for (JsonNode widget : template.get("config").get("widgets")) {
+                    sources.add(widget.get("dataSource").asText());
+                    measures.add(widget.get("measure").asText());
+                    groups.add(widget.get("groupBy").asText());
+                }
+                assertEquals(Set.of("documents", "deals"), sources);
+                assertEquals(
+                        Set.of("quote_count", "quote_issue_rate", "document_to_win_rate",
+                                "approval_decision_count", "approval_cycle_days",
+                                "effective_discount_percent", "open_discount_percent"),
+                        measures);
+                assertEquals(Set.of("none", "date", "owner", "pipeline"), groups);
+            }));
     }
 
     @Test
@@ -1117,62 +1215,6 @@ class ReportIntegrationTest {
                 .session(session))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());
-    }
-
-    @Test
-    void networkWarmIntroTemplateIsAvailableWithCanonicalMeasures() throws Exception {
-        RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
-        User member = newMember(workspace, "member");
-        MockHttpSession session = login(member.getUsername());
-
-        MvcResult result = mockMvc.perform(get("/api/reports/templates")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'network-warm-intros')]").isNotEmpty())
-            .andReturn();
-
-        JsonNode template = findTemplate(
-                objectMapper.readTree(result.getResponse().getContentAsString()), "network-warm-intros");
-        assertNotNull(template);
-        List<String> measures = new ArrayList<>();
-        for (JsonNode widget : template.get("config").get("widgets")) {
-            measures.add(widget.get("measure").asText());
-        }
-        assertTrue(measures.containsAll(List.of(
-                "warm_intro_opportunity_value",
-                "warm_intro_reachable_account_count",
-                "reverse_intro_weighted_opportunities")));
-    }
-
-    @Test
-    void employmentMoveTemplateIsAvailableWithCanonicalMeasuresAndGroups() throws Exception {
-        RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
-        User member = newMember(workspace, "member");
-        MockHttpSession session = login(member.getUsername());
-
-        MvcResult result = mockMvc.perform(get("/api/reports/templates")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'employment-moves')]").isNotEmpty())
-            .andReturn();
-
-        JsonNode template = findTemplate(
-                objectMapper.readTree(result.getResponse().getContentAsString()), "employment-moves");
-        assertNotNull(template);
-        assertEquals("monthly", template.get("cadence").asText());
-        Set<String> measures = new java.util.HashSet<>();
-        Set<String> groups = new java.util.HashSet<>();
-        for (JsonNode widget : template.get("config").get("widgets")) {
-            assertEquals("people", widget.get("dataSource").asText());
-            measures.add(widget.get("measure").asText());
-            groups.add(widget.get("groupBy").asText());
-        }
-        assertEquals(Set.of("employment_departure_count", "employment_arrival_count"), measures);
-        assertEquals(Set.of("none", "date", "company", "person"), groups);
     }
 
     @Test
@@ -1375,32 +1417,6 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.widgets[1].total").value(2))
             .andExpect(jsonPath("$.widgets[1].points.length()").value(1))
             .andExpect(jsonPath("$.widgets[1].points[0].key").value("2026-03-08"));
-    }
-
-    @Test
-    void forecastingTemplateIsAvailable() throws Exception {
-        RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
-        User member = newMember(workspace, "member");
-        MockHttpSession session = login(member.getUsername());
-
-        MvcResult result = mockMvc.perform(get("/api/reports/templates")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'forecasting')]").isNotEmpty())
-            .andReturn();
-
-        JsonNode forecasting = findTemplate(
-                objectMapper.readTree(result.getResponse().getContentAsString()), "forecasting");
-        assertNotNull(forecasting);
-        assertEquals("quarterly", forecasting.get("cadence").asText());
-        assertEquals("month", forecasting.get("config").get("bucket").asText());
-        List<String> measures = new ArrayList<>();
-        for (JsonNode widget : forecasting.get("config").get("widgets")) {
-            measures.add(widget.get("measure").asText());
-        }
-        assertTrue(measures.containsAll(List.of("forecast_best", "forecast_weighted", "forecast_worst")));
     }
 
     @Test
@@ -2773,42 +2789,6 @@ class ReportIntegrationTest {
     }
 
     @Test
-    void commercialDocumentTemplateIsAvailableWithCanonicalMeasuresAndGroups() throws Exception {
-        RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
-        User member = newMember(workspace, "member");
-        MockHttpSession session = login(member.getUsername());
-
-        MvcResult result = mockMvc.perform(get("/api/reports/templates")
-                .header("X-Workspace-Id", workspace.getId())
-                .session(session))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'commercial-documents')]").isNotEmpty())
-            .andReturn();
-
-        JsonNode template = findTemplate(
-                objectMapper.readTree(result.getResponse().getContentAsString()), "commercial-documents");
-        assertNotNull(template);
-        assertEquals("monthly", template.get("cadence").asText());
-        assertEquals("month", template.get("config").get("bucket").asText());
-        Set<String> sources = new java.util.HashSet<>();
-        Set<String> measures = new java.util.HashSet<>();
-        Set<String> groups = new java.util.HashSet<>();
-        for (JsonNode widget : template.get("config").get("widgets")) {
-            sources.add(widget.get("dataSource").asText());
-            measures.add(widget.get("measure").asText());
-            groups.add(widget.get("groupBy").asText());
-        }
-        assertEquals(Set.of("documents", "deals"), sources);
-        assertEquals(
-                Set.of("quote_count", "quote_issue_rate", "document_to_win_rate",
-                        "approval_decision_count", "approval_cycle_days",
-                        "effective_discount_percent", "open_discount_percent"),
-                measures);
-        assertEquals(Set.of("none", "date", "owner", "pipeline"), groups);
-    }
-
-    @Test
     void unsupportedCommercialMeasureGroupPairsAreRejected() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
@@ -2909,6 +2889,27 @@ class ReportIntegrationTest {
         return responseId(result);
     }
 
+    private static String scheduleBody(int recipientUserId, String cadence, int hourOfDay) {
+        return """
+            {
+              "cadence": "%s",
+              "recipientUserIds": [%d],
+              "timezone": "UTC",
+              "hourOfDay": %d,
+              "enabled": true
+            }
+            """.formatted(cadence, recipientUserId, hourOfDay);
+    }
+
+    /**
+     * Stamps the session with a WebAuthn step-up taken from the context clock. The clock is pinned to
+     * {@link #FIXED_NOW}, so a wall-clock stamp would read as a future assertion and never be fresh.
+     */
+    private void markRecentlyAuthenticated(MockHttpSession session, int userId) {
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, clock.millis());
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, userId);
+    }
+
     private void forceScheduledDelivery(int workspaceId, int scheduleId) {
         assertEquals(1, jdbcTemplate.update(
                 "UPDATE report_schedule SET enabled = TRUE, next_run_at = ? WHERE workspace_id = ? AND id = ?",
@@ -2929,8 +2930,13 @@ class ReportIntegrationTest {
 
     private void fillWorkspaceSnapshotQuota(
             int workspaceId, int reportDefinitionId, int generatedBy, int scheduledCount) {
-        List<Object[]> snapshots = new ArrayList<>(1000);
-        for (int index = 0; index < 1000; index++) {
+        seedHistoricalSnapshots(workspaceId, reportDefinitionId, generatedBy, 1000, scheduledCount, null);
+    }
+
+    private void seedHistoricalSnapshots(int workspaceId, int reportDefinitionId, int generatedBy,
+            int count, int scheduledCount, Integer scheduleId) {
+        List<Object[]> snapshots = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) {
             snapshots.add(new Object[] {
                 workspaceId,
                 reportDefinitionId,
@@ -2938,6 +2944,7 @@ class ReportIntegrationTest {
                 LocalDate.of(2026, 1, 31),
                 "{}",
                 index < scheduledCount ? "scheduled" : "manual",
+                index < scheduledCount ? scheduleId : null,
                 generatedBy,
                 LocalDateTime.of(2020, 1, 1, 0, 0).plusSeconds(index)
             });
@@ -2945,7 +2952,7 @@ class ReportIntegrationTest {
         jdbcTemplate.batchUpdate(
                 "INSERT INTO report_snapshot "
                         + "(workspace_id, report_definition_id, period_start, period_end, computed_result, "
-                        + "origin, generated_by, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        + "origin, report_schedule_id, generated_by, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 snapshots);
     }
 
@@ -3345,60 +3352,6 @@ class ReportIntegrationTest {
         jdbcTemplate.update(
                 "INSERT INTO person_share (person_id, workspace_id, granted_by, created_at) VALUES (?, ?, ?, ?)",
                 personId, workspaceId, grantedBy, "2026-01-01 00:00:00");
-    }
-
-    /** One widget of a generated commercial-metrics report body. */
-    private record CommercialWidget(
-            String id, String dataSource, String measure, String groupBy, String chartType) {
-    }
-
-    private static String commercialReportBody(List<CommercialWidget> widgets) {
-        return commercialReportBody(
-                widgets,
-                "{\"pipelineIds\": null, \"ownerIds\": null, \"statuses\": null, "
-                        + "\"tagIds\": null, \"warmthBands\": null}",
-                "2026-01-01",
-                "2026-01-31",
-                "day");
-    }
-
-    private static String commercialReportBody(
-            List<CommercialWidget> widgets,
-            String filters,
-            String rangeStart,
-            String rangeEnd,
-            String bucket) {
-        StringBuilder widgetJson = new StringBuilder();
-        StringBuilder layoutJson = new StringBuilder();
-        for (int index = 0; index < widgets.size(); index++) {
-            CommercialWidget widget = widgets.get(index);
-            if (index > 0) {
-                widgetJson.append(',');
-                layoutJson.append(',');
-            }
-            widgetJson.append(("{\"id\": \"%s\", \"title\": null, \"dataSource\": \"%s\", "
-                    + "\"measure\": \"%s\", \"groupBy\": \"%s\", \"chartType\": \"%s\"}").formatted(
-                    widget.id(), widget.dataSource(), widget.measure(),
-                    widget.groupBy(), widget.chartType()));
-            layoutJson.append(
-                    "{\"widgetId\": \"%s\", \"x\": %d, \"y\": %d, \"width\": 6, \"height\": 4}".formatted(
-                            widget.id(), index % 2 * 6, index / 2 * 4));
-        }
-        return """
-            {
-              "name": "Commercial documents",
-              "description": "Quote, approval, and discount metrics",
-              "cadence": "custom",
-              "templateKey": null,
-              "config": {
-                "widgets": [%s],
-                "filters": %s,
-                "range": {"start": "%s", "end": "%s"},
-                "bucket": "%s",
-                "layout": [%s]
-              }
-            }
-            """.formatted(widgetJson, filters, rangeStart, rangeEnd, bucket, layoutJson);
     }
 
     private JsonNode generateDocument(

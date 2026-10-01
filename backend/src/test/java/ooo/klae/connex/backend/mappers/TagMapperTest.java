@@ -21,14 +21,6 @@ import ooo.klae.connex.backend.beans.Workspace;
 
 class TagMapperTest extends AbstractMapperTest {
 
-    /**
-     * Inserts a new tag and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Tag tag = newTag();
-        assertNotEquals(0, tag.getId());
-    }
 
     /**
      * Gets a tag by ID and checks if the returned tag is not null.
@@ -36,6 +28,7 @@ class TagMapperTest extends AbstractMapperTest {
     @Test
     void getTagById_returnsInsertedRow() {
         Tag tag = newTag();
+        assertNotEquals(0, tag.getId());
 
         Tag found = tagMapper.getTagById(workspace.getId(), tag.getId());
 

@@ -15,6 +15,8 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -566,7 +568,7 @@ class TenantExportServiceTest {
 
     @Test
     void eachObjectReceivesAnIndependentReadDeadline() throws Exception {
-        properties.setExportObjectReadTimeout(Duration.ofMillis(150));
+        properties.setExportObjectReadTimeout(Duration.ofMinutes(1));
         stubStreamingRoute();
         ActiveObjectReference first = reference("first.pdf", 1);
         ActiveObjectReference second = reference("second.pdf", 1);
@@ -588,9 +590,6 @@ class TenantExportServiceTest {
             ActiveObjectReference current = invocation.getArgument(2);
             Duration timeout = invocation.getArgument(3);
             timeouts.add(timeout);
-            if (current.equals(first)) {
-                Thread.sleep(40);
-            }
             return new ManagedTenantObject(
                 current.objectKey(),
                 new StoredObject(new ByteArrayInputStream(new byte[] {1}), 1),
@@ -602,11 +601,21 @@ class TenantExportServiceTest {
             any());
         TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
 
+        Field executionField = TenantExportDownload.class.getDeclaredField("execution");
+        executionField.setAccessible(true);
+        TenantExportExecution execution = mock(TenantExportExecution.class,
+            delegatesTo(TenantExportExecution.class.cast(executionField.get(download))));
+        executionField.set(download, execution);
+
         download.writeTo(new ByteArrayOutputStream());
 
         assertEquals(2, timeouts.size());
-        assertTrue(timeouts.get(0).toMillis() >= 100);
-        assertTrue(timeouts.get(1).toMillis() >= 100);
+        verify(execution, times(2)).boundedDeadlineNanos(Duration.ofMinutes(1));
+        for (Duration timeout : timeouts) {
+            assertTrue(timeout.compareTo(Duration.ofMillis(100)) >= 0,
+                () -> "Expected at least 100 ms of provider budget, got " + timeout);
+            assertTrue(timeout.compareTo(Duration.ofMinutes(1)) <= 0);
+        }
     }
 
     @Test

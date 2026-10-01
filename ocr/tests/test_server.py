@@ -64,7 +64,7 @@ class ServerTest(unittest.TestCase):
             request_timeout_seconds=2,
         )
         self.server = create_server(config, self.engine)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
 
@@ -148,7 +148,7 @@ class HeaderTimeoutTest(unittest.TestCase):
             request_timeout_seconds=0.1,
         )
         server = create_server(config, FakeEngine())
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         thread.start()
 
         try:
@@ -177,7 +177,7 @@ class ConcurrencyTest(unittest.TestCase):
             request_timeout_seconds=2,
         )
         server = create_server(config, engine)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         url = f"http://127.0.0.1:{server.server_port}/v1/ocr"
         headers = {"Authorization": "Bearer " + token, "Content-Type": "image/jpeg"}
@@ -219,7 +219,7 @@ class ConcurrencyTest(unittest.TestCase):
             request_timeout_seconds=1,
         )
         server = create_server(config, FakeEngine())
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         partial = socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
         partial.sendall(
@@ -263,7 +263,7 @@ class HandlerLimitTest(unittest.TestCase):
             max_request_handlers=2,
         )
         server = create_server(config, FakeEngine())
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         blocked = [
             socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
@@ -302,7 +302,7 @@ class InferenceDeadlineTest(unittest.TestCase):
             request_timeout_seconds=0.25,
         )
         server = create_server(config, engine, fatal_timeout.set)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         base_url = f"http://127.0.0.1:{server.server_port}"
         request = urllib.request.Request(
@@ -358,7 +358,7 @@ class InferenceDeadlineTest(unittest.TestCase):
             request_timeout_seconds=0.4,
         )
         server = create_server(config, engine, fatal_timeout.set)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         connection = socket.create_connection(("127.0.0.1", server.server_port), timeout=1)
         connection.sendall(
@@ -399,7 +399,7 @@ class InferenceFailureTest(unittest.TestCase):
             request_timeout_seconds=2,
         )
         server = create_server(config, RejectingEngine(), fatal_failure.set)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         base_url = f"http://127.0.0.1:{server.server_port}"
         request = urllib.request.Request(
@@ -445,7 +445,7 @@ class InferenceFailureTest(unittest.TestCase):
             request_timeout_seconds=2,
         )
         server = create_server(config, FailingEngine(), fatal_failure.set)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         server_thread.start()
         base_url = f"http://127.0.0.1:{server.server_port}"
         request = urllib.request.Request(

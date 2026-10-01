@@ -18,7 +18,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -72,10 +71,10 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             );
             databaseAccessible = true;
         } catch (SQLException ignored) {
-            assumeTrue(
-                false,
+            throw new IllegalStateException(
                 "Cannot prepare seeder guard scratch catalogs; "
-                    + "grant CREATE/DROP for dedicated integration catalogs"
+                    + "grant CREATE/DROP for dedicated integration catalogs",
+                (Throwable) null
             );
         }
     }
@@ -119,7 +118,7 @@ class SeederGuardDatabaseRoutingIntegrationTest {
             guardedDataSource.setPassword(password);
             guardedDataSource.addDataSourceProperty("dbname", BLOCKED_CATALOG);
             guardedDataSource.addDataSourceProperty("createDatabaseIfNotExist", "true");
-            MockEnvironment environment = seederEnvironment()
+            MockEnvironment environment = SeederTestSupport.seederEnvironment()
                 .withProperty("spring.datasource.url", seederUrl)
                 .withProperty(
                     "spring.datasource.hikari.data-source-properties.dbname",
@@ -165,21 +164,6 @@ class SeederGuardDatabaseRoutingIntegrationTest {
                 return resultSet.getInt(1) == 1;
             }
         }
-    }
-
-    private static MockEnvironment seederEnvironment() {
-        MockEnvironment environment = new MockEnvironment()
-            .withProperty("connex.seeder.enabled", "true")
-            .withProperty("connex.maintenance.mode", "seeder")
-            .withProperty("spring.main.web-application-type", "none")
-            .withProperty("connex.tenancy.routing.mode", "single-database")
-            .withProperty("connex.object-storage.legacy-migration.mode", "off");
-        environment.getPropertySources().addLast(new MapPropertySource(
-            "Config resource 'class path resource [application-seeder.yml]'",
-            SeederStartupConfigurationValidatorTest.safeRepositoryProperties()
-        ));
-        environment.setActiveProfiles("seeder");
-        return environment;
     }
 
     private static String mysqlBootstrapUrl(

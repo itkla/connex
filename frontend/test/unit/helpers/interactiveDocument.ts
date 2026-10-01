@@ -5,12 +5,23 @@ type InteractiveListener = {
     capture: boolean;
 };
 
-type InteractiveText = {
+export type InteractiveText = {
     nodeType: 3;
     nodeName: "#text";
     nodeValue: string;
     parentNode: InteractiveElement | null;
     ownerDocument: InteractiveDocument;
+};
+
+/**
+ * The slice of `CSSStyleDeclaration` React writes through. Custom properties go through
+ * `setProperty`, which `motion` also reaches for when it drives a layout thumb, so a bare object
+ * literal is not a faithful enough stand-in to render the real control surfaces.
+ */
+type InteractiveStyle = Record<string, unknown> & {
+    setProperty: (name: string, value: string) => void;
+    removeProperty: (name: string) => string;
+    getPropertyValue: (name: string) => string;
 };
 
 export type InteractiveElement = {
@@ -23,7 +34,7 @@ export type InteractiveElement = {
     childNodes: Array<InteractiveElement | InteractiveText>;
     attributes: Map<string, string>;
     listeners: Map<string, InteractiveListener[]>;
-    style: Record<string, unknown>;
+    style: InteractiveStyle;
     textContent: string;
     disabled?: boolean;
     id?: string;
@@ -38,6 +49,7 @@ export type InteractiveElement = {
     removeAttribute: (name: string) => void;
     getAttribute: (name: string) => string | null;
     contains: (node: InteractiveNode | null) => boolean;
+    getBoundingClientRect: () => DOMRectInit;
     focus: () => void;
 };
 
@@ -72,7 +84,7 @@ function nodeText(node: InteractiveNode): string {
         : node.childNodes.map(nodeText).join("");
 }
 
-export function installInteractiveDocument(cookie = "") {
+export function installInteractiveDocument(cookie = "", options: { motion?: boolean } = {}) {
     class HtmlIFrameElement {}
 
     const elements: InteractiveElement[] = [];
@@ -99,6 +111,21 @@ export function installInteractiveDocument(cookie = "") {
         ));
     }
 
+    function createInteractiveStyle(): InteractiveStyle {
+        const properties = new Map<string, string>();
+        return {
+            setProperty: (name, value) => {
+                properties.set(name, value);
+            },
+            removeProperty: (name) => {
+                const previous = properties.get(name) ?? '';
+                properties.delete(name);
+                return previous;
+            },
+            getPropertyValue: (name) => properties.get(name) ?? '',
+        };
+    }
+
     function createInteractiveElement(
         tagName: string,
         namespaceURI = "http://www.w3.org/1999/xhtml",
@@ -116,7 +143,7 @@ export function installInteractiveDocument(cookie = "") {
             childNodes,
             attributes,
             listeners,
-            style: {},
+            style: createInteractiveStyle(),
             textContent: "",
             addEventListener: (type, callback, options) => {
                 addListener(listeners, type, callback, options);
@@ -161,6 +188,9 @@ export function installInteractiveDocument(cookie = "") {
                 }
                 return false;
             },
+            getBoundingClientRect: () => ({
+                x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
+            }),
             focus: () => {
                 documentTarget.activeElement = element;
             },
@@ -237,6 +267,18 @@ export function installInteractiveDocument(cookie = "") {
         return 1;
     }));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    if (options.motion) {
+        vi.stubGlobal("self", windowTarget);
+        vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
+        vi.stubGlobal('cancelIdleCallback', vi.fn());
+        vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
+        vi.stubGlobal('IntersectionObserver', class {
+            observe = vi.fn();
+            unobserve = vi.fn();
+            disconnect = vi.fn();
+            takeRecords = vi.fn(() => []);
+        });
+    }
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const container = document.createElement("div");
     const containerNode = elements.at(-1);

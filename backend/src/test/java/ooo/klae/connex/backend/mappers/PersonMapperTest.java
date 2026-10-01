@@ -33,14 +33,6 @@ class PersonMapperTest extends AbstractMapperTest {
     @Autowired private NoteMapper noteMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
 
-    /**
-     * Inserts a new person and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Person person = newPerson(newCompany());
-        assertNotEquals(0, person.getId());
-    }
 
     /**
      * Gets a person by ID and checks if the returned person is not null.
@@ -49,6 +41,7 @@ class PersonMapperTest extends AbstractMapperTest {
     void getPersonById_returnsInsertedRow() {
         Company company = newCompany();
         Person person = newPerson(company);
+        assertNotEquals(0, person.getId());
 
         Person found = personMapper.getPersonById(workspace.getId(), person.getId());
 

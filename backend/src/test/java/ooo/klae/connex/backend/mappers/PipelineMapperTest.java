@@ -16,14 +16,6 @@ import ooo.klae.connex.backend.beans.Workspace;
 
 class PipelineMapperTest extends AbstractMapperTest {
 
-    /**
-     * Inserts a new pipeline and checks if the generated ID is not zero.
-     */
-    @Test
-    void insertPipeline_assignsGeneratedId() {
-        Pipeline pipeline = newPipeline();
-        assertNotEquals(0, pipeline.getId());
-    }
 
     /**
      * Gets a pipeline by ID and checks if the returned pipeline is not null.
@@ -31,6 +23,7 @@ class PipelineMapperTest extends AbstractMapperTest {
     @Test
     void getPipelineById_returnsInsertedRow() {
         Pipeline pipeline = newPipeline();
+        assertNotEquals(0, pipeline.getId());
 
         Pipeline found = pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId());
 
@@ -77,24 +70,13 @@ class PipelineMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Inserts a new Stage and checks if the generated ID is not zero.
-     */
-    @Test
-    void insertStage_assignsGeneratedId() {
-        Pipeline pipeline = newPipeline();
-
-        Stage stage = newStage(pipeline, 0);
-
-        assertNotEquals(0, stage.getId());
-    }
-
-    /**
      * Gets a stage by ID and checks if the returned stage is not null.
      */
     @Test
     void getStageById_returnsInsertedRow() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 2);
+        assertNotEquals(0, stage.getId());
 
         Stage found = pipelineMapper.getStageById(workspace.getId(), stage.getId());
 

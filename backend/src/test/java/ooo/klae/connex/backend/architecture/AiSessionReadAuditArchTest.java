@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -44,10 +45,11 @@ class AiSessionReadAuditArchTest {
             Map.entry("listToolCalls", "toolCalls"),
             Map.entry("getToolCall", "toolCall"));
 
-    private static final Map<String, String> DISCLOSING_UNIT_COVERED = Map.of(
+    private static final Map<String, UnitCoverage> DISCLOSING_UNIT_COVERED = Map.of(
             "startTurn",
-            "src/test/java/ooo/klae/connex/backend/ai/assistant/"
-                    + "AiChatTurnPersistenceServiceTest.java");
+            new UnitCoverage(
+                "src/test/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceServiceTest.java",
+                "queueingATurnRecordsTheAgentLoopReadBeforeTakingAnyLock"));
 
     private static final Set<String> DISCLOSING_RETAINED = Set.of(
             "pageRetained",
@@ -164,17 +166,43 @@ class AiSessionReadAuditArchTest {
 
     @Test
     void everyUnitCoveredDisclosingHandlerIsAssertedByItsNamedTest() throws IOException {
-        List<String> violations = new ArrayList<>();
-        for (Map.Entry<String, String> entry : DISCLOSING_UNIT_COVERED.entrySet()) {
-            String source = Files.readString(
-                    Path.of(entry.getValue()), StandardCharsets.UTF_8);
-            if (!source.contains("recordAccessible")) {
-                violations.add(entry.getKey());
-            }
+        for (UnitCoverage coverage : DISCLOSING_UNIT_COVERED.values()) {
+            assertPositiveAuditCoverage(
+                Files.readString(Path.of(coverage.sourcePath()), StandardCharsets.UTF_8), coverage);
         }
-        assertTrue(violations.isEmpty(),
-                "Disclosing assistant routes whose named test asserts no audit record: "
-                        + violations);
+    }
+
+    @Test
+    void pollingVerificationCannotReplaceTheNamedPositiveTest() throws IOException {
+        UnitCoverage coverage = DISCLOSING_UNIT_COVERED.get("startTurn");
+        String source = Files.readString(Path.of(coverage.sourcePath()), StandardCharsets.UTF_8)
+            .replace(coverage.methodName(), "removedPositiveTest");
+
+        assertTrue(source.contains("verify(sessionReadAudit, never()).recordAccessible("));
+        assertThrows(AssertionError.class, () -> assertPositiveAuditCoverage(source, coverage));
+    }
+
+    @Test
+    void aNegativeVerificationInTheNamedTestDoesNotCountAsCoverage() throws IOException {
+        UnitCoverage coverage = DISCLOSING_UNIT_COVERED.get("startTurn");
+        String source = Files.readString(Path.of(coverage.sourcePath()), StandardCharsets.UTF_8)
+            .replace("ordered.verify(sessionReadAudit).recordAccessible(",
+                "ordered.verify(sessionReadAudit, never()).recordAccessible(");
+
+        assertThrows(AssertionError.class, () -> assertPositiveAuditCoverage(source, coverage));
+    }
+
+    private static void assertPositiveAuditCoverage(String source, UnitCoverage coverage) {
+        String body = methodBody(source, coverage.methodName(), "");
+        assertTrue(body.contains("service.queue("), coverage.methodName());
+        assertTrue(body.contains("inOrder(sessionReadAudit, workspaceService)"), coverage.methodName());
+        int audit = body.indexOf("ordered.verify(sessionReadAudit).recordAccessible(");
+        int lock = body.indexOf("ordered.verify(workspaceService).lockAndRequireMember(");
+        assertTrue(audit >= 0 && lock > audit,
+            coverage.methodName() + " must positively verify the audit before the membership lock");
+    }
+
+    private record UnitCoverage(String sourcePath, String methodName) {
     }
 
     private static boolean isHandler(Method method) {
@@ -195,7 +223,8 @@ class AiSessionReadAuditArchTest {
             String trimmed = line.trim();
             if ((trimmed.startsWith("public ")
                     || trimmed.startsWith("private ")
-                    || trimmed.startsWith("protected "))
+                    || trimmed.startsWith("protected ")
+                    || trimmed.startsWith("void "))
                     && trimmed.matches(".*\\b" + methodName + "\\s*\\(.*")
                     && (signatureDiscriminator.isEmpty()
                         || signatureOf(source, offset).contains(signatureDiscriminator))) {

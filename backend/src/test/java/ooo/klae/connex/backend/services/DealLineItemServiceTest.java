@@ -49,7 +49,9 @@ class DealLineItemServiceTest extends AbstractServiceTest {
             () -> assertThrows(IllegalTransactionStateException.class,
                 () -> dealValueService.reconcileLineItems(workspaceId, deal)),
             () -> assertThrows(IllegalTransactionStateException.class,
-                () -> dealValueService.reconcileRealizedValue(workspaceId, deal, null, null))));
+                () -> dealValueService.reconcileRealizedValue(workspaceId, deal, null, null)),
+            () -> assertThrows(IllegalTransactionStateException.class,
+                () -> dealValueService.setRealizedValue(workspaceId, deal, null))));
     }
 
     private Deal jpyDeal() {

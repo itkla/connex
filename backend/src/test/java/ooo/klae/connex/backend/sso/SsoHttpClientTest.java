@@ -201,7 +201,7 @@ class SsoHttpClientTest {
             } finally {
                 finished.countDown();
             }
-        }, Duration.ofSeconds(5))) {
+        }, SsoHttpClientTestSupport.EXHAUSTED_DEADLINE)) {
             assertTimeoutPreemptively(Duration.ofSeconds(15), () -> assertThrows(RestClientException.class,
                     () -> new RestTemplate(http.forEnterpriseRegistration("org-17")).getForObject(baseUrl + "/probe", String.class)));
             assertTrue(entered.await(5, TimeUnit.SECONDS));
@@ -232,7 +232,7 @@ class SsoHttpClientTest {
                 }
             }
             return new InetAddress[] { publicAddress };
-        }, Duration.ofSeconds(5))) {
+        }, SsoHttpClientTestSupport.EXHAUSTED_DEADLINE)) {
             try {
                 UncheckedIOException failure = assertThrows(UncheckedIOException.class,
                         () -> http.requireSafeEnterpriseDestinations(17, List.of("https://idp.example")));
@@ -268,7 +268,7 @@ class SsoHttpClientTest {
         });
         InetAddress publicAddress = InetAddress.getByName("93.184.216.34");
         try (SsoHttpClient http = spy(new SsoHttpClient(properties,
-                host -> new InetAddress[] { publicAddress }, Duration.ofSeconds(5)))) {
+                host -> new InetAddress[] { publicAddress }, SsoHttpClientTestSupport.EXHAUSTED_DEADLINE))) {
             doReturn(client).when(http).pinnedClient(anyString(), any(InetAddress[].class));
             assertThrows(RestClientException.class, () -> new RestTemplate(http.forEnterpriseRegistration("org-17"))
                     .getForObject("https://idp.example/jwks", String.class));
@@ -289,7 +289,7 @@ class SsoHttpClientTest {
         try (SsoHttpClient http = new SsoHttpClient(properties, host -> {
             resolutions.incrementAndGet();
             throw new AssertionError("Expired queued request reached DNS");
-        }, Duration.ofSeconds(5))) {
+        }, SsoHttpClientTestSupport.EXHAUSTED_DEADLINE)) {
             ThreadPoolExecutor workers = assertInstanceOf(ThreadPoolExecutor.class,
                     ReflectionTestUtils.getField(http, "resolutionWorkers"));
             for (int index = 0; index < SsoHttpClient.WORKERS; index++) {

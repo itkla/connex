@@ -11,14 +11,22 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 import tools.jackson.databind.JsonNode;
@@ -679,62 +687,47 @@ class ProviderCaptureAdapterContractTest {
             "2026-07-31T00%3A00%3A00Z"));
     }
 
-    @Test
-    void microsoftRejectsAProviderSuppliedCursorForAnotherHost() {
-        MicrosoftCaptureAdapter adapter =
-            new MicrosoftCaptureAdapter(
-                mock(ProviderCaptureHttpClient.class), objectMapper);
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("microsoftCursorRefusals")
+    void microsoftRejectsInvalidCursorsBeforeHttp(CursorRefusalCase fixture) {
+        ProviderCaptureHttpClient httpClient = mock(ProviderCaptureHttpClient.class);
+        MicrosoftCaptureAdapter adapter = new MicrosoftCaptureAdapter(httpClient, objectMapper);
 
         ProviderCaptureException exception = assertThrows(
             ProviderCaptureException.class,
             () -> adapter.fetch(request(
                 "mail_inbox",
-                microsoftDelta(
-                    "mail_inbox",
-                    "https://attacker.example/v1.0/delta"),
+                microsoftDelta(fixture.stream(), fixture.providerCursor(), fixture.folderId()),
                 null,
                 false)));
 
         assertEquals("cursor_invalid", exception.getCode());
+        verifyNoInteractions(httpClient);
     }
 
-    @Test
-    void microsoftRejectsACursorBoundToAnotherMailStream() {
-        MicrosoftCaptureAdapter adapter =
-            new MicrosoftCaptureAdapter(
-                mock(ProviderCaptureHttpClient.class), objectMapper);
-
-        ProviderCaptureException exception = assertThrows(
-            ProviderCaptureException.class,
-            () -> adapter.fetch(request(
-                "mail_inbox",
-                microsoftDelta(
-                    "mail_sent",
-                    "https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/delta?$deltatoken=mail-2"),
-                null,
-                false)));
-
-        assertEquals("cursor_invalid", exception.getCode());
+    private static Stream<CursorRefusalCase> microsoftCursorRefusals() {
+        return Stream.of(
+            new CursorRefusalCase("host mismatch", "mail_inbox",
+                "https://attacker.example/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=mail-2",
+                "inbox"),
+            new CursorRefusalCase("stream mismatch", "mail_sent",
+                "https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/delta?$deltatoken=mail-2",
+                "sentitems"),
+            new CursorRefusalCase("folder mismatch", "mail_inbox",
+                "https://graph.microsoft.com/v1.0/me/mailFolders/drafts/messages/delta?$deltatoken=mail-2",
+                "opaque-inbox-id"),
+            new CursorRefusalCase("original malformed hostile path", "mail_inbox",
+                "https://attacker.example/v1.0/delta", "inbox"),
+            new CursorRefusalCase("malformed path on authorized host", "mail_inbox",
+                "https://graph.microsoft.com/v1.0/delta", "inbox"));
     }
 
-    @Test
-    void microsoftRejectsACursorForAnotherMailFolder() {
-        MicrosoftCaptureAdapter adapter =
-            new MicrosoftCaptureAdapter(
-                mock(ProviderCaptureHttpClient.class), objectMapper);
-
-        ProviderCaptureException exception = assertThrows(
-            ProviderCaptureException.class,
-            () -> adapter.fetch(request(
-                "mail_inbox",
-                microsoftDelta(
-                    "mail_inbox",
-                    "https://graph.microsoft.com/v1.0/me/mailFolders/drafts/messages/delta?$deltatoken=mail-2",
-                    "opaque-inbox-id"),
-                null,
-                false)));
-
-        assertEquals("cursor_invalid", exception.getCode());
+    private record CursorRefusalCase(
+            String name, String stream, String providerCursor, String folderId) {
+        @Override
+        public String toString() {
+            return name;
+        }
     }
 
     @Test
@@ -833,6 +826,17 @@ class ProviderCaptureAdapterContractTest {
 
         assertEquals("Large", page.items().getFirst().subject());
         assertNull(page.items().getFirst().body());
+        assertEquals(microsoftDelta("mail_inbox",
+            "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=mail-5"),
+            page.stableCursor());
+        ArgumentCaptor<URI> requests = ArgumentCaptor.forClass(URI.class);
+        verify(httpClient, times(2)).getMicrosoft(requests.capture(), eq("token"), eq(1));
+        List<URI> calls = requests.getAllValues();
+        assertEquals("/v1.0/me/messages/mail-large", calls.get(0).getPath());
+        assertTrue(List.of(queryParameters(calls.get(0)).get("$select").split(","))
+            .contains("subject"));
+        assertEquals("/v1.0/me/messages/mail-large", calls.get(1).getPath());
+        assertEquals("body", queryParameters(calls.get(1)).get("$select"));
     }
 
     @Test
@@ -871,6 +875,25 @@ class ProviderCaptureAdapterContractTest {
 
         assertEquals("Large", page.items().getFirst().subject());
         assertNull(page.items().getFirst().body());
+        assertEquals("45", page.stableCursor());
+        ArgumentCaptor<URI> requests = ArgumentCaptor.forClass(URI.class);
+        verify(httpClient, times(4)).get(requests.capture(), eq("token"));
+        List<URI> calls = requests.getAllValues();
+        assertEquals("/gmail/v1/users/me/messages/mail-large", calls.get(2).getPath());
+        assertEquals("metadata", queryParameters(calls.get(2)).get("format"));
+        assertEquals(calls.get(2).getPath(), calls.get(3).getPath());
+        assertEquals("full", queryParameters(calls.get(3)).get("format"));
+    }
+
+    private static Map<String, String> queryParameters(URI uri) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        for (String parameter : uri.getRawQuery().split("&")) {
+            String[] pair = parameter.split("=", 2);
+            parameters.put(
+                URLDecoder.decode(pair[0], StandardCharsets.UTF_8),
+                URLDecoder.decode(pair[1], StandardCharsets.UTF_8));
+        }
+        return parameters;
     }
 
     private static ProviderCaptureRequest request(

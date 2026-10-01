@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.IntroEmploymentRow;
@@ -109,23 +111,27 @@ class WarmPathRankingTest {
         assertEquals(26, bridge.getScore());
     }
 
-    @Test
-    void stintChurnStaysBoundedAndStillFindsTheOverlap() {
+    @ParameterizedTest
+    @ValueSource(ints = {5, 6})
+    void onlyTheFirstFiveStintsCanSupplyOverlapEvidence(int overlappingStint) {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Bridge", 100, "Acme"),
             person(2, "Target", 200, "Globex"));
         List<IntroEmploymentRow> employment = new ArrayList<>();
-        for (int i = 0; i < 200; i++) {
-            employment.add(stint(1, 900, "Hooli",
-                "2019-01-01 00:00:0" + (i % 10), "2020-01-01 00:00:00"));
+        for (int index = 1; index <= 6; index++) {
+            String start = index == overlappingStint ? "2019-01-01 00:00:00" : "2010-01-01 00:00:00";
+            String end = index == overlappingStint ? "2020-01-01 00:00:00" : "2011-01-01 00:00:00";
+            employment.add(stint(1, 900, "Hooli", start, end));
         }
         employment.add(stint(2, 900, "Hooli", "2019-06-01 00:00:00", "2021-01-01 00:00:00"));
 
         List<WarmPathDto> rows = rank(candidates, List.of(), employment, List.of(), warmAndCold());
 
-        assertEquals(1, rows.size(), "capped stints must still yield the overlap evidence");
-        assertEquals(WarmPathService.EVIDENCE_FORMER_COLLEAGUES,
-            rows.get(0).getBridges().get(0).getEvidenceType());
+        assertEquals(overlappingStint == 5 ? 1 : 0, rows.size());
+        if (overlappingStint == 5) {
+            assertEquals(WarmPathService.EVIDENCE_FORMER_COLLEAGUES,
+                rows.getFirst().getBridges().getFirst().getEvidenceType());
+        }
     }
 
     @Test

@@ -20,6 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -170,11 +172,12 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(prefix.toLowerCase() + "-a@example.com", delivery.getAddress());
     }
 
-    @Test
-    void queuingRequiresCampaignSendPermission() {
+    @ParameterizedTest(name = "queue permission: {0}")
+    @EnumSource(value = DeliveryChannel.class, names = {"EMAIL", "SMS"})
+    void queuingRequiresCampaignSendPermission(DeliveryChannel channel) {
         String prefix = "rbac-" + unique();
-        person(newCompany(), prefix + "-in", prefix + "-in@example.com");
-        CampaignSendDto send = readySend(prefix);
+        channelPerson(channel, prefix);
+        CampaignSendDto send = readySend(channel, prefix);
         User member = newUser();
         authenticateAs(member, workspace.getId());
 
@@ -182,11 +185,12 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
                 () -> campaignSendService.queueSend(send.campaignId(), send.id()));
     }
 
-    @Test
-    void otherTenantCannotReadOrQueueSend() {
+    @ParameterizedTest(name = "foreign-tenant access: {0}")
+    @EnumSource(value = DeliveryChannel.class, names = {"EMAIL", "SMS"})
+    void otherTenantCannotReadOrQueueSend(DeliveryChannel channel) {
         String prefix = "iso-" + unique();
-        person(newCompany(), prefix + "-in", prefix + "-in@example.com");
-        CampaignSendDto send = readySend(prefix);
+        channelPerson(channel, prefix);
+        CampaignSendDto send = readySend(channel, prefix);
         CampaignActorWorkspace other = newCampaignWorkspaceActor();
         authenticateAs(other.actor(), other.workspace().getId());
 
@@ -465,32 +469,21 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals("suppressed", delivery.getSkipReason());
     }
 
-    @Test
-    void anEmailSuppressionDoesNotBlockAnSmsSend() {
-        String prefix = "sms-xchan-" + unique();
-        Person person = phonePerson(newCompany(), prefix + "-in", "+819012345678");
+    @ParameterizedTest(name = "{0} send ignores opposite-channel suppression")
+    @EnumSource(value = DeliveryChannel.class, names = {"EMAIL", "SMS"})
+    void oppositeChannelSuppressionDoesNotBlockSend(DeliveryChannel channel) {
+        String prefix = "xchan-" + unique();
+        Person person = channelPerson(channel, prefix);
         person.setEmail(prefix + "-in@example.com");
-        personMapper.update(person);
-        CampaignSendDto send = readySmsSend(prefix);
-        campaignSendService.queueSend(send.campaignId(), send.id());
-        suppressionService.add(new SuppressionEntryRequest(
-                "workspace", "email", person.getEmail(), person.getId(), "manual", null));
-
-        campaignDispatchService.processSend(workspace.getId(), send.id());
-
-        assertEquals(1, fakeDispatcher.count());
-    }
-
-    @Test
-    void anSmsSuppressionDoesNotBlockAnEmailSend() {
-        String prefix = "email-xchan-" + unique();
-        Person person = person(newCompany(), prefix + "-in", prefix + "-in@example.com");
         person.setPhone("+819012345678");
         personMapper.update(person);
-        CampaignSendDto send = readySend(prefix);
+        CampaignSendDto send = readySend(channel, prefix);
         campaignSendService.queueSend(send.campaignId(), send.id());
+        String suppressedChannel = channel == DeliveryChannel.SMS ? "email" : "sms";
+        String suppressedAddress = channel == DeliveryChannel.SMS
+                ? person.getEmail() : "+81 90-1234-5678";
         suppressionService.add(new SuppressionEntryRequest(
-                "workspace", "sms", "+81 90-1234-5678", person.getId(), "manual", null));
+                "workspace", suppressedChannel, suppressedAddress, person.getId(), "manual", null));
 
         campaignDispatchService.processSend(workspace.getId(), send.id());
 
@@ -624,30 +617,14 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertNull(saved.revisions().getFirst().bodyHtml());
     }
 
-    @Test
-    void queuingAnSmsSendRequiresCampaignSendPermission() {
-        String prefix = "sms-rbac-" + unique();
-        phonePerson(newCompany(), prefix + "-in", "+819012345678");
-        CampaignSendDto send = readySmsSend(prefix);
-        User member = newUser();
-        authenticateAs(member, workspace.getId());
-
-        assertThrows(ForbiddenException.class,
-                () -> campaignSendService.queueSend(send.campaignId(), send.id()));
+    private Person channelPerson(DeliveryChannel channel, String prefix) {
+        return channel == DeliveryChannel.SMS
+                ? phonePerson(newCompany(), prefix + "-in", "+819012345678")
+                : person(newCompany(), prefix + "-in", prefix + "-in@example.com");
     }
 
-    @Test
-    void otherTenantCannotReadOrQueueAnSmsSend() {
-        String prefix = "sms-iso-" + unique();
-        phonePerson(newCompany(), prefix + "-in", "+819012345678");
-        CampaignSendDto send = readySmsSend(prefix);
-        CampaignActorWorkspace other = newCampaignWorkspaceActor();
-        authenticateAs(other.actor(), other.workspace().getId());
-
-        assertThrows(ResourceNotFoundException.class,
-                () -> campaignSendService.getSend(send.campaignId(), send.id()));
-        assertThrows(ResourceNotFoundException.class,
-                () -> campaignSendService.queueSend(send.campaignId(), send.id()));
+    private CampaignSendDto readySend(DeliveryChannel channel, String prefix) {
+        return channel == DeliveryChannel.SMS ? readySmsSend(prefix) : readySend(prefix);
     }
 
     private CampaignSendDto readySend(String prefix) {

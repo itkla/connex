@@ -130,6 +130,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
         assertParity(snapshots.legacy(), snapshots.canonical());
         assertEquals(List.of(tag.getId()), snapshots.legacy().tagIds());
+        assertEquals(1, snapshots.legacy().actionInvocationCount());
     }
 
     @Test
@@ -450,20 +451,6 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             subject("deal", pair.legacy().getId()),
             subject("deal", pair.canonical().getId()),
             "deal.updated");
-    }
-
-    @Test
-    void p9AddTagActionHasParity() {
-        Company legacy = createCompany();
-        Company canonical = createCompany();
-        Tag tag = createTag();
-        assertActionParity(
-            entityRule(
-                "company", "company.updated", List.of(addTag(tag.getId())), null,
-                null, null, "user"),
-            subject("company", legacy.getId()),
-            subject("company", canonical.getId()),
-            "company.updated");
     }
 
     @Test

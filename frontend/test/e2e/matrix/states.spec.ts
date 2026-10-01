@@ -53,8 +53,6 @@ const NOT_FOUND_MARKER =
     '[data-app-main] :is(div.size-14, span.size-10) svg path[d^="m21 21-5.197-5.197"]';
 const EMPTY_STATE_MARKER = '[data-app-main] div.py-20.text-center h2';
 const SKELETON_MARKER = '[data-app-main] [data-slot="skeleton"]';
-const STALE_DISCLOSURE = '[data-app-main] div.rounded-lg.bg-card.px-4.py-3';
-const HARD_FAILURE_CARD = '[data-app-main] div.rounded-lg.bg-card.p-4';
 const SECTION_CONTROLS = 'table, form, input, textarea, select, button, [role="table"], [role="grid"]';
 
 type SectionRefusal = { section: string; heading: string; title: string; body: string };
@@ -431,6 +429,8 @@ test.describe('stale — a failed refresh must not present stale figures as curr
     });
 
     test('diagnostics discloses a failed refresh', async ({ browser }) => {
+        const route = MATRIX_ROUTES.find((candidate) => candidate.id === 'settings-diagnostics');
+        if (!route) throw new Error('Diagnostics route is missing from the matrix inventory');
         const { workspaceId } = matrixFixture();
         const diagnosticsPath = `/api/workspaces/${workspaceId}/diagnostics`;
         const context = await matrixContext(browser, { ...DESKTOP, role: 'admin' });
@@ -439,14 +439,20 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         const faults = captureFaults(page);
         const responses = captureResponseFailures(page);
 
-        await page.goto('/settings/diagnostics', { waitUntil: 'domcontentloaded' });
+        await page.goto(route.path, { waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle').catch(() => undefined);
-        const healthy = await landingOf(page, '/settings/diagnostics');
+        const healthy = await landingOf(page, route.path, route.landsOn);
         expect(healthy.ok, `diagnostics must render as itself — ${describeLanding(healthy)}`).toBe(true);
-        const headingsBefore = await page.locator('[data-app-main] h2').allTextContents();
+        const diagnostics = page.locator('[data-app-main] [id="diagnostics"]');
+        const refresh = diagnostics.getByRole('button', {
+            name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
+            exact: true,
+        });
+        await expect(refresh, 'the diagnostics report must finish loading').toBeVisible();
+        const headingsBefore = await diagnostics.locator('h2').allTextContents();
         await record(page, {
             routeId: 'settings-diagnostics',
-            path: '/settings/diagnostics',
+            path: route.path,
             state: 'success',
             axes: { ...DESKTOP, role: 'admin' },
             faults: significantFaults(faults),
@@ -456,10 +462,9 @@ test.describe('stale — a failed refresh must not present stale figures as curr
             notes: `sections: ${headingsBefore.length}`,
         });
         expect(headingsBefore.length, 'the healthy panel must render its report before it is faulted').toBeGreaterThan(0);
-        expect(await page.locator(STALE_DISCLOSURE).count(), 'a healthy panel discloses nothing stale').toBe(0);
+        expect(await diagnostics.getByText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'), { exact: true }).count(), 'a healthy panel discloses nothing stale').toBe(0);
 
         setFaultRules({ fail: [diagnosticsPath] });
-        const refresh = page.getByRole('button', { name: /refresh|再読み込み|更新/i }).first();
         await expect(refresh, 'the diagnostics panel must expose a refresh control').toBeVisible();
         const failedRefresh = page.waitForResponse(
             (response) => response.url().includes(diagnosticsPath) && response.status() >= 500,
@@ -468,17 +473,18 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         await refresh.click();
         await failedRefresh;
 
-        const stale = page.locator(STALE_DISCLOSURE);
+        const stale = diagnostics.getByText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'), { exact: true });
         await expect(
             stale.first(),
             'a failed refresh must disclose that the figures on screen are the last good ones',
         ).toBeVisible({ timeout: 15_000 });
-        const headingsAfter = await page.locator('[data-app-main] h2').allTextContents();
-        const staleLanding = await landingOf(page, '/settings/diagnostics');
+        const headingsAfter = await diagnostics.locator('h2').allTextContents();
+        const staleLanding = await landingOf(page, route.path, route.landsOn);
+        expect(staleLanding.ok, describeLanding(staleLanding)).toBe(true);
         const body = ((await page.locator('main').first().textContent()) ?? '').replace(/\s+/g, ' ').trim();
         await record(page, {
             routeId: 'settings-diagnostics',
-            path: '/settings/diagnostics',
+            path: route.path,
             state: 'stale-after-failed-refresh',
             axes: { ...DESKTOP, role: 'admin' },
             faults: significantFaults(faults),
@@ -489,7 +495,7 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         });
 
         expect(
-            await page.locator(HARD_FAILURE_CARD).count(),
+            await diagnostics.locator('div.rounded-lg.bg-card.p-4').count(),
             'a refresh failure over a good payload must not collapse into the hard-failure card',
         ).toBe(0);
         expect(

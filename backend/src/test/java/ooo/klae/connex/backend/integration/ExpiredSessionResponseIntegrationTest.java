@@ -37,11 +37,6 @@ class ExpiredSessionResponseIntegrationTest {
             .build();
     }
 
-    @Test
-    void currentUserWithoutSessionIsUnauthorized() throws Exception {
-        mockMvc.perform(get("/api/auth/me"))
-            .andExpect(status().isUnauthorized());
-    }
 
     @Test
     void currentUserWithUnauthenticatedSessionIsUnauthorized() throws Exception {

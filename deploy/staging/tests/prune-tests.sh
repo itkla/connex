@@ -63,17 +63,22 @@ setup() {
     mkdir -p "$state/releases/$DEPLOYED"
     ln -sfn "$state/releases/$DEPLOYED" "$root/proc/$$/cwd"
 
-    if [ "$frontend_start" = "after" ]; then
-        # Frontend restarted after the trees were quarantined: they are reclaimable.
-        sleep 1; touch "$root/proc/$$"
+    printf '%s\n' "$frontend_start" > "$root/frontend-start"
+}
+
+set_frontend_start() {
+    local root="$1" latest
+    if [ "$(cat "$root/frontend-start")" = "after" ]; then
+        latest="$(find "$root/staging/.staging" -mindepth 1 -type d -printf '%C@\n' | sort -nr | head -n 1)"
+        touch -d "@$(( ${latest%%.*} + 1 ))" "$root/proc/$$"
     else
-        # Frontend predates the quarantine, so it may still hold those trees.
         touch -d "@$(( $(date +%s) - 3600 ))" "$root/proc/$$"
     fi
 }
 
 run() {
     local root="$1"; shift
+    set_frontend_start "$root"
     CONNEX_STAGING_DIR="$root/staging" PROC_ROOT="$root/proc" \
         CONNEX_STAGING_PRUNE_KEEP_RECENT=2 \
         CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS="${MIN_AGE:-0}" \

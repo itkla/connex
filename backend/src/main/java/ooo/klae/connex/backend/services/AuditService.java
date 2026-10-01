@@ -62,6 +62,8 @@ public class AuditService {
     public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
     public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
     public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
+    public static final String SCHEDULE_DELETE_STEP_UP_SUMMARY =
+            "Recent MFA required to delete a report delivery schedule";
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -524,7 +526,8 @@ public class AuditService {
     }
 
     /**
-     * Records the service-boundary refusal of an export that carried no fresh passkey assertion.
+     * Records the service-boundary refusal of an export, or of a mutation that would open a
+     * scheduled one, that carried no fresh passkey assertion.
      *
      * <p>The path-matching filter emits the same action for the requests it recognises. The
      * {@code service_boundary} reason marks the independent guard that runs even when no filter
@@ -536,6 +539,24 @@ public class AuditService {
      * already holds that row {@code FOR UPDATE}; it would wait on its own lock.
      */
     public void recordExportStepUpRefused() {
+        recordStepUpRefused(EXPORT_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the refusal of a deletion that destroys a report delivery schedule.
+     *
+     * <p>Covers both routes to that outcome: the direct schedule endpoint, and deleting the parent
+     * report, whose cascade is the reason that endpoint is gated at all. Same action and reason as
+     * {@link #recordExportStepUpRefused()}, which the whole step-up control shares, but its summary
+     * names data export. No export is attempted on either route, so reusing it would describe a
+     * refused destructive deletion as a refused download to anyone reading the trail or alerting
+     * on it.
+     */
+    public void recordScheduleDeleteStepUpRefused() {
+        recordStepUpRefused(SCHEDULE_DELETE_STEP_UP_SUMMARY);
+    }
+
+    private void recordStepUpRefused(String summary) {
         Integer actorId = null;
         String actorLabel = null;
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -545,7 +566,7 @@ public class AuditService {
             actorLabel = user.getDisplayName();
         }
         recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actorId, null, null, actorLabel,
-                EXPORT_STEP_UP_SUMMARY, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+                summary, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
     }
 
     private void requireExportStepUp() {

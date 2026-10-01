@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -398,6 +399,25 @@ class InteractionHistoryImportServiceTest {
             .anyMatch(error -> error.contains("dueDate")));
         assertTrue(preview.rows().getFirst().errors().stream()
             .anyMatch(error -> error.contains("completed")));
+        verify(activityMapper, never()).insertHistoryBatch(anyInt(), anyList());
+        verify(taskMapper, never()).insertHistoryBatch(anyInt(), anyList());
+    }
+
+    @Test
+    void rejectsAnOtherwiseValidFutureUtcTaskBeforeWriting() {
+        HistoryImportRequest futureTask = taskRequest(
+            "future-utc-task", "Future task", "2027-01-01T00:00:00Z", "false");
+        doAnswer(invocation -> {
+            List<?> requests = invocation.getArgument(0);
+            queuePreview(requests.stream().map(request -> strongResponse(PERSON_ID)).toList(), PROOF);
+            return previews.removeFirst();
+        }).when(duplicatePreflightService).beginImportPreview(anyList(), anyList(), anyString());
+
+        HistoryImportPreviewResult preview = service.previewTasks(futureTask);
+
+        assertEquals(1, preview.invalid());
+        assertEquals(List.of("occurredAt cannot be in the future"),
+            preview.rows().getFirst().errors());
         verify(activityMapper, never()).insertHistoryBatch(anyInt(), anyList());
         verify(taskMapper, never()).insertHistoryBatch(anyInt(), anyList());
     }

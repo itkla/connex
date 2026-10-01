@@ -21,6 +21,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
@@ -899,64 +901,26 @@ class AiAssistantToolCallReadServiceTest {
         assertNull(result.get(1).change().proposedValue());
     }
 
-    @Test
-    void aRecordEditedSinceTheProposalIsReportedAsChanged() {
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "55|2026-08-12 11:59:00.000000|2026-08-12 11:59:30.000000|recordChanged",
+            "57|2026-08-12 11:59:00.400000|2026-08-12 11:59:00|recordChanged",
+            "58|2026-08-12 11:59:00.400000|2026-08-12 11:58:59|ready",
+            "56|2026-08-12 11:59:00.000000|not a timestamp|ready"
+    })
+    void proposalFreshnessReflectsTheRecordsTimestamp(
+            int toolCallId, String proposedAt, String updatedAt, String expectedState) {
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
                 user(USER_ID, "Ada Owner", "ada-owner"),
                 user(55, "Grace Hopper", "grace-hopper")));
-        AiChatToolCall toolCall = ownerProposal(55, 31, "Grace Hopper");
+        AiChatToolCall toolCall = ownerProposal(toolCallId, 31, "Grace Hopper");
+        toolCall.setCreatedAt(proposedAt);
         Person owned = person(31, "Ada Lovelace");
         owned.setOwnerId(USER_ID);
-        owned.setUpdatedAt("2026-08-12 11:59:30.000000");
+        owned.setUpdatedAt(updatedAt);
         stubPending(toolCall, 31, List.of(owned));
 
-        assertEquals("recordChanged", service.list(SESSION_ID, false)
-                .getFirst().change().state());
-    }
-
-    @Test
-    void aSecondPrecisionEditInTheProposalsOwnSecondIsReportedAsChanged() {
-        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
-                user(USER_ID, "Ada Owner", "ada-owner"),
-                user(55, "Grace Hopper", "grace-hopper")));
-        AiChatToolCall toolCall = ownerProposal(57, 31, "Grace Hopper");
-        toolCall.setCreatedAt("2026-08-12 11:59:00.400000");
-        Person owned = person(31, "Ada Lovelace");
-        owned.setOwnerId(USER_ID);
-        owned.setUpdatedAt("2026-08-12 11:59:00");
-        stubPending(toolCall, 31, List.of(owned));
-
-        assertEquals("recordChanged", service.list(SESSION_ID, false)
-                .getFirst().change().state());
-    }
-
-    @Test
-    void aRecordLastEditedTheSecondBeforeTheProposalStaysApplicable() {
-        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
-                user(USER_ID, "Ada Owner", "ada-owner"),
-                user(55, "Grace Hopper", "grace-hopper")));
-        AiChatToolCall toolCall = ownerProposal(58, 31, "Grace Hopper");
-        toolCall.setCreatedAt("2026-08-12 11:59:00.400000");
-        Person owned = person(31, "Ada Lovelace");
-        owned.setOwnerId(USER_ID);
-        owned.setUpdatedAt("2026-08-12 11:58:59");
-        stubPending(toolCall, 31, List.of(owned));
-
-        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
-    }
-
-    @Test
-    void anUnreadableTimestampNeverInventsAChangedRecord() {
-        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
-                user(USER_ID, "Ada Owner", "ada-owner"),
-                user(55, "Grace Hopper", "grace-hopper")));
-        AiChatToolCall toolCall = ownerProposal(56, 31, "Grace Hopper");
-        Person owned = person(31, "Ada Lovelace");
-        owned.setOwnerId(USER_ID);
-        owned.setUpdatedAt("not a timestamp");
-        stubPending(toolCall, 31, List.of(owned));
-
-        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
+        assertEquals(expectedState, service.list(SESSION_ID, false).getFirst().change().state());
     }
 
     @Test
