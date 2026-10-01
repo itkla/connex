@@ -758,6 +758,37 @@ describe('Ask Connex tool-call cards', () => {
         expect(askConnexToolCardAffordances(failedUndoCard, now)).toEqual(['undo']);
     });
 
+    it('refreshes draft context without rearming a decided or in-flight sibling', () => {
+        const proposed: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'draft_document',
+            tier: 'confirm',
+            status: 'proposed',
+            change: { ...PROPOSED_CHANGE, field: 'document', currentValue: null, proposedValue: 'Quote' },
+            undoAvailable: false,
+            undoExpiresAt: null,
+        };
+        const loaded = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
+            type: 'replace',
+            toolCalls: [proposed],
+        });
+        const refresh = {
+            type: 'proposalsRefreshed' as const,
+            toolCalls: [{ ...proposed, change: { ...PROPOSED_CHANGE, field: 'document' as const, currentValue: '1', proposedValue: 'Quote' } }],
+        };
+        const refreshed = reduceAskConnexToolCards(loaded, refresh);
+        expect(refreshed[0].change?.currentValue).toBe('1');
+        expect(askConnexToolCardAffordances(refreshed[0], Date.now())).toContain('approve');
+        const started = reduceAskConnexToolCards(loaded, {
+            type: 'actionStarted', toolCallId: proposed.id, action: 'approve',
+        });
+        expect(reduceAskConnexToolCards(started, refresh)).toEqual(started);
+        const settled = reduceAskConnexToolCards(started, {
+            type: 'actionSettled', toolCall: { ...proposed, status: 'executed', change: null },
+        });
+        expect(reduceAskConnexToolCards(settled, refresh)).toEqual(settled);
+    });
+
     it('settles successful actions into canonical terminal state', () => {
         const proposed: AiAssistantToolCall = {
             ...TOOL_CALL,

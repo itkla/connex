@@ -711,6 +711,8 @@ public interface AiAssistantWriteTool {
      * @param targetTags the tags the target currently holds when the tool declared {@link
      *     ReviewInput#TAGS}, read for the whole page of cards in one batch per record kind
      * @param templates the workspace templates when the tool declared {@link ReviewInput#TEMPLATES}
+     * @param documentVersions latest document version by template on this deal, when the tool
+     *     declared {@link ReviewInput#DOCUMENTS}
      * @param pinnedResolutionId the resolved id pinned at proposal time, or {@code null} when none
      *     was pinned
      * @param pinnedPrincipalIds the principal ids pinned at proposal time in ascending order, or
@@ -730,7 +732,8 @@ public interface AiAssistantWriteTool {
             Set<Permission> viewerPermissions,
             Integer pinnedResolutionId,
             List<Integer> pinnedPrincipalIds,
-            List<DocumentTemplate> templates) {
+            List<DocumentTemplate> templates,
+            Map<Integer, Integer> documentVersions) {
 
         /** Existing review inputs for tools that do not read document templates. */
         public Review(
@@ -743,7 +746,20 @@ public interface AiAssistantWriteTool {
                     List.of());
         }
 
+        /** Review inputs for tools that do not read existing deal documents. */
+        public Review(
+                String targetKind, int targetId, boolean detailsReadable, RecordSnapshot target,
+                JsonNode request, JsonNode outcome, List<User> members, List<Stage> stages,
+                List<Tag> tags, List<RecordTag> targetTags, Set<Permission> viewerPermissions,
+                Integer pinnedResolutionId, List<Integer> pinnedPrincipalIds,
+                List<DocumentTemplate> templates) {
+            this(targetKind, targetId, detailsReadable, target, request, outcome, members, stages,
+                    tags, targetTags, viewerPermissions, pinnedResolutionId, pinnedPrincipalIds,
+                    templates, Map.of());
+        }
+
         public Review {
+            documentVersions = Map.copyOf(documentVersions);
             pinnedPrincipalIds = pinnedPrincipalIds == null ? null : List.copyOf(pinnedPrincipalIds);
         }
 
@@ -774,7 +790,9 @@ public interface AiAssistantWriteTool {
          */
         FIELDS,
         /** Workspace document templates for a draft proposal. */
-        TEMPLATES
+        TEMPLATES,
+        /** Latest existing document versions by template on each readable deal. */
+        DOCUMENTS
     }
 
     /** Whether a reviewed value resolved and whether the record already holds it. */

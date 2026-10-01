@@ -22,7 +22,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         responseDue: "First-response deadline",
         taskStatus: "Status",
         dueDate: "Due date",
-        document: "Document",
+        document: "Additional draft",
     },
     changeValue: (field, value, side) => askConnexChangeValueText(
         field,
@@ -44,6 +44,10 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
     },
     changeProposedUnresolved: "No longer exists",
     changeStateForField: {
+        document: {
+            ready: (version) => version === null ? null
+                : `This deal already has a document from this template (latest version ${version}).`,
+        },
         responseDue: {
             unchanged: "This contact already has a first-response deadline, and an existing"
                 + " deadline is never moved, so applying this would change nothing.",
@@ -114,8 +118,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         addTag: "Add an existing tag",
         removeTag: "Remove a tag",
         removeTagNamed: (value) => `Remove tag: ${value}`,
-        draftDocument: "Draft a deal document",
-        draftDocumentFrom: (value) => `Draft document from: ${value}`,
+        draftDocument: "Add a draft document to the deal",
+        draftDocumentFrom: (value) => `Add a draft document from: ${value}`,
         documentDrafted: "Document drafted",
         changeDealStage: "Change the deal stage",
         changeDealStageTo: (value) => `Change deal stage to: ${value}`,

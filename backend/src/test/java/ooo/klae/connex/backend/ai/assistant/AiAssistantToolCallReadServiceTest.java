@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
+import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -54,6 +56,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
@@ -81,6 +84,7 @@ class AiAssistantToolCallReadServiceTest {
     private PipelineMapper pipelineMapper;
     private TagMapper tagMapper;
     private DocumentTemplateMapper documentTemplateMapper;
+    private DealDocumentService documentService;
     private ActivityMapper activityMapper;
     private TaskMapper taskMapper;
     private ooo.klae.connex.backend.services.ReferenceService referenceService;
@@ -98,6 +102,7 @@ class AiAssistantToolCallReadServiceTest {
         pipelineMapper = mock(PipelineMapper.class);
         tagMapper = mock(TagMapper.class);
         documentTemplateMapper = mock(DocumentTemplateMapper.class);
+        documentService = mock(DealDocumentService.class);
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
         referenceService = mock(ooo.klae.connex.backend.services.ReferenceService.class);
@@ -156,6 +161,7 @@ class AiAssistantToolCallReadServiceTest {
                 pipelineMapper,
                 tagMapper,
                 documentTemplateMapper,
+                documentService,
                 activityMapper,
                 taskMapper,
                 noteMapper,
@@ -224,6 +230,7 @@ class AiAssistantToolCallReadServiceTest {
         assertNull(cards.getFirst().change().currentValue());
         assertEquals("Quote", cards.getFirst().change().proposedValue());
         assertEquals("ready", cards.getFirst().change().state());
+        verify(documentService).getForDeal(41);
         verify(documentTemplateMapper).getAll(WORKSPACE_ID);
         when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
                 AiAssistantDraftDocumentWriteToolTest.template(6, "Retired"),
@@ -232,6 +239,67 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("Draft a deal document", drifted.requestSummary());
         assertNull(drifted.change().proposedValue());
         assertEquals("unresolved", drifted.change().state());
+    }
+
+    @Test
+    void draftCardsReadLatestPinnedTemplateVersionOncePerDealWithoutInvalidating() {
+        stubVisibleDeal();
+        AiChatToolCall first = documentProposal(91, USER_ID, "Quote");
+        AiChatToolCall second = documentProposal(92, USER_ID, "Quote");
+        AiChatToolCall shared = documentProposal(93, USER_ID + 1, "Quote");
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(first, second, shared));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+        when(documentService.getForDeal(41)).thenReturn(List.of());
+        assertNull(service.list(SESSION_ID, false).getFirst().change().currentValue());
+        when(documentService.getForDeal(41)).thenReturn(List.of(
+                document(1, 6, 1), document(2, 6, 3), document(3, 9, 4)));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        for (AiAssistantToolCallReadDto card : cards.subList(0, 2)) {
+            assertEquals("3", card.change().currentValue());
+            assertFalse(card.change().currentValueUnresolved());
+            assertEquals("Quote", card.change().proposedValue());
+            assertEquals("ready", card.change().state());
+        }
+        assertNull(cards.get(2).change());
+        assertEquals("Draft a deal document", cards.get(2).requestSummary());
+        verify(documentService, times(2)).getForDeal(41);
+    }
+
+    @Test
+    void documentsFromOtherTemplatesDoNotProduceExistingDocumentContext() {
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID, "Quote")));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+        when(documentService.getForDeal(41)).thenReturn(List.of(
+                document(1, 9, 4), document(2, null, 5)));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertNull(card.change().currentValue());
+        assertEquals("ready", card.change().state());
+    }
+
+    @Test
+    void aDraftOnAnUnreadableDealReadsNoDocumentDetails() {
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID, "Quote")));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertNull(card.change());
+        assertEquals("Draft a deal document", card.requestSummary());
+        verifyNoInteractions(documentTemplateMapper, documentService);
+    }
+
+    private static DealDocumentDto document(int id, Integer templateId, int version) {
+        return new DealDocumentDto(id, 41, templateId, "quote", "en", "draft", version,
+                "Private document title", "USD", null, USER_ID, null, false, null);
     }
 
     @Test
@@ -277,7 +345,7 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals("Draft a deal document", card.requestSummary());
         assertNull(card.change());
         assertTrue(card.outcomeValues().isEmpty());
-        verifyNoInteractions(documentTemplateMapper);
+        verifyNoInteractions(documentTemplateMapper, documentService);
     }
 
     @Test

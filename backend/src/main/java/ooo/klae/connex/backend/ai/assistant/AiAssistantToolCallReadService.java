@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
+import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -50,6 +51,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -86,6 +88,7 @@ public class AiAssistantToolCallReadService {
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
     private final DocumentTemplateMapper documentTemplateMapper;
+    private final DealDocumentService documentService;
     private final ActivityMapper activityMapper;
     private final TaskMapper taskMapper;
     private final NoteMapper noteMapper;
@@ -191,6 +194,8 @@ public class AiAssistantToolCallReadService {
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? documentTemplateMapper.getAll(viewer.workspaceId())
                 : List.of();
+        Map<Integer, Map<Integer, Integer>> documentVersions = documentVersions(
+                viewer, stored, visibleTargets);
         List<StoredToolCall> taggedCalls = stored.stream()
                 .filter(call -> readsInput(call, ReviewInput.TAGS)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
@@ -228,7 +233,8 @@ public class AiAssistantToolCallReadService {
             Review withheld = withheld(tool, call, status, viewerPermissions);
             Review review = review(
                     tool, call, status, readable, visibleTarget, assignableOwners, stages,
-                    tags, targetTags.getOrDefault(targetKey, List.of()), templates, withheld);
+                    tags, targetTags.getOrDefault(targetKey, List.of()), templates,
+                    documentVersions.getOrDefault(call.targetId(), Map.of()), withheld);
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
@@ -257,6 +263,32 @@ public class AiAssistantToolCallReadService {
                     call.toolCall().getExecutedAt()));
         }
         return List.copyOf(projected);
+    }
+
+    /** Reads documents once per distinct readable deal, retaining only versions by template. */
+    private Map<Integer, Map<Integer, Integer>> documentVersions(
+            Viewer viewer,
+            List<StoredToolCall> stored,
+            Map<RecordKey, RecordSnapshot> visibleTargets) {
+        List<Integer> dealIds = stored.stream()
+                .filter(call -> readsInput(call, ReviewInput.DOCUMENTS)
+                        && "deal".equals(call.targetKind())
+                        && PROPOSED.equals(publicStatus(call.toolCall()))
+                        && detailsReadable(call, viewer.userId(), visibleTargets))
+                .map(StoredToolCall::targetId)
+                .distinct()
+                .toList();
+        Map<Integer, Map<Integer, Integer>> versions = new LinkedHashMap<>();
+        for (Integer dealId : dealIds) {
+            Map<Integer, Integer> byTemplate = new LinkedHashMap<>();
+            for (DealDocumentDto document : documentService.getForDeal(dealId)) {
+                if (document.templateId() != null) {
+                    byTemplate.merge(document.templateId(), document.version(), Integer::max);
+                }
+            }
+            versions.put(dealId, Map.copyOf(byTemplate));
+        }
+        return Map.copyOf(versions);
     }
 
     /**
@@ -615,6 +647,7 @@ public class AiAssistantToolCallReadService {
             List<Tag> tags,
             List<RecordTag> targetTags,
             List<DocumentTemplate> templates,
+            Map<Integer, Integer> documentVersions,
             Review withheld) {
         if (!readable) {
             return withheld;
@@ -634,7 +667,8 @@ public class AiAssistantToolCallReadService {
                 withheld.viewerPermissions(),
                 call.pins() == null ? null : call.pins().resolutionId(),
                 call.pins() == null ? null : call.pins().principalIds(),
-                inputs.contains(ReviewInput.TEMPLATES) ? templates : List.of());
+                inputs.contains(ReviewInput.TEMPLATES) ? templates : List.of(),
+                inputs.contains(ReviewInput.DOCUMENTS) ? documentVersions : Map.of());
     }
 
     /**

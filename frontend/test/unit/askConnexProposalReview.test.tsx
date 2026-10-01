@@ -1,3 +1,4 @@
+import { createTranslator } from "next-intl";
 import { type AnchorHTMLAttributes, type PropsWithChildren, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import AskConnexProposalReview, {
     AskConnexProposalReviewSummary,
 } from "@/app/components/ask-connex/AskConnexProposalReview";
-import AskConnexToolCard from "@/app/components/ask-connex/AskConnexToolCard";
+import AskConnexToolCard, {
+    type AskConnexToolCardLabels,
+} from "@/app/components/ask-connex/AskConnexToolCard";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     askConnexChangeApplicable,
@@ -18,6 +21,8 @@ import {
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
 import type { AiAssistantToolCallChangeState } from "@/app/lib/types";
+import enCommon from "@/messages/en/common.json";
+import jaCommon from "@/messages/ja/common.json";
 import {
     askConnexCard as card,
     askConnexCardLabels as cardLabels,
@@ -52,11 +57,13 @@ function render(node: ReactNode): string {
     return renderToStaticMarkup(<NowProvider value={NOW}>{node}</NowProvider>);
 }
 
-function renderCard(state: AskConnexToolCardState): string {
+function renderCard(
+    state: AskConnexToolCardState, labels: AskConnexToolCardLabels = cardLabels,
+): string {
     return render(
         <AskConnexToolCard
             card={state}
-            labels={cardLabels}
+            labels={labels}
             actionsDisabled={false}
             onAction={() => {}}
             formatDeadline={(instant) => `deadline(${instant})`}
@@ -104,15 +111,74 @@ describe("assistant proposal review", () => {
         });
         const markup = renderCard(draft);
 
-        expect(markup).toContain("Draft document from: Quote");
+        expect(markup).toContain("Add a draft document from: Quote");
         expect(markup).toContain(cardLabels.changeField.document);
-        expect(markup).toContain("Not set");
+        expect(markup).not.toContain("Not set");
+        expect(markup).not.toContain(`>${cardLabels.diffBefore}<`);
         expect(markup).toContain("Apply the proposed change to Acme renewal");
 
         const withheld = { ...draft, requestSummary: "Draft a deal document", change: null };
         expect(askConnexToolCardAffordances(withheld, NOW)).toEqual(["reject"]);
         expect(renderCard(withheld)).not.toContain("Quote");
         expect(renderCard(withheld)).not.toContain("Apply the proposed change to");
+    });
+
+    it.each([
+        ["en", enCommon, "Additional draft", "latest version 3"],
+        ["ja", jaCommon, "追加する書類の下書き", "最新バージョン 3"],
+    ] as const)("describes an additional draft and existing template version in %s", (locale, messages, label, version) => {
+        const t = createTranslator({ locale, messages, namespace: "AskConnex" });
+        const labels: AskConnexToolCardLabels = {
+            ...cardLabels,
+            changeField: { ...cardLabels.changeField, document: t("toolCards.change.fieldDocument") },
+            changeNotSet: t("toolCards.change.notSet"),
+            diffBefore: t("toolCards.change.before"),
+            changeStateForField: {
+                ...cardLabels.changeStateForField,
+                document: {
+                    ready: (value) => value === null ? null
+                        : t("toolCards.change.existingDocument", { version: value }),
+                },
+            },
+            summaries: {
+                ...cardLabels.summaries,
+                draftDocument: t("toolCards.summaries.draftDocument"),
+                draftDocumentFrom: (value) => t("toolCards.summaries.draftDocumentFrom", { value }),
+            },
+        };
+        const draft = card({
+            toolName: "draft_document",
+            requestSummary: "Draft document from: Quote",
+            change: change({ field: "document", currentValue: null, proposedValue: "Quote" }),
+        });
+        const existing = { ...draft, change: change({ ...draft.change, currentValue: "3" }) };
+        const firstMarkup = renderCard(draft, labels);
+        const existingMarkup = renderCard(existing, labels);
+        for (const markup of [firstMarkup, existingMarkup]) {
+            expect(markup).toContain(label);
+            expect(markup).toContain(escaped(t("toolCards.summaries.draftDocumentFrom", { value: "Quote" })));
+            expect(markup).not.toContain(labels.changeNotSet);
+            expect(markup).not.toContain(`>${labels.diffBefore}<`);
+        }
+        expect(firstMarkup).not.toContain(version);
+        expect(existingMarkup).toContain(version);
+        expect(existingMarkup).toContain(escaped(t("toolCards.change.existingDocument", { version: "3" })));
+        expect(askConnexToolCardAffordances(existing, NOW)).toContain("approve");
+        const drafts = [existing, { ...draft, id: 32 }, { ...draft, id: 33 }];
+        const [group] = askConnexProposalGroups(
+            drafts, new Set(drafts.map((entry) => entry.id)), new Set(),
+        );
+        const grouped = render(<AskConnexProposalReview
+            group={group}
+            labels={reviewLabels}
+            cardLabels={labels}
+            actionsDisabled={false}
+            onToggleInclusion={() => {}}
+            onAction={() => {}}
+            onApplySelected={() => {}}
+        />);
+        expect(grouped).toContain(version);
+        expect(grouped).not.toContain(labels.changeNotSet);
     });
 
     it("states a tag removal as the tag the record holds now and nothing after", () => {

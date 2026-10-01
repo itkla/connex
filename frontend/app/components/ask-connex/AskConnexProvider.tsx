@@ -2080,6 +2080,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     || operationEpoch !== sessionEpochRef.current
                     || activeSessionRef.current?.id !== session.id) return mutated;
                 dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                if (mutated && card.toolName === 'draft_document') {
+                    const pending = await getAiAssistantToolCalls(
+                        session.id, { pendingOnly: true }, { signal },
+                    );
+                    if (signal.aborted
+                        || operationEpoch !== sessionEpochRef.current
+                        || activeSessionRef.current?.id !== session.id) return mutated;
+                    dispatchToolCalls({
+                        type: 'proposalsRefreshed',
+                        toolCalls: pending.filter((proposal) => proposal.id !== toolCallId
+                            && proposal.toolName === 'draft_document'
+                            && proposal.target.kind === card.target.kind
+                            && proposal.target.id === card.target.id),
+                    });
+                }
             } catch {
                 if (!signal.aborted
                     && operationEpoch === sessionEpochRef.current
@@ -2677,6 +2692,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
             changeStateForField: {
+                document: {
+                    ready: (version: string | null) => version === null ? null
+                        : t('toolCards.change.existingDocument', { version }),
+                },
                 responseDue: {
                     unchanged: t('toolCards.change.stateUnchangedResponseDue'),
                     unresolved: t('toolCards.change.stateUnresolvedResponseDue'),

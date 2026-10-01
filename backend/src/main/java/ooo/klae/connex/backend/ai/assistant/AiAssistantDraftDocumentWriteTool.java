@@ -135,7 +135,7 @@ public class AiAssistantDraftDocumentWriteTool implements AiAssistantWriteTool {
 
     @Override
     public Set<ReviewInput> reviewInputs() {
-        return Set.of(ReviewInput.TEMPLATES);
+        return Set.of(ReviewInput.TEMPLATES, ReviewInput.DOCUMENTS);
     }
 
     @Override
@@ -144,8 +144,10 @@ public class AiAssistantDraftDocumentWriteTool implements AiAssistantWriteTool {
         if (template == null) {
             return new Diff("document", null, false, null, DiffState.UNRESOLVED);
         }
+        Integer version = review.documentVersions().get(template.getId());
         return SpecialCareTextScreen.screen(template.getName()).excluded() ? null
-                : new Diff("document", null, false, template.getName(), DiffState.CHANGED);
+                : new Diff("document", version == null ? null : version.toString(), false,
+                        template.getName(), DiffState.CHANGED);
     }
 
     @Override

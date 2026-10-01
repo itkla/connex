@@ -222,7 +222,15 @@ check through `DealService.getDealById`, refusing an unavailable or shared-in de
 `unresolved_reference` before persisting a proposal. The registry currently permits that declaration
 only for a person-only or deal-only target set. Replays retain the original pins; approval still runs the locked target gate.
 Cards batch `ReviewInput.TEMPLATES` once per authorized page and show only the pinned template,
-withholding the diff when its name fails the special-care screen. The stored outcome includes the
+withholding the diff when its name fails the special-care screen. `ReviewInput.DOCUMENTS` reads
+`DealDocumentService.getForDeal` once per distinct deal among pending cards whose details are readable,
+retaining only the latest version by template. The document diff's current value carries that version
+for the pinned template as informational context; the client describes an additional draft without a
+before-row and shows the existing-document notice in English or Japanese. After a draft approval,
+the client refreshes pending draft cards on that deal to show the newly created version. Existing documents do not
+invalidate another approval or update the deal timestamp: separate approvals may create v1 and v2.
+Withheld reviews receive no document versions and cause no document lookup of their own.
+The stored outcome includes the
 rendered title, but the model projection is only `{recordType, type, version}`: a merged title is
 record-derived text, not another workspace label. Member outcome titles use the existing screen.
 The `draft_document_proposal` golden covers no document before approval, draft v1 afterward, and

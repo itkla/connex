@@ -3475,7 +3475,9 @@ export type AiAssistantToolCallChangeState =
  * Absent entirely for a viewer who did not ask for the proposal or cannot currently open its
  * target, which is what keeps one record's field value out of a shared chat. Either value may be
  * null in its own right: a record with no owner has no current value, and a proposal to clear an
- * owner has no proposed one. `currentValueUnresolved` is the third case: the record does hold a
+ * owner has no proposed one. For an additional document draft, the current value is the latest
+ * version from the pinned template, displayed as context rather than a before-row.
+ * `currentValueUnresolved` is the third case: the record does hold a
  * value, and this workspace can no longer name who or what it is.
  */
 export type AiAssistantToolCallChange = {

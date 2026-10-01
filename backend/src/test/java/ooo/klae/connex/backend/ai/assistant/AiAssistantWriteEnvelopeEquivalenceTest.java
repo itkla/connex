@@ -69,6 +69,7 @@ import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
@@ -529,6 +530,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
+                mock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 taskMapper,
                 mock(NoteMapper.class),
@@ -954,6 +956,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
+                mock(DealDocumentService.class),
                 activityMapper,
                 mock(TaskMapper.class),
                 noteMapper,
@@ -1201,6 +1204,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
+                mock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1493,6 +1497,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
+                mock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1649,6 +1654,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
+                mock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),

@@ -391,6 +391,7 @@ export type AskConnexToolCardsEvent =
         mutation: AiAssistantToolCallMutation;
     }
     | { type: 'actionSettled'; toolCall: AiAssistantToolCall }
+    | { type: 'proposalsRefreshed'; toolCalls: readonly AiAssistantToolCall[] }
     | { type: 'reset' };
 
 /** Tool cards partitioned by their transcript message or nearest visible turn position. */
@@ -476,6 +477,16 @@ export function reduceAskConnexToolCards(
                 failure: current.failure,
                 undoBlocked: current.undoBlocked,
             };
+        });
+    }
+    if (event.type === 'proposalsRefreshed') {
+        const refreshedById = new Map(event.toolCalls.map((toolCall) => [toolCall.id, toolCall]));
+        return state.map((card) => {
+            const refreshed = refreshedById.get(card.id);
+            return card.status === 'proposed' && card.pendingAction === null
+                && refreshed?.status === 'proposed'
+                ? { ...card, ...refreshed }
+                : card;
         });
     }
     if (event.type === 'actionSettled') {
