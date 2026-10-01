@@ -76,6 +76,10 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
 
+    private Integer freshWorkspaceId;
+    private Integer rewrittenRuleId;
+    private String originalActionsJson;
+
     @Test
     void aFailingActionAfterAnAuditedOneIsAuditedWithoutStallingTheDelivery() throws Exception {
         committedWorkspace();
@@ -85,6 +89,10 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         ownershipService.rollBackToLegacy(workflow.id(), workflow.activeVersionId());
         Workflow legacy = workflowMapper.getById(workspace.getId(), workflow.id());
         assertNotNull(legacy.getLegacyRuleId());
+        originalActionsJson = jdbcTemplate.queryForObject(
+                "SELECT actions_json FROM rule WHERE workspace_id = ? AND id = ?",
+                String.class, workspace.getId(), legacy.getLegacyRuleId());
+        rewrittenRuleId = legacy.getLegacyRuleId();
         assertEquals(1, jdbcTemplate.update(
                 "UPDATE rule SET actions_json = ? WHERE workspace_id = ? AND id = ?",
                 objectMapper.writeValueAsString(List.of(
@@ -112,8 +120,16 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         assertTrue(elapsedMs < WELL_INSIDE_LOCK_WAIT_MS,
                 "the delivery stalled " + elapsedMs + " ms on its own integrity head");
         assertTrue(outcome instanceof UnexpectedRollbackException,
-                "the failing action rethrows through a participating transactional proxy, so the"
-                        + " delivery must roll back rather than commit \"partial\"; was " + outcome);
+                "known bug #1928: the failing action rethrows through a participating transactional"
+                        + " proxy, so today the whole delivery rolls back instead of committing"
+                        + " \"partial\". If #1928 is fixed this tripwire fires; revisit this test then."
+                        + " Was " + outcome);
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log"
+                        + " WHERE action = 'note.create' AND outcome = 'success' AND workspace_id = ?",
+                Integer.class, workspace.getId()),
+                "create_note's audit must have joined the delivery transaction and rolled back with"
+                        + " it; otherwise that transaction never held the head and nothing was deferred");
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_log"
                         + " WHERE action = 'activity.create' AND outcome = 'failure' AND target_label = ?"
@@ -126,20 +142,26 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     /**
      * Removes the workflow and legacy rule this test committed. The test rewrites the rule's actions
      * so they no longer match the workflow's projection, which the startup legacy backfill rightly
-     * refuses; left behind, that pair would fail every later context load in the same schema. It
-     * also deletes the committed user {@code AbstractServiceTest} made an owner of the shared default
-     * workspace, which later classes would otherwise count as an eligible approver or delegate. The
-     * delivery rolls back, so no note or activity that would restrict that delete is ever committed.
-     * Mirrors {@code WorkflowTriggerExactlyOnceIntegrationTest}'s cleanup.
+     * refuses; left behind, that pair would fail every later context load in the same schema. The
+     * original actions are restored first, so even a drain that fails partway leaves a consistent
+     * pair. Only this test's own workspace is drained, never the shared default one. Mirrors
+     * {@code WorkflowTriggerExactlyOnceIntegrationTest}'s cleanup.
      */
     @AfterEach
-    void deleteCreatedRuntimeState() {
+    void restoreAndDrainWorkflowState() {
+        if (rewrittenRuleId != null && freshWorkspaceId != null) {
+            jdbcTemplate.update("UPDATE rule SET actions_json = ? WHERE workspace_id = ? AND id = ?",
+                    originalActionsJson, freshWorkspaceId, rewrittenRuleId);
+        }
+        if (freshWorkspaceId == null) {
+            return;
+        }
         TableLifecycle workflow = TenantLifecycleRegistry.require("workflow");
         jdbcTemplate.update(
                 "UPDATE workflow SET runtime_owner = 'legacy', enabled = FALSE WHERE workspace_id = ?",
-                workspace.getId());
+                freshWorkspaceId);
         for (var preparation : workflow.preparations()) {
-            tenantTeardownTransaction.prepare(workspace.getId(), workflow, (NullifyReference) preparation);
+            tenantTeardownTransaction.prepare(freshWorkspaceId, workflow, (NullifyReference) preparation);
         }
         for (String table : List.of(
                 "workflow_intervention", "workflow_invocation_record", "workflow_invocation",
@@ -147,9 +169,20 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
                 "workflow_run", "workflow_trigger_outbox", "workflow_runtime_workspace",
                 "rule_execution", "job_run", "workflow_version", "workflow", "rule")) {
             TableLifecycle declaration = TenantLifecycleRegistry.require(table);
-            while (tenantTeardownTransaction.deleteBatch(workspace.getId(), declaration, 100) > 0) {
+            while (tenantTeardownTransaction.deleteBatch(freshWorkspaceId, declaration, 100) > 0) {
             }
         }
+    }
+
+    /**
+     * Deletes the committed user {@code AbstractServiceTest} made an owner of the shared default
+     * workspace, which later classes would otherwise count as an eligible approver or delegate. It is
+     * a separate method so a failing drain cannot skip it: JUnit runs every after-each method even when
+     * one throws. Memberships cascade, audit rows keep their signed {@code integrity_actor_id}, and no
+     * foreign key to {@code app_user} restricts the delete.
+     */
+    @AfterEach
+    void deleteCommittedUser() {
         if (currentUser != null) {
             jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", currentUser.getId());
         }
@@ -194,6 +227,7 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         fresh.setSlug("delivery-audit-" + unique());
         workspaceMapper.insert(fresh);
         workspaceMapper.addMember(fresh.getId(), currentUser.getId(), "owner");
+        freshWorkspaceId = fresh.getId();
         workspace = fresh;
         authenticateAs(currentUser, fresh.getId());
     }

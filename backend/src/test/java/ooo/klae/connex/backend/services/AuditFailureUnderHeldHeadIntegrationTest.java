@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -69,13 +71,20 @@ class AuditFailureUnderHeldHeadIntegrationTest extends AbstractServiceTest {
                         + " WHERE workspace_id = ? AND action = 'note.create' AND outcome = 'success'",
                 Integer.class, fresh.getId()),
                 "the joined success audit commits or rolls back with its holder, as before");
+        assertEquals(rollBack ? List.of(1L) : List.of(1L, 2L), jdbcTemplate.queryForList(
+                "SELECT chain_index FROM audit_log"
+                        + " WHERE chain_scope_type = 'workspace' AND chain_scope_id = ? ORDER BY chain_index",
+                Long.class, fresh.getId()),
+                "the deferred row must extend the workspace chain without a gap: after the success audit"
+                        + " on commit, and in its place when the holder rolled back");
     }
 
     /**
      * Deletes the committed user {@code AbstractServiceTest} made an owner of the shared default
      * workspace. This class commits rather than rolling back, so without it every case leaves an
      * extra owner there that later classes in the same schema count as an eligible approver or
-     * delegate. Memberships cascade, and audit rows keep their signed {@code integrity_actor_id}.
+     * delegate. Memberships cascade, audit rows keep their signed {@code integrity_actor_id}, and no
+     * foreign key to {@code app_user} restricts the delete.
      */
     @AfterEach
     void deleteCommittedUser() {
