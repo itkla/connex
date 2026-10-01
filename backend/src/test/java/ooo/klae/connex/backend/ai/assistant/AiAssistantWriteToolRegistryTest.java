@@ -162,21 +162,12 @@ class AiAssistantWriteToolRegistryTest {
                         .filter(tool -> !"draft_document".equals(tool.name())).toList());
     }
 
+    /** Document drafts, response deadlines and record field edits require owned targets at prepare. */
     @Test
-    void anOwnedTargetDeclarationCannotSilentlyApplyToAnotherKind() {
-        AiAssistantWriteTool unsupported = new AiAssistantCreateTaskWriteTool(null, null, null) {
-            @Override
-            public boolean requiresOwnedTarget() {
-                return true;
-            }
-        };
-        assertRefused("requires an owned target for an unsupported kind", List.of(unsupported));
-    }
-
-    @Test
-    void onlyTheDocumentAndResponseDueToolsRequireOwnedTargetsAtPrepare() {
+    void onlyDocumentResponseDueAndFieldEditToolsRequireOwnedTargetsAtPrepare() {
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
-            assertEquals(Set.of("draft_document", "set_response_due").contains(tool.name()),
+            assertEquals(Set.of("draft_document", "set_response_due", "update_record_fields")
+                            .contains(tool.name()),
                     tool.requiresOwnedTarget(), tool.name());
         }
     }
@@ -268,15 +259,18 @@ class AiAssistantWriteToolRegistryTest {
 
     /**
      * The framework can tell an owned target from a shared-in one only for a contact, company or
-     * deal, so a tool that asks for an owned target on a task would be refused at every proposal.
+     * deal. A complete catalog with a task tool declaring ownership must fail that declaration
+     * check, before any proposal can reach the unsupported ownership gate.
      */
     @Test
     void refusesAnOwnedTargetOnATask() {
-        AiAssistantWriteTool owning =
-                spy(tool("complete_task", ToolTier.CONFIRM, Set.of("task")));
+        AiAssistantWriteTool owning = spy(new AiAssistantCompleteTaskWriteTool(null));
         doReturn(true).when(owning).requiresOwnedTarget();
 
-        assertRefused("complete_task requires an owned record target", List.of(owning));
+        assertRefused("complete_task requires an owned record target",
+                AiAssistantDeclaredWriteTools.tools().stream()
+                        .map(tool -> tool.name().equals(owning.name()) ? owning : tool)
+                        .toList());
     }
 
     @Test

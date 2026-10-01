@@ -74,6 +74,7 @@ import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
 import ooo.klae.connex.backend.services.TaskService;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
@@ -1026,9 +1027,14 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         }
     }
 
-    /** Both actor directions exercise the actual mutex/record cycle, on the same person. */
+    /**
+     * Both actor directions retain the duplicate mutex before editing the same person. The
+     * approval must reach and wait on that exact mutex before the editor is released; its setup
+     * and lock observation have separate bounds shorter than the editor's hold bound.
+     */
     @Test
     void reciprocalInteractivePersonEditsAndFieldApprovalsDoNotDeadlock() throws Exception {
+        organizationMapper.lockDuplicateDecision(organization.getId());
         for (boolean reverse : List.of(false, true)) {
             User approver = reverse ? secondActor : firstActor;
             User editor = reverse ? firstActor : secondActor;
@@ -1049,22 +1055,29 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 clearAuthentication();
             }
             CountDownLatch mutexHeld = new CountDownLatch(1);
+            CountDownLatch approvalAtMutex = new CountDownLatch(1);
             CountDownLatch releaseEdit = new CountDownLatch(1);
             AtomicReference<Thread> editing = new AtomicReference<>();
-            AtomicLong blockingConnection = new AtomicLong();
+            AtomicLong waitingConnection = new AtomicLong();
             OrganizationMapper real = sqlSessionTemplate.getMapper(OrganizationMapper.class);
             doAnswer(invocation -> {
-                int locked = real.lockDuplicateDecision(organization.getId());
-                if (Thread.currentThread() == editing.get()) {
+                boolean interactiveEdit = Thread.currentThread() == editing.get();
+                if (!interactiveEdit) {
                     Long connection = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
                     assertNotNull(connection);
-                    blockingConnection.set(connection);
+                    waitingConnection.set(connection);
+                    approvalAtMutex.countDown();
+                }
+                int locked = real.lockDuplicateDecision(organization.getId());
+                if (interactiveEdit) {
                     mutexHeld.countDown();
-                    assertTrue(releaseEdit.await(10, TimeUnit.SECONDS));
+                    assertTrue(releaseEdit.await(60, TimeUnit.SECONDS),
+                            "The editor was not released after observing approval contention");
                 }
                 return locked;
             }).when(organizationMapperSpy).lockDuplicateDecision(organization.getId());
             ExecutorService executor = Executors.newFixedThreadPool(2);
+            Throwable primaryFailure = null;
             try {
                 Future<?> edit = executor.submit(() -> {
                     editing.set(Thread.currentThread());
@@ -1077,7 +1090,8 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                         clearAuthentication();
                     }
                 });
-                assertTrue(mutexHeld.await(10, TimeUnit.SECONDS));
+                assertTrue(mutexHeld.await(30, TimeUnit.SECONDS),
+                        "The interactive edit did not acquire the duplicate-decision mutex");
                 Future<ConflictException> approval = executor.submit(() -> {
                     authenticate(approver);
                     try {
@@ -1087,43 +1101,38 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                         clearAuthentication();
                     }
                 });
-                assertTrue(awaitDuplicateDecisionWait(approval, blockingConnection.get()));
+                assertTrue(approvalAtMutex.await(30, TimeUnit.SECONDS),
+                        "The approval did not reach the duplicate-decision mutex");
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, waitingConnection.get(),
+                        "organization_duplicate_decision_lock", Integer.toString(organization.getId()));
+                assertFalse(approval.isDone(), "Approval completed while the editor held the mutex");
                 releaseEdit.countDown();
                 edit.get(20, TimeUnit.SECONDS);
                 assertEquals("Assistant proposal target changed", approval.get(20, TimeUnit.SECONDS).getMessage());
                 assertEquals(memberTitle, jdbcTemplate.queryForObject("SELECT title FROM person WHERE id = ?", String.class, person.getId()));
                 assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId()).getStatus());
+            } catch (Exception | Error failure) {
+                primaryFailure = failure;
+                throw failure;
             } finally {
                 releaseEdit.countDown();
-                executor.shutdownNow();
-                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
-                org.mockito.Mockito.reset(organizationMapperSpy);
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        executor.shutdownNow();
+                        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS),
+                                "Person edit and approval workers did not terminate after release");
+                    }
+                } catch (Exception | Error cleanupFailure) {
+                    if (primaryFailure == null) {
+                        throw cleanupFailure;
+                    }
+                    primaryFailure.addSuppressed(cleanupFailure);
+                } finally {
+                    org.mockito.Mockito.reset(organizationMapperSpy);
+                }
             }
         }
-    }
-
-    private boolean awaitDuplicateDecisionWait(Future<?> approval, long blockingConnection) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline && !approval.isDone()) {
-            Integer waiting = jdbcTemplate.queryForObject("""
-                    SELECT COUNT(*)
-                    FROM performance_schema.data_lock_waits lock_wait
-                    JOIN performance_schema.data_locks requested
-                      ON requested.ENGINE = lock_wait.ENGINE
-                     AND requested.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
-                    JOIN performance_schema.threads blocking_thread
-                      ON blocking_thread.THREAD_ID = lock_wait.BLOCKING_THREAD_ID
-                    WHERE blocking_thread.PROCESSLIST_ID = ?
-                      AND requested.OBJECT_SCHEMA = DATABASE()
-                      AND requested.OBJECT_NAME = 'organization_duplicate_decision_lock'
-                      AND requested.LOCK_STATUS = 'WAITING'
-                    """, Integer.class, blockingConnection);
-            if (waiting != null && waiting > 0) {
-                return true;
-            }
-            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
-        }
-        return false;
     }
 
     private Task task(User assignee, String description) {
