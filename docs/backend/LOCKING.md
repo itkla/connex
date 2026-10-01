@@ -510,7 +510,8 @@ only whether it removed the association and compares the pinned tag id with itse
 `set_response_due`, whose `LeadResponseSlaService.startFirstResponseClock` reports only whether it
 started a clock and compares the contact id with itself;
 `assign_owner` compares the owner id on the record `updateOwner` returns with the principal
-locked at step 1, `null` on both sides for a removal); and writes the tool-call status fail-closed. The one
+locked at step 1, `null` on both sides for a removal; `draft_document` compares the pinned template
+id with `templateId` on the generated document DTO); and writes the tool-call status fail-closed. The one
 read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
 `Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool
 names only the window, and the read refuses any other target kind), and which the activity tool
@@ -536,6 +537,12 @@ very person row step 6 already holds, and then updates that contact's open `pers
 row — person before pass, the order the workflow engine's `set_response_due` action takes through
 the same method.
 
+`DealDocumentService.generate`, used by `draft_document`, reacquires the same actor user,
+workspace, membership, custom-role permission rows and deal row already held at steps 1 and 6;
+its snapshot revalidation and document insertion introduce no new authorization or deal lock edge.
+The template is resolved without a lock and pinned by id, not by content version: template edits
+that retain that identity use the template's content as read by generation.
+
 **The authority is the step-1 snapshot, and its rows stay locked until commit.** The tool's own
 permissions become known only after step 3 has read the durable proposal, so the service asserts
 them in memory against the snapshot through `LockedPermissionSnapshot.effectiveFor(actorId)`. It
@@ -560,7 +567,7 @@ Rules that keep this sound:
   `@RequirePermission` check would be the pre-lock read. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
   unknown tool call, an unparseable proposal, an owner that no longer resolves) and the locked 403
   after them.
-- **After step 1, only non-locking permission reads, and only in the domain layer.** The service's
+- **After step 1, no new authorization lock edge; permission checks stay in the domain layer.** The service's
   own assertions read the snapshot. The domain services it calls still run their `@RequirePermission`
   and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
   after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
@@ -568,7 +575,8 @@ Rules that keep this sound:
   `DealService.changeStage`, `LeadResponseSlaService.startFirstResponseClock`, and every `deleteIf`
   undo uses. Those reads add no lock edge, and while
   the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
-  Do not turn one of them into a locking read, and do not route an assistant write through a
+  The document-generation snapshot reacquires only locks step 1 already retains, as above.
+  Do not turn another check into a new locking read, and do not route an assistant write through a
   domain method that has no permission check on the assumption that the snapshot makes it redundant.
 - **Organization lifecycle is not in the snapshot.** `lockAndRequirePermissions` checks the
   workspace's lifecycle, not the organization's. An organization entering teardown is refused by the

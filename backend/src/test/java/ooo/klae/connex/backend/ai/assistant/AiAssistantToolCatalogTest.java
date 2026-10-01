@@ -26,6 +26,23 @@ class AiAssistantToolCatalogTest {
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
+    void draftDocumentsRequireABoundedTemplateName() throws Exception {
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("draft_document"));
+        for (int length : List.of(1, 128)) {
+            assertTrue(catalog.permitsArguments("draft_document", objectMapper.readTree(
+                    "{\"handle\":\"r1\",\"template\":\"" + "x".repeat(length) + "\"}")));
+        }
+        for (String arguments : List.of(
+                "{\"handle\":\"r1\"}",
+                "{\"handle\":\"r1\",\"template\":\"\"}",
+                "{\"handle\":\"t1\",\"template\":\"Quote\"}",
+                "{\"handle\":\"r1\",\"template\":1}",
+                "{\"handle\":\"r1\",\"template\":\"" + "x".repeat(129) + "\"}")) {
+            assertFalse(catalog.permitsArguments("draft_document", objectMapper.readTree(arguments)));
+        }
+    }
+
+    @Test
     void catalogKeepsReadAndWriteSafetyTiersExplicit() throws Exception {
         assertEquals(
                 List.of(
@@ -33,9 +50,9 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due", "complete_task", "reschedule_task"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(20, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(21, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -109,7 +126,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(20, definitions.size());
+        assertEquals(21, definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -154,7 +171,7 @@ class AiAssistantToolCatalogTest {
                 byToolset.get(Toolset.WRITE_ACTIVITY));
         assertEquals(List.of("create_note", "add_tag", "remove_tag"),
                 byToolset.get(Toolset.WRITE_CONTENT));
-        assertEquals(List.of("change_deal_stage", "assign_owner"),
+        assertEquals(List.of("change_deal_stage", "assign_owner", "draft_document"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
         assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
         assertEquals(

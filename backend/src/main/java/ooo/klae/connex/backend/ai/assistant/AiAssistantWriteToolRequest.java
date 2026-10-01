@@ -74,6 +74,13 @@ public sealed interface AiAssistantWriteToolRequest {
             implements AiAssistantWriteToolRequest {
     }
 
+    /** Typed deal-document draft proposal. */
+    record DraftDocument(
+            @NotBlank @Pattern(regexp = HANDLE) String handle,
+            @NotBlank @Size(max = 128) String template)
+            implements AiAssistantWriteToolRequest {
+    }
+
     /** Typed owner-assignment proposal using an exact active-member display name or username. */
     record AssignOwner(
             @NotBlank @Pattern(regexp = HANDLE) String handle,

@@ -223,6 +223,7 @@ export default function AskConnexProposalReview({
                                         <AskConnexChangeNotice
                                             field={card.change.field}
                                             state={card.change.state}
+                                            currentValue={card.change.currentValue}
                                             removal={removal}
                                             labels={cardLabels}
                                         />

@@ -57,6 +57,37 @@ import tools.jackson.databind.JsonNode;
 class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
 
     @Test
+    void aDraftGeneratedFromAnotherTemplateRecordsTheReturnedIdentifier() throws Exception {
+        Deal target = deal(5);
+        target.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(dealService.getDealById(44)).thenReturn(target);
+        when(dealService.lockDealForUpdate(44)).thenReturn(target);
+        when(templateService.getAll()).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+        when(templateService.getById(6)).thenReturn(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote"));
+        when(documentService.generate(44, 6)).thenReturn(
+                AiAssistantDraftDocumentWriteToolTest.document(9));
+        AiAssistantWriteToolService service = service();
+        AiAssistantPreparedWrite write = propose(service, "draft_document",
+                AiAssistantDraftDocumentWriteToolTest.ARGUMENTS, "deal", 44);
+
+        AiAssistantToolCallDto approved = service.approve(TURN.sessionId(), TOOL_CALL_ID);
+
+        JsonNode stored = objectMapper.readTree(capturedExecutedResult());
+        assertEquals(6, stored.path("verification").path("requested").asInt());
+        assertEquals(9, stored.path("verification").path("applied").asInt());
+        assertEquals("templateId", stored.path("verification").path("field").asString());
+        assertFalse(approved.result().has("verification"));
+        assertEquals("Acme renewal quote", approved.result().path("title").asString());
+        JsonNode replay = objectMapper.valueToTree(service.proposalResult(write,
+                new AiAssistantToolProposal(TOOL_CALL_ID, "executed", capturedExecutedResult(), true)).data());
+        assertEquals(objectMapper.readTree(
+                "{\"recordType\":\"document\",\"type\":\"quote\",\"version\":1}"),
+                replay.path("outcome"));
+    }
+
+    @Test
     void aStageChangeThatLandedOnAnotherStageRecordsTheDivergenceBesideTheOutcome()
             throws Exception {
         DealService.LockedStageChange locked = stubStageChange();

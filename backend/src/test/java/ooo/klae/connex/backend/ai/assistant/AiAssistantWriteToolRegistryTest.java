@@ -104,12 +104,40 @@ class AiAssistantWriteToolRegistryTest {
     private static final Map<String, Set<String>> REQUIRED_REQUEST_TEXT = Map.of(
             "assign_owner", Set.of("owner"),
             "change_deal_stage", Set.of("stage"),
-            "remove_tag", Set.of("tag"));
+            "remove_tag", Set.of("tag"),
+            "draft_document", Set.of("template"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+
+    @Test
+    void refusesAMissingDraftDocumentBean() {
+        assertRefused("draft_document is declared in the catalog but has no write-tool bean",
+                AiAssistantDeclaredWriteTools.tools().stream()
+                        .filter(tool -> !"draft_document".equals(tool.name())).toList());
+    }
+
+    @Test
+    void anOwnedTargetDeclarationCannotSilentlyApplyToAnotherKind() {
+        AiAssistantWriteTool unsupported = new AiAssistantCreateTaskWriteTool(null, null, null) {
+            @Override
+            public boolean requiresOwnedTarget() {
+                return true;
+            }
+        };
+        assertRefused("requires an owned target for an unsupported kind", List.of(unsupported));
+    }
+
+    @Test
+    void onlyTheDocumentAndResponseDueToolsRequireOwnedTargetsAtPrepare() {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            assertEquals(Set.of("draft_document", "set_response_due").contains(tool.name()),
+                    tool.requiresOwnedTarget(), tool.name());
+        }
+    }
 
     @Test
     void indexesTheDeclaredToolsInCatalogOrderWhateverOrderTheyWereDiscoveredIn() {
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
+                tool("draft_document", ToolTier.CONFIRM, Set.of("deal")),
                 tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
                 tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
@@ -123,7 +151,7 @@ class AiAssistantWriteToolRegistryTest {
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due", "complete_task", "reschedule_task"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -135,6 +163,7 @@ class AiAssistantWriteToolRegistryTest {
     void theToolsThisPhaseShipsSatisfyEveryStartupCheck() {
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 new AiAssistantCreateTaskWriteTool(null, null, null),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
@@ -145,7 +174,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantSetResponseDueWriteTool(null)));
 
-        assertEquals(10, registry.tools().size());
+        assertEquals(11, registry.tools().size());
     }
 
     @Test
@@ -188,17 +217,17 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     /**
-     * The framework can tell an owned target from a shared-in one only for a person, so a tool
-     * that asks for an owned target on any other kind would be refused at every proposal.
+     * The framework checks ownership for a person or a deal, so a tool that asks for an owned
+     * target on another kind would be refused at every proposal.
      */
     @Test
-    void refusesAnOwnedTargetOnAnythingButAPerson() {
+    void refusesAnOwnedTargetOnAnythingButAPersonOrDeal() {
         AiAssistantWriteTool owning =
-                spy(tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")));
+                spy(tool("assign_owner", ToolTier.CONFIRM, Set.of("company")));
         doReturn(true).when(owning).requiresOwnedTarget();
 
         assertRefused(
-                "change_deal_stage requires an owned target, which is checked only for a person",
+                "assign_owner requires an owned target for an unsupported kind",
                 List.of(owning));
     }
 
@@ -238,6 +267,7 @@ class AiAssistantWriteToolRegistryTest {
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
+                        tool("draft_document", ToolTier.CONFIRM, Set.of("deal")),
                         tool("assign_owner", ToolTier.CONFIRM,
                                 Set.of("person", "company", "deal"))));
         assertRefused(
@@ -248,6 +278,7 @@ class AiAssistantWriteToolRegistryTest {
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
+                        tool("draft_document", ToolTier.CONFIRM, Set.of("deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
         assertRefused(
                 "change_deal_stage is declared in the catalog but has no write-tool bean",
@@ -528,6 +559,7 @@ class AiAssistantWriteToolRegistryTest {
             Map<String, SharedRequestFlag> flags) {
         return List.of(
                 new AiAssistantCreateTaskWriteTool(null, null, null),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
@@ -549,6 +581,7 @@ class AiAssistantWriteToolRegistryTest {
             Set<String> required) {
         return List.of(
                 new AiAssistantCreateTaskWriteTool(null, null, null),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),

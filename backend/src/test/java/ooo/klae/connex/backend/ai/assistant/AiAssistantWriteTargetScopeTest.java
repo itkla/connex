@@ -215,7 +215,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         };
         AiAssistantWriteToolService service = framework(List.of(
                 createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool(),
-                removeTagTool(), assignOwnerTool(), setResponseDueTool(),
+                removeTagTool(), draftDocumentTool(), assignOwnerTool(), setResponseDueTool(),
                 new AiAssistantCompleteTaskWriteTool(taskService),
                 new AiAssistantRescheduleTaskWriteTool(taskService)));
         propose(service, "create_activity",

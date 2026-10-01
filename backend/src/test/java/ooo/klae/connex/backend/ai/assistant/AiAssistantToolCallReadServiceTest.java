@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.RecordTag;
@@ -40,11 +42,13 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
+import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -52,6 +56,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
@@ -78,6 +83,8 @@ class AiAssistantToolCallReadServiceTest {
     private DealMapper dealMapper;
     private PipelineMapper pipelineMapper;
     private TagMapper tagMapper;
+    private DocumentTemplateMapper documentTemplateMapper;
+    private DealDocumentService documentService;
     private ActivityMapper activityMapper;
     private TaskMapper taskMapper;
     private ooo.klae.connex.backend.services.ReferenceService referenceService;
@@ -94,6 +101,8 @@ class AiAssistantToolCallReadServiceTest {
         dealMapper = mock(DealMapper.class);
         pipelineMapper = mock(PipelineMapper.class);
         tagMapper = mock(TagMapper.class);
+        documentTemplateMapper = mock(DocumentTemplateMapper.class);
+        documentService = mock(DealDocumentService.class);
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
         referenceService = mock(ooo.klae.connex.backend.services.ReferenceService.class);
@@ -135,6 +144,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
     }
 
@@ -150,6 +160,8 @@ class AiAssistantToolCallReadServiceTest {
                 dealMapper,
                 pipelineMapper,
                 tagMapper,
+                documentTemplateMapper,
+                documentService,
                 activityMapper,
                 taskMapper,
                 noteMapper,
@@ -198,6 +210,178 @@ class AiAssistantToolCallReadServiceTest {
     private static AiAssistantChangeDealStageWriteTool stageTool() {
         return new AiAssistantChangeDealStageWriteTool(
                 mock(DealService.class), mock(PipelineService.class));
+    }
+
+    @Test
+    void draftCardsBatchTemplatesAndBecomeUnresolvedAfterANameSwap() {
+        AiChatToolCall first = documentProposal(91, USER_ID, "Quote");
+        AiChatToolCall second = documentProposal(92, USER_ID, "Quote");
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(first, second));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        assertEquals(2, cards.size());
+        assertEquals("Draft document from: Quote", cards.getFirst().requestSummary());
+        assertEquals("document", cards.getFirst().change().field());
+        assertNull(cards.getFirst().change().currentValue());
+        assertEquals("Quote", cards.getFirst().change().proposedValue());
+        assertEquals("ready", cards.getFirst().change().state());
+        verify(documentService).getForDeal(41);
+        verify(documentTemplateMapper).getAll(WORKSPACE_ID);
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Retired"),
+                AiAssistantDraftDocumentWriteToolTest.template(9, "Quote")));
+        AiAssistantToolCallReadDto drifted = service.list(SESSION_ID, false).getFirst();
+        assertEquals("Draft a deal document", drifted.requestSummary());
+        assertNull(drifted.change().proposedValue());
+        assertEquals("unresolved", drifted.change().state());
+    }
+
+    @Test
+    void draftCardsReadLatestPinnedTemplateVersionOncePerDealWithoutInvalidating() {
+        stubVisibleDeal();
+        AiChatToolCall first = documentProposal(91, USER_ID, "Quote");
+        AiChatToolCall second = documentProposal(92, USER_ID, "Quote");
+        AiChatToolCall shared = documentProposal(93, USER_ID + 1, "Quote");
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(first, second, shared));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+        when(documentService.getForDeal(41)).thenReturn(List.of());
+        assertNull(service.list(SESSION_ID, false).getFirst().change().currentValue());
+        when(documentService.getForDeal(41)).thenReturn(List.of(
+                document(1, 6, 1), document(2, 6, 3), document(3, 9, 4)));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        for (AiAssistantToolCallReadDto card : cards.subList(0, 2)) {
+            assertEquals("3", card.change().currentValue());
+            assertFalse(card.change().currentValueUnresolved());
+            assertEquals("Quote", card.change().proposedValue());
+            assertEquals("ready", card.change().state());
+        }
+        assertNull(cards.get(2).change());
+        assertEquals("Draft a deal document", cards.get(2).requestSummary());
+        verify(documentService, times(2)).getForDeal(41);
+    }
+
+    @Test
+    void documentsFromOtherTemplatesDoNotProduceExistingDocumentContext() {
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID, "Quote")));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Quote")));
+        when(documentService.getForDeal(41)).thenReturn(List.of(
+                document(1, 9, 4), document(2, null, 5)));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertNull(card.change().currentValue());
+        assertEquals("ready", card.change().state());
+    }
+
+    @Test
+    void aDraftOnAnUnreadableDealReadsNoDocumentDetails() {
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID, "Quote")));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertNull(card.change());
+        assertEquals("Draft a deal document", card.requestSummary());
+        verifyNoInteractions(documentTemplateMapper, documentService);
+    }
+
+    private static DealDocumentDto document(int id, Integer templateId, int version) {
+        return new DealDocumentDto(id, 41, templateId, "quote", "en", "draft", version,
+                "Private document title", "USD", null, USER_ID, null, false, null);
+    }
+
+    @Test
+    void aDeactivatedPinnedTemplateMakesTheDraftCardUnresolved() {
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID, "Quote")));
+        DocumentTemplate template = AiAssistantDraftDocumentWriteToolTest.template(6, "Quote");
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(template));
+        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
+        template.setActive(false);
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Draft a deal document", card.requestSummary());
+        assertEquals("unresolved", card.change().state());
+        assertNull(card.change().proposedValue());
+    }
+
+    @Test
+    void draftCardsWithholdSpecialCareTemplateNames() {
+        AiChatToolCall screened = documentProposal(91, USER_ID, "Diagnosis pending");
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(screened));
+        when(documentTemplateMapper.getAll(WORKSPACE_ID)).thenReturn(List.of(
+                AiAssistantDraftDocumentWriteToolTest.template(6, "Diagnosis pending")));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Draft a deal document", card.requestSummary());
+        assertNull(card.change());
+    }
+
+    @Test
+    void anotherParticipantsDraftReadsNoTemplatesAndShowsNoDetails() {
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(documentProposal(91, USER_ID + 1, "Quote")));
+
+        AiAssistantToolCallReadDto card = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Draft a deal document", card.requestSummary());
+        assertNull(card.change());
+        assertTrue(card.outcomeValues().isEmpty());
+        verifyNoInteractions(documentTemplateMapper, documentService);
+    }
+
+    @Test
+    void draftOutcomeTitlesUseTheExistingMemberScreenAndStayRequesterOnly() {
+        AiChatToolCall ordinary = documentProposal(91, USER_ID, "Quote");
+        ordinary.setStatus("executed");
+        ordinary.setResultJson("{\"tier\":\"confirm\",\"outcome\":{\"recordType\":\"document\","
+                + "\"type\":\"quote\",\"title\":\"Renewal quote\",\"version\":1}}");
+        AiChatToolCall screened = documentProposal(92, USER_ID, "Quote");
+        screened.setStatus("executed");
+        screened.setResultJson(ordinary.getResultJson().replace("Renewal quote", "Diagnosis pending"));
+        AiChatToolCall shared = documentProposal(93, USER_ID + 1, "Quote");
+        shared.setStatus("executed");
+        shared.setResultJson(ordinary.getResultJson());
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(ordinary, screened, shared));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        assertEquals(List.of("quote", "Renewal quote"), cards.get(0).outcomeValues().stream()
+                .map(AiAssistantToolCallReadDto.OutcomeValue::value).toList());
+        assertEquals(List.of("quote"), cards.get(1).outcomeValues().stream()
+                .map(AiAssistantToolCallReadDto.OutcomeValue::value).toList());
+        assertTrue(cards.get(2).outcomeValues().isEmpty());
+        assertEquals("Document drafted", cards.get(2).outcomeSummary());
+        assertNull(cards.get(0).createdRecord());
+        assertFalse(cards.get(0).undoAvailable());
+    }
+
+    private static AiChatToolCall documentProposal(int id, int userId, String template) {
+        AiChatToolCall call = pinned(toolCall(id, userId, "draft_document", "confirm", "proposed",
+                "deal", 41, id, null),
+                ",\"resolution\":{\"field\":\"template\",\"id\":6},\"principals\":[]");
+        call.setArgumentsJson(call.getArgumentsJson().replace("Quote", template));
+        return call;
     }
 
     @Test
@@ -1291,6 +1475,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
         stubVisibleDeal();
         String flagged = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
@@ -1329,6 +1514,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1860,6 +2046,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1895,6 +2082,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
                         mock(PersonService.class),
                         mock(CompanyService.class),
@@ -1944,6 +2132,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -1980,6 +2169,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(TaskService.class)),
                 setResponseDueTool(),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
@@ -2237,6 +2427,7 @@ class AiAssistantToolCallReadServiceTest {
         String request = switch (tool) {
             case "assign_owner" -> "{\"handle\":\"r1\",\"owner\":\" Ada Owner \"}";
             case "change_deal_stage" -> "{\"handle\":\"r1\",\"stage\":\"Won\"}";
+            case "draft_document" -> "{\"handle\":\"r1\",\"template\":\"Quote\"}";
             case "remove_tag" -> "{\"handle\":\"r1\",\"tag\":\"priority\"}";
             case "set_response_due" -> "{\"handle\":\"r1\",\"due_in_hours\":48}";
             default -> "{\"handle\":\"r1\"}";

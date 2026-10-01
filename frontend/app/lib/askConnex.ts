@@ -334,6 +334,9 @@ export type AskConnexToolSummaryLabels = {
     addTag: string;
     removeTag: string;
     removeTagNamed: (value: string) => string;
+    draftDocument: string;
+    draftDocumentFrom: (value: string) => string;
+    documentDrafted: string;
     changeDealStage: string;
     changeDealStageTo: (value: string) => string;
     assignOwner: string;
@@ -388,6 +391,7 @@ export type AskConnexToolCardsEvent =
         mutation: AiAssistantToolCallMutation;
     }
     | { type: 'actionSettled'; toolCall: AiAssistantToolCall }
+    | { type: 'proposalsRefreshed'; toolCalls: readonly AiAssistantToolCall[] }
     | { type: 'reset' };
 
 /** Tool cards partitioned by their transcript message or nearest visible turn position. */
@@ -473,6 +477,16 @@ export function reduceAskConnexToolCards(
                 failure: current.failure,
                 undoBlocked: current.undoBlocked,
             };
+        });
+    }
+    if (event.type === 'proposalsRefreshed') {
+        const refreshedById = new Map(event.toolCalls.map((toolCall) => [toolCall.id, toolCall]));
+        return state.map((card) => {
+            const refreshed = refreshedById.get(card.id);
+            return card.status === 'proposed' && card.pendingAction === null
+                && refreshed?.status === 'proposed'
+                ? { ...card, ...refreshed }
+                : card;
         });
     }
     if (event.type === 'actionSettled') {
@@ -839,6 +853,10 @@ export function askConnexToolRequestSummary(
         const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
         return tag === null ? labels.removeTag : labels.removeTagNamed(tag);
     }
+    if (toolCall.toolName === 'draft_document') {
+        const template = summaryValue(toolCall.requestSummary, 'Draft document from:');
+        return template === null ? labels.draftDocument : labels.draftDocumentFrom(template);
+    }
     if (toolCall.toolName === 'change_deal_stage') {
         const stage = summaryValue(toolCall.requestSummary, 'Change deal stage to:');
         return stage === null ? labels.changeDealStage : labels.changeDealStageTo(stage);
@@ -882,6 +900,7 @@ export function askConnexToolOutcomeSummary(
         if (toolCall.outcomeSummary === 'Tag was not on the record') return labels.tagNotPresent;
         return labels.requestCompleted;
     }
+    if (toolCall.toolName === 'draft_document') return labels.documentDrafted;
     if (toolCall.toolName === 'change_deal_stage') return labels.dealStageChanged;
     if (toolCall.toolName === 'assign_owner') {
         return toolCall.outcomeSummary === 'Owner removed'
