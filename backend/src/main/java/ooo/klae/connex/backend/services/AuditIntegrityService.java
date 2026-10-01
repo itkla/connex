@@ -7,9 +7,12 @@ import lombok.RequiredArgsConstructor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.AuditIntegrityHead;
 import ooo.klae.connex.backend.beans.AuditLog;
@@ -25,9 +28,11 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import javax.crypto.Mac;
@@ -44,6 +49,7 @@ public class AuditIntegrityService {
 
     private static final String HMAC_ALGORITHM = "HmacSHA256";
     private static final String GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+    private static final Object HELD_HEADS_KEY = new Object();
     private static final DateTimeFormatter CREATED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AuditLogMapper auditLogMapper;
@@ -72,10 +78,27 @@ public class AuditIntegrityService {
         appendChained(entry);
     }
 
+    /**
+     * Reports whether the current transaction already holds the integrity head that {@code entry}
+     * would be chained onto.
+     *
+     * <p>An independent append for such an entry would suspend the holder and then wait on its own
+     * lock for the full InnoDB lock-wait timeout before failing (#1879), so callers that can defer
+     * the append until the holder completes must check this first.
+     *
+     * @param entry a fully scoped audit row
+     * @return true when this transaction has locked that scope's head
+     */
+    public boolean holdsHead(AuditLog entry) {
+        return TransactionSynchronizationManager.getResource(HELD_HEADS_KEY) instanceof HeldHeads held
+                && held.contains(scopeFor(entry));
+    }
+
     private void appendChained(AuditLog entry) {
         lockForeignKeyParents(entry);
         AuditScope scope = scopeFor(entry);
         auditIntegrityMapper.ensureHead(scope.type(), scope.id(), GENESIS_HASH);
+        recordHeld(scope);
         AuditIntegrityHead head = auditIntegrityMapper.lockHead(scope.type(), scope.id());
         if (head == null) {
             throw new IllegalStateException("Audit integrity head was not initialized");
@@ -146,6 +169,28 @@ public class AuditIntegrityService {
         if (!hasValidIntegrity(entry)) {
             securitySignalMetrics.integrityAnomaly(entry);
         }
+    }
+
+    /**
+     * Records that the current transaction now holds {@code scope}'s head.
+     *
+     * <p>Called straight after {@code ensureHead}: its {@code INSERT ... ON DUPLICATE KEY UPDATE}
+     * already takes the head row's exclusive lock, so a later failure in the chain step still leaves
+     * the head held. InnoDB keeps that lock even if a {@code NESTED} append's savepoint rolls back,
+     * so the record is cleared only when the owning transaction completes.
+     */
+    private void recordHeld(AuditScope scope) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        if (TransactionSynchronizationManager.getResource(HELD_HEADS_KEY) instanceof HeldHeads held) {
+            held.add(scope);
+            return;
+        }
+        HeldHeads held = new HeldHeads();
+        held.add(scope);
+        TransactionSynchronizationManager.bindResource(HELD_HEADS_KEY, held);
+        TransactionSynchronizationManager.registerSynchronization(new HeldHeadsSynchronization(held));
     }
 
     private AuditScope scopeFor(AuditLog entry) {
@@ -236,5 +281,55 @@ public class AuditIntegrityService {
     }
 
     private record AuditScope(String type, int id) {
+    }
+
+    /** The integrity heads one transaction has locked. */
+    private static final class HeldHeads {
+        private final Set<AuditScope> scopes = new HashSet<>();
+
+        void add(AuditScope scope) {
+            scopes.add(scope);
+        }
+
+        boolean contains(AuditScope scope) {
+            return scopes.contains(scope);
+        }
+    }
+
+    /**
+     * Scopes a {@link HeldHeads} record to the transaction that took the locks.
+     *
+     * <p>The record is an application resource, which suspending a transaction does not unbind on
+     * its own. Without unbinding it here, an inner {@code REQUIRES_NEW} transaction would read the
+     * outer's heads as its own and add heads it releases on its own commit, so the outer would
+     * report heads it does not hold. Runs first so a deferred append registered on the same
+     * transaction never observes a record that is about to be released.
+     */
+    private static final class HeldHeadsSynchronization implements TransactionSynchronization {
+        private final HeldHeads held;
+
+        HeldHeadsSynchronization(HeldHeads held) {
+            this.held = held;
+        }
+
+        @Override
+        public int getOrder() {
+            return Ordered.HIGHEST_PRECEDENCE;
+        }
+
+        @Override
+        public void suspend() {
+            TransactionSynchronizationManager.unbindResourceIfPossible(HELD_HEADS_KEY);
+        }
+
+        @Override
+        public void resume() {
+            TransactionSynchronizationManager.bindResource(HELD_HEADS_KEY, held);
+        }
+
+        @Override
+        public void afterCompletion(int status) {
+            TransactionSynchronizationManager.unbindResourceIfPossible(HELD_HEADS_KEY);
+        }
     }
 }

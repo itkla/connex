@@ -12,6 +12,8 @@ import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -366,12 +368,45 @@ public class AuditService {
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId) {
         try {
-            writeUnchecked(action, entityType, entityId, targetLabel, outcome, summary, changes,
-                    context, independent, explicitScope, workspaceId, orgId, true);
+            AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, outcome, summary,
+                    changes, context, explicitScope, workspaceId, orgId, true);
+            if (independent && auditIntegrityService.holdsHead(entry)) {
+                deferIndependent(entry);
+            } else {
+                appendAndObserve(entry, independent);
+            }
         } catch (Exception e) {
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
         }
+    }
+
+    /**
+     * Appends an independent audit row once the current transaction has completed.
+     *
+     * <p>Used only when this transaction already holds the entry's integrity head. An immediate
+     * {@code REQUIRES_NEW} append would suspend the holder and then wait on its own lock for the full
+     * InnoDB lock-wait timeout before failing, losing the row (#1879). After completion the head has
+     * been released, and the row is recorded whether the holder committed or rolled back — the same
+     * durability an independent append is for. The entry is built at the call, so its actor and
+     * request metadata are those of the refused operation, not of whatever runs later.
+     */
+    private void deferIndependent(AuditLog entry) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            appendAndObserve(entry, true);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    appendAndObserve(entry, true);
+                } catch (Exception e) {
+                    log.error("Failed to record deferred audit event action={} entityType={} entityId={}",
+                            entry.getAction(), entry.getEntityType(), entry.getEntityId(), e);
+                }
+            }
+        });
     }
 
     /**
@@ -381,6 +416,14 @@ public class AuditService {
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId,
             boolean includeRequestMetadata) {
+        appendAndObserve(buildEntry(action, entityType, entityId, targetLabel, outcome, summary,
+                changes, context, explicitScope, workspaceId, orgId, includeRequestMetadata),
+                independent);
+    }
+
+    private AuditLog buildEntry(String action, String entityType, Integer entityId, String targetLabel,
+            String outcome, String summary, Object changes, Object context, boolean explicitScope,
+            Integer workspaceId, Integer orgId, boolean includeRequestMetadata) {
         AuditLog entry = new AuditLog();
         entry.setAction(truncate(action, ACTION_MAX));
         entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
@@ -403,7 +446,10 @@ public class AuditService {
         if (includeRequestMetadata) {
             resolveRequest(entry);
         }
+        return entry;
+    }
 
+    private void appendAndObserve(AuditLog entry, boolean independent) {
         if (independent) {
             auditIntegrityService.appendIndependent(entry);
         } else {

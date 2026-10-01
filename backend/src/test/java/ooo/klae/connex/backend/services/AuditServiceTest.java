@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -27,6 +28,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -556,5 +559,141 @@ class AuditServiceTest {
         verify(auditIntegrityService).append(captor.capture());
         assertNull(captor.getValue().getRequestId());
         assertNull(captor.getValue().getUntrustedClientAssertedCorrelationHmac());
+    }
+
+    /**
+     * A failure audit raised while the current transaction already holds the entry's integrity head
+     * must not append there and then: an independent append would suspend the holder and wait on its
+     * own lock for the InnoDB lock-wait timeout before failing, losing the row (#1879). It waits for
+     * the holder to complete instead, and is recorded on either outcome, because the holder is often
+     * being rolled back by the very failure being audited.
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {TransactionSynchronization.STATUS_COMMITTED, TransactionSynchronization.STATUS_ROLLED_BACK})
+    void failureAuditWaitsForTheHolderWhenItsHeadIsAlreadyHeld(int outcome) {
+        when(auditIntegrityService.holdsHead(any())).thenReturn(true);
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordFailure("activity.create", "activity", null, "Call",
+                    "Could not log activity", "DataIntegrityViolationException");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+            verify(auditIntegrityService, never()).appendIndependent(any());
+            verify(auditIntegrityService, never()).append(any());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        assertEquals(1, synchronizations.size());
+        synchronizations.get(0).afterCompletion(outcome);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        verify(auditIntegrityService).observeCommittedAudit(any(), eq(true));
+        assertEquals("activity.create", appended.getValue().getAction());
+        assertEquals("failure", appended.getValue().getOutcome());
+        assertEquals(7, appended.getValue().getWorkspaceId());
+    }
+
+    /** Without a held head nothing can wait on itself, so the independent append stays immediate. */
+    @Test
+    void failureAuditAppendsImmediatelyWhenItsHeadIsNotHeld() {
+        when(auditIntegrityService.holdsHead(any())).thenReturn(false);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordFailure("activity.create", "activity", null, "Call",
+                    "Could not log activity", "DataIntegrityViolationException");
+            verify(auditIntegrityService).appendIndependent(any());
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    /**
+     * The strict independent variants are fail-closed preconditions: their callers must learn
+     * synchronously whether the record exists, so they never defer and never consult the head.
+     */
+    @Test
+    void strictFailureAuditNeverDefers() {
+        lenient().when(auditIntegrityService.holdsHead(any())).thenReturn(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordStrictFailureIndependentScoped("tenant.export", "workspace", 7, 7, 8,
+                    "Workspace", "Export refused", "denied");
+            verify(auditIntegrityService).appendIndependent(any());
+            verify(auditIntegrityService, never()).holdsHead(any());
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    /** A deferred append that fails is logged, never thrown into the completed transaction's cleanup. */
+    @Test
+    void deferredFailureAuditSwallowsItsOwnFailure() {
+        when(auditIntegrityService.holdsHead(any())).thenReturn(true);
+        doThrow(new IllegalStateException("audit store unavailable"))
+                .when(auditIntegrityService).appendIndependent(any());
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordFailure("activity.create", "activity", null, "Call",
+                    "Could not log activity", "DataIntegrityViolationException");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        assertDoesNotThrow(() -> synchronizations.get(0)
+                .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+    }
+
+    /**
+     * A deferred row must carry the actor, tenant and request of the refused operation, captured at
+     * the call. By {@code afterCompletion} the durable delivery's {@code runAs} has already restored
+     * its caller's context, so an entry built there would have no actor and no workspace, and would
+     * be chained into the global system scope instead of the tenant's own audit log. Every context is
+     * cleared before completion, so building the entry lazily cannot pass.
+     */
+    @Test
+    void deferredFailureAuditKeepsTheCallTimeActorTenantAndRequest() {
+        when(auditIntegrityService.holdsHead(any())).thenReturn(true);
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Rule Runner");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("User-Agent", "Probe/1.0");
+        request.getSession(true);
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordFailure("activity.create", "activity", null, "Call",
+                    "Could not log activity", "DataIntegrityViolationException");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+        lenient().when(tenantContext.getWorkspaceId()).thenReturn(null);
+        lenient().when(tenantContext.getOrgId()).thenReturn(null);
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(42, row.getActorId());
+        assertEquals(7, row.getWorkspaceId());
+        assertEquals(8, row.getOrgId());
+        assertEquals("203.0.113.9", row.getIpAddress());
+        assertEquals("Probe/1.0", row.getUserAgent());
+        assertNotNull(row.getSessionId());
+        assertNotNull(row.getRequestId());
     }
 }
