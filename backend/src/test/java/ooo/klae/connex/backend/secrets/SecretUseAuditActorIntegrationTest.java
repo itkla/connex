@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.secrets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-import java.util.Map;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -70,15 +68,18 @@ class SecretUseAuditActorIntegrationTest extends AbstractServiceTest {
                 WHERE action = 'secret_store.secret.use'
                   AND workspace_id = ?
                 """, Integer.class, freshWorkspaceId));
-        Map<String, Object> audit = jdbcTemplate.queryForMap("""
-                SELECT actor_id, actor_label
+        assertEquals(Integer.valueOf(automationPrincipal.getId()), jdbcTemplate.queryForObject("""
+                SELECT actor_id
                 FROM audit_log
                 WHERE action = 'secret_store.secret.use'
                   AND workspace_id = ?
-                """, freshWorkspaceId);
-        assertEquals(Integer.valueOf(automationPrincipal.getId()),
-                audit.get("actor_id") instanceof Integer actorId ? actorId : null);
-        assertEquals(automationPrincipal.getDisplayName(), audit.get("actor_label"));
+                """, Integer.class, freshWorkspaceId));
+        assertEquals(automationPrincipal.getDisplayName(), jdbcTemplate.queryForObject("""
+                SELECT actor_label
+                FROM audit_log
+                WHERE action = 'secret_store.secret.use'
+                  AND workspace_id = ?
+                """, String.class, freshWorkspaceId));
     }
 
     @AfterEach

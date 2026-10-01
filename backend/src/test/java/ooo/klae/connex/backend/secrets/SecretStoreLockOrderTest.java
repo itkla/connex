@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.secrets;
 
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -258,6 +259,81 @@ class SecretStoreLockOrderTest {
                 () -> deferredAudit.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
 
         assertSame(schedulerContext, SecurityContextHolder.getContext());
+    }
+
+    /**
+     * The audit must run under its own copy of the use-time authentication: neither the use-time
+     * context object, which its owner may still change, nor the completion context changed in place,
+     * which on a request thread can be shared and would briefly carry the automation principal.
+     */
+    @Test
+    void deferredUseAuditRunsUnderItsOwnCopyOfTheUseTimeAuthentication() {
+        User automation = user(42, "Rule actor");
+        StoredSecret secret = secret(1, "organization", 7);
+        secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
+        when(userMapper.lockByIdForShare(42)).thenReturn(42);
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(secretValueMapper.findById(1)).thenReturn(secret);
+        when(crypto.decrypt(anyString(), anyString(), anyString(), anyString())).thenReturn("plaintext");
+        AtomicReference<Object> auditedActor = new AtomicReference<>();
+        AtomicReference<SecurityContext> auditedContext = new AtomicReference<>();
+        doAnswer(invocation -> {
+            auditedContext.set(SecurityContextHolder.getContext());
+            return capturePrincipal(auditedActor).answer(invocation);
+        }).when(auditService).recordIndependentScoped(
+                anyString(), anyString(), any(), any(), any(), anyString(), anyString(), any());
+        SecurityContext useContext = signIn(automation);
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            secretStore.get(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        useContext.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                user(44, "Later occupant"), null, List.of()));
+        SecurityContext completionContext = signIn(user(43, "Signed-in caller"));
+        Authentication completionAuthentication = completionContext.getAuthentication();
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        assertSame(automation, auditedActor.get());
+        assertNotSame(completionContext, auditedContext.get());
+        assertSame(completionContext, SecurityContextHolder.getContext());
+        assertSame(completionAuthentication, completionContext.getAuthentication());
+    }
+
+    /**
+     * A secret used with nobody signed in must be audited with no actor, not attributed to whoever is
+     * signed in when the transaction completes.
+     */
+    @Test
+    void aSecretUsedWithNoActorIsNotAttributedToWhoeverCompletesTheTransaction() {
+        StoredSecret secret = secret(1, "organization", 7);
+        secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(secretValueMapper.findById(1)).thenReturn(secret);
+        when(crypto.decrypt(anyString(), anyString(), anyString(), anyString())).thenReturn("plaintext");
+        AtomicReference<Object> auditedActor = new AtomicReference<>();
+        doAnswer(capturePrincipal(auditedActor)).when(auditService).recordIndependentScoped(
+                anyString(), anyString(), any(), any(), any(), anyString(), anyString(), any());
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            secretStore.get(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        SecurityContext completionContext = signIn(user(43, "Signed-in caller"));
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+
+        verify(auditService).recordIndependentScoped(
+                anyString(), anyString(), any(), any(), any(), anyString(), anyString(), any());
+        assertNull(auditedActor.get());
+        assertSame(completionContext, SecurityContextHolder.getContext());
     }
 
     private static Answer<Void> capturePrincipal(AtomicReference<Object> principal) {
