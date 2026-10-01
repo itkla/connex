@@ -194,9 +194,11 @@ and narration containing one is dropped. Final text and summaries are checked ag
 identifier demasking. Task-handle checks cover both raw text and the canonical link-stripped
 conversation form; final text is checked again after link rewriting, and assistant history is
 checked before and after replay preparation. Streaming checks only the stable prefix of accumulated
-demasked text before persisting each fragment, withholding trailing character runs and unresolved
-links whose canonical form can still change. It withdraws the current partial answer if a handle
-is detected across fragment boundaries; the complete answer is checked again at stream finish.
+demasked text before persisting each fragment, withholding potential task-handle suffixes with
+their required word context and unresolved links or cancelling braces whose canonical form can
+still change. Closed bracketed prose and Unicode sentence boundaries release settled text. It
+withdraws the current partial answer if a handle is detected across fragment boundaries; the
+complete answer is checked again at stream finish.
 No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
 keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.
 

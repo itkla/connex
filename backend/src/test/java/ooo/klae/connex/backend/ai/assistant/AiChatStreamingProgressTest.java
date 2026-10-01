@@ -3,8 +3,8 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -273,6 +273,82 @@ class AiChatStreamingProgressTest {
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
         verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
         assertEquals(expected, String.join("", batches.getAllValues()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[Note] ", "［Note］ ", "﹇Note﹈ "})
+    void settledBracketedProseStreamsBeforeFinish(String annotation) {
+        assertStreamsBeforeFinish(annotation + "Safe words. ".repeat(30));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"通常の文章です。", "通常の文章です", "Safe　words　", "tttttttt", "at1at1at1", "áááá"})
+    void proseWithoutAsciiWhitespaceStreamsBeforeFinish(String phrase) {
+        assertStreamsBeforeFinish(phrase.repeat(40));
+    }
+
+    private static void assertStreamsBeforeFinish(String expected) {
+        AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
+        var observer = progress.observer(false);
+        observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + expected);
+        ArgumentCaptor<String> initialBatches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce())
+                .appendPartialBatch(any(), anyInt(), initialBatches.capture());
+        String streamed = String.join("", initialBatches.getAllValues());
+        assertTrue(streamed.length() >= 256);
+        assertTrue(expected.startsWith(streamed));
+        observer.onContentDelta("\"}}");
+        assertEquals(expected, observer.finish(expected));
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals(expected, String.join("", batches.getAllValues()));
+        verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ｔ１｛", "ｔ１｝", "[t](record:r1)１｛"})
+    void aCancellingBraceDoesNotPrematurelyRefuseAPermittedAnswer(String taskPrefix) {
+        AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
+        var observer = progress.observer(false);
+        String safe = "Safe words. ".repeat(30);
+        observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + safe + taskPrefix);
+        String ending = taskPrefix.substring(taskPrefix.length() - 1) + "alpha.";
+        observer.onContentDelta(ending + "\"}}");
+        String expected = safe + taskPrefix + ending;
+        assertEquals(expected, observer.finish(expected));
+        verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals(expected, String.join("", batches.getAllValues()));
+        assertTrue(batches.getAllValues().stream().noneMatch(AiAssistantStepGuard::containsTaskHandle));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "t", "t1"})
+    void batchesRetainTheWordContextThatMakesATaskShapedSuffixPermitted(String firstSuffix) {
+        AiChatTurnPersistenceService persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(1) + invocation.<String>getArgument(2).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
+        var observer = progress.observer(false);
+        String prefix = "a".repeat(300) + firstSuffix;
+        observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + prefix);
+        String ending = "t1".substring(firstSuffix.length()) + " " + "Safe words. ".repeat(30);
+        observer.onContentDelta(ending + "\"}}");
+        assertEquals(prefix + ending, observer.finish(prefix + ending));
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals(prefix + ending, String.join("", batches.getAllValues()));
+        assertTrue(batches.getAllValues().stream().noneMatch(AiAssistantStepGuard::containsTaskHandle));
     }
 
     @Test

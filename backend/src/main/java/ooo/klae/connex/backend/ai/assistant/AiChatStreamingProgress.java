@@ -1,18 +1,23 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.text.Normalizer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
-import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
 final class AiChatStreamingProgress {
     private static final int BATCH_CHARACTERS = 256;
+    private static final Pattern TASK_HANDLE_SUFFIX = Pattern.compile(
+            "t(?:[1-9][0-9]*)?\\z");
+    private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
@@ -102,36 +107,103 @@ final class AiChatStreamingProgress {
     }
 
     /**
-     * Holds the trailing character run until whitespace fixes its canonical token boundary.
-     * An unresolved bracket can still become a link spanning whitespace, so conservatively hold
-     * from the first source bracket's run while any bracket remains after link preparation.
-     * This also covers compatibility brackets and handles without mapping canonical offsets back
-     * onto raw UTF-16 offsets. Only finish may release text without a stable boundary.
+     * Holds only suffixes whose raw or canonical task-handle status can still change. A final
+     * label close awaits lookahead; a closed label followed by anything but an opening parenthesis
+     * is settled. Source boundaries are checked again because withholding a link can expose a
+     * preceding task prefix. Only finish may release such a suffix without further lookahead.
      */
     private int stablePrefixLength(String text) {
-        int boundary = whitespaceBoundary(text, text.length());
-        if (boundary == 0
-                || MaskingEngine.prepareConversationalText(text.substring(0, boundary)).indexOf('[') < 0) {
-            return boundary;
-        }
-        for (int offset = durable.length(); offset < boundary;) {
-            int end = offset + Character.charCount(text.codePointAt(offset));
-            if (Normalizer.normalize(text.substring(offset, end), Normalizer.Form.NFKC).indexOf('[') >= 0) {
-                return whitespaceBoundary(text, offset);
+        int boundary = text.length();
+        boolean retainContext = true;
+        while (boundary > durable.length()) {
+            String prefix = text.substring(0, boundary);
+            String prepared = MaskingEngine.prepareConversationalText(prefix);
+            int preparedBoundary = unresolvedLinkStart(prepared);
+            preparedBoundary = taskHandleSuffixStart(prepared.substring(0, preparedBoundary), retainContext);
+            int nextBoundary = taskHandleSuffixStart(prefix, retainContext);
+            if (preparedBoundary < prepared.length()) {
+                nextBoundary = Math.min(nextBoundary,
+                        sourceBoundary(prefix, prepared.substring(0, preparedBoundary),
+                                prepared.codePointAt(preparedBoundary)));
             }
-            offset = end;
+            if (nextBoundary == boundary) {
+                return boundary;
+            }
+            boundary = nextBoundary;
+            retainContext = false;
         }
         return durable.length();
     }
 
-    private static int whitespaceBoundary(String text, int end) {
-        for (int offset = end - 1; offset >= 0; offset--) {
-            char value = text.charAt(offset);
-            if (value == ' ' || value == '\t' || value == '\r' || value == '\n') {
-                return offset + 1;
+    /** Maps a prepared boundary back before any source link enclosing the withheld suffix. */
+    private int sourceBoundary(String text, String stablePrepared, int withheldCodePoint) {
+        int[] candidates = new int[text.length()];
+        int count = 0;
+        Matcher graphemes = SOURCE_GRAPHEME.matcher(text);
+        while (graphemes.find()) {
+            String unit = Normalizer.normalize(graphemes.group(), Normalizer.Form.NFKC);
+            if (graphemes.start() >= durable.length()
+                    && (unit.indexOf('[') >= 0 || unit.indexOf(withheldCodePoint) >= 0)) {
+                candidates[count++] = graphemes.start();
             }
         }
-        return 0;
+        while (count > 0) {
+            int offset = candidates[--count];
+            String prefix = MaskingEngine.prepareConversationalText(text.substring(0, offset));
+            if (stablePrepared.startsWith(prefix) && unresolvedLinkStart(prefix) == prefix.length()) {
+                return offset;
+            }
+        }
+        return durable.length();
+    }
+
+    /** Retains one word character as left context for a handle that could start the next batch. */
+    private static int taskHandleSuffixStart(String text, boolean retainContext) {
+        int boundary = text.length();
+        Matcher suffix = TASK_HANDLE_SUFFIX.matcher(text);
+        if (!suffix.find()) {
+            if (retainContext && boundary > 0) {
+                int last = text.codePointBefore(boundary);
+                if (isHandleWordCharacter(last) || last == '{' || last == '}') {
+                    boundary -= Character.charCount(last);
+                }
+            }
+            suffix = TASK_HANDLE_SUFFIX.matcher(text.substring(0, boundary));
+            if (!suffix.find()) {
+                return boundary;
+            }
+        }
+        boundary = suffix.start();
+        if (boundary > 0 && isHandleWordCharacter(text.codePointBefore(boundary))) {
+            if (!retainContext) {
+                return text.length();
+            }
+            boundary = text.offsetByCodePoints(boundary, -1);
+        }
+        return boundary;
+    }
+
+    private static boolean isHandleWordCharacter(int codePoint) {
+        int type = Character.getType(codePoint);
+        return Character.isLetter(codePoint) || type == Character.DECIMAL_DIGIT_NUMBER
+                || type == Character.LETTER_NUMBER || type == Character.OTHER_NUMBER || codePoint == '_';
+    }
+
+    private static int unresolvedLinkStart(String text) {
+        int labelStart = -1;
+        for (int offset = 0; offset < text.length(); offset++) {
+            char value = text.charAt(offset);
+            if (value == '[' && labelStart < 0) {
+                labelStart = offset;
+            } else if (value == ']' && labelStart >= 0) {
+                if (offset + 1 == text.length()
+                        || text.charAt(offset + 1) == '(' && text.indexOf(')', offset + 2) < 0) {
+                    return labelStart;
+                }
+                labelStart = -1;
+            }
+        }
+        return labelStart < 0 ? text.length() : labelStart;
     }
 
     private void checkpoint() {

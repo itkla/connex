@@ -53,7 +53,7 @@ class AiConversationPreprocessingArchTest {
     void conversationPathsCannotAddUnreviewedTextTransformations() throws IOException {
         String assembler = code(source("assistant/AiAssistantPromptAssembler"));
         assertCalls(assembler, "appendHistory", Set.of(
-                "Map.of", "MaskingEngine.maskConversationalFreeText",
+                "AiAssistantStepGuard.containsTaskHandle", "Map.of", "MaskingEngine.maskConversationalFreeText",
                 "MaskingEngine.maskFreeText", "crmDataMasked", "equals", "message.getAuthorKind",
                 "objectMapper.valueToTree", "prompt.assistantTurn", "prompt.userTurn", "reauthorizeAnswer",
                 "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize"));
