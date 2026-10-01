@@ -1034,8 +1034,8 @@ The filter and interceptor layer reaches at least the following durable writes o
    identity. Repetition was unbounded, which was tracked as a finding in its own right on
    [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into this false-positive
    rationale; since that fix, `DenialAuditRateLimiter` admits at most one row per hour for each user,
-   action, and client address, for at most eight addresses per user and action, while the 403 itself
-   is unchanged;
+   action, and client address, for at most eight addresses per user and action, per replica, while
+   the 403 itself is unchanged;
 3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
    request (verified in spring-session-jdbc 4.1.0 bytecode);
 4. gated session-attribute writes — when an authenticated session lacks the legacy

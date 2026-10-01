@@ -82,7 +82,9 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
 
     /**
      * Runs the real security filter chain. Both confined requests are refused, but the second comes
-     * from the same address inside the denial-audit window, so only the first is audited (#1850).
+     * from the same address inside the denial-audit window, so only the first is audited (#1850). The
+     * limiter is a singleton in this cached context: another test confining the same user from the same
+     * address would see no audit row, so it must use a different user or address.
      */
     @Test
     void testProfileDefaultsToEnforcedAndConfinesUnenrolledPrivilegedAccount() throws Exception {

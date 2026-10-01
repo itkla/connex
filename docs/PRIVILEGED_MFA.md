@@ -69,10 +69,15 @@ Anyone reading or alerting on this trail should expect:
 - **one row per window, not one per request**, for a user who keeps hitting the same wall from the
   same address;
 - **a bound per backend replica**: N replicas can record up to N rows per window and key, and a
-  restart re-arms every window; and
+  restart re-arms every window;
+- **a bounded key set**: the limiter tracks at most 4,096 user-and-action keys. Above that, the
+  least recently admitted keys are evicted and their addresses may record again early, so under
+  sustained saturation the per-key bound does not hold; and
 - **addresses as `ClientIpResolver` resolves them.** Behind a reverse proxy that is not listed in
   `CONNEX_SECURITY_TRUSTED_PROXIES`, every request resolves to the proxy, the key narrows to user and
   action, and a second address inside the hour is not recorded separately.
+
+The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
 
 Refusals at service boundaries (reason `service_boundary`) are not admitted through this bound. They
 sit behind state-changing routes that CSRF protection shields from cross-site triggering, or behind

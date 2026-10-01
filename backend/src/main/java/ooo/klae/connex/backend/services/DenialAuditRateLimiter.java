@@ -23,7 +23,8 @@ import org.springframework.stereotype.Component;
  * row per window still records the fact of the denial. The client address is part of the key because
  * a forged trigger always arrives from the victim's own browser, while a stolen session used from
  * anywhere else must keep leaving its own evidence. The addresses admitted per user and action are
- * capped, so rotating source addresses cannot reopen the volume the window bounds.
+ * capped, so rotating source addresses cannot reopen the volume the window bounds while the tracked
+ * key set stays below its limit.
  *
  * <p>The bound is per replica, and the address is only as distinct as {@link
  * ooo.klae.connex.backend.util.ClientIpResolver} makes it: behind a proxy that is not configured as
@@ -113,9 +114,10 @@ public class DenialAuditRateLimiter {
      * Bounds the tracked key set, dropping fully expired denials before the least recently admitted
      * live ones.
      *
-     * <p>Evicting a live window only lets that key record one additional audit row early. Losing
-     * evidence is the worse failure of the two, so the bound is enforced by dropping the oldest
-     * suppression rather than by refusing to admit a row.
+     * <p>Evicting a live key re-arms it: each of its tracked addresses may record one more row early.
+     * While more keys than the limit stay live, the oldest can be evicted again and again, so the
+     * per-key bound only holds below that limit. Losing evidence is the worse failure, so the limit is
+     * enforced by dropping the oldest suppression rather than by refusing to admit a row.
      */
     private void evict(long now) {
         windows.forEach((key, window) -> {

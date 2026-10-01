@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -139,6 +140,37 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq(AuditService.EXPORT_STEP_UP_ACTION), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq(AuditService.EXPORT_STEP_UP_SUMMARY), eq("step_up_required"));
+    }
+
+    /**
+     * The key is the address {@link ClientIpResolver} resolves, which is the one the audit row records,
+     * not the proxy's: behind a trusted proxy, two clients are two addresses.
+     */
+    @Test
+    void denialsAreKeyedOnTheResolvedClientAddressBehindATrustedProxy() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        PrivilegedMfaEnforcementFilter proxied = new PrivilegedMfaEnforcementFilter(
+                properties,
+                privilegedAccountService,
+                webAuthnService,
+                sessionSecurityService,
+                auditService,
+                new DenialAuditRateLimiter(3_600, Clock.systemUTC()),
+                new ClientIpResolver("10.0.0.0/8"));
+
+        for (String client : List.of("203.0.113.5", "203.0.113.5", "198.51.100.9")) {
+            MockHttpServletRequest request = request("GET", "/api/companies");
+            request.setRemoteAddr("10.0.0.2");
+            request.addHeader("X-Forwarded-For", client);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            proxied.doFilter(request, response, filterChain);
+            assertEquals(403, response.getStatus());
+        }
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
     }
 
     /**
@@ -393,6 +425,27 @@ class PrivilegedMfaEnforcementFilterTest {
         }
         verify(filterChain, org.mockito.Mockito.times(enforced ? 0 : 2)).doFilter(any(), any());
         verify(sessionSecurityService, org.mockito.Mockito.times(2)).isExportStepUpSatisfied(null, 7);
+    }
+
+    /**
+     * An {@link Error} escaping the audit write must release the window as well; otherwise one dead
+     * write would silence the trail for the rest of the hour.
+     */
+    @Test
+    void aDenialWhoseAuditWriteDiedWithAnErrorIsAuditedByTheNextOne() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        doThrow(new LinkageError("audit write died"))
+                .doNothing()
+                .when(auditService).recordStrictFailureIndependentScoped(
+                        any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThrows(LinkageError.class, () -> execute("GET", "/api/companies", "203.0.113.5"));
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
     }
 
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {

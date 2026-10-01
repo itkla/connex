@@ -9,6 +9,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
@@ -93,6 +100,50 @@ class DenialAuditRateLimiterTest {
 
         assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
         assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+    }
+
+    @Test
+    void releasingOneAddressLeavesTheOtherAddressesWindowsInPlace() {
+        DenialAuditRateLimiter limiter = new DenialAuditRateLimiter(WINDOW_SECONDS, new TestClock(1));
+        DenialAuditRateLimiter.Admission victim = limiter.acquire(7, STEP_UP, VICTIM_ADDRESS).orElseThrow();
+        assertTrue(admits(limiter, 7, STEP_UP, OTHER_ADDRESS));
+
+        limiter.release(victim);
+
+        assertTrue(admits(limiter, 7, STEP_UP, VICTIM_ADDRESS));
+        assertFalse(admits(limiter, 7, STEP_UP, OTHER_ADDRESS));
+    }
+
+    /**
+     * Concurrent denials for one key must admit exactly one row however the threads interleave; the
+     * window is opened inside a single atomic map update rather than by a read followed by a write.
+     */
+    @Test
+    void concurrentDenialsForOneKeyAreAdmittedOnce() throws Exception {
+        DenialAuditRateLimiter limiter = new DenialAuditRateLimiter(WINDOW_SECONDS, Clock.systemUTC());
+        int threads = 16;
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (int thread = 0; thread < threads; thread++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return admits(limiter, 7, CONFINED, VICTIM_ADDRESS);
+                }));
+            }
+            start.countDown();
+            int admitted = 0;
+            for (Future<Boolean> result : results) {
+                if (result.get(10, TimeUnit.SECONDS)) {
+                    admitted++;
+                }
+            }
+
+            assertEquals(1, admitted);
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /**

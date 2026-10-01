@@ -138,12 +138,17 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
         if (admission.isEmpty()) {
             return;
         }
+        boolean written = false;
         try {
             auditService.recordStrictFailureIndependentScoped(action, "user", user.getId(), null, null,
                     user.getDisplayName(), summary, reason);
+            written = true;
         } catch (RuntimeException e) {
-            denialAuditRateLimiter.release(admission.get());
             log.error("Failed to record access denial action={} userId={}", action, user.getId(), e);
+        } finally {
+            if (!written) {
+                denialAuditRateLimiter.release(admission.get());
+            }
         }
     }
 
