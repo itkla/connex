@@ -17,12 +17,13 @@ import org.springframework.stereotype.Component;
  * Fixed-window JVM-local admission for access-denial audit rows, keyed by user, audit action and
  * client address (#1850).
  *
- * <p>A filter that records a denial before refusing a {@code GET} can be driven from another site: the
- * session cookie is {@code SameSite=Lax}, so a top-level navigation carries it, and every visit would
- * otherwise append another row attributed to the victim and advance the shared integrity head. One
- * row per window still records the fact of the denial. The client address is part of the key because
- * a forged trigger always arrives from the victim's own browser, while a stolen session used from
- * anywhere else must keep leaving its own evidence. The addresses admitted per user and action are
+ * <p>A filter that records a denial before refusing a {@code GET} can be driven from another site. The
+ * session cookie rides a cross-site top-level navigation under {@code SameSite=Lax}, and any cross-site
+ * subresource load under the {@code SameSite=None} that SAML deployments use. Every visit would otherwise
+ * append another row attributed to the victim and advance the shared integrity head. One row per window
+ * still records the fact of the denial. The client address is part of the key because a forged trigger
+ * arrives from the victim's own browser, or from the frontend server rendering a page for it, while a
+ * stolen session used from anywhere else must keep leaving its own evidence through its own requests. The addresses admitted per user and action are
  * capped, so rotating source addresses cannot reopen the volume the window bounds while the tracked
  * key set stays below its limit.
  *
@@ -46,7 +47,7 @@ public class DenialAuditRateLimiter {
      *
      * @param userId denied user
      * @param action audit action the row records
-     * @param clientAddress normalised client address the row was admitted for
+     * @param clientAddress client address the row was admitted for, empty when none was resolved
      * @param admittedAtMillis when the admission opened its window
      */
     public record Admission(int userId, String action, String clientAddress, long admittedAtMillis) {

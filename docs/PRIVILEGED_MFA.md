@@ -57,12 +57,13 @@ fails closed.
 `enrollment_required`) for a confined account and `auth.mfa.step_up.required` (reason
 `step_up_required`) for an export without recent verification, **at most once per hour for each user,
 action, and client address**, and for at most eight addresses per user and action. Every request is
-still refused; only the audit row is admitted. A `GET` can trigger either refusal, and the
-`SameSite=Lax` session cookie rides a cross-site top-level navigation, so without the bound another
+still refused; only the audit row is admitted. A `GET` can trigger either refusal. The `SameSite=Lax`
+session cookie rides a cross-site top-level navigation, and where SAML sets it to `SameSite=None`, any
+cross-site subresource load (an image, a no-cors fetch) carries it silently. Without the bound another
 site could append rows attributed to the victim at will
 ([#1850](https://github.com/itkla/connex/issues/1850)). Keying on the client address keeps a stolen
-session used from elsewhere visible, and a row that fails to write is retried by the next refusal
-rather than suppressing the hour.
+session visible through the requests its own browser makes from elsewhere, and a row that fails to
+write is retried by the next refusal rather than suppressing the hour.
 
 Anyone reading or alerting on this trail should expect:
 
@@ -75,7 +76,9 @@ Anyone reading or alerting on this trail should expect:
   sustained saturation the per-key bound does not hold; and
 - **addresses as `ClientIpResolver` resolves them.** Behind a reverse proxy that is not listed in
   `CONNEX_SECURITY_TRUSTED_PROXIES`, every request resolves to the proxy, the key narrows to user and
-  action, and a second address inside the hour is not recorded separately.
+  action, and a second address inside the hour is not recorded separately. Requests the frontend
+  server makes for a user while rendering a page forward only the session cookie, so all of a user's
+  server-rendered refusals share the frontend service's single address, whichever session made them.
 
 The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
 

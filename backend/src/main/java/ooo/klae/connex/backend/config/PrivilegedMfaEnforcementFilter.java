@@ -126,9 +126,10 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     /**
      * Records a denial at most once per window for this user, action and client address.
      *
-     * <p>Both denials can be written by a {@code GET}, and the session cookie is {@code SameSite=Lax},
-     * so another site can trigger them with a top-level navigation. Unbounded, every visit appended a
-     * row attributed to the victim (#1850). The write is strict so that a failure hands the window
+     * <p>Both denials can be written by a {@code GET}, so another site can trigger them: with a
+     * top-level navigation under the {@code SameSite=Lax} session cookie, and with any subresource load
+     * under the {@code SameSite=None} that SAML deployments use. Unbounded, every visit appended a row
+     * attributed to the victim (#1850). The write is strict so that a failure hands the window
      * back instead of suppressing the next denial's evidence; the request is refused either way.
      */
     private void recordDenial(HttpServletRequest request, User user, String action, String summary,

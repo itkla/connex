@@ -1030,7 +1030,8 @@ The filter and interceptor layer reaches at least the following durable writes o
    `audit_log_integrity_head` row, written before either of its refusals: the confinement of a
    privileged passkey-less caller, and the export step-up refusal for **any** caller on an export
    path without recent verification. The session cookie is `SameSite=Lax`, so a cross-site
-   **top-level navigation** does trigger both. Content is fixed and derived from the victim's
+   **top-level navigation** does trigger both, and under the `SameSite=None` that SAML deployments
+   use, so does any cross-site subresource load. Content is fixed and derived from the victim's
    identity. Repetition was unbounded, which was tracked as a finding in its own right on
    [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into this false-positive
    rationale; since that fix, `DenialAuditRateLimiter` admits at most one row per hour for each user,
