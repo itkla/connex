@@ -64,6 +64,7 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -97,6 +98,7 @@ class AiAssistantWriteToolServiceTest {
     private NoteService noteService;
     private TagService tagService;
     private PipelineService pipelineService;
+    private LeadResponseSlaService leadResponseSlaService;
     private AiRestrictionEpoch restrictionEpoch;
     private AiWorkspaceGovernanceService governanceService;
     private WorkspaceService.LockedPermissionSnapshot authority;
@@ -115,12 +117,14 @@ class AiAssistantWriteToolServiceTest {
         workspaceService = mock(WorkspaceService.class);
         activityService = mock(ActivityService.class);
         personService = mock(PersonService.class);
+        when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
         noteService = mock(NoteService.class);
         tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
+        leadResponseSlaService = mock(LeadResponseSlaService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
@@ -155,7 +159,8 @@ class AiAssistantWriteToolServiceTest {
                 addTagTool,
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
-                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
+                new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService),
+                new AiAssistantSetResponseDueWriteTool(leadResponseSlaService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
                 registry,
@@ -1433,6 +1438,144 @@ class AiAssistantWriteToolServiceTest {
         assertTrue(refusal.recoverable());
         assertEquals("unresolved_reference", refusal.detailReason());
         verify(personService, never()).removeTag(anyInt(), anyInt());
+    }
+
+    /**
+     * A first-response deadline is proposed with no pin to compare, and its approval starts the
+     * clock through the service the workflow engine's action calls, with the reviewed hours,
+     * reporting whether a clock started and recording no undo and no divergence.
+     */
+    @Test
+    void aResponseDeadlineApprovalStartsTheClockThroughTheLeadResponseService()
+            throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":48}", "person", 31);
+        assertEquals(
+                "{\"tool\":\"set_response_due\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"person\",\"id\":31},"
+                        + "\"request\":{\"handle\":\"r1\",\"due_in_hours\":48},"
+                        + "\"principals\":[]}",
+                write.argumentsJson());
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
+        Person unchanged = person(31);
+        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.getPersonById(31)).thenReturn(unchanged);
+        when(leadResponseSlaService.startFirstResponseClock(31, 48)).thenReturn(true);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(leadResponseSlaService).startFirstResponseClock(31, 48);
+        JsonNode result = objectMapper.readTree(capturedResultJson());
+        assertEquals(
+                "{\"status\":\"executed\",\"recordType\":\"person\",\"dueInHours\":48,"
+                        + "\"changed\":true}",
+                result.get("outcome").toString());
+        assertFalse(result.has("undo"), "a response deadline records no inverse");
+        assertFalse(result.has("verification"), "a structural read-back never diverges");
+    }
+
+    /**
+     * The contact was written after the deadline was proposed, so the approval is refused on the
+     * framework's own freshness rule after the contact is locked and before any clock starts.
+     */
+    @Test
+    void aResponseDeadlineOnAContactWrittenAfterTheProposalIsRefusedAndStartsNoClock()
+            throws Exception {
+        stored(prepared(
+                "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":24}", "person", 31),
+                29);
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-06 14:59:30.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.getPersonById(31)).thenReturn(edited);
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * The contact update permission is revoked after the proposal, so the framework refuses the
+     * approval from the locked snapshot before the contact is locked or the service is reached.
+     */
+    @Test
+    void aResponseDeadlineWhoseApproverLostContactUpdateIsRefusedBeforeAnyLock()
+            throws Exception {
+        stored(prepared(
+                "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":24}", "person", 31),
+                29);
+        grantAllExcept(Permission.PERSON_UPDATE);
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals(
+                "Requires the PERSON_UPDATE permission in this workspace", refused.getMessage());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+    }
+
+    /**
+     * A contact shared in from another workspace is visible here but never writable through the
+     * clock service, so its deadline is refused recoverably when proposed: nothing is stored, no
+     * card can offer an approval that could only fail, and the reason names no row.
+     */
+    @Test
+    void aResponseDeadlineOnAContactSharedInFromAnotherWorkspaceIsRefusedRecoverably() {
+        when(personService.isOwnedByCurrentWorkspace(31)).thenReturn(false);
+
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "set_response_due", "{\"handle\":\"r1\",\"due_in_hours\":24}",
+                        "person", 31));
+
+        assertTrue(refusal.recoverable());
+        assertEquals("unresolved_reference", refusal.detailReason());
+        verify(personService).isOwnedByCurrentWorkspace(31);
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
+    }
+
+    /**
+     * Ownership is asked only of a tool whose delegate writes an owned record: a tag on the same
+     * shared-in contact is proposed as before, because its service accepts a visible contact.
+     */
+    @Test
+    void onlyAToolThatRequiresAnOwnedTargetAsksWhetherTheContactIsOwned() throws Exception {
+        when(personService.isOwnedByCurrentWorkspace(31)).thenReturn(false);
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
+
+        prepared("remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31);
+
+        verify(personService, never()).isOwnedByCurrentWorkspace(anyInt());
+    }
+
+    /**
+     * A deadline outside the service's own one-hour-to-one-year range, or one that is not a whole
+     * number, is refused before anything is stored.
+     */
+    @Test
+    void aResponseDeadlineOutsideTheServicesRangeIsRefusedBeforeAnythingIsStored() {
+        for (String hours : List.of("0", "8761", "\"[redacted]\"")) {
+            AiAssistantLoopException refusal = assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> prepared(
+                            "set_response_due",
+                            "{\"handle\":\"r1\",\"due_in_hours\":" + hours + "}",
+                            "person", 31),
+                    hours);
+            assertEquals("invalid_tool_arguments", refusal.detailReason(), hours);
+        }
+        verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
     }
 
     /**

@@ -791,15 +791,20 @@
         "fieldOwner": "担当者",
         "fieldStage": "ステージ",
         "fieldTag": "タグ",
+        "fieldResponseDue": "初回応答期限",
         "currentUnresolvedOwner": "このワークスペースにいないメンバー",
         "currentUnresolvedStage": "すでに存在しないステージ",
         "currentUnresolvedTag": "すでに存在しないタグ",
+        "currentUnresolvedResponseDue": "表示できない期限",
+        "responseDueInHours": "適用から{hours}時間後",
         "proposedUnresolved": "すでに存在しません",
         "stateUnchanged": "すでに同じ値のため、適用しても変わりません。",
         "stateRecordChanged": "提案のあとにこのレコードが更新されたため、この変更はレビューした内容のままでは適用できません。現在の内容をもとに、改めて依頼してください。",
         "statePermissionLost": "この変更を行う権限がなくなりました。ワークスペース管理者にご相談ください。",
         "stateUnresolved": "提案された値がこのワークスペースに見つからないため、この変更は行えません。",
-        "stateUnresolvedRemoval": "提案のあとに削除対象が変更されたため、この変更は行えません。"
+        "stateUnresolvedRemoval": "提案のあとに削除対象が変更されたため、この変更は行えません。",
+        "stateUnchangedResponseDue": "この連絡先にはすでに初回応答期限があり、既存の期限は変更されないため、適用しても変わりません。",
+        "stateUnresolvedResponseDue": "この連絡先は別のワークスペースに属しているため、初回応答期限はそのワークスペースでのみ設定できます。"
       },
       "actions": {
         "undo": "取り消す",
@@ -833,6 +838,8 @@
         "assignOwner": "担当者を割り当て",
         "assignOwnerTo": "担当者を「{value}」に変更",
         "removeOwner": "現在の担当者を解除",
+        "setResponseDue": "初回応答期限を設定",
+        "setResponseDueIn": "初回応答期限を{hours}時間後に設定",
         "runWriteTool": "書き込み操作を実行",
         "requestRejected": "リクエストを却下しました",
         "requestFailed": "リクエストに失敗しました",
@@ -847,6 +854,8 @@
         "dealStageChanged": "取引ステージを変更しました",
         "ownerRemoved": "担当者を解除しました",
         "ownerAssigned": "担当者を割り当てました",
+        "responseDueSet": "初回応答期限を設定しました",
+        "responseDueAlreadySet": "初回応答期限はすでに設定されています",
         "requestCompleted": "リクエストが完了しました"
       },
       "outcomeFields": {

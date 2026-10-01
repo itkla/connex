@@ -1,6 +1,6 @@
 import type { AskConnexProposalReviewLabels } from "@/app/components/ask-connex/AskConnexProposalReview";
 import type { AskConnexToolCardLabels } from "@/app/components/ask-connex/AskConnexToolCard";
-import type { AskConnexToolCardState } from "@/app/lib/askConnex";
+import { askConnexChangeValueText, type AskConnexToolCardState } from "@/app/lib/askConnex";
 import type { AiAssistantToolCall, AiAssistantToolCallChange } from "@/app/lib/types";
 
 /**
@@ -15,14 +15,35 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
     apply: "Apply",
     applyAria: (target) => `Apply the proposed change to ${target}`,
     applying: "Applying…",
-    changeField: { owner: "Owner", stage: "Stage", tag: "Tag" },
+    changeField: {
+        owner: "Owner",
+        stage: "Stage",
+        tag: "Tag",
+        responseDue: "First-response deadline",
+    },
+    changeValue: (field, value, side) => askConnexChangeValueText(
+        field,
+        value,
+        side,
+        "en",
+        (hours) => `${hours} ${hours === 1 ? "hour" : "hours"} after it's applied`,
+    ),
     changeNotSet: "Not set",
     changeCurrentUnresolved: {
         owner: "Someone no longer in this workspace",
         stage: "A stage that no longer exists",
         tag: "A tag that no longer exists",
+        responseDue: "A deadline that can't be shown",
     },
     changeProposedUnresolved: "No longer exists",
+    changeStateForField: {
+        responseDue: {
+            unchanged: "This contact already has a first-response deadline, and an existing"
+                + " deadline is never moved, so applying this would change nothing.",
+            unresolved: "This contact belongs to another workspace, so only that workspace can"
+                + " set its first-response deadline.",
+        },
+    },
     changeStateUnresolvedRemoval: "What this would remove has changed since it was proposed.",
     changeState: {
         unchanged: "This is already the current value.",
@@ -89,6 +110,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         assignOwner: "Assign an owner",
         assignOwnerTo: (value) => `Assign owner: ${value}`,
         removeOwner: "Remove the current owner",
+        setResponseDue: "Set a first-response deadline",
+        setResponseDueIn: (hours) => `Set a first-response deadline ${hours} hours out`,
         runWriteTool: "Run a write action",
         requestRejected: "Request rejected",
         requestFailed: "Request failed",
@@ -103,6 +126,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         dealStageChanged: "Deal stage changed",
         ownerRemoved: "Owner removed",
         ownerAssigned: "Owner assigned",
+        responseDueSet: "First-response deadline set",
+        responseDueAlreadySet: "A first-response deadline was already set",
         requestCompleted: "Request completed",
     },
 };

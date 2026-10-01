@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -53,9 +55,19 @@ class AiAssistantWriteToolRegistryTest {
      * <p>Such a viewer is a shared participant, or a requester who has since lost sight of the
      * target, and {@code detailsReadable} exists to withhold record state from them; a shared flag
      * passes that gate. So a flag may say only how the write went — {@code add_tag}'s
-     * {@code changed}, whether this call created the association, and {@code remove_tag}'s,
-     * whether this call removed it — and never a property of the record, such as whether it is
-     * archived or restricted. Adding a flag, or a tool with one, is a reviewed edit here.
+     * {@code changed}, whether this call created the association, {@code remove_tag}'s, whether
+     * this call removed it —
+     * and never a property of the record, such as whether it is archived or restricted, or when
+     * its deadline falls. Adding a flag, or a tool with one, is a reviewed edit here.
+     *
+     * <p>A {@code changed} flag that is false does imply what the record held when the write ran:
+     * the tag was already there or was already gone. That is a reviewed, accepted disclosure,
+     * not an oversight. The card names its target
+     * only to a viewer who can currently see the record, and the same fact is on the record itself
+     * for that viewer — its tags; a viewer who cannot see the record learns it of no named record.
+     * {@code set_response_due} shares no outcome flags: whether a contact already carried a
+     * first-response clock is withheld along with its details. No flag may carry a value the
+     * record holds, such as the deadline itself.
      */
     private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS = Map.of(
             "add_tag", Set.of("changed"),
@@ -103,12 +115,13 @@ class AiAssistantWriteToolRegistryTest {
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("assign_owner", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                 tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
+                tool("set_response_due", ToolTier.CONFIRM, Set.of("person")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -125,9 +138,10 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
-                new AiAssistantAssignOwnerWriteTool(null, null, null)));
+                new AiAssistantAssignOwnerWriteTool(null, null, null),
+                new AiAssistantSetResponseDueWriteTool(null)));
 
-        assertEquals(7, registry.tools().size());
+        assertEquals(8, registry.tools().size());
     }
 
     @Test
@@ -169,6 +183,21 @@ class AiAssistantWriteToolRegistryTest {
                         Set.of("deal.stageId"))));
     }
 
+    /**
+     * The framework can tell an owned target from a shared-in one only for a person, so a tool
+     * that asks for an owned target on any other kind would be refused at every proposal.
+     */
+    @Test
+    void refusesAnOwnedTargetOnAnythingButAPerson() {
+        AiAssistantWriteTool owning =
+                spy(tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")));
+        doReturn(true).when(owning).requiresOwnedTarget();
+
+        assertRefused(
+                "change_deal_stage requires an owned target, which is checked only for a person",
+                List.of(owning));
+    }
+
     @Test
     void refusesASharedPersonLockOnAnythingButAPerson() {
         assertRefused("create_task declares a shared person lock for deal", List.of(
@@ -196,6 +225,17 @@ class AiAssistantWriteToolRegistryTest {
 
     @Test
     void refusesEveryCatalogWriteToolThatHasNoBean() {
+        assertRefused(
+                "set_response_due is declared in the catalog but has no write-tool bean",
+                List.of(
+                        tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
+                        tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
+                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
+                        tool("assign_owner", ToolTier.CONFIRM,
+                                Set.of("person", "company", "deal"))));
         assertRefused(
                 "assign_owner is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -489,6 +529,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
+                new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
                     public Map<String, SharedRequestFlag> sharedRequestFlags() {
@@ -507,6 +548,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateNoteWriteTool(null, null),
                 new AiAssistantAddTagWriteTool(null, null, null, null),
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
+                new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
                     public Set<String> requiredRequestText() {

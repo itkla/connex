@@ -485,8 +485,10 @@ the write returned with the one resolved before the lock, recording any divergen
 built, so its link cannot diverge from the target while that holds, and nothing is re-read from
 the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
 whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
-id it resolved with itself and verifying nothing, and for `remove_tag`, whose `removeTag` reports
-only whether it removed the association and compares the pinned tag id with itself;
+id it resolved with itself and verifying nothing, for `remove_tag`, whose `removeTag` reports
+only whether it removed the association and compares the pinned tag id with itself, and for
+`set_response_due`, whose `LeadResponseSlaService.startFirstResponseClock` reports only whether it
+started a clock and compares the contact id with itself;
 `assign_owner` compares the owner id on the record `updateOwner` returns with the principal
 locked at step 1, `null` on both sides for a removal); and writes the tool-call status fail-closed. The one
 read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
@@ -509,7 +511,10 @@ it calls takes what that service documents — for a task the board root and the
 (see Tasks above), for a note or an activity the exact row `FOR UPDATE`. Domain services on this
 path may re-acquire a membership step 1 already holds (`lockAndRequireMember` for the actor in
 `TaskService.lockBoardForCreation`, for the owner in `updateOwner`); that re-acquisition adds no
-edge.
+edge. `set_response_due`'s `startFirstResponseClock` likewise re-reads its contact `FOR UPDATE`, the
+very person row step 6 already holds, and then updates that contact's open `person_lifecycle_pass`
+row — person before pass, the order the workflow engine's `set_response_due` action takes through
+the same method.
 
 **The authority is the step-1 snapshot, and its rows stay locked until commit.** The tool's own
 permissions become known only after step 3 has read the durable proposal, so the service asserts
@@ -540,7 +545,8 @@ Rules that keep this sound:
   and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
   after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
   `ActivityService.create`, `NoteService.create`, the `addTag`, `removeTag` and `updateOwner` methods,
-  `DealService.changeStage`, and every `deleteIf` undo uses. Those reads add no lock edge, and while
+  `DealService.changeStage`, `LeadResponseSlaService.startFirstResponseClock`, and every `deleteIf`
+  undo uses. Those reads add no lock edge, and while
   the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
   Do not turn one of them into a locking read, and do not route an assistant write through a
   domain method that has no permission check on the assumption that the snapshot makes it redundant.

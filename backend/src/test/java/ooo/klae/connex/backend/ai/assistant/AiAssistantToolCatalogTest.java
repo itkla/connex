@@ -33,9 +33,9 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "set_response_due"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(17, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(18, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -52,6 +52,7 @@ class AiAssistantToolCatalogTest {
                         + " write tool is confirm-tier");
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("change_deal_stage"));
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("assign_owner"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("set_response_due"));
         assertFalse(catalog.isExecutable("get_deal_brief"));
         assertEquals(
                 "deal_brief_nested_generation_unavailable",
@@ -108,7 +109,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(17, definitions.size());
+        assertEquals(18, definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -155,6 +156,7 @@ class AiAssistantToolCatalogTest {
                 byToolset.get(Toolset.WRITE_CONTENT));
         assertEquals(List.of("change_deal_stage", "assign_owner"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
+        assertEquals(List.of("set_response_due"), byToolset.get(Toolset.WRITE_FOLLOWUP));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
@@ -194,11 +196,11 @@ class AiAssistantToolCatalogTest {
     void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
         assertEquals(
                 List.of("core", "analytics", "schedule",
-                        "write_activity", "write_content", "write_pipeline"),
+                        "write_activity", "write_content", "write_pipeline", "write_followup"),
                 Arrays.stream(Toolset.values()).map(Toolset::key).toList());
         assertEquals(
                 List.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline"),
+                        "write_pipeline", "write_followup"),
                 AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
         assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
         for (Map.Entry<Toolset, String> entry : catalog.directory()) {
@@ -208,7 +210,7 @@ class AiAssistantToolCatalogTest {
                     entry.getKey().key() + " needs a server-authored summary");
         }
         assertEquals(Set.of(Toolset.CORE), AiAssistantToolCatalog.CORE);
-        assertEquals(6, AiAssistantToolCatalog.ALL.size());
+        assertEquals(7, AiAssistantToolCatalog.ALL.size());
     }
 
     /** Both prompt-facing views narrow to the loaded set and keep stable catalog order. */
@@ -263,7 +265,7 @@ class AiAssistantToolCatalogTest {
         assertTrue(argument.required());
         assertEquals(
                 Set.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline"),
+                        "write_pipeline", "write_followup"),
                 argument.values());
         assertFalse(argument.values().contains("core"));
     }
@@ -305,6 +307,27 @@ class AiAssistantToolCatalogTest {
         assertFalse(catalog.isDeclaredVocabulary("Ada Lovelace"));
         assertFalse(catalog.isDeclaredVocabulary("ANALYTICS"));
         assertFalse(catalog.isDeclaredVocabulary(null));
+    }
+
+    /**
+     * A first-response deadline is a bounded whole number of hours, never text: a date or time the
+     * member typed can reach the model as the redaction marker, and the marker can never pass as a
+     * deadline. Widening the argument to text turns the marker cases red.
+     */
+    @Test
+    void setResponseDueAcceptsOnlyABoundedWholeNumberOfHours() throws Exception {
+        assertTrue(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\",\"due_in_hours\":48}")));
+        assertTrue(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\",\"due_in_hours\":8760}")));
+        for (String deadline : List.of(
+                "\"[redacted]\"", "\"[omitted by policy]\"", "\"48\"", "\"2026-10-15\"",
+                "0", "8761", "-1", "4.5", "null")) {
+            assertFalse(catalog.permitsArguments("set_response_due", objectMapper.readTree(
+                    "{\"handle\":\"r1\",\"due_in_hours\":" + deadline + "}")), deadline);
+        }
+        assertFalse(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\"}")));
     }
 
     /** The closed enum is enforced where the raw arguments are validated, not only in a schema. */

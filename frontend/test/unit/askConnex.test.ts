@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import enCommon from '@/messages/en/common.json';
+import jaCommon from '@/messages/ja/common.json';
 
 import {
     ANSWER_ROW_PLACEHOLDER,
@@ -14,6 +17,7 @@ import {
     ASK_CONNEX_SEGMENT_CHAR_CAP,
     anchorAskConnexToolCards,
     appendAskConnexTurnSegment,
+    askConnexChangeValueText,
     askConnexReasoningSurvives,
     askConnexMessageNarration,
     askConnexCitationHref,
@@ -70,6 +74,8 @@ const TOOL_SUMMARY_LABELS = {
     assignOwner: '担当者を割り当て',
     assignOwnerTo: (value: string) => `担当者: ${value}`,
     removeOwner: '担当者を解除',
+    setResponseDue: '初回応答期限を設定',
+    setResponseDueIn: (hours: number) => `初回応答期限: ${hours}時間後`,
     runWriteTool: '書き込み操作',
     requestRejected: '却下',
     requestFailed: '失敗',
@@ -84,6 +90,8 @@ const TOOL_SUMMARY_LABELS = {
     dealStageChanged: 'ステージ変更済み',
     ownerRemoved: '担当者解除済み',
     ownerAssigned: '担当者割り当て済み',
+    responseDueSet: '期限設定済み',
+    responseDueAlreadySet: '期限設定済みでした',
     requestCompleted: '完了',
 };
 
@@ -940,6 +948,38 @@ describe('Ask Connex tool-call cards', () => {
             TOOL_SUMMARY_LABELS,
         )).toBe('完了');
     });
+
+    it('localizes a response deadline by its hours and by whether it started a clock', () => {
+        const deadlineCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'set_response_due',
+            tier: 'confirm',
+            requestSummary: 'Set first-response deadline in hours: 48',
+            outcomeSummary: 'First-response deadline set',
+        };
+
+        expect(askConnexToolRequestSummary(deadlineCall, TOOL_SUMMARY_LABELS))
+            .toBe('初回応答期限: 48時間後');
+        for (const requestSummary of [
+            'Set a first-response deadline',
+            'Set first-response deadline in hours: soon',
+            'Set first-response deadline in hours: 0',
+        ]) {
+            expect(askConnexToolRequestSummary(
+                { ...deadlineCall, requestSummary },
+                TOOL_SUMMARY_LABELS,
+            )).toBe('初回応答期限を設定');
+        }
+        expect(askConnexToolOutcomeSummary(deadlineCall, TOOL_SUMMARY_LABELS)).toBe('期限設定済み');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'A first-response deadline was already set' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('期限設定済みでした');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'Request completed' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('完了');
+    });
 });
 
 describe('Ask Connex citations', () => {
@@ -1421,5 +1461,82 @@ describe('narration accumulation and replay', () => {
         expect(askConnexMessageNarration({ narration: null })).toEqual([]);
         expect(askConnexMessageNarration({ narration: [] })).toEqual([]);
         expect(askConnexMessageNarration({})).toBe(askConnexMessageNarration({ narration: [] }));
+    });
+});
+
+/**
+ * Runs one assertion with the process clock in a zone east of UTC, where reading an offset-less
+ * UTC value as local time lands nine hours away from the instant it names. A suite pinned to UTC,
+ * as CI is, cannot tell the two readings apart without it.
+ */
+function inTokyo<T>(run: () => T): T {
+    const previous = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+        return run();
+    } finally {
+        if (previous === undefined) delete process.env.TZ;
+        else process.env.TZ = previous;
+    }
+}
+
+/** The provider's own hour wording, formatted through the real message catalogue. */
+function responseDueInHours(locale: 'en' | 'ja') {
+    const t = createTranslator({
+        locale,
+        messages: locale === 'en' ? enCommon : jaCommon,
+        namespace: 'AskConnex',
+    });
+    return (hours: number) => t('toolCards.change.responseDueInHours', { hours });
+}
+
+describe('a reviewed first-response deadline', () => {
+    it('reads the stored deadline as UTC, exactly as the contact lead panel does', () => {
+        const stored = '2026-08-13T09:30:15';
+
+        inTokyo(() => {
+            const text = askConnexChangeValueText(
+                'responseDue', stored, 'current', 'en', responseDueInHours('en'));
+
+            expect(text).toBe(new Intl.DateTimeFormat('en', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+                timeZone: 'Asia/Tokyo',
+            }).format(Date.UTC(2026, 7, 13, 9, 30, 15)));
+            expect(text).toContain('6:30');
+            expect(text).toBe(formatUtcDateTime(stored, 'en', stored));
+        });
+    });
+
+    it('states a deadline that does not parse as it stands', () => {
+        expect(askConnexChangeValueText(
+            'responseDue', 'soon', 'current', 'en', responseDueInHours('en'))).toBe('soon');
+        for (const proposed of ['soon', '0', '1.5']) {
+            expect(askConnexChangeValueText(
+                'responseDue', proposed, 'proposed', 'en', responseDueInHours('en')))
+                .toBe(proposed);
+        }
+    });
+
+    it('states the proposed hours in the reader\'s own words', () => {
+        const en = responseDueInHours('en');
+        const ja = responseDueInHours('ja');
+
+        expect(askConnexChangeValueText('responseDue', '1', 'proposed', 'en', en))
+            .toBe('1 hour after it\'s applied');
+        expect(askConnexChangeValueText('responseDue', '48', 'proposed', 'en', en))
+            .toBe('48 hours after it\'s applied');
+        expect(askConnexChangeValueText('responseDue', '1', 'proposed', 'ja', ja))
+            .toBe('適用から1時間後');
+        expect(askConnexChangeValueText('responseDue', '48', 'proposed', 'ja', ja))
+            .toBe('適用から48時間後');
+    });
+
+    it('leaves every other reviewed value as the workspace wrote it', () => {
+        expect(askConnexChangeValueText('stage', '48', 'proposed', 'en', responseDueInHours('en')))
+            .toBe('48');
+        expect(askConnexChangeValueText(
+            'owner', '2026-08-13T09:30:15', 'current', 'en', responseDueInHours('en')))
+            .toBe('2026-08-13T09:30:15');
     });
 });

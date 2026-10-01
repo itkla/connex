@@ -3,6 +3,7 @@ import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
     AiAssistantToolCallChange,
+    AiAssistantToolCallChangeField,
     AiAssistantToolCallCreatedRecord,
     AiAssistantToolCallMutation,
     AiChatCitation,
@@ -16,7 +17,7 @@ import type {
     AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -338,6 +339,8 @@ export type AskConnexToolSummaryLabels = {
     assignOwner: string;
     assignOwnerTo: (value: string) => string;
     removeOwner: string;
+    setResponseDue: string;
+    setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
     requestRejected: string;
     requestFailed: string;
@@ -352,6 +355,8 @@ export type AskConnexToolSummaryLabels = {
     dealStageChanged: string;
     ownerRemoved: string;
     ownerAssigned: string;
+    responseDueSet: string;
+    responseDueAlreadySet: string;
     requestCompleted: string;
 };
 
@@ -786,6 +791,29 @@ function summaryValue(summary: string, prefix: string): string | null {
         : null;
 }
 
+/**
+ * States one value a pending proposal reviews, in the reader's own language and time zone.
+ *
+ * A first-response deadline the contact already holds arrives as the offset-less UTC date-time
+ * the database stores, and is read as UTC exactly as the contact's own lead panel reads it, so the
+ * two surfaces print the same deadline. The deadline a proposal would start arrives as the whole
+ * hours from the approval the server will count them from, and is stated in the member's words.
+ * A value that does not parse stands as it is. Every other reviewed value is a name the workspace
+ * already wrote in its own words, and stands as it is.
+ */
+export function askConnexChangeValueText(
+    field: AiAssistantToolCallChangeField,
+    value: string,
+    side: 'current' | 'proposed',
+    locale: string,
+    responseDueInHours: (hours: number) => string,
+): string {
+    if (field !== 'responseDue') return value;
+    if (side === 'current') return formatUtcDateTime(value, locale, value);
+    const hours = Number(value);
+    return Number.isInteger(hours) && hours > 0 ? responseDueInHours(hours) : value;
+}
+
 /** Localizes one resolved tool request while retaining viewer-safe dynamic record values. */
 export function askConnexToolRequestSummary(
     toolCall: AiAssistantToolCall,
@@ -807,6 +835,13 @@ export function askConnexToolRequestSummary(
         if (toolCall.requestSummary === 'Remove the current owner') return labels.removeOwner;
         const owner = summaryValue(toolCall.requestSummary, 'Assign owner:');
         return owner === null ? labels.assignOwner : labels.assignOwnerTo(owner);
+    }
+    if (toolCall.toolName === 'set_response_due') {
+        const hours = Number(summaryValue(
+            toolCall.requestSummary, 'Set first-response deadline in hours:'));
+        return Number.isInteger(hours) && hours > 0
+            ? labels.setResponseDueIn(hours)
+            : labels.setResponseDue;
     }
     return labels.runWriteTool;
 }
@@ -838,6 +873,13 @@ export function askConnexToolOutcomeSummary(
         return toolCall.outcomeSummary === 'Owner removed'
             ? labels.ownerRemoved
             : labels.ownerAssigned;
+    }
+    if (toolCall.toolName === 'set_response_due') {
+        if (toolCall.outcomeSummary === 'First-response deadline set') return labels.responseDueSet;
+        if (toolCall.outcomeSummary === 'A first-response deadline was already set') {
+            return labels.responseDueAlreadySet;
+        }
+        return labels.requestCompleted;
     }
     return labels.requestCompleted;
 }
