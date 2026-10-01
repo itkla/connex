@@ -11,13 +11,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.inOrder;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -153,6 +153,7 @@ class AiAssistantWriteToolServiceTest {
                 tagService, personService, companyService, dealService));
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                 new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
                 new AiAssistantCreateNoteWriteTool(noteService, objectMapper),

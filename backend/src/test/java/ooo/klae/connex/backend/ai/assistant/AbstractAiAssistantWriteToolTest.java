@@ -41,7 +41,9 @@ import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.DocumentTemplateService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
@@ -75,6 +77,8 @@ abstract class AbstractAiAssistantWriteToolTest {
     CompanyService companyService;
     DealService dealService;
     TaskService taskService;
+    DealDocumentService documentService;
+    DocumentTemplateService templateService;
     TagService tagService;
     PipelineService pipelineService;
     LeadResponseSlaService leadResponseSlaService;
@@ -103,6 +107,8 @@ abstract class AbstractAiAssistantWriteToolTest {
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
+        documentService = mock(DealDocumentService.class);
+        templateService = mock(DocumentTemplateService.class);
         tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
         leadResponseSlaService = mock(LeadResponseSlaService.class);
@@ -182,6 +188,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         declared.add(setResponseDueTool());
         declared.add(new AiAssistantCompleteTaskWriteTool(taskService));
         declared.add(new AiAssistantRescheduleTaskWriteTool(taskService));
+        declared.add(draftDocumentTool());
         return framework(declared);
     }
 
@@ -223,6 +230,10 @@ abstract class AbstractAiAssistantWriteToolTest {
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK);
+    }
+
+    AiAssistantDraftDocumentWriteTool draftDocumentTool() {
+        return new AiAssistantDraftDocumentWriteTool(documentService, templateService);
     }
 
     AiAssistantCreateTaskWriteTool createTaskTool() {

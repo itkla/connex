@@ -231,8 +231,15 @@ public class AiAssistantWriteToolService {
     private void requireOwnedTarget(ResourceRef target) {
         boolean owned = switch (target.kind()) {
             case "person" -> personService.isOwnedByCurrentWorkspace(target.id());
+            case "deal" -> {
+                try {
+                    yield dealService.getDealById(target.id()) != null;
+                } catch (ResourceNotFoundException exception) {
+                    yield false;
+                }
+            }
             default -> throw new IllegalStateException(
-                    "Assistant ownership is checked only for a person");
+                    "Assistant ownership is checked only for a person or a deal");
         };
         if (!owned) {
             throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);

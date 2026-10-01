@@ -125,6 +125,7 @@ class AiAssistantToolExecutorTest {
                 "assign_owner", ",\"owner\":\"Ana\"",
                 "get_deal_brief", "",
                 "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\""));
+        arguments.put("draft_document", ",\"template\":\"Quote\"");
         arguments.put("complete_task", "");
         arguments.put("reschedule_task", ",\"due_date\":\"2026-10-15\"");
         Map<String, Set<String>> accepted = new HashMap<>(Map.of(
@@ -138,6 +139,7 @@ class AiAssistantToolExecutorTest {
                 "assign_owner", Set.of("person", "company", "deal"),
                 "get_deal_brief", Set.of("deal"),
                 "find_schedule_conflicts", Set.of("person")));
+        accepted.put("draft_document", Set.of("deal"));
         accepted.put("complete_task", Set.of("task"));
         accepted.put("reschedule_task", Set.of("task"));
         assertEquals(arguments.keySet(), accepted.keySet());

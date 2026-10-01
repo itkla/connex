@@ -60,6 +60,7 @@ export type AskConnexChangeFieldLabels = {
     responseDue: string;
     taskStatus: string;
     dueDate: string;
+    document: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -76,6 +77,7 @@ export type AskConnexUnresolvedValueLabels = {
     responseDue: string;
     taskStatus: string;
     dueDate: string;
+    document: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
@@ -101,13 +103,15 @@ export type AskConnexToolCardLabels = {
     changeProposedUnresolved: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
     /**
-     * Why a change to one field cannot be applied, where the generic reason would misstate it: a
+     * Field-specific review context, including non-blocking context for an applicable change. A
      * contact that already has a first-response deadline keeps it, rather than already holding
      * the proposed value, and a contact shared in from another workspace takes no deadline here.
      */
     changeStateForField: Partial<Record<
         AiAssistantToolCallChangeField,
-        Partial<Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>>
+        Partial<Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>> & {
+            ready?: (currentValue: string | null) => string | null;
+        }
     >>;
     /** Why a removal cannot be made once what it would remove has changed since the proposal. */
     changeStateUnresolvedRemoval: string;
@@ -270,7 +274,10 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  * its proposed value: a deadline for a contact shared in from another workspace is a real number
  * of hours, and it is the target, not the value, that the notice says cannot take it.
  *
- * Every value that is there is written through `changeValue`, because the server states what the
+ * An additional document draft has no before-row: its current value is the latest version from
+ * that template, stated as context by the notice rather than as a value being replaced.
+ *
+ * Every displayed value is written through `changeValue`, because the server states what the
  * record stores rather than what a member reads: a first-response deadline arrives as a UTC
  * date-time and its proposal as a count of hours, and neither is quoted back as it stands.
  */
@@ -290,15 +297,19 @@ export function AskConnexChangeRow({
                 {fieldLabel}
             </span>
             <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1">
-                <MinusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">{labels.diffBefore}</span>
-                <span className="break-words text-sm text-muted-foreground line-through decoration-muted-foreground/70">
-                    {change.currentValueUnresolved
-                        ? labels.changeCurrentUnresolved[change.field]
-                        : change.currentValue !== null
-                            ? labels.changeValue(change.field, change.currentValue, 'current')
-                            : <NotSetValue labels={labels} />}
-                </span>
+                {change.field !== 'document' ? (
+                    <>
+                        <MinusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{labels.diffBefore}</span>
+                        <span className="break-words text-sm text-muted-foreground line-through decoration-muted-foreground/70">
+                            {change.currentValueUnresolved
+                                ? labels.changeCurrentUnresolved[change.field]
+                                : change.currentValue !== null
+                                    ? labels.changeValue(change.field, change.currentValue, 'current')
+                                    : <NotSetValue labels={labels} />}
+                        </span>
+                    </>
+                ) : null}
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
@@ -314,7 +325,7 @@ export function AskConnexChangeRow({
 }
 
 /**
- * Why a reviewed change cannot be applied as it stands.
+ * Field-specific context before approval, or why a reviewed change cannot be applied.
  *
  * A record written since the proposal was made reads here as a change that has to be asked for
  * again, not as a caution to read before applying, and its card carries no apply control. That is
@@ -325,16 +336,23 @@ export function AskConnexChangeRow({
 export function AskConnexChangeNotice({
     field,
     state,
+    currentValue = null,
     removal,
     labels,
 }: {
     field: AiAssistantToolCallChangeField;
     state: AiAssistantToolCallChangeState;
+    currentValue?: string | null;
     removal: boolean;
     labels: AskConnexToolCardLabels;
 }) {
-    if (state === 'ready') return null;
-    const NoticeIcon = CHANGE_STATE_ICON[state];
+    const notice = state === 'ready'
+        ? labels.changeStateForField[field]?.ready?.(currentValue)
+        : state === 'unresolved' && removal
+            ? labels.changeStateUnresolvedRemoval
+            : labels.changeStateForField[field]?.[state] ?? labels.changeState[state];
+    if (!notice) return null;
+    const NoticeIcon = state === 'ready' ? InformationCircleIcon : CHANGE_STATE_ICON[state];
     const blocking = state === 'permissionLost' || state === 'unresolved';
     return (
         <p className={cn(
@@ -343,9 +361,7 @@ export function AskConnexChangeNotice({
         )}>
             <NoticeIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
-                {state === 'unresolved' && removal
-                    ? labels.changeStateUnresolvedRemoval
-                    : labels.changeStateForField[field]?.[state] ?? labels.changeState[state]}
+                {notice}
             </span>
         </p>
     );
@@ -526,6 +542,7 @@ export default function AskConnexToolCard({
                             <AskConnexChangeNotice
                                 field={proposal.field}
                                 state={proposal.state}
+                                currentValue={proposal.currentValue}
                                 removal={removal}
                                 labels={labels}
                             />
