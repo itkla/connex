@@ -200,9 +200,20 @@ public class ObjectDeletionRetryQueue {
         }
     }
 
+    /**
+     * Fires the background control-plane and tenant-plane retry sweep.
+     *
+     * <p>The first-run delay has its own property, falling back to the per-row retry backoff, so it
+     * can be moved independently. Both used to read {@code delete-retry-delay-ms}, so a test that
+     * shortened the backoff to make a rescheduled row due quickly also made this sweeper fire every
+     * second, claiming the same {@code object_deletion_queue} rows the test was driving by hand and
+     * racing its Mockito stubbing (#1884). Test contexts now push only the timer away, as they do
+     * for the other sweepers; {@link #retryPending()} still drives a pass directly.
+     */
     @Scheduled(
         fixedDelayString = "${connex.object-storage.delete-retry-delay-ms:60000}",
-        initialDelayString = "${connex.object-storage.delete-retry-delay-ms:60000}")
+        initialDelayString = "${connex.object-storage.delete-retry-sweep-initial-delay-ms:"
+            + "${connex.object-storage.delete-retry-delay-ms:60000}}")
     public void scheduleRetryPending() {
         submitRetry(userRetryRunning, this::retryUserCatalog);
         submitRetry(tenantRetryRunning, this::retryTenantCatalogs);
