@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.scheduling.annotation.Scheduled;
 
@@ -366,18 +369,26 @@ class ObjectDeletionRetryQueueTest {
     }
 
     /**
-     * Every cached test context owns its own timer. Without this property the sweeper claims
-     * {@code object_deletion_queue} rows on its own thread while a test drives the same rows by
-     * hand, so removing it would quietly bring the race back rather than fail anything.
+     * Every cached test context owns its own timer against the shared schema. Without this property
+     * a sweeper in one context claims {@code object_deletion_queue} rows a test in another is
+     * driving by hand, so removing it would quietly bring the race back rather than fail anything.
+     * The active {@code test} profile's YAML overrides the base properties, so the effective value is
+     * the one checked.
      */
     @Test
     void testContextsPushTheSweeperTimerOutOfTheWay() throws IOException {
-        Properties testProperties = new Properties();
+        String key = "connex.object-storage.delete-retry-sweep-initial-delay-ms";
+        Properties base = new Properties();
         try (InputStream stream = getClass().getResourceAsStream("/application.properties")) {
-            testProperties.load(stream);
+            assertNotNull(stream, "the test classpath must carry application.properties");
+            base.load(stream);
         }
-        String delay = testProperties.getProperty(
-            "connex.object-storage.delete-retry-sweep-initial-delay-ms");
+        YamlPropertiesFactoryBean profile = new YamlPropertiesFactoryBean();
+        profile.setResources(new ClassPathResource("application-test.yml"));
+        Properties testProfile = profile.getObject();
+        String delay = testProfile != null && testProfile.getProperty(key) != null
+            ? testProfile.getProperty(key)
+            : base.getProperty(key);
         assertTrue(delay != null && Long.parseLong(delay) >= 3_600_000L,
             "test contexts must push the deletion sweeper at least an hour away, was " + delay);
     }
