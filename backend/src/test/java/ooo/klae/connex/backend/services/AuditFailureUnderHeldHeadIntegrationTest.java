@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,6 +69,19 @@ class AuditFailureUnderHeldHeadIntegrationTest extends AbstractServiceTest {
                         + " WHERE workspace_id = ? AND action = 'note.create' AND outcome = 'success'",
                 Integer.class, fresh.getId()),
                 "the joined success audit commits or rolls back with its holder, as before");
+    }
+
+    /**
+     * Deletes the committed user {@code AbstractServiceTest} made an owner of the shared default
+     * workspace. This class commits rather than rolling back, so without it every case leaves an
+     * extra owner there that later classes in the same schema count as an eligible approver or
+     * delegate. Memberships cascade, and audit rows keep their signed {@code integrity_actor_id}.
+     */
+    @AfterEach
+    void deleteCommittedUser() {
+        if (currentUser != null) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", currentUser.getId());
+        }
     }
 
     private Workspace committedWorkspace() {

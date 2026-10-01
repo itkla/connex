@@ -124,7 +124,10 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     /**
      * Removes the workflow and legacy rule this test committed. The test rewrites the rule's actions
      * so they no longer match the workflow's projection, which the startup legacy backfill rightly
-     * refuses; left behind, that pair would fail every later context load in the same schema.
+     * refuses; left behind, that pair would fail every later context load in the same schema. It
+     * also deletes the committed user {@code AbstractServiceTest} made an owner of the shared default
+     * workspace, which later classes would otherwise count as an eligible approver or delegate. The
+     * delivery rolls back, so no note or activity that would restrict that delete is ever committed.
      * Mirrors {@code WorkflowTriggerExactlyOnceIntegrationTest}'s cleanup.
      */
     @AfterEach
@@ -144,6 +147,9 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
             TableLifecycle declaration = TenantLifecycleRegistry.require(table);
             while (tenantTeardownTransaction.deleteBatch(workspace.getId(), declaration, 100) > 0) {
             }
+        }
+        if (currentUser != null) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", currentUser.getId());
         }
     }
 
