@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,12 +30,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportDefinition;
+import ooo.klae.connex.backend.beans.ReportSchedule;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
@@ -53,6 +57,7 @@ import tools.jackson.databind.ObjectMapper;
 class ReportServiceTest {
     private static final int WORKSPACE_ID = 7;
     private static final int REPORT_ID = 11;
+    private static final int ACTOR_ID = 23;
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-07-12T12:00:00Z"), ZoneOffset.UTC);
 
@@ -64,17 +69,22 @@ class ReportServiceTest {
     private final AiRestrictionEpoch aiRestrictionEpoch = mock(AiRestrictionEpoch.class);
     private final ReportPermissionPolicy reportPermissionPolicy = mock(ReportPermissionPolicy.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final PrivilegedAccountService privilegedAccountService =
+            mock(PrivilegedAccountService.class);
+    private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
+    private final AuthService authService = mock(AuthService.class);
     private ReportService service;
 
     @BeforeEach
     void setUp() {
         service = new ReportService(
                 sessionSecurityService,
+                privilegedAccountService,
                 reportMapper,
-                mock(ScheduleMapper.class),
+                scheduleMapper,
                 mock(GoalMapper.class),
                 workspaceService,
-                mock(AuthService.class),
+                authService,
                 mock(ScoringService.class),
                 dealRiskService,
                 mock(ReportNetworkService.class),
@@ -108,6 +118,33 @@ class ReportServiceTest {
                 });
         verify(auditService).recordExportStepUpRefused();
         verifyNoInteractions(reportMapper);
+    }
+
+    /**
+     * {@code DELETE /api/reports/{id}} carries no entry in {@code PrivilegedMfaEnforcementFilter}'s
+     * path list, so the filter emits nothing for it. The refusal has to be recorded at the service
+     * boundary or a refused destructive attempt on a scheduled report leaves no audit trace (#1763).
+     */
+    @Test
+    void refusingTheParentDeleteStepUpIsAuditedAsADeletionAndDecidedBehindTheLock() {
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        actor.setDisplayName("Scheduling Admin");
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
+        when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
+        when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(true);
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+
+        verify(auditService).recordScheduleDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
+        InOrder ordered = inOrder(reportMapper, scheduleMapper);
+        ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
+        ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 
     @Test

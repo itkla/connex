@@ -6,6 +6,7 @@ import static ooo.klae.connex.backend.integration.ReportTestFixtures.commercialR
 import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -59,6 +60,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -102,6 +104,7 @@ import ooo.klae.connex.backend.services.ApprovalPolicyService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.ReportDeliveryScheduler;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -446,6 +449,7 @@ class ReportIntegrationTest {
         """;
 
     @Autowired private WebApplicationContext context;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -692,6 +696,81 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Pins the satisfied half of #1763 over HTTP: a privileged account carrying a fresh WebAuthn
+     * step-up opens and redirects a delivery schedule, and the schedule then keeps delivering with no
+     * session at all.
+     *
+     * <p>It is therefore a guard against over-gating rather than a proof of the gate: it fails if the
+     * gate ever refuses a satisfied privileged session, or if delivery itself acquires a step-up
+     * requirement it cannot meet.
+     *
+     * <p>The refused half is not asserted here. Its refusal audit is an independent
+     * {@code REQUIRES_NEW} append that re-takes the actor's {@code app_user} row {@code FOR SHARE},
+     * and this class is {@code @Transactional}, so that append would wait out
+     * {@code innodb_lock_wait_timeout} on the fixture's own uncommitted actor row. The refusal is
+     * covered by {@code ScheduleStepUpTest}, and its 403 wire shape by
+     * {@code GlobalExceptionHandlerTest}.
+     */
+    @Test
+    void aPrivilegedAccountWithAFreshStepUpSchedulesAndKeepsDeliveringUnattended() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User owner = newMember(workspace, "owner");
+        MockHttpSession session = login(owner.getUsername());
+        int reportId = createReport(session, workspace);
+        assertTrue(userMapper.isPrivilegedAccount(owner.getId()));
+
+        markRecentlyAuthenticated(session, owner.getId());
+        int scheduleId = createSchedule(session, workspace, reportId, owner.getId());
+        mockMvc.perform(put("/api/reports/{id}/schedule", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleBody(owner.getId(), "monthly", 10))
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cadence").value("monthly"));
+
+        forceScheduledDelivery(workspace.getId(), scheduleId);
+
+        assertEquals("scheduled", jdbcTemplate.queryForObject(
+                "SELECT origin FROM report_snapshot WHERE workspace_id = ? AND id = ?",
+                String.class, workspace.getId(),
+                latestScheduledSnapshotId(workspace.getId(), scheduleId)));
+    }
+
+    /**
+     * A member that administers no other principal is unaffected by the schedule step-up gate, so an
+     * ordinary password session still schedules a report.
+     */
+    @Test
+    void anUnprivilegedMemberSchedulesWithoutAFreshStepUp() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        WorkspaceRole reportManager = new WorkspaceRole();
+        reportManager.setWorkspaceId(workspace.getId());
+        reportManager.setName("Report manager " + UUID.randomUUID().toString().substring(0, 8));
+        roleMapper.insertRole(reportManager);
+        roleMapper.insertPermissions(workspace.getId(), reportManager.getId(),
+                List.of("REPORT_READ", "REPORT_CREATE", "REPORT_UPDATE"));
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), member.getId(), reportManager.getId());
+
+        assertFalse(userMapper.isPrivilegedAccount(member.getId()));
+        int scheduleId = createSchedule(session, workspace, reportId, member.getId());
+        mockMvc.perform(put("/api/reports/{id}/schedule", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(scheduleBody(member.getId(), "monthly", 11))
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(scheduleId));
     }
 
     @Test
@@ -1005,6 +1084,16 @@ class ReportIntegrationTest {
                 .session(creatorSession)
                 .with(csrf().asHeader()))
             .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(adminSession);
+        sessionSecurityService.markStepUp(stepUpRequest, admin.getId());
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)
@@ -2798,6 +2887,27 @@ class ReportIntegrationTest {
             .andExpect(status().isCreated())
             .andReturn();
         return responseId(result);
+    }
+
+    private static String scheduleBody(int recipientUserId, String cadence, int hourOfDay) {
+        return """
+            {
+              "cadence": "%s",
+              "recipientUserIds": [%d],
+              "timezone": "UTC",
+              "hourOfDay": %d,
+              "enabled": true
+            }
+            """.formatted(cadence, recipientUserId, hourOfDay);
+    }
+
+    /**
+     * Stamps the session with a WebAuthn step-up taken from the context clock. The clock is pinned to
+     * {@link #FIXED_NOW}, so a wall-clock stamp would read as a future assertion and never be fresh.
+     */
+    private void markRecentlyAuthenticated(MockHttpSession session, int userId) {
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, clock.millis());
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, userId);
     }
 
     private void forceScheduledDelivery(int workspaceId, int scheduleId) {

@@ -185,6 +185,7 @@ public class ReportService {
             "commercial-documents", "lead-lifecycle");
 
     private final SessionSecurityService sessionSecurityService;
+    private final PrivilegedAccountService privilegedAccountService;
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
     private final GoalMapper goalMapper;
@@ -397,11 +398,30 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Deletes a report definition and its snapshots. */
+    /**
+     * Deletes a report definition, its snapshots and its delivery schedule.
+     *
+     * <p>When the report carries a delivery schedule, a privileged account must first carry a fresh
+     * WebAuthn step-up. {@code report_schedule} cascades from {@code report_definition}, so deleting
+     * the report silently removes the standing delivery channel and its retained scheduled
+     * snapshots — exactly what {@code ScheduleService.delete} is gated for, and the gate would
+     * otherwise be bypassable through this endpoint (#1763). A report with no schedule is ordinary
+     * report deletion and stays on its permission check alone, so the prompt appears only where the
+     * cascade would destroy a gated object.
+     *
+     * <p>The schedule is read after {@code lockDefinitions}, never before. That statement takes
+     * {@code FOR UPDATE} on every {@code report_definition} row in the workspace, so a concurrent
+     * {@code report_schedule} insert blocks on its own foreign-key check against the locked parent
+     * and cannot commit inside the window. Reading first would let a schedule created after the
+     * check ride the cascade out ungated.
+     *
+     * @param id the report to delete
+     */
     @Transactional
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = authService.getCurrentUser().getId();
         int currentUserId = workspaceService.getCurrentUserId();
         boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
             workspaceId, currentUserId);
@@ -409,6 +429,10 @@ public class ReportService {
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
+        }
+        if (scheduleMapper.getByReport(workspaceId, id) != null
+                && privilegedAccountService.isPrivileged(actorId)) {
+            requireScheduleCascadeStepUp(actorId);
         }
         deletionPolicy.requireDeletable(definition.getCreatedBy(), builtInAdministrator);
         int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
@@ -772,6 +796,26 @@ public class ReportService {
     public String exportSnapshotCsv(int reportId, int snapshotId) {
         requireExportStepUp();
         return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
+    }
+
+    /**
+     * Applies the delivery-schedule step-up to the cascade that would destroy one, recording the
+     * refusal the way every other step-up site does.
+     *
+     * <p>This route carries no path entry in {@code PrivilegedMfaEnforcementFilter}, so no filter
+     * emits {@code auth.mfa.step_up.required} for it. Without this the refused destructive attempt
+     * would leave no audit trace at all, while the same refusal through
+     * {@code ScheduleService.delete} records one.
+     *
+     * @param actorId the account whose assertion freshness is checked
+     */
+    private void requireScheduleCascadeStepUp(int actorId) {
+        try {
+            sessionSecurityService.requireRecentAuthentication(actorId);
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordScheduleDeleteStepUpRefused();
+            throw exception;
+        }
     }
 
     private void requireExportStepUp() {
