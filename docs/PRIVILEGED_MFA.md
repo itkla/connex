@@ -51,6 +51,33 @@ exports, and report/snapshot exports. A password re-prompt never satisfies these
 verification window defaults to ten minutes; an absent, zero, negative, or malformed duration
 fails closed.
 
+### Auditing the filter's own refusals
+
+`PrivilegedMfaEnforcementFilter` audits its two refusals, `auth.mfa.policy.denied` (reason
+`enrollment_required`) for a confined account and `auth.mfa.step_up.required` (reason
+`step_up_required`) for an export without recent verification, **at most once per hour for each user,
+action, and client address**, and for at most eight addresses per user and action. Every request is
+still refused; only the audit row is admitted. A `GET` can trigger either refusal, and the
+`SameSite=Lax` session cookie rides a cross-site top-level navigation, so without the bound another
+site could append rows attributed to the victim at will
+([#1850](https://github.com/itkla/connex/issues/1850)). Keying on the client address keeps a stolen
+session used from elsewhere visible, and a row that fails to write is retried by the next refusal
+rather than suppressing the hour.
+
+Anyone reading or alerting on this trail should expect:
+
+- **one row per window, not one per request**, for a user who keeps hitting the same wall from the
+  same address;
+- **a bound per backend replica**: N replicas can record up to N rows per window and key, and a
+  restart re-arms every window; and
+- **addresses as `ClientIpResolver` resolves them.** Behind a reverse proxy that is not listed in
+  `CONNEX_SECURITY_TRUSTED_PROXIES`, every request resolves to the proxy, the key narrows to user and
+  action, and a second address inside the hour is not recorded separately.
+
+Refusals at service boundaries (reason `service_boundary`) are not admitted through this bound. They
+sit behind state-changing routes that CSRF protection shields from cross-site triggering, or behind
+export paths this filter refuses first.
+
 ### Standing export channels and the surfaces outside the filter's path list
 
 The filter's path list only covers requests that answer with the exported bytes. Three export

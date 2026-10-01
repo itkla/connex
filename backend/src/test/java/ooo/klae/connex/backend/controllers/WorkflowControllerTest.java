@@ -74,6 +74,7 @@ import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymi
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -139,6 +140,7 @@ class WorkflowControllerTest {
     @MockitoBean private OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
     @MockitoBean private LogoutAuditHandler logoutAuditHandler;
     @MockitoBean private LoginRateLimiter loginRateLimiter;
+    @MockitoBean private DenialAuditRateLimiter denialAuditRateLimiter;
     @MockitoBean private ClientIpResolver clientIpResolver;
 
     @Test

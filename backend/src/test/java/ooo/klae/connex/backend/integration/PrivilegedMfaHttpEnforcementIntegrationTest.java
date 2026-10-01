@@ -80,6 +80,10 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         return session;
     }
 
+    /**
+     * Runs the real security filter chain. Both confined requests are refused, but the second comes
+     * from the same address inside the denial-audit window, so only the first is audited (#1850).
+     */
     @Test
     void testProfileDefaultsToEnforcedAndConfinesUnenrolledPrivilegedAccount() throws Exception {
         assertTrue(privilegedMfaProperties.isEnforced());
@@ -97,7 +101,7 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currentPasswordRequired").value(true));
 
-        verify(auditService, times(2)).recordFailureScoped(
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 "auth.mfa.policy.denied",
                 "user",
                 USER_ID,
