@@ -22,6 +22,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         responseDue: "First-response deadline",
         taskStatus: "Status",
         dueDate: "Due date",
+        document: "Document",
     },
     changeValue: (field, value, side) => askConnexChangeValueText(
         field,
@@ -39,6 +40,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         responseDue: "A deadline that can't be shown",
         taskStatus: "A status that can't be shown",
         dueDate: "A due date that can't be shown",
+        document: "Document unavailable",
     },
     changeProposedUnresolved: "No longer exists",
     changeStateForField: {
@@ -112,6 +114,9 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         addTag: "Add an existing tag",
         removeTag: "Remove a tag",
         removeTagNamed: (value) => `Remove tag: ${value}`,
+        draftDocument: "Draft a deal document",
+        draftDocumentFrom: (value) => `Draft document from: ${value}`,
+        documentDrafted: "Document drafted",
         changeDealStage: "Change the deal stage",
         changeDealStageTo: (value) => `Change deal stage to: ${value}`,
         assignOwner: "Assign an owner",

@@ -188,6 +188,8 @@ import type {
 type OpenSource = 'standard' | 'keyboard';
 
 const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
+const ASK_CONNEX_DOCUMENT_TYPES: readonly string[] = ['quote', 'proposal', 'order_form', 'contract'];
+
 /** The activity types this client has words for, so an unfamiliar one is left as the record has it. */
 const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
     'call',
@@ -2481,7 +2483,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 : value;
         }
         if (field === 'type') {
-            return ASK_CONNEX_ACTIVITY_TYPES.includes(value)
+            return (ASK_CONNEX_ACTIVITY_TYPES.includes(value) || ASK_CONNEX_DOCUMENT_TYPES.includes(value))
                 ? t(`toolCards.outcomeValues.type.${value}`)
                 : value;
         }
@@ -2659,6 +2661,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 responseDue: t('toolCards.change.fieldResponseDue'),
                 taskStatus: t('toolCards.change.fieldTaskStatus'),
                 dueDate: t('toolCards.change.fieldDueDate'),
+                document: t('toolCards.change.fieldDocument'),
             },
             changeValue: changeValueText,
             changeNotSet: t('toolCards.change.notSet'),
@@ -2669,6 +2672,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 responseDue: t('toolCards.change.currentUnresolvedResponseDue'),
                 taskStatus: t('toolCards.change.currentUnresolvedTaskStatus'),
                 dueDate: t('toolCards.change.currentUnresolvedDueDate'),
+                document: t('toolCards.change.currentUnresolvedDocument'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
@@ -2743,6 +2747,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 addTag: t('toolCards.summaries.addTag'),
                 removeTag: t('toolCards.summaries.removeTag'),
                 removeTagNamed: (value: string) => t('toolCards.summaries.removeTagNamed', { value }),
+                draftDocument: t('toolCards.summaries.draftDocument'),
+                draftDocumentFrom: (value: string) => t('toolCards.summaries.draftDocumentFrom', { value }),
+                documentDrafted: t('toolCards.summaries.documentDrafted'),
                 changeDealStage: t('toolCards.summaries.changeDealStage'),
                 changeDealStageTo: (value: string) => t('toolCards.summaries.changeDealStageTo', { value }),
                 assignOwner: t('toolCards.summaries.assignOwner'),

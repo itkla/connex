@@ -96,6 +96,25 @@ describe("assistant proposal review", () => {
         expect(clearing).toContain("Not set");
     });
 
+    it("shows a document template before approval and disarms a withheld draft", () => {
+        const draft = card({
+            toolName: "draft_document",
+            requestSummary: "Draft document from: Quote",
+            change: change({ field: "document", currentValue: null, proposedValue: "Quote" }),
+        });
+        const markup = renderCard(draft);
+
+        expect(markup).toContain("Draft document from: Quote");
+        expect(markup).toContain(cardLabels.changeField.document);
+        expect(markup).toContain("Not set");
+        expect(markup).toContain("Apply the proposed change to Acme renewal");
+
+        const withheld = { ...draft, requestSummary: "Draft a deal document", change: null };
+        expect(askConnexToolCardAffordances(withheld, NOW)).toEqual(["reject"]);
+        expect(renderCard(withheld)).not.toContain("Quote");
+        expect(renderCard(withheld)).not.toContain("Apply the proposed change to");
+    });
+
     it("states a tag removal as the tag the record holds now and nothing after", () => {
         const markup = renderCard(card({
             toolName: "remove_tag",

@@ -71,7 +71,7 @@ public class AiAssistantToolCatalog {
         SCHEDULE("schedule", "Meeting conflict and availability reads for one record"),
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
         WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
-        WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments"),
+        WRITE_PIPELINE("write_pipeline", "Propose stages, owners, and deal documents"),
         WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks");
 
         private final String key;
@@ -521,6 +521,9 @@ public class AiAssistantToolCatalog {
         add(tools, confirm(Toolset.WRITE_PIPELINE, "assign_owner",
                 handle(),
                 string("owner", true, 1, 255, Set.of())));
+        add(tools, confirm(Toolset.WRITE_PIPELINE, "draft_document",
+                handle(),
+                string("template", true, 1, 128, Set.of())));
         add(tools, confirm(Toolset.WRITE_FOLLOWUP, "set_response_due",
                 handle(),
                 integer("due_in_hours", true, 1, 8_760)));
@@ -571,6 +574,7 @@ public class AiAssistantToolCatalog {
             case "create_note" -> "Create an immediately executed, undoable note for one record.";
             case "add_tag" -> "Add a tag immediately to one record.";
             case "remove_tag" -> "Propose a tag removal that requires human confirmation.";
+            case "draft_document" -> "Propose a deal document draft from a named template.";
             case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
             case "complete_task" -> "Complete assigned task";

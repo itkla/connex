@@ -131,7 +131,7 @@ public class AiChatProgressService {
             case "list_tasks", "create_task", "complete_task", "reschedule_task" -> "tasks";
             case "aggregate_metric" -> "metrics";
             case "create_note" -> "notes";
-            case "add_tag", "remove_tag", "change_deal_stage", "assign_owner",
+            case "add_tag", "remove_tag", "change_deal_stage", "draft_document", "assign_owner",
                     "set_response_due" -> "actions";
             default -> "other";
         };
@@ -165,7 +165,7 @@ public class AiChatProgressService {
         return switch (tool == null ? "" : tool) {
             case "search_records", "get_records" -> arraySize(result, "records");
             case "get_record", "create_activity", "create_task", "create_note",
-                    "add_tag", "remove_tag", "change_deal_stage", "assign_owner",
+                    "add_tag", "remove_tag", "change_deal_stage", "assign_owner", "draft_document",
                     "set_response_due", "complete_task", "reschedule_task", "relationship_metrics" -> 1;
             case "list_activities", "list_scope_activities" ->
                     arraySize(result, "activities");

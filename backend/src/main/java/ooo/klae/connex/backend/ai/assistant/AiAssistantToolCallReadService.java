@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -83,6 +85,7 @@ public class AiAssistantToolCallReadService {
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
+    private final DocumentTemplateMapper documentTemplateMapper;
     private final ActivityMapper activityMapper;
     private final TaskMapper taskMapper;
     private final NoteMapper noteMapper;
@@ -183,6 +186,11 @@ public class AiAssistantToolCallReadService {
                         && detailsReadable(call, viewer.userId(), visibleTargets))
                 ? pipelineMapper.getAllStages(viewer.workspaceId())
                 : List.of();
+        List<DocumentTemplate> templates = stored.stream().anyMatch(call ->
+                readsInput(call, ReviewInput.TEMPLATES)
+                        && detailsReadable(call, viewer.userId(), visibleTargets))
+                ? documentTemplateMapper.getAll(viewer.workspaceId())
+                : List.of();
         List<StoredToolCall> taggedCalls = stored.stream()
                 .filter(call -> readsInput(call, ReviewInput.TAGS)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
@@ -220,7 +228,7 @@ public class AiAssistantToolCallReadService {
             Review withheld = withheld(tool, call, status, viewerPermissions);
             Review review = review(
                     tool, call, status, readable, visibleTarget, assignableOwners, stages,
-                    tags, targetTags.getOrDefault(targetKey, List.of()), withheld);
+                    tags, targetTags.getOrDefault(targetKey, List.of()), templates, withheld);
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
@@ -606,6 +614,7 @@ public class AiAssistantToolCallReadService {
             List<Stage> stages,
             List<Tag> tags,
             List<RecordTag> targetTags,
+            List<DocumentTemplate> templates,
             Review withheld) {
         if (!readable) {
             return withheld;
@@ -624,7 +633,8 @@ public class AiAssistantToolCallReadService {
                 inputs.contains(ReviewInput.TAGS) ? targetTags : List.of(),
                 withheld.viewerPermissions(),
                 call.pins() == null ? null : call.pins().resolutionId(),
-                call.pins() == null ? null : call.pins().principalIds());
+                call.pins() == null ? null : call.pins().principalIds(),
+                inputs.contains(ReviewInput.TEMPLATES) ? templates : List.of());
     }
 
     /**

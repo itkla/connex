@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -208,6 +209,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         companyService = mock(CompanyService.class);
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                 new AiAssistantCreateActivityWriteTool(activityService, dateResolver, objectMapper),
                 new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
@@ -505,6 +507,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantDraftDocumentWriteTool(null, null),
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
@@ -525,6 +528,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 dealMapper,
                 pipelineMapper,
                 mock(TagMapper.class),
+                mock(DocumentTemplateMapper.class),
                 mock(ActivityMapper.class),
                 taskMapper,
                 mock(NoteMapper.class),
@@ -928,6 +932,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantDraftDocumentWriteTool(null, null),
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
@@ -948,6 +953,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 dealMapper,
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
+                mock(DocumentTemplateMapper.class),
                 activityMapper,
                 mock(TaskMapper.class),
                 noteMapper,
@@ -1173,6 +1179,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantDraftDocumentWriteTool(null, null),
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
@@ -1193,6 +1200,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 dealMapper,
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
+                mock(DocumentTemplateMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1463,6 +1471,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantDraftDocumentWriteTool(null, null),
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
@@ -1483,6 +1492,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 dealMapper,
                 pipelineMapper,
                 mock(TagMapper.class),
+                mock(DocumentTemplateMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1617,6 +1627,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantWriteToolRegistry(catalog, List.of(
                         new AiAssistantCreateTaskWriteTool(
                                 taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantDraftDocumentWriteTool(null, null),
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
@@ -1637,6 +1648,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(DealMapper.class),
                 pipelineMapper,
                 mock(TagMapper.class),
+                mock(DocumentTemplateMapper.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
