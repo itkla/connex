@@ -419,6 +419,161 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void requiredBackendInvocationsResolveDependencyJobIds() {
+        String workflow = """
+                jobs:
+                  backend-db:
+                    name: Database matrix
+                    steps:
+                      - run: bash gradlew dbTestShard2 scriptedTrajectoryTest
+                  backend:
+                    name: Backend — build & test
+                    needs: [classify, backend-unit, backend-db]
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          UNIT_RESULT: ${{ needs.backend-unit.result }}
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$UNIT_RESULT" != success || "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
+                  backend-unit:
+                    name: Unit tests
+                    steps:
+                      - run: bash gradlew verifyTestPartition unitTest
+                  unrelated:
+                    steps:
+                      - run: bash gradlew unrelatedTest
+                """;
+
+        assertEquals(List.of(
+                        "- run: bash gradlew verifyTestPartition unitTest",
+                        "- run: bash gradlew dbTestShard2 scriptedTrajectoryTest"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void requiredBackendInvocationsExpandReachableMatrixTasks() {
+        assertEquals(List.of(
+                        "run: bash gradlew dbTestShard1 --no-daemon --stacktrace",
+                        "run: bash gradlew dbTestShard2 scriptedTrajectoryTest --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(backendMatrixWorkflow()));
+    }
+
+    @Test
+    void aMissingScriptedMatrixShardCannotSatisfyTheRequiredBackendPath() {
+        String workflow = backendMatrixWorkflow().replace(
+                "          - shard: 2\n            tasks: dbTestShard2 scriptedTrajectoryTest\n", "");
+
+        assertEquals(List.of("run: bash gradlew dbTestShard1 --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void aConditionalMatrixStepCannotSatisfyTheRequiredBackendPath() {
+        for (String condition : List.of("matrix.shard == 3", "false", "matrix.shard == 2")) {
+            for (String position : List.of("before", "after")) {
+                String run = "        run: bash gradlew ${{ matrix.tasks }} --no-daemon --stacktrace\n";
+                String guard = "        if: " + condition + "\n";
+                String workflow = backendMatrixWorkflow().replace(run,
+                        position.equals("before") ? guard + run : run + guard);
+
+                assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                        "a Gradle step must run unconditionally for every listed shard: " + workflow);
+            }
+        }
+    }
+
+    @Test
+    void matrixTasksMustBeUsedByTheUnconditionalGradleStep() {
+        String workflow = backendMatrixWorkflow().replace("${{ matrix.tasks }}", "dbTestShard1");
+
+        assertEquals(List.of("run: bash gradlew dbTestShard1 --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void anUnneededMatrixJobCannotSatisfyTheRequiredBackendPath() {
+        String workflow = backendMatrixWorkflow().replace("needs: [classify, backend-db]", "needs: classify");
+
+        assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty());
+    }
+
+    @Test
+    void aConditionalProducerCannotSatisfyTheRequiredBackendPath() {
+        for (String condition : List.of("false", "needs.classify.outputs.backend == 'true' && false")) {
+            String workflow = backendMatrixWorkflow().replace(
+                    "    if: needs.classify.outputs.backend == 'true'",
+                    "    if: " + condition);
+
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "a producer must run whenever backend changes are classified: " + workflow);
+        }
+    }
+
+    @Test
+    void anIgnoredProducerResultCannotSatisfyTheRequiredBackendPath() {
+        for (String ignoredGate : List.of(
+                "UNIT_RESULT: ${{ needs.backend-unit.result }}",
+                "DB_RESULT: ${{ needs.backend-db.result }}\n"
+                        + "          UNIT_RESULT: ${{ needs.backend-unit.result }}")) {
+            String workflow = backendMatrixWorkflow()
+                    .replace("DB_RESULT: ${{ needs.backend-db.result }}", ignoredGate)
+                    .replace("\"$DB_RESULT\" != success", "\"$UNIT_RESULT\" != success");
+
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "listing or reading a dependency does not enforce its result: " + workflow);
+        }
+    }
+
+    @Test
+    void aConditionalOrNonFailingAggregatorStepCannotRequireAProducer() {
+        for (String workflow : List.of(
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - name: Require backend tests\n        if: false\n"),
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - name: Require backend tests\n        continue-on-error: true\n"),
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - continue-on-error: true\n"),
+                backendMatrixWorkflow().replace("exit 1", "exit 0"))) {
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "the aggregator must fail unconditionally for an unsuccessful producer: " + workflow);
+        }
+    }
+
+    @Test
+    void unrelatedJobsAndCommentsCannotSatisfyTheRequiredBackendPath() {
+        String workflow = """
+                jobs:
+                  backend:
+                    name: Backend — build & test
+                    needs: backend-db
+                    # run: bash gradlew scriptedTrajectoryTest
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
+                  backend-db:
+                    steps:
+                      # run: bash gradlew scriptedTrajectoryTest
+                      - run: bash gradlew dbTestShard2
+                  unrelated:
+                    steps:
+                      - run: bash gradlew scriptedTrajectoryTest
+                """;
+
+        assertEquals(List.of("- run: bash gradlew dbTestShard2"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
     void noShippedOperatorTemplateActivatesTheScriptedProvider() throws IOException {
         List<String> violations = new ArrayList<>();
         for (Path template : operatorTemplates()) {
@@ -760,44 +915,208 @@ class ScriptedAiProviderArchTest {
     }
 
     /**
-     * Returns the Gradle commands run by the required backend job alone.
+     * Returns the Gradle commands run by the required backend job and its direct dependencies.
      *
      * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
      * searching the whole file would stay satisfied after the required job stopped running the
-     * goldens. Only uncommented lines inside the job whose display name branch protection requires
-     * are returned.
+     * goldens. Only unconditional Gradle steps inside the job whose display name branch protection
+     * requires and mandatory jobs listed in its {@code needs:} entry are returned. Dependencies
+     * may use only the backend classify gate, and the aggregator must enforce their success.
+     * Matrix task lists count only when an explicit include entry supplies them to that step.
      *
      * @param workflow the CI workflow source
-     * @return the required backend job's Gradle command lines, stripped
+     * @return the required backend path's Gradle command lines, stripped
      */
     private static List<String> requiredBackendJobGradleInvocations(String workflow) {
-        List<String> invocations = new ArrayList<>();
-        List<String> current = new ArrayList<>();
-        boolean requiredJob = false;
+        Map<String, List<String>> jobs = new LinkedHashMap<>();
+        String currentJob = null;
+        String requiredJob = null;
         for (String line : workflow.split("\\R")) {
-            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
-                if (requiredJob) {
-                    invocations.addAll(current);
-                }
-                current = new ArrayList<>();
-                requiredJob = false;
-                continue;
-            }
             String stripped = line.strip();
-            if (stripped.startsWith("#")) {
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                currentJob = stripped.substring(0, stripped.length() - 1);
+                jobs.put(currentJob, new ArrayList<>());
                 continue;
             }
-            if (stripped.equals("name: " + REQUIRED_BACKEND_JOB)) {
-                requiredJob = true;
+            if (currentJob == null || stripped.startsWith("#")) {
+                continue;
             }
-            if (stripped.contains("gradlew")) {
-                current.add(stripped);
+            jobs.get(currentJob).add(line);
+            if (line.equals("    name: " + REQUIRED_BACKEND_JOB)) {
+                requiredJob = currentJob;
             }
         }
-        if (requiredJob) {
-            invocations.addAll(current);
+        if (requiredJob == null) {
+            return List.of();
+        }
+        List<String> requiredJobs = new ArrayList<>(List.of(requiredJob));
+        for (String line : jobs.get(requiredJob)) {
+            if (line.startsWith("    needs: ")) {
+                String dependencies = line.substring("    needs: ".length())
+                        .replace("[", "").replace("]", "");
+                for (String dependency : dependencies.split(",")) {
+                    requiredJobs.add(dependency.strip());
+                }
+            }
+        }
+        List<String> invocations = new ArrayList<>();
+        for (String job : requiredJobs) {
+            List<String> lines = jobs.getOrDefault(job, List.of());
+            if (!job.equals(requiredJob) && (lines.stream().anyMatch(line ->
+                    line.startsWith("    if:")
+                            && !line.equals("    if: needs.classify.outputs.backend == 'true'"))
+                    || !requiresSuccessfulDependency(jobs.get(requiredJob), job))) {
+                continue;
+            }
+            List<String> matrixTasks = matrixTaskLists(lines);
+            for (List<String> step : unconditionalWorkflowSteps(lines)) {
+                for (String line : step) {
+                    if ((line.startsWith("        run: ") || line.startsWith("      - run: "))
+                            && line.contains("bash gradlew ")) {
+                        if (line.contains("${{ matrix.tasks }}")) {
+                            for (String tasks : matrixTasks) {
+                                invocations.add(line.strip().replace("${{ matrix.tasks }}", tasks));
+                            }
+                        } else {
+                            invocations.add(line.strip());
+                        }
+                    }
+                }
+            }
         }
         return invocations;
+    }
+
+    /**
+     * Recognizes the aggregator's explicit env binding and fail-on-any-unsuccessful-result block.
+     *
+     * <p>Other shell shapes fail closed: mentioning a result, checking it in a conditional step,
+     * or merely logging it does not make a dependency required.
+     *
+     * @param lines the aggregator's uncommented workflow lines
+     * @param dependency the job ID whose success must be enforced
+     * @return whether an unconditional step exits unsuccessfully for every non-success result
+     */
+    private static boolean requiresSuccessfulDependency(List<String> lines, String dependency) {
+        Pattern binding = Pattern.compile(" {10}([A-Z_][A-Z0-9_]*): \\$\\{\\{ needs\\."
+                + Pattern.quote(dependency) + "\\.result }}");
+        Pattern failureGate = Pattern.compile("set -euo pipefail\\R {10}if \\[\\[ "
+                + "(\"\\$[A-Z_][A-Z0-9_]*\" != success(?: \\|\\| \"\\$[A-Z_][A-Z0-9_]*\" != success)*)"
+                + " ]]; then\\R(?: {12}echo [^\\r\\n]*\\R)* {12}exit 1\\R {10}fi");
+        for (List<String> step : unconditionalWorkflowSteps(lines)) {
+            int run = step.indexOf("        run: |");
+            if (run < 0 || step.stream().anyMatch(line -> line.startsWith("        continue-on-error:")
+                    || line.startsWith("      - continue-on-error:"))) {
+                continue;
+            }
+            var gate = failureGate.matcher(String.join("\n", step.subList(run + 1, step.size())).strip());
+            if (!gate.matches()) {
+                continue;
+            }
+            for (String line : step.subList(0, run)) {
+                var environment = binding.matcher(line);
+                if (environment.matches()
+                        && List.of(gate.group(1).split(" \\|\\| "))
+                                .contains("\"$" + environment.group(1) + "\" != success")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns steps without a step-level condition, preserving indentation for the small parsers.
+     *
+     * @param lines the uncommented workflow lines of one job
+     * @return the unconditional steps in declaration order
+     */
+    private static List<List<String>> unconditionalWorkflowSteps(List<String> lines) {
+        List<List<String>> steps = new ArrayList<>();
+        for (String line : lines) {
+            if (line.startsWith("      - ")) {
+                steps.add(new ArrayList<>());
+            }
+            if (!steps.isEmpty()) {
+                steps.getLast().add(line);
+            }
+        }
+        return steps.stream().filter(step -> step.stream().noneMatch(line ->
+                line.startsWith("        if:") || line.startsWith("      - if:"))).toList();
+    }
+
+    /**
+     * Reads task lists from the workflow's explicit shard entries, failing closed on other matrix shapes.
+     *
+     * @param lines the uncommented, indented lines of one job
+     * @return the tasks supplied by reachable include entries
+     */
+    private static List<String> matrixTaskLists(List<String> lines) {
+        List<String> tasks = new ArrayList<>();
+        boolean inMatrix = false;
+        boolean inInclude = false;
+        boolean inShard = false;
+        for (String line : lines) {
+            if (line.isBlank()) {
+                continue;
+            }
+            if (line.equals("      matrix:")) {
+                inMatrix = true;
+                continue;
+            }
+            if (!inMatrix) {
+                continue;
+            }
+            if (!line.startsWith("        ")) {
+                break;
+            }
+            if (line.equals("        include:")) {
+                inInclude = true;
+            } else if (inInclude && line.matches(" {10}- shard: [12]")) {
+                inShard = true;
+            } else if (inShard && line.startsWith("            tasks: ")) {
+                String value = line.substring("            tasks: ".length()).strip();
+                if (!value.matches("[A-Za-z0-9]+(?: [A-Za-z0-9]+)*")) {
+                    return List.of();
+                }
+                tasks.add(value);
+                inShard = false;
+            } else {
+                return List.of();
+            }
+        }
+        return tasks;
+    }
+
+    private static String backendMatrixWorkflow() {
+        return """
+                jobs:
+                  backend:
+                    name: Backend — build & test
+                    needs: [classify, backend-db]
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
+                  backend-db:
+                    needs: classify
+                    if: needs.classify.outputs.backend == 'true'
+                    strategy:
+                      matrix:
+                        include:
+                          - shard: 1
+                            tasks: dbTestShard1
+                          - shard: 2
+                            tasks: dbTestShard2 scriptedTrajectoryTest
+                    steps:
+                      - name: Test database shard
+                        run: bash gradlew ${{ matrix.tasks }} --no-daemon --stacktrace
+                """;
     }
 
     private static String read(Path path) throws IOException {
