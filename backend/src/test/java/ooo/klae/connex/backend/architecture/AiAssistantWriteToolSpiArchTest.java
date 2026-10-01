@@ -32,12 +32,12 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantAssignOwnerWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRescheduleTaskWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
@@ -437,11 +437,7 @@ class AiAssistantWriteToolSpiArchTest {
                 List.of("AiAssistantSetResponseDueWriteTool calls "
                         + "leadResponseSlaService.clearFirstResponseClock"),
                 unpermittedToolUses(
-                        AiAssistantCompleteTaskWriteTool.class,
-                    Map.of(TaskService.class, Set.of("complete")),
-                    AiAssistantRescheduleTaskWriteTool.class,
-                    Map.of(TaskService.class, Set.of("reschedule")),
-                    AiAssistantSetResponseDueWriteTool.class,
+                        AiAssistantSetResponseDueWriteTool.class,
                         responseDueTool
                                 + "\nleadResponseSlaService.clearFirstResponseClock(7, 31);\n"));
         String ownerTool = read(ASSISTANT_SOURCES.resolve("AiAssistantAssignOwnerWriteTool.java"));
