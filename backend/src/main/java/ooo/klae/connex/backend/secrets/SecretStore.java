@@ -6,6 +6,7 @@ import java.util.TreeSet;
 import java.util.function.IntConsumer;
 
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -248,15 +249,34 @@ public class SecretStore {
                 exception.getClass().getSimpleName()));
     }
 
+    /**
+     * Records an independent audit once the current transaction has completed, or at once outside one,
+     * so the append never contends with the scope locks this transaction holds.
+     *
+     * <p>The audit's content stays lazy, because whether a lazy rewrap counts depends on the outcome, but
+     * its actor is fixed at the call. A secret read inside {@code AutomationExecutor.runAs} joins the
+     * transaction enclosing that call, and {@code runAs} restores its caller's security context before
+     * the transaction completes, so an actor resolved at completion would be the scheduler thread's
+     * empty one (#1931). The append runs under the authentication the secret was used with, and the
+     * context in place at completion is restored afterwards, whatever the append does.
+     */
     private void deferIndependentAudit(IntConsumer recordAudit) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             recordAudit.accept(TransactionSynchronization.STATUS_COMMITTED);
             return;
         }
+        SecurityContext useContext = SecurityContextHolder.createEmptyContext();
+        useContext.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                recordAudit.accept(status);
+                SecurityContext completionContext = SecurityContextHolder.getContext();
+                SecurityContextHolder.setContext(useContext);
+                try {
+                    recordAudit.accept(status);
+                } finally {
+                    SecurityContextHolder.setContext(completionContext);
+                }
             }
         });
     }
