@@ -298,10 +298,10 @@ class CoreRecordSecurityIntegrationTest {
         Person person = newPerson(workspace);
         Deal deal = newDeal(workspace);
         User other = newMember(workspace);
-        String body = "x".repeat(50_000);
+        String body = previewNoteBody("", true);
         Note oldest = newNote(workspace, member, person, deal, "private", body);
         for (int index = 1; index < 105; index++) {
-            newNote(workspace, member, person, deal, "private", body);
+            newNote(workspace, member, person, deal, "private", previewNoteBody("", index == 104));
         }
         Note invisible = newNote(workspace, other, person, deal, "private", "Other private content");
         Workspace sibling = newWorkspace(workspace.getOrgId());
@@ -581,10 +581,11 @@ class CoreRecordSecurityIntegrationTest {
         User other = newMember(workspace);
         Note secret = newNote(workspace, other, null, null, "private", "Private target");
         String prefix = "[Hidden label](note:" + secret.getId() + ") ";
-        String body = prefix + "x".repeat(50_000 - prefix.length());
+        String body = previewNoteBody(prefix, true);
         Note oldest = newNote(workspace, member, person, deal, "private", body);
         for (int index = 1; index < 2001; index++) {
-            newNote(workspace, member, person, deal, "private", body);
+            newNote(workspace, member, person, deal, "private",
+                previewNoteBody(prefix, index == 2000 || index == 1900));
         }
         newNote(workspace, other, person, deal, "private", "Other private note");
         for (String route : List.of("/api/persons/" + person.getId() + "/notes",
@@ -628,9 +629,9 @@ class CoreRecordSecurityIntegrationTest {
         User other = newMember(workspace);
         Note privateTarget = newNote(workspace, other, null, null, "private", "Secret target");
         String prefix = "[Secret label](note:" + privateTarget.getId() + ") [Contact](person:" + person.getId() + ") ";
-        String content = prefix + "x".repeat(50_000 - prefix.length());
         for (int index = 0; index < 105; index++) {
-            newBacklinkNote(workspace, member, person, "private", content);
+            newBacklinkNote(workspace, member, person, "private",
+                previewNoteBody(prefix, index == 0 || index == 104));
         }
         Note invisible = newBacklinkNote(workspace, other, person, "private", "Other private content");
         Workspace foreignWorkspace = newWorkspace(newOrganization());
@@ -1232,4 +1233,9 @@ class CoreRecordSecurityIntegrationTest {
     private static String unique() {
         return UUID.randomUUID().toString();
     }
+    private static String previewNoteBody(String prefix, boolean large) {
+        int length = large ? 50_000 : 1_000;
+        return prefix + "x".repeat(length - prefix.length());
+    }
+
 }

@@ -18,7 +18,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -69,10 +68,10 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
-import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ApiCredentialMapper;
@@ -107,14 +106,13 @@ class PublicApiCredentialIntegrationTest {
     @Autowired private StatementCounter statementCounter;
     @Autowired private TenantContext tenantContext;
 
-    private final List<Integer> workspaceIds = new ArrayList<>();
-    private final List<Integer> organizationIds = new ArrayList<>();
-    private final List<Integer> userIds = new ArrayList<>();
-
+    private PublicApiFixtureSupport fixtures;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        fixtures = new PublicApiFixtureSupport(organizationMapper, workspaceMapper, userMapper,
+            passwordEncoder, jdbcTemplate, PASSWORD);
         tenantContext.clear();
         RequestContextHolder.resetRequestAttributes();
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
@@ -126,34 +124,7 @@ class PublicApiCredentialIntegrationTest {
     void cleanUpControlPlaneState() {
         tenantContext.clear();
         RequestContextHolder.resetRequestAttributes();
-        Throwable cleanupFailure = attempt(null, this::assertNoDedicatedPlacementLeaks);
-        for (int workspaceId : workspaceIds) {
-            cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                "DELETE FROM api_credential WHERE workspace_id = ?", workspaceId));
-        }
-        for (int organizationId : organizationIds) {
-            cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                "DELETE FROM org_placement WHERE org_id = ?", organizationId));
-        }
-        for (int workspaceId : workspaceIds) {
-            cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                "DELETE FROM workspace WHERE id = ?", workspaceId));
-        }
-        for (int organizationId : organizationIds) {
-            cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                "DELETE FROM organization WHERE id = ?", organizationId));
-        }
-        for (int userId : userIds) {
-            cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                "DELETE FROM app_user WHERE id = ?", userId));
-        }
-        cleanupFailure = attempt(cleanupFailure, this::assertControlPlaneCleanupComplete);
-        workspaceIds.clear();
-        organizationIds.clear();
-        userIds.clear();
-        if (cleanupFailure != null) {
-            rethrow(cleanupFailure);
-        }
+        fixtures.cleanUp(true);
     }
 
     @Test
@@ -328,6 +299,10 @@ class PublicApiCredentialIntegrationTest {
         MockHttpSession session = loginWithStepUp(manager);
         Issued expired = issue(session, workspace, "Expired", "crm.read");
         Issued revoked = issue(session, workspace, "Revoked", "crm.read");
+        Issued sqlRevoked = issue(session, workspace, "Revoked before first use", "crm.read");
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE api_credential SET revoked_at = UTC_TIMESTAMP(6), revoked_by_id = ? WHERE id = ?",
+            manager.getId(), sqlRevoked.id()));
         jdbcTemplate.update(
             "UPDATE api_credential SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?",
             expired.id());
@@ -348,6 +323,7 @@ class PublicApiCredentialIntegrationTest {
             Integer.class, expired.id(), workspace.getId(), sha256Hex(expired.token())));
         assertInvalid("Bearer " + expired.token());
         assertInvalid("Bearer " + revoked.token());
+        assertInvalid("Bearer " + sqlRevoked.token());
         mockMvc.perform(get("/api/v1/me")
                 .header(
                     HttpHeaders.AUTHORIZATION,
@@ -962,25 +938,6 @@ class PublicApiCredentialIntegrationTest {
     }
 
     @Test
-    void revocationCommittedBeforeAuthorizationSnapshotIsDenied() throws Exception {
-        Workspace workspace = newWorkspace("revoked-before-snapshot");
-        User manager = newMember(workspace, "member", "revoked-before-snapshot");
-        grantApiManager(workspace, manager, "revoked-before-snapshot");
-        Issued issued = issue(
-            loginWithStepUp(manager), workspace, "Revoked before snapshot", "crm.read");
-
-        assertEquals(1, jdbcTemplate.update(
-            "UPDATE api_credential SET revoked_at = UTC_TIMESTAMP(6), revoked_by_id = ? WHERE id = ?",
-            manager.getId(),
-            issued.id()));
-
-        mockMvc.perform(get("/api/v1/me")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + issued.token()))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("invalid_token"));
-    }
-
-    @Test
     void revocationCommittedAfterSnapshotIsBoundedToThatRequestTransaction() throws Exception {
         Workspace workspace = newWorkspace("revoked-after-snapshot");
         User manager = newMember(workspace, "member", "revoked-after-snapshot");
@@ -997,6 +954,12 @@ class PublicApiCredentialIntegrationTest {
                     if (!continueRequest.await(10, TimeUnit.SECONDS)) {
                         throw new ServletException("Timed out waiting to continue public API request");
                     }
+                    assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                    assertEquals(1, jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM api_credential WHERE id = ? AND workspace_id = ? "
+                            + "AND revoked_at IS NULL",
+                        Integer.class, issued.id(), workspace.getId()),
+                        "The dispatch transaction must retain the pre-revocation database snapshot");
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                     throw new ServletException("Interrupted while waiting to continue request", exception);
@@ -1071,56 +1034,15 @@ class PublicApiCredentialIntegrationTest {
     }
 
     private Workspace newWorkspace(String label) {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        Organization organization = new Organization();
-        organization.setName("Public API " + label + " " + suffix);
-        organization.setSlug("public-api-" + label + "-" + suffix);
-        organizationMapper.insert(organization);
-        organizationIds.add(organization.getId());
-        Workspace workspace = new Workspace();
-        workspace.setOrgId(organization.getId());
-        workspace.setName("Public API " + label + " " + suffix);
-        workspace.setSlug("public-api-" + label + "-" + suffix);
-        workspaceMapper.insert(workspace);
-        workspaceIds.add(workspace.getId());
-        return workspace;
+        return fixtures.newWorkspace(label);
     }
 
     private User newMember(Workspace workspace, String role, String label) {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        User user = new User();
-        user.setUsername("public_api_" + label + "_" + suffix);
-        user.setDisplayName("Public API " + label);
-        user.setEmail(label + "-" + suffix + "@example.com");
-        user.setPasswordHash(passwordEncoder.encode(PASSWORD));
-        user.setTimezone("UTC");
-        userMapper.insert(user);
-        userIds.add(user.getId());
-        workspaceMapper.addMember(workspace.getId(), user.getId(), role);
-        return user;
+        return fixtures.newMember(workspace, role, label);
     }
 
     private void grantApiManager(Workspace workspace, User user, String label) {
-        jdbcTemplate.update(
-            "INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)",
-            workspace.getId(),
-            "API manager " + label + " " + UUID.randomUUID().toString().substring(0, 8));
-        Integer roleId = jdbcTemplate.queryForObject(
-            "SELECT id FROM workspace_role WHERE workspace_id = ? ORDER BY id DESC LIMIT 1",
-            Integer.class,
-            workspace.getId());
-        assertNotNull(roleId);
-        jdbcTemplate.update(
-            "INSERT INTO workspace_role_permission (workspace_role_id, permission) VALUES (?, ?), (?, ?)",
-            roleId,
-            "API_CREDENTIAL_MANAGE",
-            roleId,
-            "REPORT_READ");
-        jdbcTemplate.update(
-            "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
-            roleId,
-            workspace.getId(),
-            user.getId());
+        fixtures.grantApiManager(workspace, user, label);
     }
 
     private MockHttpSession login(String username) throws Exception {
@@ -1152,72 +1074,6 @@ class PublicApiCredentialIntegrationTest {
                 assertFalse(rendered.contains(credentialName));
             }
         }
-    }
-
-    private void assertNoDedicatedPlacementLeaks() {
-        for (int organizationId : organizationIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM org_placement "
-                    + "WHERE org_id = ? AND placement_mode = 'dedicated_database'",
-                Integer.class,
-                organizationId),
-                "Public API credential test leaked a dedicated org_placement row for organization "
-                    + organizationId);
-        }
-    }
-
-    private void assertControlPlaneCleanupComplete() {
-        for (int workspaceId : workspaceIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM api_credential WHERE workspace_id = ?",
-                Integer.class,
-                workspaceId),
-                "Public API credential test leaked api_credential rows for workspace " + workspaceId);
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM workspace WHERE id = ?",
-                Integer.class,
-                workspaceId),
-                "Public API credential test leaked workspace " + workspaceId);
-        }
-        for (int organizationId : organizationIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM org_placement WHERE org_id = ?",
-                Integer.class,
-                organizationId),
-                "Public API credential test leaked org_placement rows for organization "
-                    + organizationId);
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM organization WHERE id = ?",
-                Integer.class,
-                organizationId),
-                "Public API credential test leaked organization " + organizationId);
-        }
-        for (int userId : userIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM app_user WHERE id = ?",
-                Integer.class,
-                userId),
-                "Public API credential test leaked app_user " + userId);
-        }
-    }
-
-    private static Throwable attempt(Throwable previous, Runnable cleanup) {
-        try {
-            cleanup.run();
-        } catch (RuntimeException | Error failure) {
-            if (previous == null) {
-                return failure;
-            }
-            previous.addSuppressed(failure);
-        }
-        return previous;
-    }
-
-    private static void rethrow(Throwable failure) {
-        if (failure instanceof RuntimeException runtimeException) {
-            throw runtimeException;
-        }
-        throw (Error) failure;
     }
 
     private static String sha256Hex(String value) throws Exception {

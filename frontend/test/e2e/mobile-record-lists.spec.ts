@@ -1,7 +1,34 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test as base, type Page } from "@playwright/test";
 
 import { csrfBootstrap, seeder, type RunFixture } from "./support/api";
 import { runFixture } from "./support/fixtures";
+
+const test = base.extend<{ createdTaskIds: number[] }>({
+    createdTaskIds: async ({ page }, runTest, testInfo) => {
+        const taskIds: number[] = [];
+        try {
+            await runTest(taskIds);
+        } finally {
+            if (taskIds.length > 0) {
+                const fixture = runFixture(testInfo.project.name);
+                const csrf = await csrfBootstrap(page.request);
+                const results = await Promise.allSettled(taskIds.map(async (id) => {
+                    const response = await page.request.delete(`/api/tasks/${id}`, {
+                        headers: {
+                            "X-Workspace-Id": String(fixture.workspaceId),
+                            [csrf.headerName]: csrf.token,
+                        },
+                    });
+                    expect(response.ok(), `DELETE /api/tasks/${id}: ${response.status()}`).toBe(true);
+                }));
+                const failures = results.filter((result) => result.status === "rejected");
+                if (failures.length > 0) {
+                    throw new AggregateError(failures.map((failure) => failure.reason), "Failed to remove mobile-list tasks");
+                }
+            }
+        }
+    },
+});
 
 test.describe("mobile record lists", () => {
     test("record pages force rows and restore the stored desktop view @mobile-only", async ({ page }, testInfo) => {
@@ -37,11 +64,13 @@ test.describe("mobile record lists", () => {
         await expect(mobileRow(page, "E2E Deal 1")).toBeVisible();
     });
 
-    test("phone filter sheets sort records and filter tasks @mobile-only", async ({ page }, testInfo) => {
+    test("phone filter sheets sort records and filter tasks @mobile-only", async ({ page, createdTaskIds }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.search;
         const taskDescription = `Mobile task ${fixture.username} retry ${testInfo.retry}`;
-        await createTask(page, fixture, taskDescription);
+        createdTaskIds.push(await createTask(page, fixture, taskDescription, contact.id));
+        const otherTaskDescription = `Other mobile task ${fixture.username} retry ${testInfo.retry}`;
+        createdTaskIds.push(await createTask(page, fixture, otherTaskDescription, fixture.contacts.peek.id));
 
         await page.goto(`/records/contacts?q=${encodeURIComponent(contact.name)}`);
         await page.getByRole("button", { name: "Filter and sort records" }).click();
@@ -61,14 +90,23 @@ test.describe("mobile record lists", () => {
         await expect(taskDisplayMode.getByRole("button", { name: "Board view" })).toHaveAttribute("aria-pressed", "true");
 
         await page.setViewportSize({ width: 412, height: 915 });
-        const taskRow = mobileRow(page, taskDescription);
+        const taskRow = page.getByRole("listitem").filter({ has: page.getByText(taskDescription, { exact: true }) });
+        const otherTaskRow = page.getByRole("listitem").filter({ has: page.getByText(otherTaskDescription, { exact: true }) });
         await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toBeVisible();
         await expect(taskRow.getByRole("button", { name: `Actions for ${taskDescription}` })).toBeVisible();
         await page.getByRole("button", { name: "Filter tasks" }).click();
         const tasksSheet = page.getByRole("dialog", { name: "Filters" });
         await tasksSheet.getByRole("button").filter({ hasText: contact.name }).click();
         await tasksSheet.getByRole("button", { name: "Done", exact: true }).click();
         await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toHaveCount(0);
+
+        await page.getByRole("button", { name: "Filter tasks" }).click();
+        await tasksSheet.getByRole("button").filter({ hasText: contact.name }).click();
+        await tasksSheet.getByRole("button", { name: "Done", exact: true }).click();
+        await expect(taskRow).toBeVisible();
+        await expect(otherTaskRow).toBeVisible();
     });
 });
 
@@ -90,7 +128,8 @@ async function createTask(
     page: Page,
     fixture: RunFixture,
     description: string,
-): Promise<void> {
+    personId: number,
+): Promise<number> {
     const response = await page.request.get("/api/auth/me");
     expect(response.status()).toBe(200);
     const currentUser: unknown = await response.json();
@@ -103,10 +142,14 @@ async function createTask(
         throw new Error("Invalid current-user response");
     }
     const csrf = await csrfBootstrap(page.request);
-    await seeder(page.request, fixture.workspaceId, csrf).post("/api/tasks", {
+    const task = await seeder(page.request, fixture.workspaceId, csrf).post("/api/tasks", {
         description,
         completed: false,
         assignedToId: currentUser.id,
-        personId: fixture.contacts.search.id,
+        personId,
     });
+    if (typeof task.id !== "number" || !Number.isInteger(task.id) || task.id <= 0) {
+        throw new Error("Invalid created-task response");
+    }
+    return task.id;
 }

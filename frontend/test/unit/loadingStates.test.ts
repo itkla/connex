@@ -92,6 +92,22 @@ function appSources(directory = path.join(process.cwd(), "app")): string[] {
     });
 }
 
+const sources = new Map<string, string>();
+let applicationFiles: string[] | undefined;
+
+function source(file: string): string {
+    const cached = sources.get(file);
+    if (cached !== undefined) return cached;
+    const text = readFileSync(file, "utf8");
+    sources.set(file, text);
+    return text;
+}
+
+function applicationSources(): string[] {
+    applicationFiles ??= appSources();
+    return applicationFiles;
+}
+
 /**
  * The `PageShell` opening tag a routed surface renders, normalized for whitespace. Comparing the whole
  * tag — not one prop — is what keeps a skeleton and its page from drifting apart on any wrapper concern.
@@ -437,8 +453,8 @@ describe("loading skeletons mirror rather than decorate", () => {
     });
 
     it("caps no page at the shell", () => {
-        const capped = appSources()
-            .filter((file) => /<PageShell\s[^>]*max-w-/.test(readFileSync(file, "utf8")))
+        const capped = applicationSources()
+            .filter((file) => /<PageShell\s[^>]*max-w-/.test(source(file)))
             .map((file) => path.relative(process.cwd(), file));
 
         expect(
@@ -449,8 +465,8 @@ describe("loading skeletons mirror rather than decorate", () => {
 
     it("caps no page at the wrapper immediately inside the shell", () => {
         const centeredCap = /<PageShell(?:\s[^>]*)?>\s*<[a-zA-Z][^>]*?(?:mx-auto[^>]*max-w-|max-w-[^>]*mx-auto)[^>]*>/;
-        const capped = appSources()
-            .filter((file) => centeredCap.test(readFileSync(file, "utf8")))
+        const capped = applicationSources()
+            .filter((file) => centeredCap.test(source(file)))
             .map((file) => path.relative(process.cwd(), file));
 
         expect(

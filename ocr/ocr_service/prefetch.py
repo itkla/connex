@@ -1,7 +1,11 @@
 import hashlib
+import http.client
 import shutil
+import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -15,6 +19,19 @@ _MODEL_BASE_URL = f"https://{_MODEL_HOST}/paddlex/official_inference_model/paddl
 _MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 _MAX_EXTRACTED_BYTES = 128 * 1024 * 1024
 _MAX_ARCHIVE_MEMBERS = 64
+_RETRY_BACKOFF_SECONDS = (2.0, 8.0, 20.0)
+_RETRYABLE_STATUSES = frozenset({408, 429})
+
+
+class _PrematureEof(OSError):
+    """The body ended before the pinned length.
+
+    A bounded ``HTTPResponse.read(amt)`` returns the short data and then ``b""`` when a server
+    closes a fixed-length response early, raising nothing. Reporting that as an integrity failure
+    would put a plain transport interruption on the non-retryable path, so it is raised separately
+    and inherits :class:`OSError` to land in the retryable set. Nothing is accepted on a short body:
+    the pinned length and digest still gate every completed download.
+    """
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -76,13 +93,47 @@ def _install(artifact: ModelArtifact, root: Path) -> None:
     with tempfile.TemporaryDirectory(prefix=".prefetch-", dir=root) as temporary:
         temporary_root = Path(temporary)
         archive_path = temporary_root / f"{artifact.name}.tar"
-        _download(artifact, archive_path)
+        _fetch(artifact, archive_path)
         extracted_root = temporary_root / "extracted"
         extracted_root.mkdir()
         source = _extract(artifact, archive_path, extracted_root)
         if not model_directory_ready(source):
             raise RuntimeError(f"Model archive is incomplete: {artifact.name}")
         source.rename(destination)
+
+
+def _fetch(artifact: ModelArtifact, destination: Path) -> None:
+    """Downloads a pinned archive, retrying only transport failures.
+
+    Every verification failure in :func:`_download` — pinned size, ``Content-Length``, digest,
+    host, redirect — raises :class:`RuntimeError`, which this deliberately does not catch. A
+    download that failed its integrity checks must never be re-attempted, so the distinction is
+    carried by the exception type rather than by a predicate a later change could widen. A body that
+    ends early is the one case that looks like an integrity failure but is not: it raises
+    :class:`_PrematureEof` and is retried, and the retry re-verifies the whole artifact.
+    """
+    for attempt in range(len(_RETRY_BACKOFF_SECONDS) + 1):
+        try:
+            _download(artifact, destination)
+            return
+        except (OSError, http.client.HTTPException) as error:
+            destination.unlink(missing_ok=True)
+            if attempt == len(_RETRY_BACKOFF_SECONDS) or not _retryable(error):
+                raise
+            delay = _RETRY_BACKOFF_SECONDS[attempt]
+            print(
+                f"Model download failed ({artifact.name}): {error}; "
+                f"retrying in {delay:.0f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+
+
+def _retryable(error: BaseException) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in _RETRYABLE_STATUSES or error.code >= 500
+    return True
 
 
 def _download(artifact: ModelArtifact, destination: Path) -> None:
@@ -108,7 +159,10 @@ def _download(artifact: ModelArtifact, destination: Path) -> None:
                     raise RuntimeError(f"Model archive exceeds its pinned size: {artifact.name}")
                 digest.update(chunk)
                 output.write(chunk)
-    if received != artifact.size or digest.hexdigest() != artifact.sha256:
+    if received < artifact.size:
+        raise _PrematureEof(
+            f"Model archive ended after {received} of {artifact.size} bytes: {artifact.name}")
+    if digest.hexdigest() != artifact.sha256:
         raise RuntimeError(f"Model archive integrity check failed: {artifact.name}")
 
 

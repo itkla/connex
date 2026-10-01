@@ -399,7 +399,7 @@ describe("app-shell capability navigation honesty", () => {
         const html = renderToStaticMarkup(sidebar);
 
         expect(sidebar.props.navAccess.captureReviews).toBe("disabled");
-        expect(html).not.toContain("/account/connections/reviews");
+        expect(html).not.toContain("/settings/personal/connected-accounts#reviews");
         expect(html).not.toContain("CapabilityUnavailable.title");
         expect(html).toContain("CommonSidebar.navDashboard");
     });

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -369,6 +370,41 @@ class AiAssistantToolExecutorTest {
                 privateResult.data().get("notes"));
     }
 
+    @Test
+    void sharedBulkReadsExcludePrivateNotesWhilePrivateSessionsKeepThem() throws Exception {
+        Note workspaceNote = new Note();
+        workspaceNote.setVisibility("workspace");
+        workspaceNote.setContent("Visible to the workspace");
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setContent("Owner only");
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+
+        AiAssistantToolResult shared = executor.execute(
+                "get_records", objectMapper.readTree("{\"handles\":[\"r1\"]}"), resources, false);
+        AiAssistantToolResult privateResult = executor.execute(
+                "get_records", objectMapper.readTree("{\"handles\":[\"r1\"]}"), resources, true);
+
+        List<?> sharedRecords = assertInstanceOf(List.class, shared.data().get("records"));
+        List<?> privateRecords = assertInstanceOf(List.class, privateResult.data().get("records"));
+        assertEquals(1, sharedRecords.size());
+        assertEquals(1, privateRecords.size());
+        assertEquals(
+                List.of(Map.of("content", "Visible to the workspace")),
+                assertInstanceOf(Map.class, sharedRecords.getFirst()).get("notes"));
+        assertEquals(
+                List.of(
+                        Map.of("content", "Visible to the workspace"),
+                        Map.of("content", "Owner only")),
+                assertInstanceOf(Map.class, privateRecords.getFirst()).get("notes"));
+    }
+
     /**
      * The bulk read collapses a record crawl into one step without granting anything the serial
      * form did not: every handle resolves through the registry, duplicates are read once, and each
@@ -393,14 +429,16 @@ class AiAssistantToolExecutorTest {
                 objectMapper.readTree("{\"handles\":[\"r1\",\"r2\",\"r1\"]}"),
                 resources, false);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> records =
-                (List<Map<String, Object>>) result.data().get("records");
+        List<?> records = assertInstanceOf(List.class, result.data().get("records"));
         assertEquals(2, records.size());
-        assertEquals("r1", records.get(0).get("handle"));
-        assertEquals("r2", records.get(1).get("handle"));
-        assertEquals("Ada Lovelace", records.get(0).get("name"));
-        assertEquals("Grace Hopper", records.get(1).get("name"));
+        Map<?, ?> first = assertInstanceOf(Map.class, records.get(0));
+        Map<?, ?> second = assertInstanceOf(Map.class, records.get(1));
+        assertEquals("r1", first.get("handle"));
+        assertEquals("r2", second.get("handle"));
+        assertEquals("Ada Lovelace", first.get("name"));
+        assertEquals("Grace Hopper", second.get("name"));
+        verify(personService).getPersonById(17);
+        verify(personService).getPersonById(18);
     }
 
     @Test

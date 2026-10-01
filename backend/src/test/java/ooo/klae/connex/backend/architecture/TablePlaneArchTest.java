@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
@@ -8,6 +9,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 import javax.sql.DataSource;
@@ -136,7 +139,7 @@ class TablePlaneArchTest {
                         + " is missing");
                 }
                 if (!leadingIndexExists(
-                        connection, declaration.table(), declaration.workspaceColumn(), false)) {
+                        connection, declaration.table(), declaration.workspaceColumn())) {
                     violations.add(declaration.table() + "." + declaration.workspaceColumn()
                         + " does not lead an index");
                 }
@@ -144,16 +147,46 @@ class TablePlaneArchTest {
                     violations.add(declaration.table() + "." + declaration.exportKey()
                         + " is missing");
                 }
-                if (!leadingIndexExists(
-                        connection, declaration.table(), declaration.exportKey(), true)) {
+                if (!uniqueExportKeyExists(
+                        connection, declaration.table(), declaration.exportKey())) {
                     violations.add(declaration.table() + "." + declaration.exportKey()
-                        + " does not lead a unique index");
+                        + " is not independently unique");
                 }
             }
         }
         assertTrue(violations.isEmpty(),
             "Control-workspace lifecycle declarations need live indexed workspace and keyset "
                 + "columns: " + violations);
+    }
+
+    @Test
+    void aCompositeUniquePrefixDoesNotEstablishExportKeyUniqueness() {
+        assertFalse(hasUniqueExportKey(List.of(List.of("export_key", "other_column")), "export_key"));
+        assertFalse(hasUniqueExportKey(List.of(List.of("other_column", "export_key")), "export_key"));
+        assertFalse(hasUniqueExportKey(List.of(List.of("other_column")), "export_key"));
+        assertTrue(hasUniqueExportKey(List.of(List.of("export_key")), "export_key"));
+    }
+
+    private boolean uniqueExportKeyExists(Connection connection, String table, String column)
+            throws Exception {
+        Map<String, List<String>> indexes = new LinkedHashMap<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT INDEX_NAME, COLUMN_NAME FROM information_schema.STATISTICS"
+                    + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND NON_UNIQUE = 0"
+                    + " ORDER BY INDEX_NAME, SEQ_IN_INDEX")) {
+            statement.setString(1, table);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    indexes.computeIfAbsent(result.getString(1), ignored -> new ArrayList<>())
+                        .add(result.getString(2));
+                }
+            }
+        }
+        return hasUniqueExportKey(new ArrayList<>(indexes.values()), column);
+    }
+
+    private static boolean hasUniqueExportKey(List<List<String>> indexes, String column) {
+        return indexes.stream().anyMatch(columns -> columns.equals(List.of(column)));
     }
 
     private boolean columnExists(Connection connection, String table, String column)
@@ -173,13 +206,11 @@ class TablePlaneArchTest {
     private boolean leadingIndexExists(
             Connection connection,
             String table,
-            String column,
-            boolean unique) throws Exception {
-        String uniquePredicate = unique ? " AND NON_UNIQUE = 0" : "";
+            String column) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT COUNT(*) FROM information_schema.STATISTICS"
                     + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
-                    + " AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1" + uniquePredicate)) {
+                    + " AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1")) {
             statement.setString(1, table);
             statement.setString(2, column);
             try (ResultSet resultSet = statement.executeQuery()) {

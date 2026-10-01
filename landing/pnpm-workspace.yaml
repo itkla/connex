@@ -4,8 +4,16 @@ allowBuilds:
   esbuild: true
   workerd: true
 overrides:
+  # GHSA-6j4f-fj2g-mc7p and GHSA-qhr7-859c-m2p7, both high, hit three lines at once here:
+  # <2.1.5/<2.1.6 on the 2.x resolution and <5.0.10/<5.0.11 on the 5.x one. Both need a pin;
+  # carets keep each on its own line.
+  'brace-expansion@2': ^2.1.6
+  'brace-expansion@>=3': ^5.0.11
   # shadcn > cosmiconfig pulls js-yaml 4.3.1 (GHSA-2883-xcg3-v3hh, high).
   js-yaml: '>=4.3.2'
+  # wrangler/miniflare pull undici below 7.29.1 (GHSA-rfgv-xxqx-mfg5 and
+  # GHSA-w293-vg96-wgc3, both high). Caret keeps the 7.x line.
+  undici: ^7.29.1
 # Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
 # than one day and versions without registry publish time are refused, and a
 # package whose trust evidence (staged publish, trusted publisher, provenance)

@@ -49,19 +49,31 @@ class AiAssistantScopeActivityMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        activity(actor, person, null, "meeting", "2026-03-01 09:00:00");
-        activity(actor, null, deal, "call", "2026-03-02 09:00:00");
+        Activity personOnly = activity(actor, person, null, "meeting", "2026-03-01 09:00:00");
+        Activity dealOnly = activity(actor, null, deal, "call", "2026-03-02 09:00:00");
+        Company otherCompany = newCompany();
+        Deal otherDeal = newDeal(pipeline, stage, otherCompany);
+        Activity conflicting = activity(actor, person, otherDeal, "meeting", "2026-03-01 12:00:00");
 
         List<AiAssistantScopeActivity> rows = activityMapper.getAiAssistantScopeActivities(
                 workspace.getId(), List.of(workspace.getId()), "company",
                 List.of(company.getId()), WINDOW_START, WINDOW_END, List.of(), true, 10, 50);
 
-        assertEquals(2, rows.size());
+        assertEquals(3, rows.size());
+        assertEquals(List.of(dealOnly.getId(), conflicting.getId(), personOnly.getId()),
+                rows.stream().map(AiAssistantScopeActivity::id).toList());
         assertTrue(rows.stream().allMatch(row -> row.scopeRecordId() == company.getId()));
         assertEquals("call", rows.getFirst().type());
-        assertEquals(2L, activityMapper.countAiAssistantScopeActivities(
+        assertEquals(3L, activityMapper.countAiAssistantScopeActivities(
                 workspace.getId(), List.of(workspace.getId()), "company",
                 List.of(company.getId()), WINDOW_START, WINDOW_END, List.of(), true));
+        assertTrue(activityMapper.getAiAssistantScopeActivities(
+                workspace.getId(), List.of(workspace.getId()), "company",
+                List.of(otherCompany.getId()), WINDOW_START, WINDOW_END, List.of(), true, 10, 50)
+                .isEmpty());
+        assertEquals(0L, activityMapper.countAiAssistantScopeActivities(
+                workspace.getId(), List.of(workspace.getId()), "company",
+                List.of(otherCompany.getId()), WINDOW_START, WINDOW_END, List.of(), true));
     }
 
     @Test
@@ -70,17 +82,30 @@ class AiAssistantScopeActivityMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         Person person = newPerson(company);
         activity(actor, person, null, "meeting", "2026-03-01 09:00:00");
-        activity(actor, person, null, "meeting", "2026-03-02 09:00:00");
-        activity(actor, person, null, "meeting", "2026-03-03 09:00:00");
+        Activity second = activity(actor, person, null, "meeting", "2026-03-02 09:00:00");
+        Activity newest = activity(actor, person, null, "meeting", "2026-03-03 09:00:00");
+        Company otherCompany = newCompany();
+        Person otherPerson = newPerson(otherCompany);
+        activity(actor, otherPerson, null, "call", "2026-03-01 10:00:00");
+        Activity otherSecond = activity(actor, otherPerson, null, "call", "2026-03-02 10:00:00");
+        Activity otherNewest = activity(actor, otherPerson, null, "call", "2026-03-03 10:00:00");
 
         List<AiAssistantScopeActivity> rows = activityMapper.getAiAssistantScopeActivities(
                 workspace.getId(), List.of(workspace.getId()), "company",
-                List.of(company.getId()), WINDOW_START, WINDOW_END, List.of(), true, 2, 50);
+                List.of(company.getId(), otherCompany.getId()),
+                WINDOW_START, WINDOW_END, List.of(), true, 2, 50);
 
-        assertEquals(2, rows.size());
-        assertEquals(3L, activityMapper.countAiAssistantScopeActivities(
+        assertEquals(4, rows.size());
+        assertEquals(List.of(newest.getId(), second.getId()), rows.stream()
+                .filter(row -> row.scopeRecordId() == company.getId())
+                .map(AiAssistantScopeActivity::id).toList());
+        assertEquals(List.of(otherNewest.getId(), otherSecond.getId()), rows.stream()
+                .filter(row -> row.scopeRecordId() == otherCompany.getId())
+                .map(AiAssistantScopeActivity::id).toList());
+        assertEquals(6L, activityMapper.countAiAssistantScopeActivities(
                 workspace.getId(), List.of(workspace.getId()), "company",
-                List.of(company.getId()), WINDOW_START, WINDOW_END, List.of(), true));
+                List.of(company.getId(), otherCompany.getId()),
+                WINDOW_START, WINDOW_END, List.of(), true));
     }
 
     @Test
@@ -183,7 +208,7 @@ class AiAssistantScopeActivityMapperTest extends AbstractMapperTest {
                 true, 10, 50).stream().findAny().isPresent());
     }
 
-    private void activity(
+    private Activity activity(
             User actor, Person person, Deal deal, String type, String timestamp) {
         Activity activity = new Activity();
         activity.setWorkspaceId(workspace.getId());
@@ -195,6 +220,7 @@ class AiAssistantScopeActivityMapperTest extends AbstractMapperTest {
         activity.setCreatedBy(actor);
         activity.setTimestamp(timestamp);
         activityMapper.insert(activity);
+        return activity;
     }
 
     private Company companyIn(Workspace target) {

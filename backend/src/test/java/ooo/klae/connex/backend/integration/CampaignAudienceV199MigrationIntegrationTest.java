@@ -12,7 +12,6 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.UUID;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
@@ -34,14 +33,10 @@ import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CampaignAudienceV199MigrationIntegrationTest {
 
-    private static final String SCRATCH_CATALOG =
-            "connex_campaign_v199_it_" + UUID.randomUUID().toString().replace("-", "");
-
-    private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
     private static String password;
-    private static boolean created;
+    private static MySqlScratchCatalog scratchCatalog;
 
     @BeforeAll
     static void createV198EquivalentCatalogWithCampaignAudienceRows() throws SQLException {
@@ -52,13 +47,10 @@ class CampaignAudienceV199MigrationIntegrationTest {
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(username != null && password != null,
                 "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping V199 migration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
-        scratchUrl = withCatalog(configuredUrl, SCRATCH_CATALOG);
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + SCRATCH_CATALOG
-                    + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
-            created = true;
+        try {
+            scratchCatalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_campaign_v199_it_", "utf8mb4", "utf8mb4_0900_ai_ci");
+            scratchUrl = scratchCatalog.url();
         } catch (SQLException exception) {
             assumeTrue(false, "Cannot create V199 migration scratch catalog: " + exception.getMessage());
         }
@@ -140,12 +132,8 @@ class CampaignAudienceV199MigrationIntegrationTest {
 
     @AfterAll
     static void dropScratchCatalog() throws SQLException {
-        if (!created) {
-            return;
-        }
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + SCRATCH_CATALOG + "`");
+        if (scratchCatalog != null) {
+            scratchCatalog.close();
         }
     }
 
@@ -157,7 +145,7 @@ class CampaignAudienceV199MigrationIntegrationTest {
         try (Connection connection = connection();
                 Statement statement = connection.createStatement();
                 SqlSession session = sessionFactory.openSession(connection)) {
-            assertEquals(SCRATCH_CATALOG, session.getConnection().getCatalog());
+            assertEquals(scratchCatalog.name(), session.getConnection().getCatalog());
             assertEquals("email:marketing", stringScalar(statement, """
                 SELECT CONCAT(channel, ':', purpose)
                 FROM campaign_audience WHERE id = 65201
@@ -574,11 +562,4 @@ class CampaignAudienceV199MigrationIntegrationTest {
         }
     }
 
-    private static String withCatalog(String configuredUrl, String catalog) {
-        int queryIndex = configuredUrl.indexOf('?');
-        String query = queryIndex >= 0 ? configuredUrl.substring(queryIndex) : "";
-        String base = queryIndex >= 0 ? configuredUrl.substring(0, queryIndex) : configuredUrl;
-        int slashIndex = base.lastIndexOf('/');
-        return base.substring(0, slashIndex + 1) + catalog + query;
-    }
 }

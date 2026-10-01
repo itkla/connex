@@ -17,9 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.sql.Timestamp;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -49,7 +47,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
-import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
@@ -87,11 +84,7 @@ class PublicApiTenantIsolationIntegrationTest {
     @Autowired private WorkspaceService workspaceService;
     @MockitoSpyBean private TenantCatalogResolver tenantCatalogResolver;
 
-    private final List<Integer> workspaceIds = new ArrayList<>();
-    private final List<Integer> organizationIds = new ArrayList<>();
-    private final List<Integer> userIds = new ArrayList<>();
-    private final List<String> scratchCatalogs = new ArrayList<>();
-
+    private PublicApiFixtureSupport fixtures;
     private MockMvc mockMvc;
 
     @DynamicPropertySource
@@ -106,6 +99,8 @@ class PublicApiTenantIsolationIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        fixtures = new PublicApiFixtureSupport(organizationMapper, workspaceMapper, userMapper,
+            passwordEncoder, jdbcTemplate, PASSWORD);
         tenantContext.clear();
         RequestContextHolder.resetRequestAttributes();
         clearInvocations(tenantCatalogResolver);
@@ -118,43 +113,8 @@ class PublicApiTenantIsolationIntegrationTest {
     void cleanUpRoutingState() {
         tenantContext.clear();
         RequestContextHolder.resetRequestAttributes();
-        Throwable cleanupFailure = null;
-        try {
-            for (int workspaceId : workspaceIds) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                    "DELETE FROM api_credential WHERE workspace_id = ?", workspaceId));
-            }
-            for (int organizationId : organizationIds) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                    "DELETE FROM org_placement WHERE org_id = ?", organizationId));
-            }
-            for (int workspaceId : workspaceIds) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                    "DELETE FROM workspace WHERE id = ?", workspaceId));
-            }
-            for (int organizationId : organizationIds) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                    "DELETE FROM organization WHERE id = ?", organizationId));
-            }
-            for (int userId : userIds) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.update(
-                    "DELETE FROM app_user WHERE id = ?", userId));
-            }
-        } finally {
-            for (String catalog : scratchCatalogs) {
-                cleanupFailure = attempt(cleanupFailure, () -> jdbcTemplate.execute(
-                    "DROP DATABASE IF EXISTS `" + identifier(catalog) + "`"));
-            }
-        }
-        cleanupFailure = attempt(cleanupFailure, this::assertCleanupComplete);
-        workspaceIds.clear();
-        organizationIds.clear();
-        userIds.clear();
-        scratchCatalogs.clear();
         clearInvocations(tenantCatalogResolver);
-        if (cleanupFailure != null) {
-            rethrow(cleanupFailure);
-        }
+        fixtures.cleanUp(false);
     }
 
     @Test
@@ -376,55 +336,15 @@ class PublicApiTenantIsolationIntegrationTest {
     }
 
     private Workspace newWorkspace(String label) {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        Organization organization = new Organization();
-        organization.setName("API tenant " + label + " " + suffix);
-        organization.setSlug("api-tenant-" + label + "-" + suffix);
-        organizationMapper.insert(organization);
-        organizationIds.add(organization.getId());
-        Workspace workspace = new Workspace();
-        workspace.setOrgId(organization.getId());
-        workspace.setName("API tenant " + label + " " + suffix);
-        workspace.setSlug("api-tenant-" + label + "-" + suffix);
-        workspaceMapper.insert(workspace);
-        workspaceIds.add(workspace.getId());
-        return workspace;
+        return fixtures.newWorkspace(label);
     }
 
     private User newUser(String label) {
-        String suffix = UUID.randomUUID().toString().substring(0, 8);
-        User user = new User();
-        user.setUsername("api_tenant_" + label + "_" + suffix);
-        user.setDisplayName("API tenant " + label);
-        user.setEmail(label + "-" + suffix + "@example.com");
-        user.setPasswordHash(passwordEncoder.encode(PASSWORD));
-        user.setTimezone("UTC");
-        userMapper.insert(user);
-        userIds.add(user.getId());
-        return user;
+        return fixtures.newUser(label);
     }
 
     private void grantApiManager(Workspace workspace, User user, String label) {
-        jdbcTemplate.update(
-            "INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)",
-            workspace.getId(),
-            "API manager " + label + " " + UUID.randomUUID().toString().substring(0, 8));
-        Integer roleId = jdbcTemplate.queryForObject(
-            "SELECT id FROM workspace_role WHERE workspace_id = ? ORDER BY id DESC LIMIT 1",
-            Integer.class,
-            workspace.getId());
-        assertNotNull(roleId);
-        jdbcTemplate.update(
-            "INSERT INTO workspace_role_permission (workspace_role_id, permission) VALUES (?, ?), (?, ?)",
-            roleId,
-            "API_CREDENTIAL_MANAGE",
-            roleId,
-            "REPORT_READ");
-        jdbcTemplate.update(
-            "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
-            roleId,
-            workspace.getId(),
-            user.getId());
+        fixtures.grantApiManager(workspace, user, label);
     }
 
     private void grantCustomRole(
@@ -473,12 +393,7 @@ class PublicApiTenantIsolationIntegrationTest {
     }
 
     private String createScratchCatalog(String label) {
-        String catalog = "cnx_public_api_" + label + "_"
-            + UUID.randomUUID().toString().replace("-", "");
-        scratchCatalogs.add(catalog);
-        jdbcTemplate.execute("CREATE DATABASE `" + identifier(catalog)
-            + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
-        return catalog;
+        return fixtures.createScratchCatalog(label);
     }
 
     private void insertPlacement(int organizationId, String catalog) {
@@ -489,63 +404,6 @@ class PublicApiTenantIsolationIntegrationTest {
             catalog);
     }
 
-    private void assertCleanupComplete() {
-        for (int workspaceId : workspaceIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM api_credential WHERE workspace_id = ?",
-                Integer.class,
-                workspaceId));
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM workspace WHERE id = ?",
-                Integer.class,
-                workspaceId));
-        }
-        for (int organizationId : organizationIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM org_placement WHERE org_id = ?",
-                Integer.class,
-                organizationId),
-                "Public API tenant test leaked org_placement rows for organization "
-                    + organizationId);
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM organization WHERE id = ?",
-                Integer.class,
-                organizationId));
-        }
-        for (int userId : userIds) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM app_user WHERE id = ?",
-                Integer.class,
-                userId),
-                "Public API tenant test leaked app_user " + userId);
-        }
-        for (String catalog : scratchCatalogs) {
-            assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?",
-                Integer.class,
-                catalog));
-        }
-    }
-
-    private static Throwable attempt(Throwable previous, Runnable cleanup) {
-        try {
-            cleanup.run();
-        } catch (RuntimeException | Error failure) {
-            if (previous == null) {
-                return failure;
-            }
-            previous.addSuppressed(failure);
-        }
-        return previous;
-    }
-
-    private static void rethrow(Throwable failure) {
-        if (failure instanceof RuntimeException runtimeException) {
-            throw runtimeException;
-        }
-        throw (Error) failure;
-    }
-
     private static String defaultCatalog() {
         String catalog = TenantRoutingConfig.databaseFromJdbcUrl(System.getenv("CONNEX_DB_URL"));
         if (catalog != null) {
@@ -553,13 +411,6 @@ class PublicApiTenantIsolationIntegrationTest {
         }
         String configured = System.getenv("CONNEX_DB_NAME");
         return configured != null ? configured : "connexdb";
-    }
-
-    private static String identifier(String value) {
-        if (value == null || !value.matches("[A-Za-z0-9_]{1,64}")) {
-            throw new IllegalArgumentException("Invalid test catalog identifier");
-        }
-        return value;
     }
 
 }

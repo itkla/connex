@@ -326,7 +326,10 @@ class TenantExportAdmissionIntegrationTest extends AbstractServiceTest {
                         rows.next();
                         throw new AssertionError("Cancelled cursor returned its blocked row");
                     }
-                } catch (Throwable exception) {
+                } catch (AssertionError assertion) {
+                    primary = assertion;
+                    throw assertion;
+                } catch (Exception exception) {
                     primary = exception;
                     workerFailure.set(exception);
                 } finally {
@@ -350,7 +353,12 @@ class TenantExportAdmissionIntegrationTest extends AbstractServiceTest {
             cancellationExecutor.shutdownNow();
         }
 
-        assertTrue(workerFailure.get() != null);
+        Throwable cancellationFailure = workerFailure.get();
+        while (cancellationFailure != null && !(cancellationFailure instanceof SQLException)) {
+            cancellationFailure = cancellationFailure.getCause();
+        }
+        assertInstanceOf(SQLException.class, cancellationFailure,
+            () -> "Expected JDBC cancellation failure, got " + workerFailure.get());
         assertTrue(leaseReleased.get());
         assertEquals(1, jdbcTemplate.queryForObject("SELECT 1", Integer.class));
     }

@@ -10,6 +10,8 @@ import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
@@ -62,6 +64,15 @@ class WorkflowActionRetryPolicyTest {
         assertTrue(first.compareTo(Duration.ofSeconds(30)) >= 0);
         assertTrue(policy.retryDelay(31L, "action", 3)
             .compareTo(Duration.ofMinutes(15)) <= 0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {6, 9, 20})
+    void retryDelaySaturatesAtTheConfiguredMaximum(int attempt) {
+        WorkflowActionRetryPolicy policy = policy();
+
+        assertEquals(Duration.ofMinutes(15), policy.retryDelay(31L, "action", attempt));
+        assertEquals(policy.retryDelay(31L, "action", attempt), policy.retryDelay(31L, "action", attempt));
     }
 
     private static WorkflowActionRetryPolicy policy() {

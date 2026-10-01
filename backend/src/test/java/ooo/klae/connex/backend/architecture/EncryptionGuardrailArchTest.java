@@ -31,6 +31,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
@@ -550,84 +552,101 @@ class EncryptionGuardrailArchTest {
                 + "not an app-level blob: " + violationLocations);
     }
 
-    @Test
-    void documentation_fixture_binds_exceptions_to_the_matched_statement(@TempDir Path fixtureRoot) throws Exception {
-        Path adjacent = writeFixture(fixtureRoot, "claims.md", """
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("documentationClaimCases")
+    void documentation_fixture_binds_exceptions_to_the_matched_statement(
+            DocumentationClaimCase fixture, @TempDir Path fixtureRoot) throws Exception {
+        Path file = writeFixture(fixtureRoot, fixture.path(), fixture.content());
+        List<String> violations = unsupportedDocClaimViolations(fixtureRoot, file);
+
+        assertEquals(fixture.expectedCount(), violations.size());
+        if (fixture.expectedLocation() != null) {
+            assertTrue(violations.getFirst().contains(fixture.expectedLocation()));
+        }
+        if (fixture.discovered()) {
+            assertTrue(customerFacingTextFiles(fixtureRoot).contains(file));
+        }
+    }
+
+    private static Stream<DocumentationClaimCase> documentationClaimCases() {
+        return Stream.of(
+            new DocumentationClaimCase("claims.md", """
             Hosted Connex is E2EE.
             Do not say hosted Connex is E2EE.
-            """);
-        Path wrapped = writeFixture(fixtureRoot, "wrapped.md", """
+            """,
+                1, "claims.md:1", false),
+            new DocumentationClaimCase("wrapped.md", """
             Hosted storage is not
             end-to-end encryption or zero-knowledge encryption.
-            """);
-        Path table = writeFixture(fixtureRoot, "table.md", """
+            """,
+                0, null, false),
+            new DocumentationClaimCase("table.md", """
             | Claim | Separate policy |
             | Connex is E2EE. | Hosted Connex is not E2EE. |
             | Is Connex E2EE? | No for hosted SaaS. |
-            """);
-        Path notOnly = writeFixture(fixtureRoot, "not-only.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("not-only.md", """
             Not only is Connex E2EE, it is convenient.
-            """);
-        Path json = writeFixture(fixtureRoot, "claims.json", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("claims.json", """
             {"policy":"Do not say E2EE","marketing":"Connex is E2EE"}
-            """);
-        Path html = writeFixture(fixtureRoot, "claims.html", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("claims.html", """
             <p>Do not say E2EE</p><p>Connex is E2EE</p>
-            """);
-        Path misboundNegation = writeFixture(fixtureRoot, "misbound-negation.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("misbound-negation.md", """
             Hosted Connex is E2EE, but another deployment is not zero-knowledge.
-            """);
-        Path misboundOnPrem = writeFixture(fixtureRoot, "misbound-on-prem.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("misbound-on-prem.md", """
             Hosted Connex is E2EE, while customer-operated/on-prem only deployments control their keys.
-            """);
-        Path coordinatedClaims = writeFixture(fixtureRoot, "coordinated-claims.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("coordinated-claims.md", """
             This deployment is not E2EE and hosted Connex is zero-knowledge.
             Customer-operated/on-prem only deployments may be E2EE and hosted Connex is zero-knowledge.
-            """);
-        Path clausePolicy = writeFixture(fixtureRoot, "clause-policy.md", """
+            """,
+                2, null, false),
+            new DocumentationClaimCase("clause-policy.md", """
             Do not say legacy mode is E2EE, and hosted Connex is zero-knowledge.
-            """);
-        Path misplacedQualifier = writeFixture(fixtureRoot, "misplaced-qualifier.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("misplaced-qualifier.md", """
             Hosted Connex is E2EE because customer-operated/on-prem only deployments also exist.
-            """);
-        Path validPostfixNegation = writeFixture(fixtureRoot, "postfix-negation.md", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("postfix-negation.md", """
             E2EE is not available for hosted Connex.
-            """);
-        Path attributedHtml = writeFixture(fixtureRoot, "attributed.html", """
+            """,
+                0, null, false),
+            new DocumentationClaimCase("attributed.html", """
             <p title="Hosted Connex is E2EE">Safe copy</p>
-            """);
-        Path email = writeFixture(fixtureRoot,
-            "backend/src/main/resources/templates/emails/claim.html", """
+            """,
+                1, null, false),
+            new DocumentationClaimCase("backend/src/main/resources/templates/emails/claim.html", """
                 <p>Hosted Connex is zero-knowledge.</p>
-                """);
-        Path emailSubject = writeFixture(fixtureRoot,
-            "backend/src/main/java/ooo/klae/connex/backend/services/ClaimEmailService.java", """
+                """,
+                1, null, true),
+            new DocumentationClaimCase("backend/src/main/java/ooo/klae/connex/backend/services/ClaimEmailService.java", """
                 class ClaimEmailService {
                     void send(String email, String body) {
                         MailMessage.html(email, "Hosted Connex is E2EE", body);
                     }
                 }
-                """);
+                """,
+                1, null, true));
+    }
 
-        List<String> adjacentViolations = unsupportedDocClaimViolations(fixtureRoot, adjacent);
-        assertEquals(1, adjacentViolations.size());
-        assertTrue(adjacentViolations.getFirst().contains("claims.md:1"));
-        assertTrue(unsupportedDocClaimViolations(fixtureRoot, wrapped).isEmpty());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, table).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, notOnly).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, json).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, html).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, misboundNegation).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, misboundOnPrem).size());
-        assertEquals(2, unsupportedDocClaimViolations(fixtureRoot, coordinatedClaims).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, clausePolicy).size());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, misplacedQualifier).size());
-        assertTrue(unsupportedDocClaimViolations(fixtureRoot, validPostfixNegation).isEmpty());
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, attributedHtml).size());
-        assertTrue(customerFacingTextFiles(fixtureRoot).contains(email));
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, email).size());
-        assertTrue(customerFacingTextFiles(fixtureRoot).contains(emailSubject));
-        assertEquals(1, unsupportedDocClaimViolations(fixtureRoot, emailSubject).size());
+    private record DocumentationClaimCase(
+            String path, String content, int expectedCount, String expectedLocation, boolean discovered) {
+        @Override
+        public String toString() {
+            return path;
+        }
     }
 
     @Test

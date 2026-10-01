@@ -17,16 +17,12 @@ class UserDashboardMapperTest extends AbstractMapperTest {
 
     @Autowired UserDashboardMapper dashboardMapper;
 
-    @Test
-    void upsert_assignsGeneratedId() {
-        UserDashboard dashboard = save(workspace, newUser(), "{\"widgets\":[]}");
-        assertNotEquals(0, dashboard.getId());
-    }
 
     @Test
     void getByWorkspaceAndUser_returnsOwnRow() {
         User user = newUser();
-        save(workspace, user, "{\"widgets\":[\"pipeline\"]}");
+        UserDashboard dashboard = save(workspace, user, "{\"widgets\":[\"pipeline\"]}");
+        assertNotEquals(0, dashboard.getId());
         UserDashboard found = dashboardMapper.getByWorkspaceAndUser(workspace.getId(), user.getId());
         assertNotNull(found);
         assertEquals(user.getId(), found.getUserId());

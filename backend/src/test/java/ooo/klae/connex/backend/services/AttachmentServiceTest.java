@@ -112,11 +112,30 @@ class AttachmentServiceTest extends AbstractServiceTest {
     @Test
     void create_rejectsUrlClaimedByAnotherWorkspace() {
         String url = "/attachments/company/1-" + unique() + ".png";
-        attachmentService.create(attachmentWithUrl(url));
+        Attachment original = attachmentService.create(attachmentWithUrl(url));
+        Workspace other = newWorkspaceInSameOrg();
+        Company company = companyInWorkspace(other);
+        workspaceMapper.addMember(other.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, other.getId());
+        Attachment duplicate = new Attachment();
+        duplicate.setEntityType("company");
+        duplicate.setEntityId(company.getId());
+        duplicate.setFileName("duplicate.png");
+        duplicate.setUrl(url);
 
+        BadRequestException rejected = assertThrows(BadRequestException.class,
+            () -> attachmentService.create(duplicate));
+
+        assertEquals("That attachment url is already in use", rejected.getMessage());
+        assertEquals(0, attachmentMapper.countUrl(other.getId(), url));
+        assertEquals(1, attachmentMapper.countUrl(workspace.getId(), url));
+        Attachment preserved = attachmentMapper.getByUrl(workspace.getId(), url, currentUser.getId());
+        assertNotNull(preserved);
+        assertEquals(original.getId(), preserved.getId());
+        assertEquals(original.getEntityId(), preserved.getEntityId());
         assertEquals(0, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId(), url),
             "the owning workspace is not counted as another");
-        assertEquals(1, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId() + 100_000, url),
+        assertEquals(1, attachmentMapper.countUrlInOtherWorkspaces(other.getId(), url),
             "a different workspace sees the url as foreign, so re-claiming it is rejected on create");
     }
 

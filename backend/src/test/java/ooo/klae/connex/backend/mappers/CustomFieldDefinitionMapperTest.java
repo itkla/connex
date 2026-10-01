@@ -19,15 +19,11 @@ class CustomFieldDefinitionMapperTest extends AbstractMapperTest {
 
     @Autowired CustomFieldDefinitionMapper definitionMapper;
 
-    @Test
-    void insert_assignsGeneratedId() {
-        CustomFieldDefinition def = newDefinition();
-        assertNotEquals(0, def.getId());
-    }
 
     @Test
     void getById_returnsInsertedRow() {
         CustomFieldDefinition def = newDefinition();
+        assertNotEquals(0, def.getId());
 
         CustomFieldDefinition found = definitionMapper.getById(workspace.getId(), def.getId());
 

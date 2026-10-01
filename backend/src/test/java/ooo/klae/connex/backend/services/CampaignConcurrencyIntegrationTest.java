@@ -531,8 +531,8 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
                         return null;
                     }));
             awaitWorkspaceMutationRootWait();
-            assertThrows(TimeoutException.class, () -> revoked.get(500, TimeUnit.MILLISECONDS));
-            assertThrows(TimeoutException.class, () -> applied.get(500, TimeUnit.MILLISECONDS));
+            assertFalse(revoked.isDone(), "Role revocation must remain blocked until holder release");
+            assertFalse(applied.isDone(), "Campaign mutation must remain blocked until holder release");
             holderBarrier.releaseForCommit();
 
             applied.get(20, TimeUnit.SECONDS);

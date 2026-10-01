@@ -88,6 +88,7 @@ async function sweepCell(
             responseFailures: classified,
             httpStatus: status,
             finalPath: landing.finalPath,
+            landing,
             notes: [landingNote, blockedNote].filter((note) => note.length > 0).join(' :: ') || undefined,
         });
         return {

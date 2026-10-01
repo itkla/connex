@@ -230,12 +230,8 @@ class ScoringServiceTest {
     }
 
     @Test
-    void futureTouchesAreExcludedFromLiveAndReplayContactAndCompanyScores() {
-        Person p = person(1, 10);
-        ScoringService service = service(NOW,
-            List.of(p), List.of(company(10)), List.of(),
-            List.of(activity(p, "meeting", "2026-07-15 09:00:00")),
-            List.of(), List.of());
+    void emptyAggregatesProduceColdLiveAndReplayScores() {
+        ScoringService service = explicitAggregates(0);
 
         RelationshipTemperatureDto asOfNow = scoreFor(service.scoreContacts(WS, NOW), 1);
         RelationshipTemperatureDto live = scoreFor(service.scoreContacts(WS), 1);
@@ -252,12 +248,8 @@ class ScoringServiceTest {
     }
 
     @Test
-    void exactBoundaryTouchCountsForLiveAndReplayContactAndCompanyScores() {
-        Person p = person(1, 10);
-        ScoringService service = service(NOW,
-            List.of(p), List.of(company(10)), List.of(),
-            List.of(activity(p, "meeting", "2026-06-30 00:00:00")),
-            List.of(), List.of());
+    void oneTouchAggregatesProduceMatchingLiveAndReplayScores() {
+        ScoringService service = explicitAggregates(1);
 
         RelationshipTemperatureDto contactLive = scoreFor(service.scoreContacts(WS), 1);
         RelationshipTemperatureDto contactAsOf = scoreFor(service.scoreContacts(WS, NOW), 1);
@@ -273,19 +265,8 @@ class ScoringServiceTest {
     }
 
     @Test
-    void subsetScoresIncludeBoundaryAndExcludeFutureTouches() {
-        Person person = person(1, 10);
-        Deal deal = new Deal();
-        deal.setId(20);
-        deal.setCompanyId(10);
-        Activity boundary = activity(person, "meeting", "2026-06-30 00:00:00");
-        boundary.setId(30);
-        boundary.setDeal(deal);
-        Activity future = activity(person, "meeting", "2026-06-30 00:00:01");
-        future.setId(31);
-        future.setDeal(deal);
-        ScoringService service = service(NOW, List.of(person), List.of(company(10)), List.of(deal),
-            List.of(boundary, future), List.of(), List.of());
+    void subsetScoresPreserveAggregateCountsAndLastTouch() {
+        ScoringService service = explicitAggregates(1);
 
         RelationshipTemperatureDto contact = service.scoreContacts(WS, Set.of(1)).getFirst();
         RelationshipTemperatureDto companyScore = service.scoreCompanies(WS, Set.of(10)).getFirst();
@@ -465,15 +446,8 @@ class ScoringServiceTest {
     }
 
     @Test
-    void privateNotesDoNotAffectSharedContactOrCompanyScores() {
-        Person contact = person(1, 10);
-        Note privateNote = new Note();
-        privateNote.setVisibility("private");
-        privateNote.setPerson(contact);
-        privateNote.setCreatedAt("2026-06-29 12:00:00");
-        ScoringService service = service(
-            NOW, List.of(contact), List.of(company(10)), List.of(),
-            List.of(), List.of(privateNote), List.of());
+    void emptyAggregatesProduceColdSharedScores() {
+        ScoringService service = explicitAggregates(0);
 
         assertEquals("cold", scoreFor(service.scoreContacts(WS), 1).getBand());
         assertEquals(0, scoreFor(service.scoreContacts(WS), 1).getTouchCount());
@@ -505,14 +479,8 @@ class ScoringServiceTest {
     }
 
     @Test
-    void privateNotesDoNotAffectSubsetCompanyScores() {
-        Person contact = person(1, 10);
-        Note privateNote = new Note();
-        privateNote.setVisibility("private");
-        privateNote.setPerson(contact);
-        privateNote.setCreatedAt("2026-06-29 12:00:00");
-        ScoringService service = service(NOW, List.of(contact), List.of(company(10)), List.of(),
-            List.of(), List.of(privateNote), List.of());
+    void emptySubsetCompanyAggregateProducesColdScore() {
+        ScoringService service = explicitAggregates(0);
 
         RelationshipTemperatureDto score = service.scoreCompanies(WS, Set.of(10)).getFirst();
 
@@ -875,6 +843,30 @@ class ScoringServiceTest {
 
     private static RelationshipTemperatureDto scoreFor(List<RelationshipTemperatureDto> scores, int id) {
         return scores.stream().filter(s -> s.getId() == id).findFirst().orElseThrow();
+    }
+
+    private ScoringService explicitAggregates(int count) {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        String lastTouch = count == 0 ? null : "2026-06-30 00:00:00";
+        RelationshipScoreAggregateDto contact = new RelationshipScoreAggregateDto(
+            1, count * 12.0, count * 12.0, 0.0, lastTouch, count);
+        RelationshipScoreAggregateDto company = new RelationshipScoreAggregateDto(
+            10, count * 12.0, count * 12.0, 0.0, lastTouch, count);
+        when(personMapper.getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(contact));
+        when(personMapper.getRelationshipScoreAggregatesByIds(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(1)))
+            .thenReturn(List.of(contact));
+        when(companyMapper.getRelationshipScoreAggregates(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(company));
+        when(companyMapper.getRelationshipScoreAggregatesByIds(
+            WS, reference, RelationshipWarmthModel.current().sqlParameters(), List.of(10)))
+            .thenReturn(List.of(company));
+        return new ScoringService(personMapper, companyMapper, mock(DealMapper.class),
+            mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class),
+            Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private ScoringService service(Instant now, List<Person> persons, List<Company> companies, List<Deal> deals,

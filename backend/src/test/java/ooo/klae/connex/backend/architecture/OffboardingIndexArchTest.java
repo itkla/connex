@@ -3,10 +3,9 @@ package ooo.klae.connex.backend.architecture;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import javax.sql.DataSource;
 
@@ -90,19 +89,12 @@ class OffboardingIndexArchTest {
     @Test
     void everyOffboardingColumnHasALeadingIndex() throws Exception {
         List<String> missing = new ArrayList<>();
-        try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(
-                    "SELECT COUNT(*) FROM information_schema.STATISTICS"
-                        + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
-                        + " AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1")) {
+        try (Connection connection = dataSource.getConnection()) {
+            Set<SchemaMetadataSnapshot.Column> indexes =
+                SchemaMetadataSnapshot.readLeadingIndexes(connection);
             for (String[] required : REQUIRED_LEADING_INDEXES) {
-                statement.setString(1, required[0]);
-                statement.setString(2, required[1]);
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    resultSet.next();
-                    if (resultSet.getInt(1) == 0) {
-                        missing.add(required[0] + "." + required[1]);
-                    }
+                if (!indexes.contains(new SchemaMetadataSnapshot.Column(required[0], required[1]))) {
+                    missing.add(required[0] + "." + required[1]);
                 }
             }
         }

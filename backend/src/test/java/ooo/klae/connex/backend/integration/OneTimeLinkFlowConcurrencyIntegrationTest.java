@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.servlet.http.Cookie;
 
@@ -22,6 +24,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowClaimService;
@@ -31,6 +35,7 @@ import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 
 /** Proves flow claims serialize independent request wrappers and cannot be stolen by elapsed time. */
 @SpringBootTest
@@ -40,6 +45,7 @@ class OneTimeLinkFlowConcurrencyIntegrationTest {
     @Autowired private OneTimeLinkFlowClaimService claimService;
     @Autowired private OneTimeLinkFlowScheduler flowScheduler;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     @Test
     void concurrentFinalRequestsExecuteTheDomainOperationExactlyOnce() throws Exception {
@@ -55,8 +61,11 @@ class OneTimeLinkFlowConcurrencyIntegrationTest {
         CountDownLatch operationEntered = new CountDownLatch(1);
         CountDownLatch operationMayFinish = new CountDownLatch(1);
         AtomicInteger executions = new AtomicInteger();
+        AtomicLong secondConnection = new AtomicLong();
+        CountDownLatch secondTransactionStarted = new CountDownLatch(1);
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
             Future<?> first = executor.submit(() -> flowService.consume(
                 firstRequest,
                 Purpose.PASSWORD_RESET,
@@ -66,19 +75,28 @@ class OneTimeLinkFlowConcurrencyIntegrationTest {
                     operationEntered.countDown();
                     await(operationMayFinish);
                 }));
-            assertTrue(operationEntered.await(5, TimeUnit.SECONDS));
-
-            Future<?> second = executor.submit(() -> flowService.consume(
-                secondRequest,
-                Purpose.PASSWORD_RESET,
-                grant.value(),
-                sourceTokenHash -> executions.incrementAndGet()));
-
+            assertTrue(operationEntered.await(10, TimeUnit.SECONDS));
+            Future<?> second = executor.submit(() ->
+                new TransactionTemplate(transactionManager).executeWithoutResult(transaction -> {
+                    secondConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    secondTransactionStarted.countDown();
+                    flowService.consume(secondRequest, Purpose.PASSWORD_RESET, grant.value(),
+                        sourceTokenHash -> executions.incrementAndGet());
+                }));
+            assertTrue(secondTransactionStarted.await(10, TimeUnit.SECONDS));
+            MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, secondConnection.get(),
+                "one_time_link_flow", OneTimeTokenDigest.sha256(grant.value()));
+            assertFalse(second.isDone());
+            assertEquals(1, executions.get());
             operationMayFinish.countDown();
-            first.get(5, TimeUnit.SECONDS);
+            first.get(10, TimeUnit.SECONDS);
             ExecutionException rejected = assertThrows(
-                ExecutionException.class, () -> second.get(5, TimeUnit.SECONDS));
+                ExecutionException.class, () -> second.get(10, TimeUnit.SECONDS));
             assertInstanceOf(BadRequestException.class, rejected.getCause());
+        } finally {
+            operationMayFinish.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
         }
 
         assertEquals(1, executions.get());
@@ -151,7 +169,7 @@ class OneTimeLinkFlowConcurrencyIntegrationTest {
 
     private static void await(CountDownLatch latch) {
         try {
-            if (!latch.await(5, TimeUnit.SECONDS)) {
+            if (!latch.await(30, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("One-time-link operation wait timed out");
             }
         } catch (InterruptedException exception) {

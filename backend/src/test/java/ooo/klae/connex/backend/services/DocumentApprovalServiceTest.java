@@ -853,6 +853,17 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         DocumentApprovalDto reread = approvalService.getForDocument(deal.getId(), doc.id()).getFirst();
         assertEquals(1, reread.steps().size());
+        assertEquals("sequential", reread.mode());
+        assertEquals(requested.separationOfDuties(), reread.separationOfDuties());
+        var originalStep = requested.steps().getFirst();
+        var frozenStep = reread.steps().getFirst();
+        assertEquals(originalStep.id(), frozenStep.id());
+        assertEquals(originalStep.stepOrder(), frozenStep.stepOrder());
+        assertEquals(originalStep.name(), frozenStep.name());
+        assertEquals(originalStep.requiredCount(), frozenStep.requiredCount());
+        assertEquals(originalStep.dueIntervalHours(), frozenStep.dueIntervalHours());
+        assertEquals(originalStep.onExpiry(), frozenStep.onExpiry());
+        assertEquals(originalStep.approvers(), frozenStep.approvers());
         authenticateAs(first, workspace.getId());
         assertEquals("approved",
             approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
@@ -2420,18 +2431,6 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void requestApprovalPublishesApprovalRequestedTrigger() {
-        Deal deal = jpyDeal();
-        DealDocumentDto doc = generate(deal);
-        clearInvocations(ruleTriggers);
-
-        approvalService.requestApproval(deal.getId(), doc.id(), null);
-
-        verify(ruleTriggers).publish(
-            workspace.getId(), "document", doc.id(), "document.approval_requested");
-    }
-
-    @Test
     void finalApprovalPublishesApprovedTrigger() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);
@@ -2515,6 +2514,8 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         approvalService.requestApproval(deal.getId(), doc.id(), null);
 
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.approval_requested");
         InOrder order = inOrder(documentMapper, ruleTriggers);
         order.verify(documentMapper).updateStatus(workspace.getId(), doc.id(), "pending_approval");
         order.verify(ruleTriggers).publish(

@@ -29,11 +29,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.springframework.http.HttpMethod;
@@ -265,12 +267,8 @@ class HttpListConnectorTest {
                 false,
                 slowSerializer,
                 nanoTime::get);
-        List<AudienceMember> members = IntStream.range(0, 10_000)
-                .mapToObj(index -> new AudienceMember(
-                        "member-" + index + "@example.test", "First", "Last"))
-                .toList();
         AudiencePush push = new AudiencePush(
-                "list-9", members, "campaign-export-71-attempt-1",
+                "list-9", push().members(), "campaign-export-71-attempt-1",
                 nanoTime.get() + Duration.ofMillis(10).toNanos());
 
         try {
@@ -443,13 +441,15 @@ class HttpListConnectorTest {
         }
     }
 
-    @Test
-    void pushAudience_classifiesA2xxResponseWithMissingCountersAsAmbiguous() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidSuccessfulCounterResponses")
+    void pushAudience_classifiesA2xxResponseWithInvalidCountersAsAmbiguous(
+            String scenario, String response) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         HttpListConnector connector = new HttpListConnector(builder.build(), 1024, objectMapper);
         server.expect(requestTo(ENDPOINT))
-                .andRespond(withSuccess("{\"added\":2}", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
 
         try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
             AudiencePushResult result = connector.pushAudience(connectorTarget(), push());
@@ -459,53 +459,12 @@ class HttpListConnectorTest {
         }
     }
 
-    @Test
-    void pushAudience_classifiesA2xxResponseWithInconsistentCountersAsAmbiguous() {
-        RestClient.Builder builder = RestClient.builder();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        HttpListConnector connector = new HttpListConnector(builder.build(), 1024, objectMapper);
-        server.expect(requestTo(ENDPOINT))
-                .andRespond(withSuccess("{\"added\":2,\"failed\":1}", MediaType.APPLICATION_JSON));
-
-        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
-            AudiencePushResult result = connector.pushAudience(connectorTarget(), push());
-
-            assertEquals(AudiencePushResult.Outcome.AMBIGUOUS, result.outcome());
-            server.verify();
-        }
-    }
-
-    @Test
-    void pushAudience_classifiesA2xxResponseWithNegativeCountersAsAmbiguous() {
-        RestClient.Builder builder = RestClient.builder();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        HttpListConnector connector = new HttpListConnector(builder.build(), 1024, objectMapper);
-        server.expect(requestTo(ENDPOINT))
-                .andRespond(withSuccess("{\"added\":-1,\"failed\":3}", MediaType.APPLICATION_JSON));
-
-        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
-            AudiencePushResult result = connector.pushAudience(connectorTarget(), push());
-
-            assertEquals(AudiencePushResult.Outcome.AMBIGUOUS, result.outcome());
-            server.verify();
-        }
-    }
-
-    @Test
-    void pushAudience_classifiesA2xxResponseWithOverflowingCountersAsAmbiguous() {
-        RestClient.Builder builder = RestClient.builder();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        HttpListConnector connector = new HttpListConnector(builder.build(), 1024, objectMapper);
-        server.expect(requestTo(ENDPOINT))
-                .andRespond(withSuccess(
-                        "{\"added\":2147483648,\"failed\":0}", MediaType.APPLICATION_JSON));
-
-        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
-            AudiencePushResult result = connector.pushAudience(connectorTarget(), push());
-
-            assertEquals(AudiencePushResult.Outcome.AMBIGUOUS, result.outcome());
-            server.verify();
-        }
+    private static Stream<Arguments> invalidSuccessfulCounterResponses() {
+        return Stream.of(
+                Arguments.of("missing", "{\"added\":2}"),
+                Arguments.of("inconsistent", "{\"added\":2,\"failed\":1}"),
+                Arguments.of("negative", "{\"added\":-1,\"failed\":3}"),
+                Arguments.of("overflowing", "{\"added\":2147483648,\"failed\":0}"));
     }
 
     @Test

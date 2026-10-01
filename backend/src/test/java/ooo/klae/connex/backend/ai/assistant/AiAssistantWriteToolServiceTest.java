@@ -33,6 +33,8 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InOrder;
 
 import jakarta.validation.Validation;
@@ -710,8 +712,13 @@ class AiAssistantWriteToolServiceTest {
         verify(personService, never()).updateOwner(31, 21);
     }
 
-    @Test
-    void approvalRefusesWhenTheTargetWasWrittenAfterTheProposal() throws Exception {
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "2026-03-05 12:00:00.000000|2026-03-05 12:00:30.000000",
+            "2026-03-05 12:00:00.400000|2026-03-05 12:00:00"
+    })
+    void approvalRefusesWhenTheTargetsTimestampDoesNotPrecedeTheProposal(
+            String proposedAt, String updatedAt) throws Exception {
         User owner = new User();
         owner.setId(21);
         owner.setDisplayName("Grace Hopper");
@@ -722,9 +729,9 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
+        storedToolCall.setCreatedAt(proposedAt);
         Person edited = person(31);
-        edited.setUpdatedAt("2026-03-05 12:00:30.000000");
+        edited.setUpdatedAt(updatedAt);
         when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
 
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
@@ -733,28 +740,6 @@ class AiAssistantWriteToolServiceTest {
         verify(chatMapper, never()).updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 eq("executed"), any(), eq(TURN.userId()));
-    }
-
-    @Test
-    void approvalRefusesWhenTheTargetWasWrittenInTheProposalsOwnSecond() throws Exception {
-        User owner = new User();
-        owner.setId(21);
-        owner.setDisplayName("Grace Hopper");
-        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
-        AiAssistantPreparedWrite write = prepared(
-                "assign_owner",
-                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
-                "person",
-                31);
-        stored(write, 29);
-        storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
-        Person edited = person(31);
-        edited.setUpdatedAt("2026-03-05 12:00:00");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
-
-        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
-
-        verify(personService, never()).updateOwner(31, 21);
     }
 
     @Test
