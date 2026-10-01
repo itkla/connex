@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.text.Normalizer;
+
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -11,8 +13,6 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
 final class AiChatStreamingProgress {
     private static final int BATCH_CHARACTERS = 256;
-    private static final java.util.regex.Pattern TASK_PREFIX = java.util.regex.Pattern.compile(
-            "(?<![\\p{L}\\p{N}_])t(?:[1-9][0-9]*)?$");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
@@ -83,8 +83,7 @@ final class AiChatStreamingProgress {
         }
         pending.append(decoded);
         String accumulated = durable.toString() + pending;
-        int suffix = taskPrefixStart(accumulated);
-        String settled = suffix < 0 ? accumulated : accumulated.substring(0, suffix);
+        String settled = accumulated.substring(0, stablePrefixLength(accumulated));
         if (AiAssistantStepGuard.containsTaskHandle(settled)) {
             persistenceService.resetPartialContent(turn, durable.length());
             durable.setLength(0);
@@ -102,10 +101,37 @@ final class AiChatStreamingProgress {
         }
     }
 
-    /** Holds an unfinished token until a following delimiter can distinguish t1 from t1alpha. */
-    private static int taskPrefixStart(String text) {
-        var match = TASK_PREFIX.matcher(text);
-        return match.find() ? match.start() : -1;
+    /**
+     * Holds the trailing character run until whitespace fixes its canonical token boundary.
+     * An unresolved bracket can still become a link spanning whitespace, so conservatively hold
+     * from the first source bracket's run while any bracket remains after link preparation.
+     * This also covers compatibility brackets and handles without mapping canonical offsets back
+     * onto raw UTF-16 offsets. Only finish may release text without a stable boundary.
+     */
+    private int stablePrefixLength(String text) {
+        int boundary = whitespaceBoundary(text, text.length());
+        if (boundary == 0
+                || MaskingEngine.prepareConversationalText(text.substring(0, boundary)).indexOf('[') < 0) {
+            return boundary;
+        }
+        for (int offset = durable.length(); offset < boundary;) {
+            int end = offset + Character.charCount(text.codePointAt(offset));
+            if (Normalizer.normalize(text.substring(offset, end), Normalizer.Form.NFKC).indexOf('[') >= 0) {
+                return whitespaceBoundary(text, offset);
+            }
+            offset = end;
+        }
+        return durable.length();
+    }
+
+    private static int whitespaceBoundary(String text, int end) {
+        for (int offset = end - 1; offset >= 0; offset--) {
+            char value = text.charAt(offset);
+            if (value == ' ' || value == '\t' || value == '\r' || value == '\n') {
+                return offset + 1;
+            }
+        }
+        return 0;
     }
 
     private void checkpoint() {
@@ -129,8 +155,8 @@ final class AiChatStreamingProgress {
         if (pending.isEmpty()) {
             return;
         }
-        int suffix = terminal ? -1 : taskPrefixStart(durable.toString() + pending);
-        int length = suffix < 0 ? pending.length() : suffix - durable.length();
+        int length = terminal ? pending.length()
+                : stablePrefixLength(durable.toString() + pending) - durable.length();
         if (length == 0) {
             persistenceService.requireRunning(turn);
             return;

@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
-import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import tools.jackson.databind.JsonNode;
 
 /**

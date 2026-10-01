@@ -193,8 +193,10 @@ A task handle belongs only in a tool argument. Final text, suggestions and title
 and narration containing one is dropped. Final text and summaries are checked again after
 identifier demasking. Task-handle checks cover both raw text and the canonical link-stripped
 conversation form; final text is checked again after link rewriting, and assistant history is
-checked before and after replay preparation. Streaming checks accumulated demasked text before persisting each fragment
-and withdraws the current partial answer if a handle is detected across fragment boundaries.
+checked before and after replay preparation. Streaming checks only the stable prefix of accumulated
+demasked text before persisting each fragment, withholding trailing character runs and unresolved
+links whose canonical form can still change. It withdraws the current partial answer if a handle
+is detected across fragment boundaries; the complete answer is checked again at stream finish.
 No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
 keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.
 
