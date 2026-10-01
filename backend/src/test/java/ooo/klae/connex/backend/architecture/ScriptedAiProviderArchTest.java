@@ -429,6 +429,16 @@ class ScriptedAiProviderArchTest {
                   backend:
                     name: Backend — build & test
                     needs: [classify, backend-unit, backend-db]
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          UNIT_RESULT: ${{ needs.backend-unit.result }}
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$UNIT_RESULT" != success || "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
                   backend-unit:
                     name: Unit tests
                     steps:
@@ -492,6 +502,48 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void aConditionalProducerCannotSatisfyTheRequiredBackendPath() {
+        for (String condition : List.of("false", "needs.classify.outputs.backend == 'true' && false")) {
+            String workflow = backendMatrixWorkflow().replace(
+                    "    if: needs.classify.outputs.backend == 'true'",
+                    "    if: " + condition);
+
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "a producer must run whenever backend changes are classified: " + workflow);
+        }
+    }
+
+    @Test
+    void anIgnoredProducerResultCannotSatisfyTheRequiredBackendPath() {
+        for (String ignoredGate : List.of(
+                "UNIT_RESULT: ${{ needs.backend-unit.result }}",
+                "DB_RESULT: ${{ needs.backend-db.result }}\n"
+                        + "          UNIT_RESULT: ${{ needs.backend-unit.result }}")) {
+            String workflow = backendMatrixWorkflow()
+                    .replace("DB_RESULT: ${{ needs.backend-db.result }}", ignoredGate)
+                    .replace("\"$DB_RESULT\" != success", "\"$UNIT_RESULT\" != success");
+
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "listing or reading a dependency does not enforce its result: " + workflow);
+        }
+    }
+
+    @Test
+    void aConditionalOrNonFailingAggregatorStepCannotRequireAProducer() {
+        for (String workflow : List.of(
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - name: Require backend tests\n        if: false\n"),
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - name: Require backend tests\n        continue-on-error: true\n"),
+                backendMatrixWorkflow().replace("      - name: Require backend tests\n",
+                        "      - continue-on-error: true\n"),
+                backendMatrixWorkflow().replace("exit 1", "exit 0"))) {
+            assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                    "the aggregator must fail unconditionally for an unsuccessful producer: " + workflow);
+        }
+    }
+
+    @Test
     void unrelatedJobsAndCommentsCannotSatisfyTheRequiredBackendPath() {
         String workflow = """
                 jobs:
@@ -499,6 +551,15 @@ class ScriptedAiProviderArchTest {
                     name: Backend — build & test
                     needs: backend-db
                     # run: bash gradlew scriptedTrajectoryTest
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
                   backend-db:
                     steps:
                       # run: bash gradlew scriptedTrajectoryTest
@@ -859,8 +920,9 @@ class ScriptedAiProviderArchTest {
      * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
      * searching the whole file would stay satisfied after the required job stopped running the
      * goldens. Only unconditional Gradle steps inside the job whose display name branch protection
-     * requires and the job IDs listed in its {@code needs:} entry are returned. Matrix task lists
-     * count only when an explicit include entry supplies them to that step.
+     * requires and mandatory jobs listed in its {@code needs:} entry are returned. Dependencies
+     * may use only the backend classify gate, and the aggregator must enforce their success.
+     * Matrix task lists count only when an explicit include entry supplies them to that step.
      *
      * @param workflow the CI workflow source
      * @return the required backend path's Gradle command lines, stripped
@@ -900,21 +962,14 @@ class ScriptedAiProviderArchTest {
         List<String> invocations = new ArrayList<>();
         for (String job : requiredJobs) {
             List<String> lines = jobs.getOrDefault(job, List.of());
-            List<String> matrixTasks = matrixTaskLists(lines);
-            List<List<String>> steps = new ArrayList<>();
-            for (String line : lines) {
-                if (line.startsWith("      - ")) {
-                    steps.add(new ArrayList<>());
-                }
-                if (!steps.isEmpty()) {
-                    steps.getLast().add(line);
-                }
+            if (!job.equals(requiredJob) && (lines.stream().anyMatch(line ->
+                    line.startsWith("    if:")
+                            && !line.equals("    if: needs.classify.outputs.backend == 'true'"))
+                    || !requiresSuccessfulDependency(jobs.get(requiredJob), job))) {
+                continue;
             }
-            for (List<String> step : steps) {
-                if (step.stream().anyMatch(line -> line.startsWith("        if:")
-                        || line.startsWith("      - if:"))) {
-                    continue;
-                }
+            List<String> matrixTasks = matrixTaskLists(lines);
+            for (List<String> step : unconditionalWorkflowSteps(lines)) {
                 for (String line : step) {
                     if ((line.startsWith("        run: ") || line.startsWith("      - run: "))
                             && line.contains("bash gradlew ")) {
@@ -930,6 +985,64 @@ class ScriptedAiProviderArchTest {
             }
         }
         return invocations;
+    }
+
+    /**
+     * Recognizes the aggregator's explicit env binding and fail-on-any-unsuccessful-result block.
+     *
+     * <p>Other shell shapes fail closed: mentioning a result, checking it in a conditional step,
+     * or merely logging it does not make a dependency required.
+     *
+     * @param lines the aggregator's uncommented workflow lines
+     * @param dependency the job ID whose success must be enforced
+     * @return whether an unconditional step exits unsuccessfully for every non-success result
+     */
+    private static boolean requiresSuccessfulDependency(List<String> lines, String dependency) {
+        Pattern binding = Pattern.compile(" {10}([A-Z_][A-Z0-9_]*): \\$\\{\\{ needs\\."
+                + Pattern.quote(dependency) + "\\.result }}");
+        Pattern failureGate = Pattern.compile("set -euo pipefail\\R {10}if \\[\\[ "
+                + "(\"\\$[A-Z_][A-Z0-9_]*\" != success(?: \\|\\| \"\\$[A-Z_][A-Z0-9_]*\" != success)*)"
+                + " ]]; then\\R(?: {12}echo [^\\r\\n]*\\R)* {12}exit 1\\R {10}fi");
+        for (List<String> step : unconditionalWorkflowSteps(lines)) {
+            int run = step.indexOf("        run: |");
+            if (run < 0 || step.stream().anyMatch(line -> line.startsWith("        continue-on-error:")
+                    || line.startsWith("      - continue-on-error:"))) {
+                continue;
+            }
+            var gate = failureGate.matcher(String.join("\n", step.subList(run + 1, step.size())).strip());
+            if (!gate.matches()) {
+                continue;
+            }
+            for (String line : step.subList(0, run)) {
+                var environment = binding.matcher(line);
+                if (environment.matches()
+                        && List.of(gate.group(1).split(" \\|\\| "))
+                                .contains("\"$" + environment.group(1) + "\" != success")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns steps without a step-level condition, preserving indentation for the small parsers.
+     *
+     * @param lines the uncommented workflow lines of one job
+     * @return the unconditional steps in declaration order
+     */
+    private static List<List<String>> unconditionalWorkflowSteps(List<String> lines) {
+        List<List<String>> steps = new ArrayList<>();
+        for (String line : lines) {
+            if (line.startsWith("      - ")) {
+                steps.add(new ArrayList<>());
+            }
+            if (!steps.isEmpty()) {
+                steps.getLast().add(line);
+            }
+        }
+        return steps.stream().filter(step -> step.stream().noneMatch(line ->
+                line.startsWith("        if:") || line.startsWith("      - if:"))).toList();
     }
 
     /**
@@ -981,7 +1094,18 @@ class ScriptedAiProviderArchTest {
                   backend:
                     name: Backend — build & test
                     needs: [classify, backend-db]
+                    steps:
+                      - name: Require backend tests
+                        env:
+                          DB_RESULT: ${{ needs.backend-db.result }}
+                        run: |
+                          set -euo pipefail
+                          if [[ "$DB_RESULT" != success ]]; then
+                            exit 1
+                          fi
                   backend-db:
+                    needs: classify
+                    if: needs.classify.outputs.backend == 'true'
                     strategy:
                       matrix:
                         include:
