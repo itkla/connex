@@ -217,17 +217,62 @@ fullTestClasses.each { name ->
 tasks.register('verifyTestPartition') {
 	group = 'verification'
 	description = 'Checks that every backend test class belongs to exactly one non-empty CI partition.'
+	dependsOn tasks.named('testClasses')
 	doLast {
-		def selected = testPartition.values().flatten()
-		def duplicates = selected.countBy { it }.findAll { name, count -> count > 1 }.keySet()
-		def missing = fullTestClasses - selected
-		def unexpected = selected - fullTestClasses
-		def empty = testPartition.findAll { name, classes -> classes.empty }.keySet()
-		logger.lifecycle("Test partition: total=${fullTestClasses.size()}, " + testPartition.collect {
+		// Verify compiled carriers independently of the naming convention used to assign sources.
+		// An executable FooSpec (including inherited or nested tests) must fail closed, not vanish
+		// from both the partition and the inventory that is supposed to check its coverage.
+		def descriptors = [
+			'Lorg/junit/jupiter/api/Test;', 'Lorg/junit/jupiter/params/ParameterizedTest;',
+			'Lorg/junit/jupiter/api/RepeatedTest;', 'Lorg/junit/jupiter/api/TestFactory;',
+			'Lorg/junit/jupiter/api/TestTemplate;', 'Lorg/junit/jupiter/api/Nested;'
+		]
+		def compiledClasses = [:]
+		def classNamesByFile = [:]
+		sourceSets.test.output.classesDirs.asFileTree.matching { include '**/*.class' }.each { file ->
+			def bytes = file.bytes
+			def model = java.lang.classfile.ClassFile.of().parse(bytes)
+			def name = model.thisClass().asInternalName()
+			def constants = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+			compiledClasses[name] = [
+				superclass: model.superclass().orElse(null)?.asInternalName(),
+				carrier: descriptors.any { constants.contains(it) },
+				concrete: !model.flags().has(java.lang.reflect.AccessFlag.ABSTRACT)
+			]
+			classNamesByFile[file] = name
+		}
+		def carriers = compiledClasses.findAll { name, model -> model.carrier }.keySet().toSet()
+		def inherited
+		do {
+			inherited = compiledClasses.findAll { name, model ->
+				!carriers.contains(name) && carriers.contains(model.superclass)
+			}.keySet()
+			carriers.addAll(inherited)
+		} while (!inherited.empty)
+		// Abstract harnesses supply inherited tests but cannot run independently under Jupiter.
+		def executableCarriers = carriers.findAll { compiledClasses[it].concrete }.toSet()
+		def ownerNames = executableCarriers.collect { it.split(/\$/)[0] }.toSet()
+		def executableOwners = ownerNames.collect { it.replace('/', '.') }.toSorted().toSet()
+		// A selected outer container discovers its nested tests, but unrelated helper inners cannot
+		// stand in for an excluded test carrier merely because they share its top-level owner.
+		def selectableClasses = executableCarriers + ownerNames
+		def selections = ['unitTest', 'dbTestShard1', 'dbTestShard2', 'scriptedTrajectoryTest']
+			.collectEntries { taskName ->
+				// Gradle's candidate tree applies the task's actual include/exclude patterns.
+				def selectedOwners = tasks.named(taskName, Test).get().candidateClassFiles.files
+					.collect { classNamesByFile[it] }.findAll { selectableClasses.contains(it) }
+					.collect { it.split(/\$/)[0].replace('/', '.') }.toSet()
+				[(taskName): selectedOwners]
+			}
+		def selected = selections.values().flatten()
+		def duplicates = selected.countBy { it }.findAll { name, count -> count > 1 }.keySet().toSorted()
+		def missing = executableOwners - selected
+		def empty = selections.findAll { name, classes -> classes.empty }.keySet()
+		logger.lifecycle("Test partition: total=${executableOwners.size()}, " + selections.collect {
 			name, classes -> "${name}=${classes.size()}"
 		}.join(', '))
-		if (duplicates || missing || unexpected || empty) {
-			throw new GradleException("Invalid test partition: missing=${missing}, unexpected=${unexpected}, " +
+		if (duplicates || missing || empty) {
+			throw new GradleException("Invalid compiled test partition: missing=${missing}, " +
 				"overlapping=${duplicates}, empty=${empty}")
 		}
 	}

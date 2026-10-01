@@ -46,7 +46,7 @@ Verified against `main`. Where this section and an older plan disagree, this sec
 
 One fixture serves two goldens (`confirm_proposal` backs both the proposal golden and the freshness refusal), which is why nineteen files carry twenty cases.
 
-**Run them with `./gradlew scriptedTrajectoryTest`, never `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache; the task has its own fork with a two-slot cache, `check` depends on it, and the required `Backend — build & test` CI job names `test scriptedTrajectoryTest` explicitly. `ScriptedAiProviderArchTest` asserts both that the workflow still names the task and that every class extending the harness matches the include pattern, so a golden CI would silently skip fails the build instead of passing quietly.
+**Run them with `./gradlew scriptedTrajectoryTest`, never `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache; the task has its own fork with a two-slot cache, and `check` depends on it. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the include pattern, so a golden CI would silently skip fails the build instead of passing quietly.
 
 ### The browser mode
 

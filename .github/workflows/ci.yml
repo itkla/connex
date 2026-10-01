@@ -201,7 +201,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        # Explicit task lists make the required scripted path verifiable without evaluating step conditions.
+        include:
+          - shard: 1
+            tasks: dbTestShard1
+          - shard: 2
+            tasks: dbTestShard2 scriptedTrajectoryTest
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
@@ -229,16 +234,11 @@ jobs:
           cache: gradle
       - name: Allow non-SUPER routine creation under binary logging
         run: mysql -h 127.0.0.1 -P 3306 -uroot -pci-${{ github.run_id }}-${{ github.run_attempt }}-root -e "SET GLOBAL log_bin_trust_function_creators = 1;"
-      - name: Test database shard 1
-        if: matrix.shard == 1
-        working-directory: backend
-        run: bash gradlew dbTestShard1 --no-daemon --stacktrace
       # The scripted provider has its own Spring context and task. Shard 2 must name it:
       # a task no required job runs proves nothing about the end-to-end agent trajectories.
-      - name: Test database shard 2 and scripted trajectories
-        if: matrix.shard == 2
+      - name: Test database shard
         working-directory: backend
-        run: bash gradlew dbTestShard2 scriptedTrajectoryTest --no-daemon --stacktrace
+        run: bash gradlew ${{ matrix.tasks }} --no-daemon --stacktrace
       # Spring reports one failed context load as failures for every test sharing that context.
       # Surface MySQL's capacity counter separately so connection exhaustion cannot mimic a product regression.
       - name: Diagnose MySQL connection capacity

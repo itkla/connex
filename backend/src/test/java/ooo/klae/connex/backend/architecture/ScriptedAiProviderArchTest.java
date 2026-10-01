@@ -445,6 +445,53 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void requiredBackendInvocationsExpandReachableMatrixTasks() {
+        assertEquals(List.of(
+                        "run: bash gradlew dbTestShard1 --no-daemon --stacktrace",
+                        "run: bash gradlew dbTestShard2 scriptedTrajectoryTest --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(backendMatrixWorkflow()));
+    }
+
+    @Test
+    void aMissingScriptedMatrixShardCannotSatisfyTheRequiredBackendPath() {
+        String workflow = backendMatrixWorkflow().replace(
+                "          - shard: 2\n            tasks: dbTestShard2 scriptedTrajectoryTest\n", "");
+
+        assertEquals(List.of("run: bash gradlew dbTestShard1 --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void aConditionalMatrixStepCannotSatisfyTheRequiredBackendPath() {
+        for (String condition : List.of("matrix.shard == 3", "false", "matrix.shard == 2")) {
+            for (String position : List.of("before", "after")) {
+                String run = "        run: bash gradlew ${{ matrix.tasks }} --no-daemon --stacktrace\n";
+                String guard = "        if: " + condition + "\n";
+                String workflow = backendMatrixWorkflow().replace(run,
+                        position.equals("before") ? guard + run : run + guard);
+
+                assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty(),
+                        "a Gradle step must run unconditionally for every listed shard: " + workflow);
+            }
+        }
+    }
+
+    @Test
+    void matrixTasksMustBeUsedByTheUnconditionalGradleStep() {
+        String workflow = backendMatrixWorkflow().replace("${{ matrix.tasks }}", "dbTestShard1");
+
+        assertEquals(List.of("run: bash gradlew dbTestShard1 --no-daemon --stacktrace"),
+                requiredBackendJobGradleInvocations(workflow));
+    }
+
+    @Test
+    void anUnneededMatrixJobCannotSatisfyTheRequiredBackendPath() {
+        String workflow = backendMatrixWorkflow().replace("needs: [classify, backend-db]", "needs: classify");
+
+        assertTrue(requiredBackendJobGradleInvocations(workflow).isEmpty());
+    }
+
+    @Test
     void unrelatedJobsAndCommentsCannotSatisfyTheRequiredBackendPath() {
         String workflow = """
                 jobs:
@@ -811,8 +858,9 @@ class ScriptedAiProviderArchTest {
      *
      * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
      * searching the whole file would stay satisfied after the required job stopped running the
-     * goldens. Only uncommented lines inside the job whose display name branch protection requires
-     * and the job IDs listed in its {@code needs:} entry are returned.
+     * goldens. Only unconditional Gradle steps inside the job whose display name branch protection
+     * requires and the job IDs listed in its {@code needs:} entry are returned. Matrix task lists
+     * count only when an explicit include entry supplies them to that step.
      *
      * @param workflow the CI workflow source
      * @return the required backend path's Gradle command lines, stripped
@@ -831,7 +879,7 @@ class ScriptedAiProviderArchTest {
             if (currentJob == null || stripped.startsWith("#")) {
                 continue;
             }
-            jobs.get(currentJob).add(stripped);
+            jobs.get(currentJob).add(line);
             if (line.equals("    name: " + REQUIRED_BACKEND_JOB)) {
                 requiredJob = currentJob;
             }
@@ -841,8 +889,8 @@ class ScriptedAiProviderArchTest {
         }
         List<String> requiredJobs = new ArrayList<>(List.of(requiredJob));
         for (String line : jobs.get(requiredJob)) {
-            if (line.startsWith("needs: ")) {
-                String dependencies = line.substring("needs: ".length())
+            if (line.startsWith("    needs: ")) {
+                String dependencies = line.substring("    needs: ".length())
                         .replace("[", "").replace("]", "");
                 for (String dependency : dependencies.split(",")) {
                     requiredJobs.add(dependency.strip());
@@ -851,13 +899,100 @@ class ScriptedAiProviderArchTest {
         }
         List<String> invocations = new ArrayList<>();
         for (String job : requiredJobs) {
-            for (String line : jobs.getOrDefault(job, List.of())) {
-                if (line.contains("gradlew")) {
-                    invocations.add(line);
+            List<String> lines = jobs.getOrDefault(job, List.of());
+            List<String> matrixTasks = matrixTaskLists(lines);
+            List<List<String>> steps = new ArrayList<>();
+            for (String line : lines) {
+                if (line.startsWith("      - ")) {
+                    steps.add(new ArrayList<>());
+                }
+                if (!steps.isEmpty()) {
+                    steps.getLast().add(line);
+                }
+            }
+            for (List<String> step : steps) {
+                if (step.stream().anyMatch(line -> line.startsWith("        if:")
+                        || line.startsWith("      - if:"))) {
+                    continue;
+                }
+                for (String line : step) {
+                    if ((line.startsWith("        run: ") || line.startsWith("      - run: "))
+                            && line.contains("bash gradlew ")) {
+                        if (line.contains("${{ matrix.tasks }}")) {
+                            for (String tasks : matrixTasks) {
+                                invocations.add(line.strip().replace("${{ matrix.tasks }}", tasks));
+                            }
+                        } else {
+                            invocations.add(line.strip());
+                        }
+                    }
                 }
             }
         }
         return invocations;
+    }
+
+    /**
+     * Reads task lists from the workflow's explicit shard entries, failing closed on other matrix shapes.
+     *
+     * @param lines the uncommented, indented lines of one job
+     * @return the tasks supplied by reachable include entries
+     */
+    private static List<String> matrixTaskLists(List<String> lines) {
+        List<String> tasks = new ArrayList<>();
+        boolean inMatrix = false;
+        boolean inInclude = false;
+        boolean inShard = false;
+        for (String line : lines) {
+            if (line.isBlank()) {
+                continue;
+            }
+            if (line.equals("      matrix:")) {
+                inMatrix = true;
+                continue;
+            }
+            if (!inMatrix) {
+                continue;
+            }
+            if (!line.startsWith("        ")) {
+                break;
+            }
+            if (line.equals("        include:")) {
+                inInclude = true;
+            } else if (inInclude && line.matches(" {10}- shard: [12]")) {
+                inShard = true;
+            } else if (inShard && line.startsWith("            tasks: ")) {
+                String value = line.substring("            tasks: ".length()).strip();
+                if (!value.matches("[A-Za-z0-9]+(?: [A-Za-z0-9]+)*")) {
+                    return List.of();
+                }
+                tasks.add(value);
+                inShard = false;
+            } else {
+                return List.of();
+            }
+        }
+        return tasks;
+    }
+
+    private static String backendMatrixWorkflow() {
+        return """
+                jobs:
+                  backend:
+                    name: Backend — build & test
+                    needs: [classify, backend-db]
+                  backend-db:
+                    strategy:
+                      matrix:
+                        include:
+                          - shard: 1
+                            tasks: dbTestShard1
+                          - shard: 2
+                            tasks: dbTestShard2 scriptedTrajectoryTest
+                    steps:
+                      - name: Test database shard
+                        run: bash gradlew ${{ matrix.tasks }} --no-daemon --stacktrace
+                """;
     }
 
     private static String read(Path path) throws IOException {

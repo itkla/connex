@@ -110,7 +110,7 @@ Adding an assistant write tool follows the checklist and SPI rules under "Adding
 - `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
-- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, the dispatch-accounting rule every provider adapter owes, and the end-to-end trajectory harness are in `../docs/backend/AI_SECURITY.md`. The harness runs under `./gradlew scriptedTrajectoryTest`, which is excluded from `test` and named separately by the required Backend CI job.
+- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, the dispatch-accounting rule every provider adapter owes, and the end-to-end trajectory harness are in `../docs/backend/AI_SECURITY.md`. The harness runs under `./gradlew scriptedTrajectoryTest`, which is excluded from `test` and runs in CI DB shard 2 behind the required `Backend — build & test` aggregator.
 - Before adding or changing an agent evaluation golden, or before proposing a live model-evaluation run, read `../docs/AI_EVALUATION.md`: it maps the goldens that exist, the fixture constraints the loader enforces, what the harness cannot reach, and the decision-gated design of the operator-invoked staging runner.
 
 ## Transactions and locking
@@ -148,7 +148,7 @@ Architecture tests are enforcement, not obstacles. If a migration or mapper chan
 
 ## Verification
 
-Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` checks complete, disjoint, non-empty coverage. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
+Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` compiles tests and independently checks compiled test carriers against the tasks' actual selections for complete, disjoint, non-empty coverage. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
 
 For a material backend change:
 
