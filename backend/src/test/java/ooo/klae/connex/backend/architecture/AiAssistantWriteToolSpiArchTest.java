@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantDraftDocumentWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRemoveTagWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantRescheduleTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSetResponseDueWriteTool;
@@ -42,7 +43,9 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.DocumentTemplateService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
@@ -139,6 +142,8 @@ class AiAssistantWriteToolSpiArchTest {
             NoteService.class,
             TaskService.class,
             DealService.class,
+            DealDocumentService.class,
+            DocumentTemplateService.class,
             PipelineService.class,
             TagService.class,
             PersonService.class,
@@ -190,42 +195,50 @@ class AiAssistantWriteToolSpiArchTest {
      * membership, records its audit row and returns the updated record the tool reads the owner id
      * back from. No read, no member lookup and no other mutator is granted: the framework resolved
      * and locked the owner before the tool runs, and reads the target through its own scoped gate.
+     *
+     * <p>{@code draft_document} is granted the workspace-scoped {@code getById} template read to
+     * recheck the pinned template's active state after the framework's locks and before generation.
+     * No template mutator or lock is granted.
      */
     private static final Map<Class<? extends AiAssistantWriteTool>, Map<Class<?>, Set<String>>>
-            PERMITTED_SERVICE_METHODS = Map.of(
-                    AiAssistantCreateActivityWriteTool.class,
-                    Map.of(ActivityService.class, Set.of("create", "deleteIf")),
-                    AiAssistantCreateNoteWriteTool.class,
-                    Map.of(NoteService.class, Set.of("create", "deleteIf")),
-                    AiAssistantCreateTaskWriteTool.class,
-                    Map.of(TaskService.class, Set.of("create", "deleteIf")),
-                    AiAssistantChangeDealStageWriteTool.class,
-                    Map.of(
-                            DealService.class, Set.of("changeStage", "getDealById"),
-                            PipelineService.class, Set.of("getAllStages")),
-                    AiAssistantAddTagWriteTool.class,
-                    Map.of(
-                            TagService.class, Set.of("getAllTags"),
-                            PersonService.class, Set.of("addTag"),
-                            CompanyService.class, Set.of("addTag"),
-                            DealService.class, Set.of("addTag")),
-                    AiAssistantRemoveTagWriteTool.class,
-                    Map.of(
-                            TagService.class, Set.of("getAllTags"),
-                            PersonService.class, Set.of("removeTag"),
-                            CompanyService.class, Set.of("removeTag"),
-                            DealService.class, Set.of("removeTag")),
-                    AiAssistantAssignOwnerWriteTool.class,
-                    Map.of(
-                            PersonService.class, Set.of("updateOwner"),
-                            CompanyService.class, Set.of("updateOwner"),
-                            DealService.class, Set.of("updateOwner")),
-                    AiAssistantCompleteTaskWriteTool.class,
-                    Map.of(TaskService.class, Set.of("complete")),
-                    AiAssistantRescheduleTaskWriteTool.class,
-                    Map.of(TaskService.class, Set.of("reschedule")),
-                    AiAssistantSetResponseDueWriteTool.class,
-                    Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock")));
+            PERMITTED_SERVICE_METHODS = Map.ofEntries(
+                    Map.entry(AiAssistantCreateActivityWriteTool.class,
+                            Map.of(ActivityService.class, Set.of("create", "deleteIf"))),
+                    Map.entry(AiAssistantCreateNoteWriteTool.class,
+                            Map.of(NoteService.class, Set.of("create", "deleteIf"))),
+                    Map.entry(AiAssistantCreateTaskWriteTool.class,
+                            Map.of(TaskService.class, Set.of("create", "deleteIf"))),
+                    Map.entry(AiAssistantDraftDocumentWriteTool.class,
+                            Map.of(
+                                    DealDocumentService.class, Set.of("generate"),
+                                    DocumentTemplateService.class, Set.of("getAll", "getById"))),
+                    Map.entry(AiAssistantChangeDealStageWriteTool.class,
+                            Map.of(
+                                    DealService.class, Set.of("changeStage", "getDealById"),
+                                    PipelineService.class, Set.of("getAllStages"))),
+                    Map.entry(AiAssistantAddTagWriteTool.class,
+                            Map.of(
+                                    TagService.class, Set.of("getAllTags"),
+                                    PersonService.class, Set.of("addTag"),
+                                    CompanyService.class, Set.of("addTag"),
+                                    DealService.class, Set.of("addTag"))),
+                    Map.entry(AiAssistantRemoveTagWriteTool.class,
+                            Map.of(
+                                    TagService.class, Set.of("getAllTags"),
+                                    PersonService.class, Set.of("removeTag"),
+                                    CompanyService.class, Set.of("removeTag"),
+                                    DealService.class, Set.of("removeTag"))),
+                    Map.entry(AiAssistantAssignOwnerWriteTool.class,
+                            Map.of(
+                                    PersonService.class, Set.of("updateOwner"),
+                                    CompanyService.class, Set.of("updateOwner"),
+                                    DealService.class, Set.of("updateOwner"))),
+                    Map.entry(AiAssistantCompleteTaskWriteTool.class,
+                            Map.of(TaskService.class, Set.of("complete"))),
+                    Map.entry(AiAssistantRescheduleTaskWriteTool.class,
+                            Map.of(TaskService.class, Set.of("reschedule"))),
+                    Map.entry(AiAssistantSetResponseDueWriteTool.class,
+                            Map.of(LeadResponseSlaService.class, Set.of("startFirstResponseClock"))));
 
     /**
      * The tools whose read-back is {@code ReadBack.structural}: a comparison of the resolved

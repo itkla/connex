@@ -209,7 +209,7 @@ class AiSkillCatalogTest {
         assertThrows(IllegalArgumentException.class,
                 () -> spec(Set.of("write_pipeline"),
                         AiSkillCatalog.Authority.READ,
-                        Set.of("change_deal_stage", "assign_owner")),
+                        Set.of("change_deal_stage", "draft_document", "assign_owner")),
                 "a READ-authority declaration may not seed a write family");
         assertThrows(IllegalArgumentException.class,
                 () -> spec(Set.of("write_pipeline"),
@@ -218,7 +218,7 @@ class AiSkillCatalogTest {
                 "seeding a family it cannot call every write of is the same trap");
         assertNotNull(spec(Set.of("write_pipeline"),
                 AiSkillCatalog.Authority.EXECUTE_REVERSIBLE,
-                Set.of("change_deal_stage", "assign_owner")));
+                Set.of("change_deal_stage", "draft_document", "assign_owner")));
         assertNotNull(spec(Set.of("analytics"),
                 AiSkillCatalog.Authority.READ,
                 Set.of("aggregate_metric")),

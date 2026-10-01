@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -32,6 +34,7 @@ import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -79,6 +82,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
 
     @Autowired private TaskMapper taskMapper;
     @Autowired private TaskService taskService;
+    @Autowired private DocumentTemplateMapper documentTemplateMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PersonMapper personMapper;
@@ -112,6 +116,99 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", siblingId);
         }
         siblingWorkspaces.clear();
+    }
+
+    @AfterEach
+    void removeDraftDocuments() {
+        jdbcTemplate.update("DELETE FROM deal_document WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM document_template WHERE workspace_id = ?", workspaceId());
+    }
+
+    @Test
+    void aDocumentProposalCreatesNothingUntilApprovalThenCreatesDraftVersionOne() {
+        Deal target = documentDeal();
+        int templateId = documentTemplate("Quote");
+        Trajectory trajectory = run("connex_script_draft_document_proposal", "prepare the paperwork");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "draft_document"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "draft_document");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals(templateId, stored.path("resolution").path("id").asInt());
+        assertEquals("template", stored.path("resolution").path("field").asString());
+        assertEquals(0, documentCount(target));
+        assertEquals(0, auditRows("deal_document.generate"));
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+
+        assertEquals(1, documentCount(target));
+        assertEquals("draft", jdbcTemplate.queryForObject(
+                "SELECT status FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                String.class, workspaceId(), target.getId()));
+        assertEquals(Integer.valueOf(1), jdbcTemplate.queryForObject(
+                "SELECT version FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), target.getId()));
+        assertEquals(Integer.valueOf(templateId), jdbcTemplate.queryForObject(
+                "SELECT template_id FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), target.getId()));
+        assertEquals(1, auditRows("deal_document.generate"));
+    }
+
+    @Test
+    void aDocumentProposalRefusesATemplateSwapUnderTheSameName() {
+        Deal target = documentDeal();
+        int reviewed = documentTemplate("Quote");
+        int successor = documentTemplate("Alternate");
+        Trajectory trajectory = run("connex_script_draft_document_proposal", "prepare the paperwork");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "draft_document");
+        assertEquals(reviewed, objectMapper.readTree(proposal.getArgumentsJson())
+                .path("resolution").path("id").asInt());
+        jdbcTemplate.update("UPDATE document_template SET name = ? WHERE workspace_id = ? AND id = ?",
+                "Retired", workspaceId(), reviewed);
+        jdbcTemplate.update("UPDATE document_template SET name = ? WHERE workspace_id = ? AND id = ?",
+                "Quote", workspaceId(), successor);
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(0, documentCount(target));
+        assertEquals(0, auditRows("deal_document.generate"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    private Deal documentDeal() {
+        Company customer = company("Alderwick Shipping");
+        Pipeline pipeline = pipeline("Document pipeline");
+        return deal("Alderwick Expansion", pipeline, stage(pipeline, "Discovery", 0), customer);
+    }
+
+    private int documentTemplate(String name) {
+        DocumentTemplate template = new DocumentTemplate();
+        template.setWorkspaceId(workspaceId());
+        template.setName(name);
+        template.setType("quote");
+        template.setLocale("en");
+        template.setTitle("Quote for {{deal.name}}");
+        documentTemplateMapper.insert(template);
+        return template.getId();
+    }
+
+    private int documentCount(Deal deal) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), deal.getId());
+        return Objects.requireNonNull(count);
     }
 
     @AfterEach

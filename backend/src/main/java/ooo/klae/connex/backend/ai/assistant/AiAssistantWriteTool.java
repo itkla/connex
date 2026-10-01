@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
@@ -150,8 +151,8 @@ public interface AiAssistantWriteTool {
      * on the shared-in row, so a card could state neither its before-value nor an approval that
      * can succeed. The framework therefore refuses such a target recoverably, with
      * {@code unresolved_reference}, when the proposal is prepared, so no card is ever stored for
-     * it. The check is made for a person only; the registry refuses a declaration that asks for it
-     * on any other kind.
+     * it. The check is made for a person or a deal; the registry refuses a declaration that asks
+     * for it on any other kind or more than one kind.
      *
      * @return {@code true} when the target must be owned by the current workspace
      */
@@ -709,6 +710,9 @@ public interface AiAssistantWriteTool {
      * @param tags the workspace's tags when the tool declared {@link ReviewInput#TAGS}
      * @param targetTags the tags the target currently holds when the tool declared {@link
      *     ReviewInput#TAGS}, read for the whole page of cards in one batch per record kind
+     * @param templates the workspace templates when the tool declared {@link ReviewInput#TEMPLATES}
+     * @param documentVersions latest document version by template on this deal, when the tool
+     *     declared {@link ReviewInput#DOCUMENTS}
      * @param pinnedResolutionId the resolved id pinned at proposal time, or {@code null} when none
      *     was pinned
      * @param pinnedPrincipalIds the principal ids pinned at proposal time in ascending order, or
@@ -727,9 +731,35 @@ public interface AiAssistantWriteTool {
             List<RecordTag> targetTags,
             Set<Permission> viewerPermissions,
             Integer pinnedResolutionId,
-            List<Integer> pinnedPrincipalIds) {
+            List<Integer> pinnedPrincipalIds,
+            List<DocumentTemplate> templates,
+            Map<Integer, Integer> documentVersions) {
+
+        /** Existing review inputs for tools that do not read document templates. */
+        public Review(
+                String targetKind, int targetId, boolean detailsReadable, RecordSnapshot target,
+                JsonNode request, JsonNode outcome, List<User> members, List<Stage> stages,
+                List<Tag> tags, List<RecordTag> targetTags, Set<Permission> viewerPermissions,
+                Integer pinnedResolutionId, List<Integer> pinnedPrincipalIds) {
+            this(targetKind, targetId, detailsReadable, target, request, outcome, members, stages,
+                    tags, targetTags, viewerPermissions, pinnedResolutionId, pinnedPrincipalIds,
+                    List.of());
+        }
+
+        /** Review inputs for tools that do not read existing deal documents. */
+        public Review(
+                String targetKind, int targetId, boolean detailsReadable, RecordSnapshot target,
+                JsonNode request, JsonNode outcome, List<User> members, List<Stage> stages,
+                List<Tag> tags, List<RecordTag> targetTags, Set<Permission> viewerPermissions,
+                Integer pinnedResolutionId, List<Integer> pinnedPrincipalIds,
+                List<DocumentTemplate> templates) {
+            this(targetKind, targetId, detailsReadable, target, request, outcome, members, stages,
+                    tags, targetTags, viewerPermissions, pinnedResolutionId, pinnedPrincipalIds,
+                    templates, Map.of());
+        }
 
         public Review {
+            documentVersions = Map.copyOf(documentVersions);
             pinnedPrincipalIds = pinnedPrincipalIds == null ? null : List.copyOf(pinnedPrincipalIds);
         }
 
@@ -758,7 +788,11 @@ public interface AiAssistantWriteTool {
          * The target's own reviewable column values, carried on its {@link RecordSnapshot}, for a
          * tool whose card states what the record holds now as its before-value.
          */
-        FIELDS
+        FIELDS,
+        /** Workspace document templates for a draft proposal. */
+        TEMPLATES,
+        /** Latest existing document versions by template on each readable deal. */
+        DOCUMENTS
     }
 
     /** Whether a reviewed value resolved and whether the record already holds it. */

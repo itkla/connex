@@ -132,8 +132,9 @@ public class AiAssistantWriteToolRegistry {
         if (kinds == null || kinds.isEmpty() || !RECORD_KINDS.containsAll(kinds)) {
             throw refused(name, "must accept a non-empty subset of " + RECORD_KINDS);
         }
-        if (tool.requiresOwnedTarget() && !kinds.equals(Set.of("person"))) {
-            throw refused(name, "requires an owned target, which is checked only for a person");
+        if (tool.requiresOwnedTarget()
+                && !kinds.equals(Set.of("person")) && !kinds.equals(Set.of("deal"))) {
+            throw refused(name, "requires an owned target for an unsupported kind");
         }
         if (tool.freshness() == null || tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
             throw refused(name, "declares unsupported freshness");
