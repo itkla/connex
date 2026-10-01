@@ -116,9 +116,11 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
                         + " delivery must roll back rather than commit \"partial\"; was " + outcome);
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_log"
-                        + " WHERE action = 'activity.create' AND outcome = 'failure' AND target_label = ?",
-                Integer.class, activityTitle),
-                "the failing action's audit must be recorded even though the delivery rolled back");
+                        + " WHERE action = 'activity.create' AND outcome = 'failure' AND target_label = ?"
+                        + " AND workspace_id = ? AND actor_id = ?",
+                Integer.class, activityTitle, workspace.getId(), currentUser.getId()),
+                "the failing action's audit must be recorded in the tenant's own chain, attributed to"
+                        + " the rule's actor, even though the delivery rolled back");
     }
 
     /**

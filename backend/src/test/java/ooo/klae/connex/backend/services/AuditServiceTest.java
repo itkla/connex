@@ -648,4 +648,52 @@ class AuditServiceTest {
         assertDoesNotThrow(() -> synchronizations.get(0)
                 .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
     }
+
+    /**
+     * A deferred row must carry the actor, tenant and request of the refused operation, captured at
+     * the call. By {@code afterCompletion} the durable delivery's {@code runAs} has already restored
+     * its caller's context, so an entry built there would have no actor and no workspace, and would
+     * be chained into the global system scope instead of the tenant's own audit log. Every context is
+     * cleared before completion, so building the entry lazily cannot pass.
+     */
+    @Test
+    void deferredFailureAuditKeepsTheCallTimeActorTenantAndRequest() {
+        when(auditIntegrityService.holdsHead(any())).thenReturn(true);
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Rule Runner");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("User-Agent", "Probe/1.0");
+        request.getSession(true);
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.recordFailure("activity.create", "activity", null, "Call",
+                    "Could not log activity", "DataIntegrityViolationException");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+        lenient().when(tenantContext.getWorkspaceId()).thenReturn(null);
+        lenient().when(tenantContext.getOrgId()).thenReturn(null);
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(42, row.getActorId());
+        assertEquals(7, row.getWorkspaceId());
+        assertEquals(8, row.getOrgId());
+        assertEquals("203.0.113.9", row.getIpAddress());
+        assertEquals("Probe/1.0", row.getUserAgent());
+        assertNotNull(row.getSessionId());
+        assertNotNull(row.getRequestId());
+    }
 }
