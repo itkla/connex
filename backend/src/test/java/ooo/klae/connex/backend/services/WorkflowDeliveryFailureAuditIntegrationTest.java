@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workflow;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
@@ -83,6 +85,8 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
     @MockitoSpyBean private ReferenceService referenceService;
+    @Autowired private AuditLogMapper auditLogMapper;
+    @Autowired private AuditIntegrityService auditIntegrityService;
 
     private Integer freshWorkspaceId;
     private Integer rewrittenRuleId;
@@ -135,6 +139,38 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         assertEquals(0, activities(activityTitle));
         assertEquals(0, audits("activity.create", "success", activityTitle));
         assertWorkspaceAuditChainIsUnbroken();
+    }
+
+    /**
+     * The first action's audit append is undone with its savepoint, so the next action's append reuses
+     * the freed chain index. The chain must stay contiguous, each row must keep exactly one checkpoint,
+     * and every row must still verify.
+     */
+    @Test
+    void anAuditAfterAnUndoneOneReusesTheFreedChainIndexWithoutBreakingIntegrity() throws Exception {
+        doThrow(new IllegalStateException("reference sync failed"))
+                .when(referenceService).syncReferences(anyInt(), eq(ReferenceService.SOURCE_ACTIVITY),
+                        anyInt(), any());
+
+        deliverRule(List.of(
+                action("log_activity", "Undone first body", "Undone first " + unique(), "call"),
+                action("create_note", "Note after an undone audit", null, null)));
+
+        assertCompletedPartially("log_activity");
+        assertEquals(1, notes("Note after an undone audit"));
+        assertWorkspaceAuditChainIsUnbroken();
+        assertEquals(
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log"
+                        + " WHERE chain_scope_type = 'workspace' AND chain_scope_id = ?",
+                        Integer.class, freshWorkspaceId),
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log_integrity_checkpoint"
+                        + " WHERE scope_type = 'workspace' AND scope_id = ?",
+                        Integer.class, freshWorkspaceId));
+        List<AuditLog> recorded = auditLogMapper.findRecent(freshWorkspaceId, 500, 0);
+        assertFalse(recorded.isEmpty());
+        for (AuditLog entry : recorded) {
+            assertTrue(auditIntegrityService.hasValidIntegrity(entry), entry.getAction());
+        }
     }
 
     /**

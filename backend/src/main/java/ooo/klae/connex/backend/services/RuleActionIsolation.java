@@ -39,6 +39,11 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       run's own bookkeeping, can read state the savepoint undid.</li>
  * </ul>
  *
+ * <p>The callbacks that are forwarded still run for undone work. An undone notification can bump its
+ * recipient's state version and send a content-free refresh, which costs a client refetch and reveals
+ * nothing. A transactional event listener in a phase other than {@code AFTER_COMMIT} would likewise run,
+ * so a listener added in another phase must tolerate undone work.
+ *
  * <p>Without an active transaction, on the non-durable dispatch path, the action runs exactly as before.
  */
 @Component
