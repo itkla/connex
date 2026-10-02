@@ -1092,7 +1092,8 @@ public class AiChatAgentLoopService {
                 && state.planPublications >= MAX_TURN_PLAN_PUBLICATIONS) {
             return refuseCall(
                     context, stepNumber, closingAttempted, nativeTools, call, state,
-                    progress, PLAN_UPDATES_EXHAUSTED, true);
+                    progress, PLAN_UPDATES_EXHAUSTED,
+                    !nativeTools || state.nativeCalls.containsKey(callRef));
         }
         if ("set_todos".equals(toolName)) {
             state.planPublications++;

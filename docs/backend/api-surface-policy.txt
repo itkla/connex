@@ -42,7 +42,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolRegistry.
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolService.java	300470bcd30e286afaa62c26cf0fd2501a23c434e8dc02b8375afb0cd1398b77
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefRunService.java	b8708d8d569418ab3b7f6aa32d77aa6789bb3960de869385ed9e093315d0c8d7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefScheduleService.java	12f31731c51536385880133c98904430e4a1ea5d473553a52b48874e1a0e88c7
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAgentLoopService.java	df5c8928475d099fce6571da9a4a51f367e5ed009e3a8889801648e02390e286
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAgentLoopService.java	befef07e5946cc10c8002579d7a6d95d1eee5a19ce97b1db82ed0d33428bcab8
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAttachmentService.java	527b4b18071eeec6607ac4f4df8a1f457e3c4fbc3a2f940962e9c640ce7953d8
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAttachmentTransactions.java	8a7301b6e0759122be88a2c7b7abb1b134ebba8421a9cd48b52ed80ceffed0db
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatQueryScopeResolver.java	67568fa3469714e12fe2a4a5794572c9ed48c4ce28ebe1f0da94c7036e64d449
