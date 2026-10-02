@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonService;
@@ -87,6 +88,7 @@ abstract class RecordControllerMvcTestSupport {
     @MockitoBean protected OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
     @MockitoBean protected LogoutAuditHandler logoutAuditHandler;
     @MockitoBean protected LoginRateLimiter loginRateLimiter;
+    @MockitoBean protected DenialAuditRateLimiter denialAuditRateLimiter;
     @MockitoBean protected ClientIpResolver clientIpResolver;
     @MockitoBean protected ErrorReporter errorReporter;
 

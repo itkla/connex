@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.config;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -15,8 +18,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
@@ -25,9 +30,14 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
  * <p>Emailed-link recipient surfaces are exempt from the enrollment confinement: their authority is
  * the purpose-bound grant cookie, the session only supplies exchange lineage, and a signed-in
  * signer who has not yet enrolled a passkey must still be able to countersign or opt out.
+ *
+ * <p>Each denial is audited at most once per window for a user, action and client address, through
+ * {@link DenialAuditRateLimiter}; every denied request is still refused.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+    private static final Logger log = LoggerFactory.getLogger(PrivilegedMfaEnforcementFilter.class);
+    private static final String ENROLLMENT_DENIED_ACTION = "auth.mfa.policy.denied";
     private static final String RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
     private static final Set<String> ENROLLMENT_GET_PATHS = Set.of(
             "/api/auth/me",
@@ -62,18 +72,24 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private final WebAuthnService webAuthnService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
+    private final DenialAuditRateLimiter denialAuditRateLimiter;
+    private final ClientIpResolver clientIpResolver;
 
     public PrivilegedMfaEnforcementFilter(
             PrivilegedMfaProperties properties,
             PrivilegedAccountService privilegedAccountService,
             WebAuthnService webAuthnService,
             SessionSecurityService sessionSecurityService,
-            AuditService auditService) {
+            AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
+            ClientIpResolver clientIpResolver) {
         this.properties = properties;
         this.privilegedAccountService = privilegedAccountService;
         this.webAuthnService = webAuthnService;
         this.sessionSecurityService = sessionSecurityService;
         this.auditService = auditService;
+        this.denialAuditRateLimiter = denialAuditRateLimiter;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @Override
@@ -90,23 +106,51 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
                 && !webAuthnService.hasPasskey(user.getId())
                 && !isEnrollmentPath(request.getMethod(), path)
                 && !isLinkFlowPath(path)) {
-            auditService.recordFailureScoped("auth.mfa.policy.denied", "user", user.getId(), null, null,
-                    user.getDisplayName(), "Privileged account confined pending MFA enrollment",
-                    "enrollment_required");
+            recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
+                    "Privileged account confined pending MFA enrollment", "enrollment_required");
             deny(response, ENROLLMENT_REQUIRED_CODE,
                     "A passkey must be enrolled before this privileged account can continue");
             return;
         }
         if (requiresExportStepUp(request.getMethod(), path)
                 && !sessionSecurityService.isExportStepUpSatisfied(request.getSession(false), user.getId())) {
-            auditService.recordFailureScoped(AuditService.EXPORT_STEP_UP_ACTION, "user", user.getId(),
-                    null, null, user.getDisplayName(), AuditService.EXPORT_STEP_UP_SUMMARY,
-                    "step_up_required");
+            recordDenial(request, user, AuditService.EXPORT_STEP_UP_ACTION,
+                    AuditService.EXPORT_STEP_UP_SUMMARY, "step_up_required");
             deny(response, RECENT_AUTHENTICATION_REQUIRED_CODE,
                     "Recent passkey verification is required");
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Records a denial at most once per window for this user, action and client address.
+     *
+     * <p>Both denials can be written by a {@code GET}, so another site can trigger them: with a
+     * top-level navigation under the {@code SameSite=Lax} session cookie, and with any subresource load
+     * under the {@code SameSite=None} that SAML deployments use. Unbounded, every visit appended a row
+     * attributed to the victim (#1850). The write is strict so that a failure hands the window
+     * back instead of suppressing the next denial's evidence; the request is refused either way.
+     */
+    private void recordDenial(HttpServletRequest request, User user, String action, String summary,
+            String reason) {
+        Optional<DenialAuditRateLimiter.Admission> admission =
+                denialAuditRateLimiter.acquire(user.getId(), action, clientIpResolver.resolve(request));
+        if (admission.isEmpty()) {
+            return;
+        }
+        boolean written = false;
+        try {
+            auditService.recordStrictFailureIndependentScoped(action, "user", user.getId(), null, null,
+                    user.getDisplayName(), summary, reason);
+            written = true;
+        } catch (RuntimeException e) {
+            log.error("Failed to record access denial action={} userId={}", action, user.getId(), e);
+        } finally {
+            if (!written) {
+                denialAuditRateLimiter.release(admission.get());
+            }
+        }
     }
 
     private static User currentUser() {

@@ -1026,12 +1026,17 @@ The filter and interceptor layer reaches at least the following durable writes o
 
 1. the workspace-pin heal above — value server-derived from the victim's own default workspace,
    never request data;
-2. `PrivilegedMfaEnforcementFilter:93` — an `audit_log` insert plus a lazily created
-   `audit_log_integrity_head` row, for a privileged passkey-less caller. The session cookie is
-   `SameSite=Lax`, so a cross-site **top-level navigation** does trigger it. Content is fixed and
-   derived from the victim's identity, but repetition is unbounded, so this is tracked as a finding
-   in its own right on [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into
-   this false-positive rationale;
+2. `PrivilegedMfaEnforcementFilter` — an `audit_log` insert plus a lazily created
+   `audit_log_integrity_head` row, written before either of its refusals: the confinement of a
+   privileged passkey-less caller, and the export step-up refusal for **any** caller on an export
+   path without recent verification. The session cookie is `SameSite=Lax`, so a cross-site
+   **top-level navigation** does trigger both, and under the `SameSite=None` that SAML deployments
+   use, so does any cross-site subresource load. Content is fixed and derived from the victim's
+   identity. Repetition was unbounded, which was tracked as a finding in its own right on
+   [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into this false-positive
+   rationale; since that fix, `DenialAuditRateLimiter` admits at most one row per hour for each user,
+   action, and client address, for at most eight addresses per user and action, per replica, while
+   the 403 itself is unchanged;
 3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
    request (verified in spring-session-jdbc 4.1.0 bytecode);
 4. gated session-attribute writes — when an authenticated session lacks the legacy
