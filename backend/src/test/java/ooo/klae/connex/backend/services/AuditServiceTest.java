@@ -744,13 +744,20 @@ class AuditServiceTest {
                 "document.accept", "document", 6, "Quote", "Accepted quote", null));
     }
 
-    /** An independent append runs in its own transaction, so even its lost commit leaves the caller's. */
+    /**
+     * An independent append runs in its own transaction, so even inside the caller's transaction its
+     * failed commit leaves the caller's transaction standing.
+     */
     @Test
     void aFailedIndependentAppendNeverBreaksTheOperation() {
         doThrow(new TransactionSystemException("Could not commit JDBC transaction"))
                 .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
-
-        assertDoesNotThrow(() -> service.recordFailureScoped(
-                "deal.update", "deal", 5, 7, 8, "Deal", "Deal update refused", "ForbiddenException"));
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertDoesNotThrow(() -> service.recordFailureScoped(
+                    "deal.update", "deal", 5, 7, 8, "Deal", "Deal update refused", "ForbiddenException"));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 }
