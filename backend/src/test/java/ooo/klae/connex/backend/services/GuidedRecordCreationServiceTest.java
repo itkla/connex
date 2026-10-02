@@ -174,6 +174,26 @@ class GuidedRecordCreationServiceTest {
         order.verify(dealService).createReviewed(any(), eq(null), any());
     }
 
+    @Test
+    void reviewedStageNameReachesCanonicalCreationWithTheSubmittedPipeline() {
+        RecordCreationTemplateUseDto use = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, use))
+            .thenReturn(resolved(RecordCreationRecordType.deal));
+        GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
+            new GuidedDealRecordDto("Deal", BigDecimal.ZERO, "USD", 8, 10, null, null, null),
+            use, Map.of(), List.of());
+
+        service.createDeal(request, "Discovery");
+
+        ArgumentCaptor<Deal> deal = ArgumentCaptor.forClass(Deal.class);
+        ArgumentCaptor<RecordCreationAugmentation> augmentation =
+            ArgumentCaptor.forClass(RecordCreationAugmentation.class);
+        verify(dealService).createReviewed(deal.capture(), eq(null), augmentation.capture());
+        assertEquals(8, deal.getValue().getPipelineId());
+        assertEquals(10, deal.getValue().getStageId());
+        assertEquals("Discovery", augmentation.getValue().reviewedStageName());
+    }
+
     private RecordCreationTemplateUseDto use(RecordCreationRecordType type) {
         return new RecordCreationTemplateUseDto(
             "system:" + type.name() + ":standard",

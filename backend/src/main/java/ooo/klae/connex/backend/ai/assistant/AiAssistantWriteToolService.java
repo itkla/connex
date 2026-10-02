@@ -190,11 +190,12 @@ public class AiAssistantWriteToolService {
                 if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
                     requireTargetAccessible(anchor);
                 }
-                pinned = AiAssistantToolProposalPin.copy(tool.pin(anchor, request));
+                AiAssistantWriteTool.Preparation preparation = tool.prepare(anchor, request);
+                pinned = AiAssistantToolProposalPin.copy(preparation.pinned());
+                requireNoKnownDuplicate(tool, preparation.duplicateProbe());
             } catch (ResourceNotFoundException exception) {
                 throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
             }
-            requireNoKnownDuplicate(tool, anchor, request);
         }
         ObjectNode storedRequest = objectMapper.valueToTree(request);
         storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
@@ -233,8 +234,7 @@ public class AiAssistantWriteToolService {
 
     /** Strict assistant-create policy: any visible candidate or truncation refuses a proposal. */
     private void requireNoKnownDuplicate(
-            AiAssistantWriteTool tool, Target target, AiAssistantWriteToolRequest request) {
-        AiAssistantWriteTool.DuplicateProbe probe = tool.duplicateProbe(target, request);
+            AiAssistantWriteTool tool, AiAssistantWriteTool.DuplicateProbe probe) {
         if (probe == null) {
             if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
                 throw new IllegalStateException("Assistant create has no duplicate probe");
@@ -246,7 +246,7 @@ public class AiAssistantWriteToolService {
             candidates = switch (probe.kind()) {
                 case "person" -> {
                     DuplicatePreflightResponse response = duplicatePreflightService.preflightPerson(
-                            new PersonDuplicatePreflightRequest(probe.name(), List.of(), List.of()));
+                            new PersonDuplicatePreflightRequest(probe.name(), probe.emails(), probe.phones()));
                     yield response.truncated() || !response.candidates().isEmpty();
                 }
                 case "deal" -> duplicatePreflightService.dealCandidatesExist(

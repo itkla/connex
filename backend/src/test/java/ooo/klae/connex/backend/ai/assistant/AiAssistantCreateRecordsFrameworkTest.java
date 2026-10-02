@@ -14,17 +14,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 
+import ooo.klae.connex.backend.ai.masking.EntityKind;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
+import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationPresetCatalogDto;
@@ -44,6 +50,57 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
     private static final String PERSON = "{\"handle\":\"r1\",\"name\":\"New colleague\",\"title\":\"Director\"}";
     private static final String DEAL = "{\"handle\":\"r1\",\"name\":\"New opportunity\",\"stage\":\"Proposal\","
             + "\"value\":\"1250.50\",\"currency\":\"JPY\"}";
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create_person", "create_deal"})
+    void embeddedIssuedNamesAndDemaskedIdentifierSubstringsRefuseBeforePreparation(String tool) {
+        MaskingContext masking = new MaskingContext();
+        masking.tokenFor(EntityKind.PERSON, "Morgan Vale");
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(masking);
+        resources.register("company", 31);
+        AiAssistantWriteToolService service = service();
+        for (String name : List.of("{{P1}} Jr", "｛｛ Ｐ１ ｝｝ Jr", "Morgan Vale Jr", "MORGAN VALE Jr")) {
+            var arguments = objectMapper.createObjectNode().put("handle", "r1").put("name", name);
+            if ("create_deal".equals(tool)) {
+                arguments.put("stage", "Proposal").put("value", "100").put("currency", "JPY");
+            }
+            if (name.contains("{{") || name.contains("｛｛")) {
+                var output = objectMapper.createObjectNode();
+                output.putObject("tool").put("name", tool).set("args", arguments);
+                output.putNull("final");
+                Set<String> refused = new HashSet<>();
+                var schema = new AiAssistantStepGuard(catalog).forStep(
+                        Set.of(AiAssistantToolCatalog.Toolset.CORE, AiAssistantToolCatalog.Toolset.WRITE_CREATE),
+                        Set.of("{{P1}}"));
+                assertNull(service.guardRawIdentifiers(schema, masking, refused).rejectionReason(output));
+                assertEquals(Set.of(tool), refused);
+            }
+            assertRefusal("identifier_from_another_record",
+                    () -> service.prepare(tool, arguments, resources, TURN.restrictionEpoch()));
+        }
+        verifyNoInteractions(chatMapper, presetService, duplicatePreflightService, creationService, pipelineService);
+    }
+
+    @Test
+    void templateIdentityDefaultsReachPreflightWithoutEnteringDurablePins() throws Exception {
+        ResolvedCreationFieldDto email = defaultField("email", "private@example.test");
+        ResolvedCreationFieldDto phone = defaultField("phone", "+12025550123");
+        when(presetService.persons(RecordCreationEntryPoint.quick_create, 31))
+                .thenReturn(preset(RecordCreationRecordType.person, email, phone));
+        when(duplicatePreflightService.preflightPerson(any()))
+                .thenReturn(new DuplicatePreflightResponse("person", List.of(), false, null));
+
+        AiAssistantPreparedWrite prepared = propose(service(), "create_person", PERSON, "company", 31);
+
+        ArgumentCaptor<PersonDuplicatePreflightRequest> captured =
+                ArgumentCaptor.forClass(PersonDuplicatePreflightRequest.class);
+        verify(duplicatePreflightService).preflightPerson(captured.capture());
+        assertEquals(List.of("private@example.test"), captured.getValue().emails());
+        assertEquals(List.of("+12025550123"), captured.getValue().phones());
+        assertFalse(prepared.argumentsJson().contains("private@example.test"));
+        assertFalse(prepared.argumentsJson().contains("+12025550123"));
+        verifyNoInteractions(duplicateDecisionLockService, creationService);
+    }
 
     @Test
     void aTruncatedPersonCheckRefusesBeforeAnyProposalOrCreate() {
@@ -206,11 +263,19 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
         when(pipelineService.getAllStages()).thenReturn(List.of(stage(6, "Proposal")));
     }
 
-    private static RecordCreationPresetCatalogDto preset(RecordCreationRecordType kind) {
+    private ResolvedCreationFieldDto defaultField(String key, String value) {
+        return new ResolvedCreationFieldDto(key, null, null, null, null, null, null, null,
+                false, false, false, objectMapper.valueToTree(value), null, List.of());
+    }
+
+    private static RecordCreationPresetCatalogDto preset(
+            RecordCreationRecordType kind, ResolvedCreationFieldDto... fields) {
         return new RecordCreationPresetCatalogDto(kind, RecordCreationEntryPoint.quick_create, 4,
                 "workspace:12", List.of(new ResolvedCreationTemplateDto("workspace:12", kind, false, 3,
                         new LocalizedTextDto("Reviewed", "確認済み"), null,
-                        RecordCreationTemplateAvailability.available, List.of(), List.of())), false, List.of());
+                        RecordCreationTemplateAvailability.available,
+                        List.of(new ResolvedCreationGroupDto("basics", null, null, List.of(fields))), List.of())),
+                false, List.of());
     }
 
     private static void assertRefusal(String reason, org.junit.jupiter.api.function.Executable action) {

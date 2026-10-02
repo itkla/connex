@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -188,13 +189,13 @@ class AiAssistantCreateRecordsWriteToolTest {
         created.setName("Renewal");
         created.setValue(new BigDecimal("1250.50"));
         created.setCurrency("USD");
-        when(creationService.createDeal(any())).thenReturn(created);
+        when(creationService.createDeal(any(), eq("Qualified"))).thenReturn(created);
 
         Outcome outcome = dealTool.apply(execution(DEAL, new Resolution("stage", 7, "Qualified")));
 
         ArgumentCaptor<GuidedDealCreateRequestDto> captured =
                 ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
-        verify(creationService).createDeal(captured.capture());
+        verify(creationService).createDeal(captured.capture(), eq("Qualified"));
         GuidedDealCreateRequestDto request = captured.getValue();
         assertEquals(3, request.templateUse().templateVersion());
         assertEquals(12, request.templateUse().templateSetRevision());
@@ -225,6 +226,47 @@ class AiAssistantCreateRecordsWriteToolTest {
         when(pipelineService.getAllStages()).thenReturn(List.of(stage(7, "qUALIFIED")));
         assertEquals(7, dealTool.resolve(COMPANY, DEAL).id());
         verifyNoInteractions(creationService, presetService);
+    }
+
+    @Test
+    void dealPinsTheReviewedPipelineAndRefusesAStageMovedToAnotherPipeline() {
+        Stage stage = stage(7, "Qualified");
+        when(pipelineService.getAllStages()).thenReturn(List.of(stage));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal));
+        Map<String, Object> pinned = dealTool.pin(COMPANY, DEAL);
+        assertEquals(7, pinned.get("stageId"));
+        assertEquals(5, pinned.get("stagePipelineId"));
+        assertEquals("Qualified", pinned.get("stageName"));
+        assertEquals(pinned, AiAssistantToolProposalPin.read(objectMapper.valueToTree(Map.of("pinned", pinned))));
+        stage.getPipeline().setId(8);
+        when(pipelineService.getStageById(7)).thenReturn(stage);
+
+        assertEquals("Assistant proposal target changed", assertThrows(ConflictException.class,
+                () -> dealTool.apply(execution(DEAL, new Resolution("stage", 7, "Qualified")))).getMessage());
+        assertEquals(DiffState.UNRESOLVED,
+                dealTool.diffs(review(DEAL, List.of(stage), 7, pinned)).get(1).state());
+        verifyNoInteractions(creationService);
+    }
+
+    @Test
+    void aNameSwapBetweenResolutionAndPinningCannotMixStageIdentities() {
+        Stage first = stage(7, "Qualified");
+        Stage successor = stage(9, "Qualified");
+        successor.getPipeline().setId(8);
+        when(pipelineService.getAllStages()).thenReturn(List.of(first), List.of(successor));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal));
+        Resolution resolution = dealTool.resolve(COMPANY, DEAL);
+        Map<String, Object> pinned = dealTool.pin(COMPANY, DEAL);
+        first.getPipeline().setId(8);
+        when(pipelineService.getStageById(7)).thenReturn(first);
+
+        assertEquals("Assistant proposal target changed", assertThrows(ConflictException.class,
+                () -> dealTool.apply(execution(DEAL, resolution, pinned))).getMessage());
+        assertEquals(DiffState.UNRESOLVED,
+                dealTool.diffs(review(DEAL, List.of(first), resolution.id(), pinned)).get(1).state());
+        verifyNoInteractions(creationService);
     }
 
     @Test
@@ -295,9 +337,14 @@ class AiAssistantCreateRecordsWriteToolTest {
     }
 
     private Execution execution(AiAssistantWriteToolRequest request, Resolution resolution) {
+        return execution(request, resolution, pin());
+    }
+
+    private Execution execution(
+            AiAssistantWriteToolRequest request, Resolution resolution, Map<String, Object> pinned) {
         return new Execution(new Authority(4, 17, 91, Instant.EPOCH), new Row(COMPANY, request),
                 List.of(), resolution, new LockedTarget(null, null),
-                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pin());
+                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pinned);
     }
 
     private Review review(
@@ -312,7 +359,8 @@ class AiAssistantCreateRecordsWriteToolTest {
     private static Map<String, Object> pin() {
         return Map.of("templateId", "workspace:8", "templateVersion", 3,
                 "templateSetRevision", 12, "templateName", "Sales intake",
-                "defaultedFields", Map.of("leadSource", "REFERRAL", "customFields", ""));
+                "defaultedFields", Map.of("leadSource", "REFERRAL", "customFields", ""),
+                "stageId", 7, "stageName", "Qualified", "stagePipelineId", 5);
     }
 
     private RecordCreationPresetCatalogDto catalog(

@@ -122,7 +122,9 @@ class AiAssistantWriteToolRegistryTest {
         for (Discovered discovered : AiAssistantDeclaredWriteTools.discover()) {
             AiAssistantWriteTool tool = discovered.tool();
             boolean editing = "update_record_fields".equals(tool.name());
-            assertEquals(editing ? Set.of("website") : Set.of(), tool.identifierValueFields());
+            assertEquals(editing ? Set.of("website")
+                    : Set.of("create_person", "create_deal").contains(tool.name()) ? Set.of("name")
+                    : Set.of(), tool.identifierValueFields());
             assertEquals(editing
                     ? Set.of("title", "website", "industry", "address", "value", "expectedCloseDate")
                     : "create_person".equals(tool.name()) ? Set.of("name", "title")

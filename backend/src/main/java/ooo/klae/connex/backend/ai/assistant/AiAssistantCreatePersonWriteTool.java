@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreatePe
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonRecordDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationPresetCatalogDto;
 import ooo.klae.connex.backend.recordcreation.RecordCreationEntryPoint;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
 import ooo.klae.connex.backend.services.RecordCreationPresetService;
@@ -71,6 +72,11 @@ public class AiAssistantCreatePersonWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
+    public Set<String> identifierValueFields() {
+        return Set.of("name");
+    }
+
+    @Override
     public void validateFor(String targetKind, JsonNode request) {
         AiAssistantCreationTemplatePin.validateShape(
                 targetKind, request, Set.of("handle", "name", "title"));
@@ -86,11 +92,25 @@ public class AiAssistantCreatePersonWriteTool implements AiAssistantWriteTool {
 
     @Override
     public Map<String, Object> pin(Target target, AiAssistantWriteToolRequest request) {
+        return pin(presetService.persons(RecordCreationEntryPoint.quick_create, target.id()), request(request));
+    }
+
+    @Override
+    public Preparation prepare(Target target, AiAssistantWriteToolRequest request) {
         CreatePerson person = request(request);
+        RecordCreationPresetCatalogDto catalog =
+                presetService.persons(RecordCreationEntryPoint.quick_create, target.id());
+        return new Preparation(pin(catalog, person), new DuplicateProbe(
+                "person", person.name(), target.id(), person.title(),
+                AiAssistantCreationTemplatePin.identityDefault(catalog, "email"),
+                AiAssistantCreationTemplatePin.identityDefault(catalog, "phone")));
+    }
+
+    private static Map<String, Object> pin(RecordCreationPresetCatalogDto catalog, CreatePerson person) {
         Set<String> supplied = person.title() == null
                 ? Set.of("name", "company") : Set.of("name", "company", "title");
         return AiAssistantCreationTemplatePin.prepare(
-                presetService.persons(RecordCreationEntryPoint.quick_create, target.id()),
+                catalog,
                 supplied, Set.of("owner", "consentStatus"));
     }
 

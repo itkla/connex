@@ -161,14 +161,34 @@ public interface AiAssistantWriteTool {
         return Map.of();
     }
 
+    /** Keeps private preflight identity values transient and separate from durable proposal pins. */
+    default Preparation prepare(Target target, AiAssistantWriteToolRequest request) {
+        return new Preparation(pin(target, request), duplicateProbe(target, request));
+    }
+
+    /** Only pinned metadata is persisted; duplicate inputs live for this preparation alone. */
+    record Preparation(Map<String, Object> pinned, DuplicateProbe duplicateProbe) {
+        public Preparation {
+            pinned = Map.copyOf(pinned);
+        }
+    }
+
     /** Pure duplicate-check inputs; the framework alone performs the advisory read. */
     default DuplicateProbe duplicateProbe(Target target, AiAssistantWriteToolRequest request) {
         return null;
     }
 
     /** Identity values for a framework-owned check, never candidate records or a review proof. */
-    record DuplicateProbe(String kind, String name, Integer companyId, String title) {
+    record DuplicateProbe(
+            String kind, String name, Integer companyId, String title,
+            List<String> emails, List<String> phones) {
+        public DuplicateProbe(String kind, String name, Integer companyId, String title) {
+            this(kind, name, companyId, title, List.of(), List.of());
+        }
+
         public DuplicateProbe {
+            emails = List.copyOf(emails);
+            phones = List.copyOf(phones);
             if ((!"person".equals(kind) && !"deal".equals(kind)) || name == null || name.isBlank()
                     || companyId == null || companyId <= 0) {
                 throw new IllegalArgumentException("Invalid assistant duplicate probe");

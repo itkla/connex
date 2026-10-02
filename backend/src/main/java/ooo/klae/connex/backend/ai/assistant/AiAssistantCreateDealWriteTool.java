@@ -80,6 +80,11 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
+    public Set<String> identifierValueFields() {
+        return Set.of("name");
+    }
+
+    @Override
     public void validateFor(String targetKind, JsonNode request) {
         AiAssistantCreationTemplatePin.validateShape(targetKind, request,
                 Set.of("handle", "name", "stage", "value", "currency", "expected_close_date"));
@@ -124,9 +129,17 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
         Set<String> supplied = deal.expectedCloseDate() == null
                 ? Set.of("name", "company", "stage", "pipeline", "value", "currency")
                 : Set.of("name", "company", "stage", "pipeline", "value", "currency", "expectedCloseDate");
-        return AiAssistantCreationTemplatePin.prepare(
+        Stage stage = requestedStage(deal.stage(), pipelineService.getAllStages());
+        if (stage == null) {
+            throw new ResourceNotFoundException("Deal stage is unavailable or ambiguous");
+        }
+        Map<String, Object> pinned = new LinkedHashMap<>(AiAssistantCreationTemplatePin.prepare(
                 presetService.deals(RecordCreationEntryPoint.quick_create, target.id()),
-                supplied, Set.of("owner"));
+                supplied, Set.of("owner")));
+        pinned.put("stageId", stage.getId());
+        pinned.put("stageName", stage.getName());
+        pinned.put("stagePipelineId", stage.getPipeline().getId());
+        return Map.copyOf(pinned);
     }
 
     @Override
@@ -141,18 +154,26 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
         if (resolution == null) {
             throw new ConflictException("Prepared deal stage is unavailable");
         }
+        Object stagePin = execution.pinned().get("stageId");
+        Object pipelinePin = execution.pinned().get("stagePipelineId");
+        Object namePin = execution.pinned().get("stageName");
+        if (!(stagePin instanceof Integer stageId) || stageId != resolution.id()
+                || !(pipelinePin instanceof Integer pipelineId) || pipelineId <= 0
+                || !(namePin instanceof String stageName) || stageName.isBlank()) {
+            throw new ConflictException("Assistant proposal target changed");
+        }
         Stage stage = pipelineService.getStageById(resolution.id());
         if (stage == null || stage.getId() != resolution.id() || stage.getPipeline() == null
-                || stage.getName() == null || !stage.getName().equalsIgnoreCase(request.stage().trim())) {
+                || stage.getPipeline().getId() != pipelineId || !stageName.equals(stage.getName())) {
             throw new ConflictException("Assistant proposal target changed");
         }
         int companyId = execution.row().target().id();
         Deal created = creationService.createDeal(new GuidedDealCreateRequestDto(
                 new GuidedDealRecordDto(request.name(), new BigDecimal(request.value()), request.currency(),
-                        stage.getPipeline().getId(), stage.getId(), companyId,
+                        pipelineId, stage.getId(), companyId,
                         request.expectedCloseDate() == null ? null : LocalDate.parse(request.expectedCloseDate()),
                         null),
-                AiAssistantCreationTemplatePin.use(execution.pinned(), companyId), Map.of(), List.of()));
+                AiAssistantCreationTemplatePin.use(execution.pinned(), companyId), Map.of(), List.of()), stageName);
         if (created == null) {
             throw new IllegalStateException("Created deal could not be read back");
         }
@@ -163,7 +184,7 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
             outcome.put("name", created.getName());
         }
         if (Integer.valueOf(stage.getId()).equals(created.getStageId())) {
-            outcome.put("stage", stage.getName());
+            outcome.put("stage", stageName);
         }
         if (created.getValue() != null) {
             outcome.put("value", created.getValue().toPlainString());
@@ -204,6 +225,9 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
         Stage stage = requestedStage(review.requestText("stage"), review.stages());
         boolean resolved = stage != null && review.pinnedResolutionId() != null
                 && stage.getId() == review.pinnedResolutionId()
+                && Integer.valueOf(stage.getId()).equals(review.pinned().get("stageId"))
+                && stage.getName().equals(review.pinned().get("stageName"))
+                && Integer.valueOf(stage.getPipeline().getId()).equals(review.pinned().get("stagePipelineId"))
                 && !SpecialCareTextScreen.screen(stage.getName()).excluded();
         rows.add(new Diff("stage", null, false, resolved ? stage.getName() : null,
                 resolved ? DiffState.CHANGED : DiffState.UNRESOLVED));

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Diff;
@@ -28,11 +29,7 @@ final class AiAssistantCreationTemplatePin {
     /** Resolves required inputs after the same defaults and intrinsic values as guided creation. */
     static Map<String, Object> prepare(
             RecordCreationPresetCatalogDto catalog, Set<String> supplied, Set<String> intrinsic) {
-        ResolvedCreationTemplateDto selected = catalog.templates().stream()
-                .filter(template -> template.id().equals(catalog.selectedTemplateId()))
-                .filter(template -> template.availability() == RecordCreationTemplateAvailability.available)
-                .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Creation template is unavailable"));
+        ResolvedCreationTemplateDto selected = selected(catalog);
         Map<String, Object> defaults = new LinkedHashMap<>();
         for (ResolvedCreationFieldDto field : selected.groups().stream()
                 .flatMap(group -> group.fields().stream()).toList()) {
@@ -59,6 +56,26 @@ final class AiAssistantCreationTemplatePin {
                 "templateSetRevision", catalog.setRevision(),
                 "templateName", name,
                 "defaultedFields", Map.copyOf(defaults));
+    }
+
+    /** Uses guided creation's first non-null core text default, including an empty string. */
+    static List<String> identityDefault(RecordCreationPresetCatalogDto catalog, String key) {
+        return selected(catalog).groups().stream()
+                .flatMap(group -> group.fields().stream())
+                .filter(field -> field.customFieldId() == null && key.equals(field.key()))
+                .map(ResolvedCreationFieldDto::defaultValue)
+                .filter(Objects::nonNull)
+                .map(JsonNode::textValue)
+                .filter(Objects::nonNull)
+                .findFirst().map(List::of).orElseGet(List::of);
+    }
+
+    private static ResolvedCreationTemplateDto selected(RecordCreationPresetCatalogDto catalog) {
+        return catalog.templates().stream()
+                .filter(template -> template.id().equals(catalog.selectedTemplateId()))
+                .filter(template -> template.availability() == RecordCreationTemplateAvailability.available)
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Creation template is unavailable"));
     }
 
     /** Submits the proposal's exact template version; approval never selects a replacement. */

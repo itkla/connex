@@ -529,9 +529,14 @@ The framework acquires its locks in exactly this order:
    existing guided-create order. No path takes that mutex before an `ai_chat_*` row.
 
 Prepare-time duplicate checks are advisory reads with no mutex and no proof issuance. They hold
-no domain lock across a model call. Approval's duplicate recheck under the mutex is authoritative,
+no domain lock across a model call. Person preparation includes the selected template's effective
+email/phone defaults only in transient preflight state. Approval's duplicate recheck under the mutex is authoritative,
 and the pinned template version/set revision is validated by guided creation both preliminarily
 and under the template hierarchy. A new candidate or changed template refuses without a create.
+Deal creation submits the proposal's pinned pipeline id and carries its exact reviewed stage name
+through server-only augmentation. After locking the stage, canonical creation compares that name
+and refuses drift before insertion; stage-to-pipeline validation retains the pinned pipeline under
+the existing stage-before-pipeline hierarchy. No new lock or lock-order edge is introduced.
 
 After step 7 the framework, still in this order and taking no further lock of its own: retains the
 restriction-epoch read fence to completion; for confirm-tier tools compares their declared freshness
