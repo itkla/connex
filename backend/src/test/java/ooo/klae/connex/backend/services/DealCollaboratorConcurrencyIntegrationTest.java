@@ -54,9 +54,11 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -69,6 +71,10 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  * The tenant-only insert no longer joins {@code workspace_member}, so the replacement relies on locking
  * each requested membership {@code FOR UPDATE} before it writes: a removal holding the member's locks
  * makes the replacement wait, and once the removal commits the replacement is refused.
+ *
+ * <p>The bean overrides match {@code OwnerChangeConcurrencyIntegrationTest}'s exactly, field names
+ * included, so the two classes can share one cached application context; the person and company
+ * mapper spies serve that class.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -86,6 +92,8 @@ class DealCollaboratorConcurrencyIntegrationTest {
     @MockitoSpyBean private WorkspaceMapper workspaceMapper;
     @MockitoSpyBean private NotificationMapper notificationMapper;
     @MockitoSpyBean private DealMapper dealMapper;
+    @MockitoSpyBean private PersonMapper personMapper;
+    @MockitoSpyBean private CompanyMapper companyMapper;
     @MockitoBean private AuditService auditService;
     @MockitoBean private NotificationChangePublisher notificationChanges;
     @MockitoBean private NotificationStateVersionService notificationStateVersionService;

@@ -542,12 +542,27 @@ public class CompanyService {
         return after;
     }
 
+    /**
+     * Assigns or clears a company's owner. The audited old owner and the
+     * {@code company.owner_changed} decision come from the company row locked after the new owner's
+     * membership, if any, not from the unlocked existence check, which opens this transaction's read
+     * view before any lock is held. A company archived or deleted since that check is refused under
+     * the lock, before anything is written (#1948).
+     *
+     * @param companyId the company in the current workspace
+     * @param ownerId the new owner, or {@code null} to unassign
+     * @return the updated company
+     */
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = requireOwnedCompany(workspaceId, companyId);
+        requireOwnedCompany(workspaceId, companyId);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        Company before = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Company not found");
+        }
         companyMapper.updateOwner(workspaceId, companyId, ownerId);
         auditService.record("company.updateOwner", "company", companyId, before.getName(),
             "Updated owner on " + before.getName(),

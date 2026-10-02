@@ -80,6 +80,23 @@ class DealMapperXmlTest {
         assertTrue(sql.endsWith("FOR UPDATE"));
     }
 
+    /**
+     * The owner change locks only the primary-key record its update locks anyway, and never the
+     * composite foreign-key index a child insert holds (#1948).
+     */
+    @Test
+    void ownerChangeLookupLocksOnlyThePrimaryKey() throws Exception {
+        Configuration configuration = configuration();
+
+        String sql = sql(configuration, "getDealByPrimaryKeyForUpdate", MemberScope.allTeam());
+
+        assertTrue(sql.contains("FROM deal FORCE INDEX (PRIMARY)"));
+        assertTrue(sql.contains("WHERE workspace_id = ? AND id = ?"));
+        assertTrue(sql.endsWith("FOR UPDATE"));
+        assertTrue(configuration.getMappedStatement(DealMapper.class.getName() + ".getDealByPrimaryKeyForUpdate")
+            .isFlushCacheRequired());
+    }
+
     @Test
     void batchPositionUpdateKeepsWorkspaceAndStagePredicates() throws Exception {
         String sql = sql(configuration(), "setPositions", MemberScope.allTeam());
