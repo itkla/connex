@@ -225,13 +225,18 @@ class AiAssistantScriptedTrajectoryCreateRecordsTest extends AbstractScriptedTra
         assertEquals(0, auditRows("deal.create"));
     }
 
+    /** Keeps a policy-default stage in Sales so template availability cannot mask the pipeline fence. */
     @Test
     void aStageMovedAfterResolutionRefusesThePinnedPipelineUnderTheCanonicalLocks() throws Exception {
         company("Alderwick Shipping");
-        Stage reviewed = stage(pipeline("Sales"), "Discovery", 0);
+        Pipeline original = pipeline("Sales");
+        Stage reviewed = stage(original, "Discovery", 0);
+        stage(original, "Qualified", 1);
         Pipeline destination = pipeline("Other sales");
         Trajectory trajectory = run("connex_script_create_deal_proposal", "add an opportunity");
         AiChatToolCall proposal = proposal(trajectory, "create_deal");
+        assertEquals(original.getId(), objectMapper.readTree(proposal.getArgumentsJson())
+                .path("pinned").path("stagePipelineId").asInt());
 
         RecordCreationTemplateException refused = approveAfterMutexWait(
                 trajectory, proposal, RecordCreationTemplateException.class, holder -> {
@@ -245,6 +250,7 @@ class AiAssistantScriptedTrajectoryCreateRecordsTest extends AbstractScriptedTra
                 });
 
         assertEquals("VALIDATION_FAILED", refused.error().code());
+        assertEquals("The selected stage does not belong to the selected pipeline", refused.getMessage());
         assertEquals(0, dealCount());
         assertEquals(0, auditRows("deal.create"));
     }
