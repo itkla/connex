@@ -174,9 +174,8 @@ class SecretStoreTest {
     }
 
     /**
-     * Mail readiness now asks {@code exists} instead of decrypting (#1932), so it must refuse a
-     * reference outside the asked scope exactly as {@code get} does: another workspace, or another
-     * purpose and scope.
+     * {@code exists} must refuse a reference outside the asked scope exactly as {@code get} does:
+     * another workspace, or another purpose and scope.
      */
     @Test
     void exists_scopeMismatchIsFalse() {
