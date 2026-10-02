@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
+import static org.springframework.test.web.client.ExpectedCount.manyTimes;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -226,6 +227,11 @@ class BusinessCardOcrClientTest {
         server.verify(Duration.ofSeconds(2));
     }
 
+    /**
+     * With a 1 ms readiness cache the background prober keeps probing after the recovery probe, so
+     * every later probe is answered the same way instead of exactly once: an exact count raced the
+     * prober and failed the final verify on a busy runner (#1834).
+     */
     @Test
     void staleProbeCannotReopenReadinessAfterWorkerFailure() throws Exception {
         CountDownLatch staleProbeStarted = new CountDownLatch(1);
@@ -253,7 +259,7 @@ class BusinessCardOcrClientTest {
                 });
         server.expect(requestTo(BASE + "/v1/ocr"))
                 .andRespond(withServiceUnavailable());
-        server.expect(requestTo(BASE + "/ready"))
+        server.expect(manyTimes(), requestTo(BASE + "/ready"))
                 .andRespond(request -> {
                     recoveryProbeStarted.countDown();
                     return withServiceUnavailable().createResponse(request);

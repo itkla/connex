@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,6 +63,12 @@ class UploadContentInspectorTest {
     private UploadContentInspector inspector;
     private BoundedImageValidationExecutor imageValidationExecutor;
 
+    /**
+     * Builds the inspector with the production executor's shape but a 30-second inspection budget
+     * instead of five. These tests are about what inspection accepts and refuses, not its deadline,
+     * which the short-timeout test pins; on a starved CI host a small JPEG's decode has outlasted five
+     * seconds and turned an acceptance into a timeout refusal (#1914).
+     */
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
@@ -72,7 +79,12 @@ class UploadContentInspectorTest {
             policy,
             new ImageDecodeAdmissionService(properties),
             imageValidationExecutor);
-        inspector = new UploadContentInspector(policy, imageValidator, new ObjectMapper());
+        inspector = new UploadContentInspector(
+            policy,
+            imageValidator,
+            new ObjectMapper(),
+            new ThreadPoolExecutor(4, 4, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(8)),
+            Duration.ofSeconds(30));
     }
 
     @AfterEach
