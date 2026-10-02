@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -104,6 +108,161 @@ class MailConfigResolverTest {
         actor.setId(9);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(actor, null, List.of()));
+    }
+
+    private static WorkspaceMailConfig authenticatingOverride(boolean usable, String passwordEnc) {
+        WorkspaceMailConfig ws = new WorkspaceMailConfig();
+        ws.setWorkspaceId(7);
+        ws.setEnabled(true);
+        ws.setHost(usable ? "smtp.workspace.test" : null);
+        ws.setFromAddress("team@workspace.test");
+        ws.setAuth(true);
+        ws.setPasswordEnc(passwordEnc);
+        return ws;
+    }
+
+    /**
+     * Readiness decides exactly as resolution does but never decrypts: asking whether a workspace can
+     * send used to write an audited secret use for every check, and the decrypted password was never
+     * part of the answer (#1932).
+     */
+    @Test
+    void readinessSelectsAUsableOverrideWithoutDecryptingItsPassword() {
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(true, "secret:v1:5"));
+        when(secretCipher.canResolveForWorkspace(7, "secret:v1:5")).thenReturn(true);
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("workspace_override", true),
+                resolver.readinessForWorkspace(7));
+        assertTrue(resolver.canSendForWorkspace(7));
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), anyString());
+
+        when(secretCipher.decryptForWorkspace(7, "secret:v1:5")).thenReturn("password");
+        ResolvedMailConfig resolved = resolver.resolveForWorkspace(7);
+        assertNotNull(resolved);
+        assertTrue(resolved.workspaceSupplied());
+        assertEquals("password", resolved.password());
+    }
+
+    /**
+     * Resolving an override whose stored password no longer resolves fails rather than falling back to
+     * the instance default, so readiness reports it as not ready instead of selecting the instance.
+     */
+    @Test
+    void readinessReportsAnOverrideWhosePasswordNoLongerResolvesAsNotReady() {
+        enableInstance();
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(true, "secret:v1:6"));
+        when(secretCipher.canResolveForWorkspace(7, "secret:v1:6")).thenReturn(false);
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false),
+                resolver.readinessForWorkspace(7));
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), anyString());
+
+        when(secretCipher.decryptForWorkspace(7, "secret:v1:6"))
+                .thenThrow(new IllegalStateException("Secret reference not found"));
+        assertThrows(IllegalStateException.class, () -> resolver.resolveForWorkspace(7));
+    }
+
+    /** Usability never depended on the password, so an override with none stored is ready. */
+    @Test
+    void readinessIsReadyForAnAuthenticatingOverrideWithNoStoredPassword() {
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(true, " "));
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("workspace_override", true),
+                resolver.readinessForWorkspace(7));
+        verifyNoInteractions(secretCipher);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void anUnusableOverrideFallsBackToTheInstanceWithoutBeingDecrypted(boolean instanceEnabled) {
+        if (instanceEnabled) {
+            enableInstance();
+        }
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(false, "secret:v1:5"));
+
+        assertEquals(instanceEnabled
+                        ? new MailConfigResolver.WorkspaceMailReadiness("instance_default", true)
+                        : new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false),
+                resolver.readinessForWorkspace(7));
+        assertEquals(instanceEnabled, resolver.resolveForWorkspace(7) != null);
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void readinessIgnoresADisabledOverride() {
+        enableInstance();
+        WorkspaceMailConfig ws = authenticatingOverride(true, "secret:v1:5");
+        ws.setEnabled(false);
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("instance_default", true),
+                resolver.readinessForWorkspace(7));
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void readinessWithNothingConfiguredIsNotReady() {
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false),
+                resolver.readinessForWorkspace(7));
+        assertFalse(resolver.canSendForWorkspace(7));
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void workspaceOnlyResolutionDoesNotDecryptAnOverrideItDiscards() {
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(false, "secret:v1:5"));
+
+        assertNull(resolver.resolveWorkspaceOnly(7));
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void readinessForAWorkspaceThatIsGoneIsNotReady() {
+        enableInstance();
+        when(workspaceMapper.lockWorkspaceForShare(7)).thenReturn(null);
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false),
+                resolver.readinessForWorkspace(7));
+        verifyNoInteractions(mailConfigMapper, secretCipher);
+    }
+
+    @Test
+    void readinessForAnActorWhoIsGoneIsNotReady() {
+        authenticateActor();
+        when(userMapper.lockByIdForShare(9)).thenReturn(null);
+
+        assertFalse(resolver.canSendForWorkspace(7));
+        verifyNoInteractions(workspaceMapper, mailConfigMapper, secretCipher);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void readinessInManagedModeReportsTheInstance(boolean instanceEnabled) {
+        properties.setManaged(true);
+        if (instanceEnabled) {
+            enableInstance();
+        }
+
+        assertEquals(new MailConfigResolver.WorkspaceMailReadiness("managed", instanceEnabled),
+                resolver.readinessForWorkspace(7));
+        verifyNoInteractions(workspaceMapper, mailConfigMapper, secretCipher);
+    }
+
+    @Test
+    void readinessTakesTheResolutionLocksInTheSameOrderAndNeverDecrypts() {
+        authenticateActor();
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(true, "secret:v1:5"));
+        when(secretCipher.canResolveForWorkspace(7, "secret:v1:5")).thenReturn(true);
+
+        assertTrue(resolver.canSendForWorkspace(7));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, mailConfigMapper, secretCipher);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).lockWorkspaceForShare(7);
+        order.verify(mailConfigMapper).findByWorkspace(7);
+        order.verify(secretCipher).canResolveForWorkspace(7, "secret:v1:5");
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), anyString());
     }
 
     private void enableInstance() {

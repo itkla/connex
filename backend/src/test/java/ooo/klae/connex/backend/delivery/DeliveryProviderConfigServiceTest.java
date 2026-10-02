@@ -404,6 +404,20 @@ class DeliveryProviderConfigServiceTest {
         assertFalse(service().isReady(WORKSPACE, DeliveryChannel.SMS));
     }
 
+    /**
+     * SMTP readiness is the resolver's decrypt-free readiness. Resolving here decrypted the workspace SMTP
+     * password and audited a secret use on every check, and the answer never depended on it (#1932).
+     */
+    @Test
+    void isReady_forSmtpUsesTheDecryptFreeReadinessRatherThanResolution() {
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null);
+        when(mailConfigResolver.canSendForWorkspace(WORKSPACE)).thenReturn(true, false);
+
+        assertTrue(service().isReady(WORKSPACE, DeliveryChannel.EMAIL));
+        assertFalse(service().isReady(WORKSPACE, DeliveryChannel.EMAIL));
+        verify(mailConfigResolver, never()).resolveForWorkspace(WORKSPACE);
+    }
+
     @Test
     void issueWebhookToken_persistsOnlyTheHashAndReference_andRevealsTheRawPairOnce() {
         currentWorkspaceAndActor();

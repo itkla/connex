@@ -41,7 +41,6 @@ import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Scope;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.SectionFault;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.WorkspaceProviders;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
-import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
@@ -242,9 +241,8 @@ public class TenantDiagnosticsService {
     }
 
     private WorkspaceProviders workspaceProviders(int workspaceId, List<Capture> capture) {
-        ResolvedMailConfig mailConfig = resolveMail(workspaceId);
-        boolean mailConfigured = mailConfig != null && mailConfig.usable();
-        Mail mail = new Mail(mailConfigResolver.effectiveMode(mailConfig), mailConfigured);
+        MailConfigResolver.WorkspaceMailReadiness mailReadiness = mailReadiness(workspaceId);
+        Mail mail = new Mail(mailReadiness.mode(), mailReadiness.ready());
         List<Delivery> delivery = new ArrayList<>();
         for (DeliveryChannel channel : DeliveryChannel.values()) {
             boolean implemented = channel == DeliveryChannel.EMAIL || channel == DeliveryChannel.SMS;
@@ -254,11 +252,12 @@ public class TenantDiagnosticsService {
         return new WorkspaceProviders(workspaceId, mail, delivery, capture);
     }
 
-    private ResolvedMailConfig resolveMail(int workspaceId) {
+    private MailConfigResolver.WorkspaceMailReadiness mailReadiness(int workspaceId) {
         try {
-            return mailConfigResolver.resolveForWorkspace(workspaceId);
+            return mailConfigResolver.readinessForWorkspace(workspaceId);
         } catch (RuntimeException exception) {
-            return null;
+            return new MailConfigResolver.WorkspaceMailReadiness(
+                    mailConfigResolver.effectiveMode(null), false);
         }
     }
 
