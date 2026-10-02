@@ -73,8 +73,8 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  * makes the replacement wait, and once the removal commits the replacement is refused.
  *
  * <p>The bean overrides match {@code OwnerChangeConcurrencyIntegrationTest}'s exactly, field names
- * included, so both classes share one cached application context; the person and company mapper
- * spies serve that class.
+ * included, so the two classes can share one cached application context; the person and company
+ * mapper spies serve that class.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

@@ -531,8 +531,9 @@ public class PersonService {
     /**
      * Assigns or clears a contact's owner. The audited old owner and the
      * {@code person.owner_changed} decision come from the contact row locked after the new owner's
-     * membership, not from the unlocked existence check, which opens this transaction's read view
-     * before any lock is held (#1948).
+     * membership, if any, not from the unlocked existence check, which opens this transaction's read
+     * view before any lock is held. A contact archived or deleted since that check is refused under
+     * the lock, before anything is written (#1948).
      *
      * @param personId the contact in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign

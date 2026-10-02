@@ -66,8 +66,9 @@ rows `FOR UPDATE` and replaces them, before its trailing audit — the order `De
 uses — so a member offboarded concurrently is never written back as a collaborator (#1793). The owner
 changes (`DealService`, `PersonService` and `CompanyService.updateOwner`) lock the new owner's membership,
 then read the record row `FOR UPDATE`, and take the audited old owner and the `owner_changed` decision
-from that row rather than from their unlocked existence check (#1948). For a deal that read locks the
-`uq_deal_workspace_id` entry every other deal mutation takes, so an owner change newly waits behind a
+from that row rather than from their unlocked existence check (#1948). For a deal, that read locks the
+`uq_deal_workspace_id` entry that stage moves, deletion, collaborator replacement, line items and
+documents also lock through `getDealByIdForUpdate`, so an owner change newly waits behind a
 composite-foreign-key child insert, such as an approval request, that holds a shared lock on it; none of
 those inserts takes a lock after it. The collaborator path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at

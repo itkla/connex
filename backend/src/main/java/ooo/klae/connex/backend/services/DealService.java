@@ -1855,8 +1855,9 @@ public class DealService {
 
     /**
      * Assigns or clears a deal's owner. The audited old owner and the {@code deal.owner_changed}
-     * decision come from the deal row locked after the new owner's membership, not from the unlocked
-     * existence check, which opens this transaction's read view before any lock is held (#1948).
+     * decision come from the deal row locked after the new owner's membership, if any, not from the
+     * unlocked existence check, which opens this transaction's read view before any lock is held. A
+     * deal deleted since that check is refused under the lock, before anything is written (#1948).
      *
      * @param dealId the deal in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign

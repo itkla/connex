@@ -545,8 +545,9 @@ public class CompanyService {
     /**
      * Assigns or clears a company's owner. The audited old owner and the
      * {@code company.owner_changed} decision come from the company row locked after the new owner's
-     * membership, not from the unlocked existence check, which opens this transaction's read view
-     * before any lock is held (#1948).
+     * membership, if any, not from the unlocked existence check, which opens this transaction's read
+     * view before any lock is held. A company archived or deleted since that check is refused under
+     * the lock, before anything is written (#1948).
      *
      * @param companyId the company in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign

@@ -62,14 +62,21 @@ import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
- * Races two changes of the same record's owner (#1948). The first change is paused after its
- * unlocked existence check has opened its read view, and before it holds any lock; the second then
- * commits the same new owner. The first must audit the transition it really makes, from the owner
- * the second committed, and must not report a second {@code owner_changed}: from its snapshot it
- * would audit the original owner and fire the record's automations twice.
+ * Races an owner change against a concurrent commit to the same record (#1948). The change is paused
+ * after its unlocked existence check has opened its read view, and before it holds any lock.
+ *
+ * <ul>
+ *   <li>When the concurrent commit is the same change, the paused one must audit the transition it
+ *       really makes, from the owner the other committed, and must not report a second
+ *       {@code owner_changed}. From its snapshot it would audit the original owner and fire the
+ *       record's automations twice. An unassignment, which locks no membership, behaves the
+ *       same.</li>
+ *   <li>When the concurrent commit archives or deletes the record, the paused change must be refused
+ *       under its lock, before it writes, audits or triggers anything.</li>
+ * </ul>
  *
  * <p>The bean overrides match {@code DealCollaboratorConcurrencyIntegrationTest}'s exactly, field
- * names included, so both classes share one cached application context.
+ * names included, so the two classes can share one cached application context.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -245,8 +252,11 @@ class OwnerChangeConcurrencyIntegrationTest {
             () -> personService.updateOwner(person.getId(), ownerId),
             () -> archive("person", person.getId())));
 
+        assertTrue(paused.get());
         assertInstanceOf(ResourceNotFoundException.class, refused.getCause());
+        assertTrue(archived("person", person.getId()));
         assertEquals(Integer.valueOf(currentUser.getId()), committedOwner("person", person.getId()));
+        verify(personMapper, never()).updateOwner(anyInt(), anyInt(), any());
         verify(auditService, never()).singleChange(eq("ownerId"), any(), any());
         verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
     }
@@ -262,8 +272,34 @@ class OwnerChangeConcurrencyIntegrationTest {
             () -> companyService.updateOwner(company.getId(), ownerId),
             () -> archive("company", company.getId())));
 
+        assertTrue(paused.get());
         assertInstanceOf(ResourceNotFoundException.class, refused.getCause());
+        assertTrue(archived("company", company.getId()));
         assertEquals(Integer.valueOf(currentUser.getId()), committedOwner("company", company.getId()));
+        verify(companyMapper, never()).updateOwner(anyInt(), anyInt(), any());
+        verify(auditService, never()).singleChange(eq("ownerId"), any(), any());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    /**
+     * A deal deleted while its owner change waited is refused under the lock. Before #1948 the change
+     * updated no row yet still committed its audit and its trigger, and answered 200.
+     */
+    @Test
+    void aDealDeletedWhileTheOwnerChangeWaitedIsRefusedBeforeAnyWrite() throws Exception {
+        int workspaceId = workspace.getId();
+        int ownerId = newOwner.getId();
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        pauseInTheNewOwnersMembershipLock(() -> verify(dealMapper).getDealById(workspaceId, deal.getId()));
+
+        ExecutionException refused = assertThrows(ExecutionException.class, () -> runWhilePaused(
+            () -> dealService.updateOwner(deal.getId(), ownerId),
+            () -> jdbcTemplate.update(
+                "DELETE FROM deal WHERE workspace_id = ? AND id = ?", workspaceId, deal.getId())));
+
+        assertTrue(paused.get());
+        assertInstanceOf(ResourceNotFoundException.class, refused.getCause());
+        verify(dealMapper, never()).updateOwner(anyInt(), anyInt(), any());
         verify(auditService, never()).singleChange(eq("ownerId"), any(), any());
         verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
     }
@@ -355,6 +391,12 @@ class OwnerChangeConcurrencyIntegrationTest {
         jdbcTemplate.update(
             "UPDATE " + table + " SET archived_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?",
             workspace.getId(), id);
+    }
+
+    private boolean archived(String table, int id) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+            "SELECT archived_at IS NOT NULL FROM " + table + " WHERE workspace_id = ? AND id = ?",
+            Boolean.class, workspace.getId(), id));
     }
 
     private Integer committedOwner(String table, int id) {
