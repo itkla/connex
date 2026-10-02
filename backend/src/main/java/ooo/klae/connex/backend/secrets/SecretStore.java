@@ -118,6 +118,27 @@ public class SecretStore {
         return secret != null && matches(secret, purpose, scopeId);
     }
 
+    /**
+     * Whether {@link #get} has what it needs to decrypt the reference, decided without decrypting it or
+     * writing a secret-use audit: the row exists in the asked scope, uses the supported algorithms, and
+     * its key-encryption key is configured and enabled. A ciphertext that has been altered in place still
+     * passes; only a decrypt can detect that.
+     *
+     * @param purpose the purpose and scope type the reference must belong to
+     * @param scopeId the scope the reference must belong to
+     * @param reference the stored secret reference
+     * @return whether a decrypt would find the row and its key
+     */
+    public boolean canDecrypt(SecretPurpose purpose, int scopeId, String reference) {
+        SecretReference parsed = SecretReference.parseOrNull(reference);
+        if (parsed == null) {
+            return false;
+        }
+        StoredSecret secret = secretValueMapper.findById(parsed.id());
+        return secret != null && matches(secret, purpose, scopeId)
+                && supportedAlgorithms(secret) && crypto.hasKey(secret.getKeyId());
+    }
+
     /** Deletes the current scoped reference without consulting a potentially older transaction snapshot. */
     @Transactional
     public void delete(SecretPurpose purpose, int scopeId, String reference) {
@@ -301,10 +322,14 @@ public class SecretStore {
     }
 
     private static void requireSupportedAlgorithms(StoredSecret secret) {
-        if (!SecretStoreCrypto.KEY_ALGORITHM.equals(secret.getKeyAlgorithm())
-                || !SecretStoreCrypto.DATA_ALGORITHM.equals(secret.getDataAlgorithm())) {
+        if (!supportedAlgorithms(secret)) {
             throw new SecretUnavailableException("Encrypted integration secret algorithm is not supported");
         }
+    }
+
+    private static boolean supportedAlgorithms(StoredSecret secret) {
+        return SecretStoreCrypto.KEY_ALGORITHM.equals(secret.getKeyAlgorithm())
+                && SecretStoreCrypto.DATA_ALGORITHM.equals(secret.getDataAlgorithm());
     }
 
     private static String scopeEntityType(StoredSecret secret) {

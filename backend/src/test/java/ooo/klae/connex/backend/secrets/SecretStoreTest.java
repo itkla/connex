@@ -173,6 +173,53 @@ class SecretStoreTest {
         assertEquals("smtp-password", testStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
     }
 
+    /**
+     * Mail readiness now asks {@code exists} instead of decrypting (#1932), so it must refuse a
+     * reference outside the asked scope exactly as {@code get} does: another workspace, or another
+     * purpose and scope.
+     */
+    @Test
+    void exists_scopeMismatchIsFalse() {
+        int workspaceId = workspaceId();
+        SecretStore testStore = store();
+        String reference = testStore.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "smtp-password");
+
+        assertTrue(testStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        assertFalse(testStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId(), reference));
+        assertFalse(testStore.exists(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertFalse(testStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId(), reference));
+    }
+
+    /**
+     * Mail readiness asks {@code canDecrypt} instead of decrypting (#1932), so it must refuse what
+     * {@code get} could not decrypt, without trying: another scope, a malformed reference, a disabled or
+     * unknown key-encryption key, or an unsupported algorithm. The algorithm is altered on a secret no
+     * earlier read in this transaction has cached, because MyBatis would otherwise serve the stale row.
+     */
+    @Test
+    void canDecrypt_requiresTheScopeAnEnabledKeyAndSupportedAlgorithms() {
+        int workspaceId = workspaceId();
+        String oldKey = base64Key((byte) 9);
+        SecretStore store = store("old-v1", oldKey, Map.of(), Set.of(), true);
+        String reference = store.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "smtp-password");
+
+        assertTrue(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId(), reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "secret:v1:not-a-number"));
+
+        SecretStore revoked = store("new-v2", base64Key((byte) 10), Map.of("old-v1", oldKey), Set.of("old-v1"),
+                true);
+        assertFalse(revoked.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        SecretStore forgotten = store("new-v3", base64Key((byte) 11), Map.of(), Set.of(), true);
+        assertFalse(forgotten.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+
+        String unsupported = store.put(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, "connector");
+        jdbcTemplate.update("UPDATE secret_value SET key_algorithm = 'RSA-OAEP-256' WHERE id = ?",
+                SecretReference.parse(unsupported).id());
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, unsupported));
+    }
+
     @Test
     void existsAndDelete_ignoreMalformedReferences() {
         int workspaceId = workspaceId();

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.secrets.SecretReference;
 import ooo.klae.connex.backend.services.AbstractServiceTest;
 import ooo.klae.connex.backend.services.AutomationExecutor;
 import ooo.klae.connex.backend.services.OrgMemberService;
@@ -29,9 +31,10 @@ import ooo.klae.connex.backend.services.OrgMemberService;
 /**
  * Pins that asking whether a workspace can send mail never decrypts its SMTP password (#1932). The
  * readiness check used to resolve the full sender, so every workflow step and campaign enrolment wrote
- * an audited "Secret used" row — with no actor when it ran before {@code runAs}. Readiness and a send
- * still choose the sender the same way; only the send decrypts, which the final resolution proves is
- * visible to this test.
+ * an audited "Secret used" row — with no actor when it ran on the scheduler thread before {@code runAs}.
+ * Readiness and a send still choose the sender the same way; only the send decrypts, which the final
+ * resolution proves is visible to this test. A stored password whose key-encryption key is unknown is
+ * not ready either: decrypting it would fail inside the audited read and write a {@code use_failed} row.
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class MailReadinessSecretAuditIntegrationTest extends AbstractServiceTest {
@@ -56,6 +59,7 @@ class MailReadinessSecretAuditIntegrationTest extends AbstractServiceTest {
         automationPrincipal = newUser();
         String reference = secretCipher.encryptForWorkspace(freshWorkspaceId, "smtp-" + unique());
         mailConfigMapper.upsert(override(reference));
+        SecurityContextHolder.clearContext();
 
         assertTrue(deliveryProviderConfigService.isReady(freshWorkspaceId, DeliveryChannel.EMAIL));
         Boolean readyUnderRunAs = new TransactionTemplate(transactionManager).execute(status ->
@@ -64,6 +68,14 @@ class MailReadinessSecretAuditIntegrationTest extends AbstractServiceTest {
         assertEquals(Boolean.TRUE, readyUnderRunAs);
         assertEquals(new MailConfigResolver.WorkspaceMailReadiness("workspace_override", true),
                 mailConfigResolver.readinessForWorkspace(freshWorkspaceId));
+
+        long secretId = SecretReference.parse(reference).id();
+        String keyId = jdbcTemplate.queryForObject(
+                "SELECT key_id FROM secret_value WHERE id = ?", String.class, secretId);
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE secret_value SET key_id = 'retired-readiness-key' WHERE id = ?", secretId));
+        assertFalse(deliveryProviderConfigService.isReady(freshWorkspaceId, DeliveryChannel.EMAIL));
+        assertEquals(1, jdbcTemplate.update("UPDATE secret_value SET key_id = ? WHERE id = ?", keyId, secretId));
 
         assertEquals(1, mailConfigMapper.updatePasswordReference(freshWorkspaceId, DANGLING_REFERENCE));
         assertFalse(deliveryProviderConfigService.isReady(freshWorkspaceId, DeliveryChannel.EMAIL));

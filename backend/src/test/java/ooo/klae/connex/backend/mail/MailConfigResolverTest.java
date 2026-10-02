@@ -205,6 +205,15 @@ class MailConfigResolverTest {
         assertEquals(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false),
                 resolver.readinessForWorkspace(7));
         assertFalse(resolver.canSendForWorkspace(7));
+        verifyNoInteractions(secretCipher);
+    }
+
+    @Test
+    void workspaceOnlyResolutionDoesNotDecryptAnOverrideItDiscards() {
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(false, "secret:v1:5"));
+
+        assertNull(resolver.resolveWorkspaceOnly(7));
+        verifyNoInteractions(secretCipher);
     }
 
     @Test

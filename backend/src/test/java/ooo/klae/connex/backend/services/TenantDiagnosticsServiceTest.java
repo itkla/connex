@@ -38,7 +38,6 @@ import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Finding;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.Job;
 import ooo.klae.connex.backend.dto.TenantDiagnosticsDto.WorkspaceProviders;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
-import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.JobRunMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
@@ -72,16 +71,8 @@ class TenantDiagnosticsServiceTest {
         capabilityRegistry = mock(CapabilityRegistry.class);
         aiProviderReadiness = mock(AiProviderReadiness.class);
         mailConfigResolver = mock(MailConfigResolver.class);
-        when(mailConfigResolver.effectiveMode(any())).thenAnswer(invocation -> {
-            ResolvedMailConfig resolved = invocation.getArgument(0);
-            if (managedMail) {
-                return "managed";
-            }
-            if (resolved == null || !resolved.usable()) {
-                return "unconfigured";
-            }
-            return resolved.workspaceSupplied() ? "workspace_override" : "instance_default";
-        });
+        when(mailConfigResolver.effectiveMode(null)).thenAnswer(invocation ->
+                managedMail ? "managed" : "unconfigured");
         when(mailConfigResolver.readinessForWorkspace(anyInt())).thenAnswer(invocation ->
                 new MailConfigResolver.WorkspaceMailReadiness(managedMail ? "managed" : "unconfigured", false));
         deliveryProviderReadiness = mock(DeliveryProviderReadiness.class);
@@ -254,11 +245,12 @@ class TenantDiagnosticsServiceTest {
     }
 
     /**
-     * A stored SMTP password that no longer resolves is reported as mail not ready, through the same
-     * decision a send makes, and the readiness check never decrypts it (#1932).
+     * The resolver's readiness, not a resolution, drives both the mail row and its finding, so a
+     * workspace the resolver reports not ready (for example a stored password that can no longer be
+     * decrypted) is shown unconfigured without the page ever resolving, and so decrypting, it (#1932).
      */
     @Test
-    void anUnresolvableStoredMailCredentialReportsMailAndEmailNotReady() {
+    void mailReadinessDrivesTheMailRowWithoutResolvingTheSender() {
         when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
                 .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
         when(mailConfigResolver.readinessForWorkspace(WORKSPACE_ID))

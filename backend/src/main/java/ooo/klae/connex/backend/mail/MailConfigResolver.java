@@ -33,8 +33,9 @@ import ooo.klae.connex.backend.secrets.SecretReference;
  *
  * <p>Readiness ({@link #canSendForWorkspace}, {@link #readinessForWorkspace}) takes the same roots and
  * selects the sender through the same decision, but never decrypts the workspace SMTP password: usability
- * depends only on the host and from address, and a selected override's stored password only has to
- * still resolve. Decrypting there wrote an audited secret use for every readiness check (#1932).
+ * depends only on the host and from address, and a selected override's stored password only has to be
+ * decryptable as far as can be told without decrypting it. Decrypting there wrote an audited secret use
+ * for every readiness check (#1932).
  */
 @Component
 @RequiredArgsConstructor
@@ -50,12 +51,13 @@ public class MailConfigResolver {
     private final String instanceConfigurationVersion = "instance:" + UUID.randomUUID();
 
     /**
-     * How a workspace's mail would be sent, decided exactly as {@link #resolveForWorkspace} decides it
-     * but without decrypting the workspace SMTP password.
+     * How a workspace's mail would be sent, selected as {@link #resolveForWorkspace} selects it but
+     * without decrypting the workspace SMTP password.
      *
      * @param mode one of {@code managed}, {@code workspace_override}, {@code instance_default}, or
      *     {@code unconfigured}
-     * @param ready whether a send would find a usable transport and a resolvable stored password
+     * @param ready whether a send would find a usable transport and a stored password whose row,
+     *     algorithms and key-encryption key are all present
      */
     public record WorkspaceMailReadiness(String mode, boolean ready) {
     }
@@ -92,11 +94,12 @@ public class MailConfigResolver {
      * workspace SMTP password or writing a secret-use audit.
      *
      * @param workspaceId the workspace whose mail would be sent
-     * @return whether {@link #resolveForWorkspace} would return a usable config without failing
+     * @return whether {@link #resolveForWorkspace} would return a usable config, unless a stored password
+     *     whose row and key are present no longer decrypts
      */
     @Transactional
     public boolean canSendForWorkspace(int workspaceId) {
-        return readinessForWorkspace(workspaceId).ready();
+        return readiness(workspaceId).ready();
     }
 
     /**
@@ -110,8 +113,12 @@ public class MailConfigResolver {
      */
     @Transactional
     public WorkspaceMailReadiness readinessForWorkspace(int workspaceId) {
+        return readiness(workspaceId);
+    }
+
+    private WorkspaceMailReadiness readiness(int workspaceId) {
         Selection selection = select(workspaceId);
-        if (properties.isManaged()) {
+        if (selection.managed()) {
             return new WorkspaceMailReadiness("managed", selection.instance() != null);
         }
         if (selection.override() != null) {
@@ -159,31 +166,28 @@ public class MailConfigResolver {
             return null;
         }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
-        if (ws != null && ws.isEnabled()) {
-            ResolvedMailConfig resolved = fromWorkspace(ws, decryptPassword(ws));
-            if (resolved != null && resolved.usable()) {
-                return resolved;
-            }
+        if (ws != null && ws.isEnabled() && fromWorkspace(ws, null).usable()) {
+            return fromWorkspace(ws, decryptPassword(ws));
         }
         return null;
     }
 
     private Selection select(int workspaceId) {
         if (properties.isManaged()) {
-            return new Selection(null, resolveInstance());
+            return new Selection(true, null, resolveInstance());
         }
         if (!lockWorkspaceForResolution(workspaceId)) {
-            return new Selection(null, null);
+            return new Selection(false, null, null);
         }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
         if (ws != null && ws.isEnabled()) {
             if (fromWorkspace(ws, null).usable()) {
-                return new Selection(ws, null);
+                return new Selection(false, ws, null);
             }
             log.warn("Workspace {} has SMTP enabled but its config is unusable; "
                     + "falling back to the instance default sender", workspaceId);
         }
-        return new Selection(null, resolveInstance());
+        return new Selection(false, null, resolveInstance());
     }
 
     private String decryptPassword(WorkspaceMailConfig ws) {
@@ -271,6 +275,6 @@ public class MailConfigResolver {
                 + String.valueOf(config.getUsername());
     }
 
-    private record Selection(WorkspaceMailConfig override, ResolvedMailConfig instance) {
+    private record Selection(boolean managed, WorkspaceMailConfig override, ResolvedMailConfig instance) {
     }
 }

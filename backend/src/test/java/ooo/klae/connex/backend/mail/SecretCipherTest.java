@@ -41,15 +41,16 @@ class SecretCipherTest {
     }
 
     /**
-     * Readiness asks whether a stored password could be resolved. For a secret-store reference that is
-     * an existence check on this workspace's SMTP slot, never a decrypt, so it writes no secret-use audit.
+     * Readiness asks whether a stored password could be decrypted. For a secret-store reference that is
+     * the store's non-decrypting check on this workspace's SMTP slot, never a decrypt, so it writes no
+     * secret-use audit.
      */
     @Test
     void canResolveForWorkspaceChecksAReferenceWithoutDecryptingIt() {
         SecretStore secretStore = mock(SecretStore.class);
         SecretCipher cipher = new SecretCipher(new MailProperties(), secretStore);
-        when(secretStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:5")).thenReturn(true);
-        when(secretStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:6")).thenReturn(false);
+        when(secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:5")).thenReturn(true);
+        when(secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:6")).thenReturn(false);
 
         assertTrue(cipher.canResolveForWorkspace(7, "secret:v1:5"));
         assertFalse(cipher.canResolveForWorkspace(7, "secret:v1:6"));

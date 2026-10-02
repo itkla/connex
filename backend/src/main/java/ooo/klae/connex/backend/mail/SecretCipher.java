@@ -82,10 +82,11 @@ public class SecretCipher {
     }
 
     /**
-     * Whether a stored workspace SMTP password could still be resolved, without decrypting it or writing
-     * a secret-use audit. A secret-store reference must still name this workspace's SMTP slot, and a
-     * legacy blob needs the legacy key. A row whose data key has since been lost still counts as
-     * resolvable; the send that decrypts it fails closed.
+     * Whether a stored workspace SMTP password could still be decrypted, decided without decrypting it or
+     * writing a secret-use audit. A secret-store reference must still name this workspace's SMTP slot,
+     * with supported algorithms and an enabled key-encryption key; a legacy blob needs the legacy key.
+     * A ciphertext altered in place, or a legacy blob sealed under another key, still passes and fails
+     * closed when a send decrypts it.
      *
      * @param workspaceId the owning workspace
      * @param encoded the stored secret reference or legacy encrypted blob
@@ -93,7 +94,7 @@ public class SecretCipher {
      */
     public boolean canResolveForWorkspace(int workspaceId, String encoded) {
         if (SecretReference.isReference(encoded)) {
-            return secretStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, encoded);
+            return secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, encoded);
         }
         return key != null;
     }

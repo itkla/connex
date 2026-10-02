@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mail;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,13 +91,18 @@ class MailServiceTest {
         verify(smtpDestinationGuard, never()).resolveForSend(config);
     }
 
+    /**
+     * Document delivery asks this before every send and resend, so it must use the resolver's
+     * decrypt-free readiness rather than resolving, which decrypted the password and audited a use.
+     */
     @Test
-    void workspaceTransportAvailabilityReflectsTheEffectiveResolvedConfig() {
-        when(resolver.resolveForWorkspace(7)).thenReturn(config(true));
-        when(resolver.resolveForWorkspace(8)).thenReturn(null);
+    void workspaceTransportAvailabilityIsTheDecryptFreeReadiness() {
+        when(resolver.canSendForWorkspace(7)).thenReturn(true);
+        when(resolver.canSendForWorkspace(8)).thenReturn(false);
 
         assertTrue(mailService.hasUsableWorkspaceTransport(7));
         assertFalse(mailService.hasUsableWorkspaceTransport(8));
+        verify(resolver, never()).resolveForWorkspace(anyInt());
     }
 
     private static ResolvedMailConfig config(boolean workspaceSupplied) {
