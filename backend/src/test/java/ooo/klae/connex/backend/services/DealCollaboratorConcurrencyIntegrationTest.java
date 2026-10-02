@@ -10,6 +10,9 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +23,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +78,7 @@ class DealCollaboratorConcurrencyIntegrationTest {
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private DataSource dataSource;
     @MockitoSpyBean private WorkspaceMapper workspaceMapper;
     @MockitoSpyBean private NotificationMapper notificationMapper;
     @MockitoSpyBean private DealMapper dealMapper;
@@ -204,6 +211,72 @@ class DealCollaboratorConcurrencyIntegrationTest {
     }
 
     /**
+     * The removal pauses after it has deleted the member's collaborator rows, so a row the replacement
+     * wrote back would survive: the zero-row check here can only pass because the replacement waits on
+     * the membership lock and is then refused.
+     */
+    @Test
+    void aMemberRemovedAfterTheirCollaboratorRowsAreDeletedIsNeverWrittenBack() throws Exception {
+        int workspaceId = workspace.getId();
+        int targetUserId = targetMember.getId();
+        jdbcTemplate.update("INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?)",
+            workspaceId, deal.getId(), targetUserId);
+        CountDownLatch removalCleanedUp = new CountDownLatch(1);
+        CountDownLatch releaseRemoval = new CountDownLatch(1);
+        DealMapper realDealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        doAnswer(invocation -> {
+            realDealMapper.removeCollaboratorFromWorkspace(workspaceId, targetUserId);
+            removalCleanedUp.countDown();
+            assertTrue(releaseRemoval.await(30, TimeUnit.SECONDS));
+            return null;
+        }).when(dealMapper).removeCollaboratorFromWorkspace(workspaceId, targetUserId);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> removal = executor.submit(() -> removeTargetMember(workspaceId));
+            assertTrue(removalCleanedUp.await(10, TimeUnit.SECONDS));
+            Future<List<UserDto>> replacement = executor.submit(() -> addTargetAsCollaborator(workspaceId));
+            assertThrows(TimeoutException.class, () -> replacement.get(1, TimeUnit.SECONDS));
+            releaseRemoval.countDown();
+
+            removal.get(20, TimeUnit.SECONDS);
+            ExecutionException failure = assertThrows(
+                ExecutionException.class,
+                () -> replacement.get(20, TimeUnit.SECONDS));
+            assertTrue(hasCause(failure, ForbiddenException.class));
+        } finally {
+            releaseRemoval.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM deal_collaborator WHERE workspace_id = ? AND user_id = ?",
+            Integer.class, workspaceId, targetUserId));
+    }
+
+    /**
+     * The membership locks must still be held when the tenant-only insert runs, through the real service
+     * path: at that moment an independent connection cannot take the member's row. A lock released before
+     * the insert, for example by a separate transaction around the membership check, would let it through.
+     */
+    @Test
+    void membershipLocksAreStillHeldWhenTheCollaboratorInsertRuns() {
+        int workspaceId = workspace.getId();
+        AtomicReference<Integer> probeError = new AtomicReference<>();
+        DealMapper realDealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        doAnswer(invocation -> {
+            probeError.set(lockErrorFromAnotherConnection(workspaceId, targetMember.getId()));
+            return realDealMapper.insertCollaborators(
+                workspaceId, deal.getId(), invocation.getArgument(2));
+        }).when(dealMapper).insertCollaborators(eq(workspaceId), eq(deal.getId()), anyList());
+
+        addTargetAsCollaborator(workspaceId);
+
+        assertEquals(Integer.valueOf(3572), probeError.get());
+    }
+
+    /**
      * Pins the lock order the replacement shares with {@code updateOwner} and offboarding: each requested
      * membership in ascending user id, then the deal row, then its collaborator rows.
      */
@@ -225,6 +298,21 @@ class DealCollaboratorConcurrencyIntegrationTest {
         order.verify(dealMapper).getDealByIdForUpdate(workspaceId, deal.getId());
         order.verify(dealMapper).clearCollaborators(workspaceId, deal.getId());
         order.verify(dealMapper).insertCollaborators(eq(workspaceId), eq(deal.getId()), anyList());
+    }
+
+    private Integer lockErrorFromAnotherConnection(int workspaceId, int userId) throws SQLException {
+        try (Connection other = dataSource.getConnection(); Statement statement = other.createStatement()) {
+            other.setAutoCommit(false);
+            try {
+                statement.executeQuery("SELECT user_id FROM workspace_member WHERE workspace_id = " + workspaceId
+                    + " AND user_id = " + userId + " FOR UPDATE NOWAIT").close();
+                return null;
+            } catch (SQLException refused) {
+                return refused.getErrorCode();
+            } finally {
+                other.rollback();
+            }
+        }
     }
 
     private void removeTargetMember(int workspaceId) {

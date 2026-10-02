@@ -87,6 +87,7 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
@@ -199,6 +200,25 @@ class DealServiceTest extends AbstractServiceTest {
             deal.getId(), Arrays.asList(member.getId(), null)));
         assertThrows(ResourceNotFoundException.class,
             () -> dealService.replaceCollaborators(Integer.MAX_VALUE, List.of(member.getId())));
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+    }
+
+    /**
+     * A pending invitee is not an active member, so the membership lock refuses them and no collaborator
+     * row is written: the tenant-only insert trusts that lock rather than joining the membership table
+     * (#1793).
+     */
+    @Test
+    void collaboratorReplacementRefusesAPendingMemberWithoutWritingARow() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+        User pending = newPendingMember();
+
+        assertThrows(ForbiddenException.class, () -> dealService.replaceCollaborators(
+            deal.getId(), List.of(member.getId(), pending.getId())));
+
         assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
     }
 
