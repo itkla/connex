@@ -82,6 +82,24 @@ public class SecretCipher {
     }
 
     /**
+     * Whether a stored workspace SMTP password could still be decrypted, decided without decrypting it or
+     * writing a secret-use audit. A secret-store reference must still name this workspace's SMTP slot,
+     * with supported algorithms and an enabled key-encryption key; a legacy blob needs the legacy key.
+     * A ciphertext altered in place, or a legacy blob sealed under another key, still passes and fails
+     * closed when a send decrypts it.
+     *
+     * @param workspaceId the owning workspace
+     * @param encoded the stored secret reference or legacy encrypted blob
+     * @return whether {@link #decryptForWorkspace} has what it needs
+     */
+    public boolean canResolveForWorkspace(int workspaceId, String encoded) {
+        if (SecretReference.isReference(encoded)) {
+            return secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, encoded);
+        }
+        return key != null;
+    }
+
+    /**
      * Legacy AES-GCM encryptor used only by compatibility tests.
      * @param plaintext the value to protect
      * @return the legacy encrypted blob
