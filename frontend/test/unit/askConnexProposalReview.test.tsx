@@ -75,6 +75,51 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it.each(["create_person", "create_deal"])("reviews every %s field and template default on both surfaces", (toolName) => {
+        const name = change({ field: "name", currentValue: null, proposedValue: "New record" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "Referral template" });
+        const defaults = change({
+            field: "templateDefaults",
+            currentValue: null,
+            proposedValue: '{"leadSource":"REFERRAL","tags":"","customFields":""}',
+        });
+        const changes = [name, template, defaults];
+        const proposal = card({
+            toolName,
+            target: { kind: "company", id: 42, label: "Acme" },
+            change: { ...name, state: "unresolved" },
+            changes,
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup).toContain("New record");
+            expect(markup).toContain("Creation template");
+            expect(markup).toContain("Referral template");
+            expect(markup).toContain("Filled by the template");
+            expect(markup).toContain("Source: Referral, Tags, and Custom fields");
+            expect(markup).not.toContain("leadSource");
+            expect(markup).toContain('href="/records/companies/42"');
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(changes.length);
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(askConnexProposalAppliable(card({
+            ...proposal, changes: [name, template, { ...defaults, state: "withheld", proposedValue: null }],
+        }))).toBe(false);
+    });
+
     it.each([
         "withheld", "unresolved", "permissionLost", "recordChanged", "unchanged",
     ] as const)("shows each field's notice and blocks an inapplicable %s proposal on both surfaces", (state) => {

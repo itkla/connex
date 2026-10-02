@@ -53,7 +53,7 @@ type StatusPresentation = {
     badgeVariant: 'default' | 'secondary' | 'destructive' | 'outline';
 };
 
-/** Localized names for the record fields an assistant proposal can rewrite. */
+/** Localized names for fields and template details reviewed before an assistant action. */
 export type AskConnexChangeFieldLabels = {
     owner: string;
     stage: string;
@@ -68,6 +68,10 @@ export type AskConnexChangeFieldLabels = {
     address: string;
     value: string;
     expectedCloseDate: string;
+    name: string;
+    currency: string;
+    template: string;
+    templateDefaults: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -91,6 +95,10 @@ export type AskConnexUnresolvedValueLabels = {
     address: string;
     value: string;
     expectedCloseDate: string;
+    name: string;
+    currency: string;
+    template: string;
+    templateDefaults: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */

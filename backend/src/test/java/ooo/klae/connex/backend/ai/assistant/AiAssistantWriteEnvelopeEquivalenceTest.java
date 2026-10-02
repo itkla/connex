@@ -222,6 +222,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
@@ -252,6 +254,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 companyService,
                 dealService,
                 mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class),
+                mock(ooo.klae.connex.backend.services.DuplicatePreflightService.class),
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
@@ -523,6 +526,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                        new AiAssistantCreatePersonWriteTool(null, null, null),
+                        new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -950,6 +955,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                        new AiAssistantCreatePersonWriteTool(null, null, null),
+                        new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1199,6 +1206,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                        new AiAssistantCreatePersonWriteTool(null, null, null),
+                        new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1493,6 +1502,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                        new AiAssistantCreatePersonWriteTool(null, null, null),
+                        new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1651,6 +1662,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                        new AiAssistantCreatePersonWriteTool(null, null, null),
+                        new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),

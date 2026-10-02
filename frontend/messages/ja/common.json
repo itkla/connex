@@ -822,7 +822,11 @@
         "fieldExpectedCloseDate": "受注予定日",
         "currentUnresolvedField": "表示できない値",
         "proposedWithheld": "非表示",
-        "stateWithheld": "提案された値は表示できません。レコードで直接変更してください。"
+        "stateWithheld": "提案された値は表示できません。レコードで直接変更してください。",
+        "fieldName": "名前",
+        "fieldCurrency": "通貨",
+        "fieldTemplate": "作成テンプレート",
+        "fieldTemplateDefaults": "テンプレートで入力する項目"
       },
       "actions": {
         "undo": "取り消す",
@@ -883,7 +887,11 @@
         "taskCompleted": "タスクを完了しました",
         "taskRescheduled": "タスクの期限を変更しました",
         "updateRecordFields": "レコードの項目を更新する",
-        "recordFieldsUpdated": "レコードの項目を更新しました"
+        "recordFieldsUpdated": "レコードの項目を更新しました",
+        "createPerson": "連絡先を作成",
+        "createDeal": "案件を作成",
+        "personCreated": "連絡先を作成しました",
+        "dealCreated": "案件を作成しました"
       },
       "outcomeFields": {
         "type": "種別",
@@ -918,14 +926,30 @@
       "openCreated": {
         "activity": "活動を開く",
         "task": "タスクを開く",
-        "note": "メモを開く"
+        "note": "メモを開く",
+        "person": "連絡先を開く",
+        "deal": "案件を開く"
       },
       "openCreatedAria": {
         "activity": "この操作で作成された活動を開く",
         "task": "この操作で作成されたタスクを開く",
-        "note": "この操作で作成されたメモを開く"
+        "note": "この操作で作成されたメモを開く",
+        "person": "この操作で作成した連絡先を開く",
+        "deal": "この操作で作成した案件を開く"
       },
-      "undoWindow": "{deadline}まで取り消せます（{remaining}）。"
+      "undoWindow": "{deadline}まで取り消せます（{remaining}）。",
+      "templateDefaults": {
+        "email": "メールアドレス",
+        "phone": "電話番号",
+        "company": "会社",
+        "pipeline": "パイプライン",
+        "tags": "タグ",
+        "customFields": "カスタム項目",
+        "other": "その他の項目",
+        "none": "追加で入力する項目はありません",
+        "unavailable": "詳細を表示できません",
+        "fieldValue": "{field}：{value}"
+      }
     },
     "upload": {
       "progress": "アップロード中 {progress}%",

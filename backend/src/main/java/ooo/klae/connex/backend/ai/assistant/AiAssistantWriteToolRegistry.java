@@ -135,7 +135,7 @@ public class AiAssistantWriteToolRegistry {
         if (tool.requiresOwnedTarget() && !Set.of("person", "company", "deal").containsAll(kinds)) {
             throw refused(name, "requires an owned record target");
         }
-        if (tool.freshness() == null || tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+        if (tool.freshness() == null) {
             throw refused(name, "declares unsupported freshness");
         }
         for (String kind : kinds) {
@@ -151,6 +151,13 @@ public class AiAssistantWriteToolRegistry {
                     || "task".equals(kind) != (tool.freshness()
                             == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT)) {
                 throw refused(name, "task targets require TASK_ROW and TARGET_FINGERPRINT");
+            }
+            if ((lock.target() == TargetLock.NONE)
+                    != (tool.freshness() == AiAssistantWriteTool.Freshness.NONE)) {
+                throw refused(name, "NONE lock and NONE freshness must be declared together");
+            }
+            if (lock.target() == TargetLock.NONE && (lock.taskBoard() || !declaresDuplicateProbe(tool))) {
+                throw refused(name, "a structural create requires a duplicate probe and no board lock");
             }
             if (lock.target() == TargetLock.PERSON_SHARE && !"person".equals(kind)) {
                 throw refused(name, "declares a shared person lock for " + kind);
@@ -173,10 +180,24 @@ public class AiAssistantWriteToolRegistry {
                 throw refused(name, "declares malformed writable field " + field);
             }
         }
+        if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE
+                && fields.stream().anyMatch(field -> kinds.stream()
+                        .anyMatch(kind -> field.startsWith(kind + ".")))) {
+            throw refused(name, "NONE freshness may not write its anchor fields");
+        }
         Set<String> forbidden = new HashSet<>(fields);
         forbidden.retainAll(AiAssistantWriteFieldPolicy.NEVER_WRITABLE);
         if (!forbidden.isEmpty()) {
             throw refused(name, "declares never-writable fields " + forbidden);
+        }
+    }
+
+    private static boolean declaresDuplicateProbe(AiAssistantWriteTool tool) {
+        try {
+            return tool.getClass().getMethod("duplicateProbe", AiAssistantWriteTool.Target.class,
+                    AiAssistantWriteToolRequest.class).getDeclaringClass() != AiAssistantWriteTool.class;
+        } catch (NoSuchMethodException exception) {
+            throw refused(tool.name(), "declares no duplicate probe");
         }
     }
 

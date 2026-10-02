@@ -86,6 +86,42 @@ class DuplicatePreflightServiceTest {
     }
 
     @Test
+    void advisoryDealCheckUsesTheInteractiveCandidatesWithoutMutexOrProof() {
+        when(matchingService.normalizeName("Renewal")).thenReturn(Optional.of("renewal"));
+        when(dealMapper.findDuplicatePreflightCandidates(7, "renewal", null, 51))
+                .thenReturn(List.of(deal(12, "Renewal", null)));
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest("Renewal", null, null);
+
+        assertTrue(service.dealCandidatesExist(request));
+        verify(rateLimiter).requireAllowed(1);
+        org.mockito.Mockito.verifyNoInteractions(duplicateDecisionLockService, dealReviewProofService);
+        DuplicatePreflightResponse interactive = service.preflightDeal(request);
+        assertEquals(1, interactive.candidates().size());
+        assertTrue(service.dealCandidatesExist(request));
+    }
+
+    @Test
+    void advisoryDealCheckFailsClosedOnTruncationAndFalseOnlyWhenClear() {
+        when(matchingService.normalizeName("Renewal")).thenReturn(Optional.of("renewal"));
+        when(matchingService.normalizeName("Other")).thenReturn(Optional.of("other"));
+        when(dealMapper.findDuplicatePreflightCandidates(7, "renewal", null, 51))
+                .thenReturn(Collections.nCopies(51, deal(12, "Other", null)))
+                .thenReturn(List.of());
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest("Renewal", null, null);
+        assertTrue(service.dealCandidatesExist(request));
+        org.junit.jupiter.api.Assertions.assertFalse(service.dealCandidatesExist(request));
+        org.mockito.Mockito.verifyNoInteractions(duplicateDecisionLockService, dealReviewProofService);
+    }
+
+    @Test
+    void advisoryDealCheckIsReadOnlyAndRequiresDealCreate() throws Exception {
+        var method = DuplicatePreflightService.class.getMethod("dealCandidatesExist", DealDuplicatePreflightRequest.class);
+        assertTrue(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class).readOnly());
+        assertEquals(ooo.klae.connex.backend.tenant.Permission.DEAL_CREATE,
+                method.getAnnotation(ooo.klae.connex.backend.tenant.RequirePermission.class).value());
+    }
+
+    @Test
     void ranksCanonicalIdentityAheadOfExactNormalizedName() {
         when(matchingService.normalizeIdentifier(
                 IdentityKind.EMAIL, "ADA@EXAMPLE.COM"))

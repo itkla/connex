@@ -331,6 +331,10 @@ export type AskConnexToolSummaryLabels = {
     createActivity: string;
     createTask: string;
     createNote: string;
+    createPerson: string;
+    createDeal: string;
+    personCreated: string;
+    dealCreated: string;
     addTag: string;
     removeTag: string;
     removeTagNamed: (value: string) => string;
@@ -582,12 +586,13 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
     return change.state === 'ready';
 }
 
-/** Keeps existing tools on their single change and reads every record-field update row. */
+/** Reads every field reviewed by record edits and creates, retaining older single-row tools. */
 export function askConnexToolChanges(
     card: Pick<AiAssistantToolCall, 'toolName' | 'change' | 'changes'>,
 ): AiAssistantToolCallChange[] {
     const singleChange = card.change ? [card.change] : [];
-    return card.toolName === 'update_record_fields' ? card.changes ?? singleChange : singleChange;
+    return ['update_record_fields', 'create_person', 'create_deal'].includes(card.toolName)
+        ? card.changes ?? singleChange : singleChange;
 }
 
 /**
@@ -792,11 +797,15 @@ export function askConnexCreatedRecordHref(
     if (createdRecord === null) return null;
     if (createdRecord.kind === 'activity') return `/activity/activities/${createdRecord.id}`;
     if (createdRecord.kind === 'task') return `/activity/tasks/${createdRecord.id}`;
+    if (createdRecord.kind === 'person') return `/records/contacts/${createdRecord.id}`;
+    if (createdRecord.kind === 'deal') return `/records/deals/${createdRecord.id}`;
     return `/activity/notes/${createdRecord.id}`;
 }
 
 /** The fields a completed assistant action reports values for, in the order they are shown. */
 export const ASK_CONNEX_OUTCOME_FIELDS = [
+    'name',
+    'currency',
     'type',
     'subject',
     'start',
@@ -863,6 +872,44 @@ export function askConnexChangeValueText(
     return Number.isInteger(hours) && hours > 0 ? responseDueInHours(hours) : value;
 }
 
+/** Localized rendering contract for the fields a pinned creation template fills. */
+export type AskConnexTemplateDefaultsLabels = {
+    field: (key: string) => string;
+    leadSource: (value: string) => string;
+    fieldValue: (field: string, value: string) => string;
+    none: string;
+    unavailable: string;
+};
+
+/** Lists template-filled fields without displaying private defaults or unrecognized identifiers. */
+export function askConnexTemplateDefaultsText(
+    value: string,
+    locale: string,
+    labels: AskConnexTemplateDefaultsLabels,
+): string {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return labels.unavailable;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return labels.unavailable;
+    }
+    const entries = Object.entries(parsed);
+    if (entries.some(([, defaultValue]) => typeof defaultValue !== 'string')) {
+        return labels.unavailable;
+    }
+    const fields = entries.map(([key, defaultValue]) => {
+        const field = labels.field(key);
+        return key === 'leadSource' && typeof defaultValue === 'string' && defaultValue.length > 0
+            ? labels.fieldValue(field, labels.leadSource(defaultValue))
+            : field;
+    });
+    return fields.length === 0 ? labels.none
+        : new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format([...new Set(fields)]);
+}
+
 /** Localizes one resolved tool request while retaining viewer-safe dynamic record values. */
 export function askConnexToolRequestSummary(
     toolCall: AiAssistantToolCall,
@@ -874,6 +921,8 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'reschedule_task') return labels.rescheduleTask;
     if (toolCall.toolName === 'update_record_fields') return labels.updateRecordFields;
     if (toolCall.toolName === 'create_note') return labels.createNote;
+    if (toolCall.toolName === 'create_person') return labels.createPerson;
+    if (toolCall.toolName === 'create_deal') return labels.createDeal;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
     if (toolCall.toolName === 'remove_tag') {
         const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
@@ -917,6 +966,8 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'reschedule_task') return labels.taskRescheduled;
     if (toolCall.toolName === 'update_record_fields') return labels.recordFieldsUpdated;
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
+    if (toolCall.toolName === 'create_person') return labels.personCreated;
+    if (toolCall.toolName === 'create_deal') return labels.dealCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
         if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;

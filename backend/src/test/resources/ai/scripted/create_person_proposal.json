@@ -1,0 +1,42 @@
+{
+  "id": "create_person_proposal",
+  "selector": "connex_script_create_person_proposal",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Alderwick\",\"kinds\":[\"company\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_create\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_person",
+        "arguments": "{\"handle\":\"r1\",\"name\":\"Morgan Vale\",\"title\":\"Director\"}"
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I proposed a new contact for you to review.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

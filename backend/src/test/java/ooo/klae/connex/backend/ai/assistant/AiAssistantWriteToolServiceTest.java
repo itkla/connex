@@ -164,6 +164,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantSetResponseDueWriteTool(leadResponseSlaService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -193,6 +195,7 @@ class AiAssistantWriteToolServiceTest {
                 companyService,
                 dealService,
                 mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class),
+                mock(ooo.klae.connex.backend.services.DuplicatePreflightService.class),
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
