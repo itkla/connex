@@ -90,6 +90,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.storage.AttachmentScanWorker;
 import ooo.klae.connex.backend.storage.ObjectStorage;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -210,7 +211,8 @@ class AttachmentUploadSecurityIntegrationTest {
         }
         for (User user : new User[] {actor, target}) {
             if (user != null) {
-                jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", user.getUsername());
+                jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?",
+                    new AccountSessionIndex(user.getId()).getName());
                 jdbc.update("DELETE FROM app_user WHERE id = ?", user.getId());
             }
         }
