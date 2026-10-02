@@ -93,6 +93,20 @@ public interface AiAssistantWriteTool {
         return Freshness.TARGET_UPDATED_AT;
     }
 
+    /** Pure validation of raw field shape and target kind, repeated by both stored readers. */
+    default void validateFor(String targetKind, JsonNode request) {
+    }
+
+    /** Request string fields that may not copy a seeded identifier in a masked turn. */
+    default Set<String> identifierValueFields() {
+        return Set.of();
+    }
+
+    /** Diff field keys whose proposed values the framework special-care screens. */
+    default Set<String> modelAuthoredDiffFields() {
+        return Set.of();
+    }
+
     /** Proposal freshness policies; NONE is reserved for future structural creates. */
     enum Freshness { TARGET_UPDATED_AT, TARGET_FINGERPRINT, NONE }
 
@@ -151,8 +165,8 @@ public interface AiAssistantWriteTool {
      * on the shared-in row, so a card could state neither its before-value nor an approval that
      * can succeed. The framework therefore refuses such a target recoverably, with
      * {@code unresolved_reference}, when the proposal is prepared, so no card is ever stored for
-     * it. The check is made for a person or a deal; the registry refuses a declaration that asks
-     * for it on any other kind or more than one kind.
+     * it. The framework checks person and company ownership and looks up deals in the current
+     * workspace. The registry permits this declaration only for person, company and deal targets.
      *
      * @return {@code true} when the target must be owned by the current workspace
      */
@@ -265,17 +279,18 @@ public interface AiAssistantWriteTool {
      * <p>The read service batches each input once per page of cards, only for cards whose viewer
      * may read their details; a tool that reads an input it did not declare finds it empty.
      *
-     * @return the batched inputs {@link #diff} and the summaries read from a {@link Review}
+     * @return the batched inputs {@link #diffs} and the summaries read from a {@link Review}
      */
     Set<ReviewInput> reviewInputs();
 
     /**
      * The before and after values one pending proposal would write, never shown to the model.
      *
-     * <p>Called only for a viewer who may read the proposal's details. The framework does not
-     * screen these values for special-care text: a stage or a member is workspace vocabulary the
-     * requester reviews by name, so a change keeps naming it even when a screened summary falls
-     * back to the generic one. A tool whose values are free-text labels a member attaches to a
+     * <p>Called only for a viewer who may read the proposal's details. Server-resolved values
+     * retain their existing screening: a stage or a member is workspace vocabulary the requester
+     * reviews by name, so a change keeps naming it even when a screened summary falls back to the
+     * generic one. Proposed fields declared by {@link #modelAuthoredDiffFields()} are screened by
+     * the framework. A tool whose values are free-text labels a member attaches to a
      * record, such as a tag name, screens them itself and returns {@code null} rather than name an
      * excluded one, so its card withholds the change, and with it the apply control, exactly where
      * its summary withholds the name.
@@ -284,7 +299,15 @@ public interface AiAssistantWriteTool {
      * @return the change, or {@code null} when the tool has no reviewable before and after or
      *     withholds it
      */
-    Diff diff(Review review);
+    default Diff diff(Review review) {
+        return null;
+    }
+
+    /** All before/after rows, retaining exactly the legacy row for a single-change tool. */
+    default List<Diff> diffs(Review review) {
+        Diff change = diff(review);
+        return change == null ? List.of() : List.of(change);
+    }
 
     /**
      * The member-visible request summary.
@@ -447,6 +470,8 @@ public interface AiAssistantWriteTool {
         PERSON_SHARE,
         /** The target person, company or deal {@code FOR UPDATE}. */
         RECORD_UPDATE,
+        /** The organization duplicate-decision mutex, then the person or company for update. */
+        DUPLICATE_DECISION_RECORD_UPDATE,
         /** The ordered board rows of a deal stage change toward the resolved stage. */
         DEAL_STAGE_CHANGE,
         /** The exact task row, after the board root when the write changes positions. */
@@ -628,8 +653,9 @@ public interface AiAssistantWriteTool {
      * <p>{@code fields} holds the target's own reviewable column values, keyed by field name and
      * read off the same row the snapshot is built from; a column that holds no value has no key.
      * The framework hands a tool these values only when it declared {@link ReviewInput#FIELDS},
-     * and an empty map otherwise. A person carries {@code firstResponseDueAt}, the UTC deadline of
-     * a running first-response clock as an ISO local date-time.
+     * and an empty map otherwise. A person carries {@code title} and {@code firstResponseDueAt},
+     * a company carries {@code website}, {@code industry} and {@code address}, and a deal carries
+     * {@code value} and {@code expectedCloseDate}. Dates retain their stored ISO representation.
      *
      * <p>{@code sharedIn} is set when the viewer's workspace sees the row only through a share
      * from another workspace of its organization. The row's own lifecycle columns are masked for

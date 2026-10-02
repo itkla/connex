@@ -6,15 +6,17 @@ import {
     NoSymbolIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import {
-    askConnexFailureMessage,
     AskConnexChangeNotice,
     AskConnexChangeRow,
+    askConnexFailureMessage,
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import {
     askConnexProposalAppliable,
+    askConnexToolChanges,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
@@ -173,6 +175,7 @@ export default function AskConnexProposalReview({
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
                     const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card);
+                    const changes = askConnexToolChanges(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
                     return (
@@ -213,22 +216,22 @@ export default function AskConnexProposalReview({
                                         </span>
                                     )}
                                 </div>
-                                {card.change !== null ? (
-                                    <>
+                                {changes.map((change) => (
+                                    <Fragment key={change.field}>
                                         <AskConnexChangeRow
-                                            change={card.change}
+                                            change={change}
                                             removal={removal}
                                             labels={cardLabels}
                                         />
                                         <AskConnexChangeNotice
-                                            field={card.change.field}
-                                            state={card.change.state}
-                                            currentValue={card.change.currentValue}
+                                            field={change.field}
+                                            state={change.state}
+                                            currentValue={change.currentValue}
                                             removal={removal}
                                             labels={cardLabels}
                                         />
-                                    </>
-                                ) : null}
+                                    </Fragment>
+                                ))}
                                 {card.failure !== null ? (
                                     <div
                                         role="alert"

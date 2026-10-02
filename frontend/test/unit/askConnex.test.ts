@@ -68,6 +68,8 @@ const TOOL_SUMMARY_LABELS = {
     createTask: 'タスクを作成',
     completeTask: 'タスクを完了する',
     rescheduleTask: 'タスクの期限を変更する',
+    updateRecordFields: 'レコードの項目を更新する',
+    recordFieldsUpdated: 'レコードの項目を更新しました',
     createNote: 'メモを作成',
     addTag: 'タグを追加',
     removeTag: 'タグを削除',
@@ -1034,6 +1036,21 @@ describe('Ask Connex tool-call cards', () => {
             { ...draft, requestSummary: 'Draft a deal document' }, TOOL_SUMMARY_LABELS,
         )).toBe('書類の下書きを作成');
         expect(askConnexToolOutcomeSummary(draft, TOOL_SUMMARY_LABELS)).toBe('書類の下書き作成済み');
+    });
+
+    it('localizes field-edit requests and outcomes without interpreting proposed values', () => {
+        const editCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'update_record_fields',
+            tier: 'confirm',
+            requestSummary: 'Update record fields',
+            outcomeSummary: 'Record fields updated',
+        };
+
+        expect(askConnexToolRequestSummary(editCall, TOOL_SUMMARY_LABELS))
+            .toBe(TOOL_SUMMARY_LABELS.updateRecordFields);
+        expect(askConnexToolOutcomeSummary(editCall, TOOL_SUMMARY_LABELS))
+            .toBe(TOOL_SUMMARY_LABELS.recordFieldsUpdated);
     });
 
     it('localizes a tag removal by the tag it names and by whether it removed anything', () => {

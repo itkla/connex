@@ -132,9 +132,8 @@ public class AiAssistantWriteToolRegistry {
         if (kinds == null || kinds.isEmpty() || !RECORD_KINDS.containsAll(kinds)) {
             throw refused(name, "must accept a non-empty subset of " + RECORD_KINDS);
         }
-        if (tool.requiresOwnedTarget()
-                && !kinds.equals(Set.of("person")) && !kinds.equals(Set.of("deal"))) {
-            throw refused(name, "requires an owned target for an unsupported kind");
+        if (tool.requiresOwnedTarget() && !Set.of("person", "company", "deal").containsAll(kinds)) {
+            throw refused(name, "requires an owned record target");
         }
         if (tool.freshness() == null || tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
             throw refused(name, "declares unsupported freshness");
@@ -156,8 +155,15 @@ public class AiAssistantWriteToolRegistry {
             if (lock.target() == TargetLock.PERSON_SHARE && !"person".equals(kind)) {
                 throw refused(name, "declares a shared person lock for " + kind);
             }
+            if (lock.target() == TargetLock.DUPLICATE_DECISION_RECORD_UPDATE
+                    && !Set.of("person", "company").contains(kind)) {
+                throw refused(name, "declares a duplicate-decision lock for " + kind);
+            }
         }
         requireRequestText(tool);
+        requireStringComponents(tool, tool.identifierValueFields());
+        requireStringComponents(tool, AiAssistantWriteFieldPolicy.MARKER_TOLERANT_PROSE
+                .getOrDefault(name, Set.of()));
         Set<String> fields = tool.declaredWritableFields();
         if (fields == null) {
             throw refused(name, "declares no writable fields");
@@ -175,7 +181,10 @@ public class AiAssistantWriteToolRegistry {
     }
 
     private static void requireRequestText(AiAssistantWriteTool tool) {
-        Set<String> required = tool.requiredRequestText();
+        requireStringComponents(tool, tool.requiredRequestText());
+    }
+
+    private static void requireStringComponents(AiAssistantWriteTool tool, Set<String> required) {
         if (required == null) {
             throw refused(tool.name(), "declares no required request text");
         }

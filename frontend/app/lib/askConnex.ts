@@ -1,3 +1,4 @@
+import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
@@ -8,17 +9,16 @@ import type {
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
-    AiChatTodo,
+    AiChatNarrationFrame,
     AiChatPageContext,
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
-    AiChatNarrationFrame,
     AiChatThinkingFrame,
+    AiChatTodo,
     Page,
 } from '@/app/lib/types';
 import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
-import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
 const RESOURCE_HANDLE = /(^|[^\p{L}\p{N}_])r[1-9]\d*($|[^\p{L}\p{N}_])/u;
@@ -344,6 +344,8 @@ export type AskConnexToolSummaryLabels = {
     removeOwner: string;
     completeTask: string;
     rescheduleTask: string;
+    updateRecordFields: string;
+    recordFieldsUpdated: string;
     setResponseDue: string;
     setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
@@ -428,13 +430,21 @@ function sameToolCallProjection(
     current: AskConnexToolCardState,
     incoming: AiAssistantToolCall,
 ): boolean {
+    const currentChanges = askConnexToolChanges(current);
+    const incomingChanges = askConnexToolChanges(incoming);
     return current.status === incoming.status
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt
-        && current.change?.state === incoming.change?.state
-        && current.change?.currentValue === incoming.change?.currentValue
-        && current.change?.proposedValue === incoming.change?.proposedValue;
+        && currentChanges.length === incomingChanges.length
+        && currentChanges.every((change, index) => {
+            const incomingChange = incomingChanges[index];
+            return change.field === incomingChange.field
+                && change.state === incomingChange.state
+                && change.currentValue === incomingChange.currentValue
+                && change.currentValueUnresolved === incomingChange.currentValueUnresolved
+                && change.proposedValue === incomingChange.proposedValue;
+        });
 }
 
 function compareToolCalls(
@@ -572,6 +582,14 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
     return change.state === 'ready';
 }
 
+/** Keeps existing tools on their single change and reads every record-field update row. */
+export function askConnexToolChanges(
+    card: Pick<AiAssistantToolCall, 'toolName' | 'change' | 'changes'>,
+): AiAssistantToolCallChange[] {
+    const singleChange = card.change ? [card.change] : [];
+    return card.toolName === 'update_record_fields' ? card.changes ?? singleChange : singleChange;
+}
+
 /**
  * Whether a tool's reviewed change takes a value off its record rather than writing one.
  *
@@ -595,8 +613,10 @@ export function askConnexToolProposesRemoval(
  * in, because retrying it is the whole point.
  */
 export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+    const changes = askConnexToolChanges(card);
     return (card.failure === null || card.failure === 'actionFailed')
-        && askConnexChangeApplicable(card.change);
+        && changes.some(askConnexChangeApplicable)
+        && changes.every((change) => change.state === 'ready' || change.state === 'unchanged');
 }
 
 /** How an executed action's undo window reads right now. */
@@ -783,6 +803,11 @@ export const ASK_CONNEX_OUTCOME_FIELDS = [
     'description',
     'dueDate',
     'title',
+    'website',
+    'industry',
+    'address',
+    'value',
+    'expectedCloseDate',
     'visibility',
     'tag',
     'stage',
@@ -847,6 +872,7 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'create_task') return labels.createTask;
     if (toolCall.toolName === 'complete_task') return labels.completeTask;
     if (toolCall.toolName === 'reschedule_task') return labels.rescheduleTask;
+    if (toolCall.toolName === 'update_record_fields') return labels.updateRecordFields;
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
     if (toolCall.toolName === 'remove_tag') {
@@ -889,6 +915,7 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'create_task') return labels.taskCreated;
     if (toolCall.toolName === 'complete_task') return labels.taskCompleted;
     if (toolCall.toolName === 'reschedule_task') return labels.taskRescheduled;
+    if (toolCall.toolName === 'update_record_fields') return labels.recordFieldsUpdated;
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;

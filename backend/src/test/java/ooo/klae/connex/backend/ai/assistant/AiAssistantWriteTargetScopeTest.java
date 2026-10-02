@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
@@ -201,6 +203,31 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
+    void fieldEditsOutsideTheActorsScopeNeverReachAnyDelegate() throws Exception {
+        when(personService.getPersonById(31)).thenThrow(new ResourceNotFoundException("Person not found"));
+        when(companyService.getCompanyById(31)).thenThrow(new ResourceNotFoundException("Company not found"));
+        when(dealService.getDealById(31)).thenReturn(new Deal())
+                .thenThrow(new ResourceNotFoundException("Deal not found"));
+        AiAssistantUpdateRecordFieldsWriteTool tool = spy(
+                new AiAssistantUpdateRecordFieldsWriteTool(personService, companyService, dealService));
+        AiAssistantWriteToolService service = framework(List.of(
+                createTaskTool(), stageTool(), createActivityTool(), createNoteTool(), addTagTool(),
+                removeTagTool(), draftDocumentTool(), assignOwnerTool(), setResponseDueTool(),
+                new AiAssistantCompleteTaskWriteTool(taskService),
+                new AiAssistantRescheduleTaskWriteTool(taskService), tool));
+        for (String kind : List.of("person", "company", "deal")) {
+            String field = "person".equals(kind) ? "title" : "company".equals(kind) ? "industry" : "value";
+            propose(service, "update_record_fields", "{\"handle\":\"r1\",\"" + field + "\":\"123\"}", kind, 31);
+            assertThrows(ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
+            verify(tool, never()).apply(any());
+        }
+        verify(personService, never()).update(anyInt(), any());
+        verify(companyService, never()).updateCompany(anyInt(), any());
+        verify(dealService, never()).updateValue(anyInt(), any());
+        verify(dealService, never()).reschedule(anyInt(), any());
+    }
+
+    @Test
     void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
             throws Exception {
         AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
@@ -217,7 +244,8 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
                 createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool(),
                 removeTagTool(), draftDocumentTool(), assignOwnerTool(), setResponseDueTool(),
                 new AiAssistantCompleteTaskWriteTool(taskService),
-                new AiAssistantRescheduleTaskWriteTool(taskService)));
+                new AiAssistantRescheduleTaskWriteTool(taskService),
+                new AiAssistantUpdateRecordFieldsWriteTool(personService, companyService, dealService)));
         propose(service, "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
                         + "\"start\":\"9:00am next Thursday\"}",

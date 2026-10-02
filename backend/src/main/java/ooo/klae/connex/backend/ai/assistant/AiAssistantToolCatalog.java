@@ -72,7 +72,8 @@ public class AiAssistantToolCatalog {
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
         WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
         WRITE_PIPELINE("write_pipeline", "Propose stages, owners, and deal documents"),
-        WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks");
+        WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks"),
+        WRITE_FIELDS("write_fields", "Correct record fields");
 
         private final String key;
         private final String summary;
@@ -531,6 +532,13 @@ public class AiAssistantToolCatalog {
         add(tools, confirm(Toolset.WRITE_FOLLOWUP, "reschedule_task", taskHandle(),
                 new ArgumentSpec("due_date", ArgumentKind.STRING, true, 10, 10, Set.of(),
                         Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}"))));
+        add(tools, confirm(Toolset.WRITE_FIELDS, "update_record_fields", handle(),
+                string("title", false, 1, 128, Set.of()),
+                string("website", false, 1, 255, Set.of()),
+                string("industry", false, 1, 128, Set.of()),
+                string("address", false, 1, 512, Set.of()),
+                string("value", false, 1, 16, Set.of()),
+                string("expected_close_date", false, 10, 10, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
@@ -579,6 +587,7 @@ public class AiAssistantToolCatalog {
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
             case "complete_task" -> "Complete assigned task";
             case "reschedule_task" -> "Reschedule task: YYYY-MM-DD";
+            case "update_record_fields" -> "Propose correcting record fields.";
             case "set_response_due" -> "Propose a contact's first-response deadline, in hours "
                     + "from approval, that requires human confirmation.";
             default -> throw new IllegalStateException("Assistant native tool description is missing");

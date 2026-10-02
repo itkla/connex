@@ -163,6 +163,7 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService),
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantSetResponseDueWriteTool(leadResponseSlaService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -191,6 +192,7 @@ class AiAssistantWriteToolServiceTest {
                 personService,
                 companyService,
                 dealService,
+                mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class),
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
@@ -1076,14 +1078,17 @@ class AiAssistantWriteToolServiceTest {
      * A stored row whose name is not a registered write — a read tool's, one forged with a write
      * tier, or a name the catalog no longer declares — is refused as an invalid proposal by every
      * decision: approval before any authority lock, and rejection and undo before any status write
-     * or domain call.
+     * or domain call. The fixture asserts that none of its names is a declared write, so adding a
+     * tool cannot silently turn this invariant check into request validation for a registered tool.
      */
     @Test
     void aStoredRowNamingNoRegisteredWriteToolIsRefusedByEveryDecision() {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         for (String[] row : List.of(
                 new String[] {"list_tasks", "read"},
                 new String[] {"list_tasks", "auto"},
-                new String[] {"update_record_fields", "confirm"})) {
+                new String[] {"retired_write_tool", "confirm"})) {
+            assertFalse(catalog.isWrite(row[0]), row[0]);
             storedToolCall.setId(29);
             storedToolCall.setToolName(row[0]);
             storedToolCall.setArgumentsJson("{\"tool\":\"" + row[0] + "\",\"tier\":\"" + row[1]

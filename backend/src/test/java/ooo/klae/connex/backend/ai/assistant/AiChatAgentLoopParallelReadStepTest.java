@@ -117,6 +117,8 @@ class AiChatAgentLoopParallelReadStepTest {
         directAdmission = mock(AiInvocationAdmissionService.DirectAdmission.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
         writeToolService = mock(AiAssistantWriteToolService.class);
+        when(writeToolService.guardRawIdentifiers(any(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         memoryService = mock(AiChatMemoryService.class);
         AiChatAttachmentContextService attachmentContextService =
                 mock(AiChatAttachmentContextService.class);

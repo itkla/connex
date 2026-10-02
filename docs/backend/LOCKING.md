@@ -489,11 +489,19 @@ The framework acquires its locks in exactly this order:
 5. Immediate execution and approval only: the `task_board_lock` workspace root, when the tool
    declares it (task creation). The value the write moves its target to — a deal's new stage — is
    resolved by non-locking reads just before this step, because the stage-change lock needs it.
-6. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
+6. For `DUPLICATE_DECISION_RECORD_UPDATE` (only person/company edits),
+   `DuplicateDecisionLockService.lockCurrentOrganization()` re-enters the step-1 roots, then retains
+   the organization `FOR SHARE` and `organization_duplicate_decision_lock` mutex. Only then take
+   the target record row. `PersonService.update` and `CompanyService.updateCompany` re-enter the
+   mutex; taking the target first would invert the interactive-edit hierarchy below. No path takes
+   this mutex and then an `ai_chat_*` row. The reciprocal interactive-person-edit/field-approval
+   integration test pauses the editor after acquiring the mutex, observes the other actor's
+   approval waiting on that mutex, and proves the editor commits while approval refuses stale.
+7. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
    tool only links to it (task creation on a person), otherwise the person, company or deal
    `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
 
-After step 6 the framework, still in this order and taking no further lock of its own: retains the
+After step 7 the framework, still in this order and taking no further lock of its own: retains the
 restriction-epoch read fence to completion; for every confirm-tier tool refuses a target written
 after the proposal (`AiAssistantProposalFreshness`) — the freshness check is derived from the tier,
 and no tool can opt out of it; re-asserts the tool's permissions from the step-1 snapshot; runs the
@@ -519,9 +527,9 @@ makes inside `apply` for a meeting on a person, after the owner-scope gate and b
 the new meeting is never its own conflict.
 
 The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
-stage tool reads its deal through the same scoped getter before step 6 to resolve the stage, and
+stage tool reads its deal through the same scoped getter before step 7 to resolve the stage, and
 inside one transaction MyBatis answers an identical select from its first-level cache. Every target
-lock statement the framework takes at step 6 — `getVisiblePersonByIdForShare`,
+lock statement the framework takes at step 7 — `getVisiblePersonByIdForShare`,
 `getVisiblePersonByIdForUpdate`, `getOwnedCompanyByIdForUpdate` and `getDealByIdForUpdate` —
 therefore declares `flushCache="true"`, so the gate's getter goes to the database after the lock.
 `AiAssistantWriteTargetGateCacheIntegrationTest` pins this against MySQL for each of them. Do not
@@ -533,7 +541,7 @@ it calls takes what that service documents — for a task the board root and the
 path may re-acquire a membership step 1 already holds (`lockAndRequireMember` for the actor in
 `TaskService.lockBoardForCreation`, for the owner in `updateOwner`); that re-acquisition adds no
 edge. `set_response_due`'s `startFirstResponseClock` likewise re-reads its contact `FOR UPDATE`, the
-very person row step 6 already holds, and then updates that contact's open `person_lifecycle_pass`
+very person row step 7 already holds, and then updates that contact's open `person_lifecycle_pass`
 row — person before pass, the order the workflow engine's `set_response_due` action takes through
 the same method.
 

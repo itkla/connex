@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Inverse;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Lock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.RecordSnapshot;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Review;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.SharedRequestFlag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.TargetLock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreateTask;
@@ -106,6 +108,51 @@ class AiAssistantWriteToolRegistryTest {
             "change_deal_stage", Set.of("stage"),
             "remove_tag", Set.of("tag"),
             "draft_document", Set.of("template"));
+    /** Reviewed legacy prose exceptions; no field-edit argument tolerates a marker. */
+    private static final Map<String, Set<String>> MARKER_TOLERANT_PROSE = Map.of(
+            "create_note", Set.of("content", "title"),
+            "create_activity", Set.of("subject", "notes"),
+            "create_task", Set.of("description"));
+
+    @Test
+    void fieldEditingSafetyDeclarationsArePinnedAndValidationIsPure() {
+        assertEquals(MARKER_TOLERANT_PROSE, AiAssistantWriteFieldPolicy.MARKER_TOLERANT_PROSE);
+        for (Discovered discovered : AiAssistantDeclaredWriteTools.discover()) {
+            AiAssistantWriteTool tool = discovered.tool();
+            boolean editing = "update_record_fields".equals(tool.name());
+            assertEquals(editing ? Set.of("website") : Set.of(), tool.identifierValueFields());
+            assertEquals(editing
+                    ? Set.of("title", "website", "industry", "address", "value", "expectedCloseDate")
+                    : Set.of(), tool.modelAuthoredDiffFields());
+            tool.validateFor("person", JSON.createObjectNode().put("handle", "r1").put("title", "Director"));
+            for (Object dependency : discovered.dependencies()) {
+                verifyNoInteractions(dependency);
+            }
+        }
+    }
+
+    @Test
+    void duplicateDecisionLockCannotBeDeclaredOnADeal() {
+        AiAssistantUpdateRecordFieldsWriteTool invalid = new AiAssistantUpdateRecordFieldsWriteTool(null, null, null) {
+            @Override
+            public Lock lock(String kind) {
+                return new Lock(false, TargetLock.DUPLICATE_DECISION_RECORD_UPDATE);
+            }
+        };
+        assertRefused("declares a duplicate-decision lock for deal", List.of(invalid));
+    }
+
+    @Test
+    void identifierFieldsMustBeStringRequestComponents() {
+        AiAssistantUpdateRecordFieldsWriteTool invalid = new AiAssistantUpdateRecordFieldsWriteTool(null, null, null) {
+            @Override
+            public Set<String> identifierValueFields() {
+                return Set.of("email");
+            }
+        };
+        assertRefused("requires request text email", List.of(invalid));
+    }
+
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -115,21 +162,12 @@ class AiAssistantWriteToolRegistryTest {
                         .filter(tool -> !"draft_document".equals(tool.name())).toList());
     }
 
+    /** Document drafts, response deadlines and record field edits require owned targets at prepare. */
     @Test
-    void anOwnedTargetDeclarationCannotSilentlyApplyToAnotherKind() {
-        AiAssistantWriteTool unsupported = new AiAssistantCreateTaskWriteTool(null, null, null) {
-            @Override
-            public boolean requiresOwnedTarget() {
-                return true;
-            }
-        };
-        assertRefused("requires an owned target for an unsupported kind", List.of(unsupported));
-    }
-
-    @Test
-    void onlyTheDocumentAndResponseDueToolsRequireOwnedTargetsAtPrepare() {
+    void onlyDocumentResponseDueAndFieldEditToolsRequireOwnedTargetsAtPrepare() {
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
-            assertEquals(Set.of("draft_document", "set_response_due").contains(tool.name()),
+            assertEquals(Set.of("draft_document", "set_response_due", "update_record_fields")
+                            .contains(tool.name()),
                     tool.requiresOwnedTarget(), tool.name());
         }
     }
@@ -145,13 +183,14 @@ class AiAssistantWriteToolRegistryTest {
                 tool("remove_tag", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                 new AiAssistantCompleteTaskWriteTool(null),
                 new AiAssistantRescheduleTaskWriteTool(null),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 tool("set_response_due", ToolTier.CONFIRM, Set.of("person")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -172,9 +211,11 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantAssignOwnerWriteTool(null, null, null),
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null)));
 
-        assertEquals(11, registry.tools().size());
+        assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                .filter(spec -> spec.tier() != ToolTier.READ).count(), registry.tools().size());
     }
 
     @Test
@@ -217,18 +258,19 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     /**
-     * The framework checks ownership for a person or a deal, so a tool that asks for an owned
-     * target on another kind would be refused at every proposal.
+     * The framework can tell an owned target from a shared-in one only for a contact, company or
+     * deal. A complete catalog with a task tool declaring ownership must fail that declaration
+     * check, before any proposal can reach the unsupported ownership gate.
      */
     @Test
-    void refusesAnOwnedTargetOnAnythingButAPersonOrDeal() {
-        AiAssistantWriteTool owning =
-                spy(tool("assign_owner", ToolTier.CONFIRM, Set.of("company")));
+    void refusesAnOwnedTargetOnATask() {
+        AiAssistantWriteTool owning = spy(new AiAssistantCompleteTaskWriteTool(null));
         doReturn(true).when(owning).requiresOwnedTarget();
 
-        assertRefused(
-                "assign_owner requires an owned target for an unsupported kind",
-                List.of(owning));
+        assertRefused("complete_task requires an owned record target",
+                AiAssistantDeclaredWriteTools.tools().stream()
+                        .map(tool -> tool.name().equals(owning.name()) ? owning : tool)
+                        .toList());
     }
 
     @Test
@@ -325,6 +367,37 @@ class AiAssistantWriteToolRegistryTest {
             discovered.add(tool.name());
         }
         assertEquals(expected, discovered);
+    }
+
+    @Test
+    void everyConfirmToolProvidesAtLeastOneReviewRowWithoutReadingDependencies() throws Exception {
+        for (Discovered discovered : AiAssistantDeclaredWriteTools.discover()) {
+            AiAssistantWriteTool tool = discovered.tool();
+            if (tool.tier() != ToolTier.CONFIRM) {
+                continue;
+            }
+            for (String kind : tool.acceptedTargetKinds()) {
+                JsonNode request = JSON.valueToTree(sampleRequest(tool.requestType()));
+                if ("update_record_fields".equals(tool.name())) {
+                    request = JSON.createObjectNode().put("handle", "r1").put(
+                            switch (kind) {
+                                case "person" -> "title";
+                                case "company" -> "industry";
+                                case "deal" -> "value";
+                                default -> throw new AssertionError("Unreviewed record kind");
+                            }, "deal".equals(kind) ? "1250" : "Software");
+                }
+                Review review = new Review(
+                        kind, 31, true,
+                        new RecordSnapshot("Visible record", null, null, null, null, Map.of(), false),
+                        request, null, List.of(), List.of(), List.of(), List.of(), Set.of(), null, null);
+
+                assertFalse(tool.diffs(review).isEmpty(), tool.name() + " has no review row for " + kind);
+            }
+            for (Object dependency : discovered.dependencies()) {
+                verifyNoInteractions(dependency);
+            }
+        }
     }
 
     @Test
@@ -567,6 +640,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -589,6 +663,7 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantRemoveTagWriteTool(null, null, null, null),
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -616,7 +691,11 @@ class AiAssistantWriteToolRegistryTest {
 
         @Override
         public Class<? extends AiAssistantWriteToolRequest> requestType() {
-            return CreateTask.class;
+            return switch (name) {
+                case "create_note" -> AiAssistantWriteToolRequest.CreateNote.class;
+                case "create_activity" -> AiAssistantWriteToolRequest.CreateActivity.class;
+                default -> CreateTask.class;
+            };
         }
 
         @Override

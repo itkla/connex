@@ -113,4 +113,17 @@ public sealed interface AiAssistantWriteToolRequest {
             @NotBlank @Pattern(regexp = "[0-9]{4}-[0-9]{2}-[0-9]{2}") String dueDate)
             implements AiAssistantWriteToolRequest {
     }
+
+    /** Closed field-edit proposal; absent fields keep their current values. */
+    record UpdateRecordFields(
+            @NotBlank @Pattern(regexp = HANDLE) String handle,
+            @Size(min = 1, max = 128) String title,
+            @Size(min = 1, max = 255) String website,
+            @Size(min = 1, max = 128) String industry,
+            @Size(min = 1, max = 512) String address,
+            @Size(min = 1, max = 16) String value,
+            @JsonProperty("expected_close_date")
+            @Size(min = 10, max = 10) String expectedCloseDate)
+            implements AiAssistantWriteToolRequest {
+    }
 }

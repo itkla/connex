@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 import {
     ArrowPathIcon,
     CheckCircleIcon,
@@ -15,6 +14,7 @@ import {
     XCircleIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { Fragment, useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
@@ -22,6 +22,7 @@ import {
     askConnexCreatedRecordHref,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
+    askConnexToolChanges,
     askConnexToolOutcomeSummary,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
@@ -61,6 +62,12 @@ export type AskConnexChangeFieldLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -78,6 +85,12 @@ export type AskConnexUnresolvedValueLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
@@ -101,6 +114,7 @@ export type AskConnexToolCardLabels = {
     changeCurrentUnresolved: AskConnexUnresolvedValueLabels;
     /** What the proposal asked for, when that value no longer exists in this workspace. */
     changeProposedUnresolved: string;
+    changeProposedWithheld: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
     /**
      * Field-specific review context, including non-blocking context for an applicable change. A
@@ -243,6 +257,7 @@ const CHANGE_STATE_ICON: Record<
     recordChanged: ClockIcon,
     permissionLost: LockClosedIcon,
     unresolved: ExclamationTriangleIcon,
+    withheld: ExclamationTriangleIcon,
 };
 
 function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
@@ -313,7 +328,9 @@ export function AskConnexChangeRow({
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
-                    {change.state === 'unresolved' && !removal && change.proposedValue === null
+                    {change.state === 'withheld'
+                        ? labels.changeProposedWithheld
+                        : change.state === 'unresolved' && !removal && change.proposedValue === null
                         ? labels.changeProposedUnresolved
                         : change.proposedValue !== null
                             ? labels.changeValue(change.field, change.proposedValue, 'proposed')
@@ -353,7 +370,7 @@ export function AskConnexChangeNotice({
             : labels.changeStateForField[field]?.[state] ?? labels.changeState[state];
     if (!notice) return null;
     const NoticeIcon = state === 'ready' ? InformationCircleIcon : CHANGE_STATE_ICON[state];
-    const blocking = state === 'permissionLost' || state === 'unresolved';
+    const blocking = state === 'permissionLost' || state === 'unresolved' || state === 'withheld';
     return (
         <p className={cn(
             'flex items-start gap-2 text-xs leading-relaxed',
@@ -396,7 +413,7 @@ export default function AskConnexToolCard({
     const outcomeSummary = askConnexToolOutcomeSummary(card, labels.summaries);
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
-    const proposal = status === 'proposed' ? card.change : null;
+    const changes = status === 'proposed' ? askConnexToolChanges(card) : [];
     const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'
@@ -535,17 +552,21 @@ export default function AskConnexToolCard({
                         )}
                     </div>
 
-                    {proposal !== null ? (
+                    {changes.length > 0 ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
-                            <AskConnexChangeRow change={proposal} removal={removal} labels={labels} />
-                            <AskConnexChangeNotice
-                                field={proposal.field}
-                                state={proposal.state}
-                                currentValue={proposal.currentValue}
-                                removal={removal}
-                                labels={labels}
-                            />
+                            {changes.map((change) => (
+                                <Fragment key={change.field}>
+                                    <AskConnexChangeRow change={change} removal={removal} labels={labels} />
+                                    <AskConnexChangeNotice
+                                        field={change.field}
+                                        state={change.state}
+                                        currentValue={change.currentValue}
+                                        removal={removal}
+                                        labels={labels}
+                                    />
+                                </Fragment>
+                            ))}
                         </div>
                     ) : null}
 
@@ -596,7 +617,7 @@ export default function AskConnexToolCard({
                         </div>
                     ) : null}
 
-                    {affordances.length > 0 || (proposal !== null && targetHref !== null) ? (
+                    {affordances.length > 0 || (changes.length > 0 && targetHref !== null) ? (
                         <div className="flex flex-wrap justify-end gap-2 pt-1">
                             {affordances.includes('reject') ? (
                                 <Button
@@ -610,7 +631,7 @@ export default function AskConnexToolCard({
                                     {card.pendingAction === 'reject' ? labels.discarding : labels.discard}
                                 </Button>
                             ) : null}
-                            {proposal !== null && targetHref !== null ? (
+                            {changes.length > 0 && targetHref !== null ? (
                                 <Button asChild variant="outline" size="dialog">
                                     <Link
                                         href={targetHref}

@@ -27,19 +27,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
 import ooo.klae.connex.backend.config.AiAssistantNavigationAdmissionFilter;
-import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
+import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
 import ooo.klae.connex.backend.dto.AiChatPresenceDto;
@@ -62,9 +62,9 @@ import ooo.klae.connex.backend.exceptions.MalwareDetectedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AiAssistantService;
-import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.storage.malware.EicarTestFixture;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -355,6 +355,8 @@ class AiAssistantControllerTest {
                 null,
                 new AiAssistantToolCallReadDto.Change(
                         "owner", null, true, "Grace Hopper", "ready"),
+                List.of(new AiAssistantToolCallReadDto.Change(
+                        "owner", null, true, "Grace Hopper", "ready")),
                 List.of(new AiAssistantToolCallReadDto.OutcomeValue("owner", "Grace Hopper")),
                 new AiAssistantToolCallReadDto.CreatedRecord("task", 74),
                 82,

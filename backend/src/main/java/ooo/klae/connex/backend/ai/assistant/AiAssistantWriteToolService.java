@@ -20,6 +20,8 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Authority;
@@ -36,6 +38,8 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Row;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ScheduleConflicts;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Target;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -51,6 +55,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -97,6 +102,7 @@ public class AiAssistantWriteToolService {
     private final PersonService personService;
     private final CompanyService companyService;
     private final DealService dealService;
+    private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final AiRestrictionEpoch restrictionEpoch;
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
@@ -155,8 +161,11 @@ public class AiAssistantWriteToolService {
         readToolExecutor.validateReferences(name, args, resources);
         AiAssistantWriteTool tool = writeToolRegistry.find(name)
                 .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
+        requireNoRedactedValues(tool, args);
+        requireNoSeededIdentifiers(tool, args, resources.maskingContext());
         AiAssistantWriteToolRequest request = readRequest(tool, args);
         ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
+        tool.validateFor(target.kind(), args);
         if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
             requireOwnedTarget(target);
         }
@@ -197,6 +206,80 @@ public class AiAssistantWriteToolService {
                 serialize(durable));
     }
 
+    private static void requireNoRedactedValues(AiAssistantWriteTool tool, JsonNode args) {
+        Set<String> tolerant = AiAssistantWriteFieldPolicy.MARKER_TOLERANT_PROSE
+                .getOrDefault(tool.name(), Set.of());
+        for (Map.Entry<String, JsonNode> entry : args.properties()) {
+            if (!tolerant.contains(entry.getKey()) && containsRedaction(entry.getValue())) {
+                throw AiAssistantLoopException.refusedArguments("redacted_value");
+            }
+        }
+    }
+
+    private static boolean containsRedaction(JsonNode value) {
+        if (value.isString()) {
+            return value.asString().contains(MaskingEngine.REDACTED)
+                    || value.asString().contains(MaskingEngine.OMITTED_BY_POLICY);
+        }
+        if (value.isArray()) {
+            for (JsonNode item : value) {
+                if (containsRedaction(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void requireNoSeededIdentifiers(
+            AiAssistantWriteTool tool, JsonNode args, MaskingContext context) {
+        if (context.privacyMode() == AiPrivacyMode.UNMASKED) {
+            return;
+        }
+        for (String field : tool.identifierValueFields()) {
+            JsonNode value = args.get(field);
+            if (value != null && value.isString()
+                    && (MaskingEngine.containsIssuedPlaceholder(value.asString(), context)
+                            || context.containsSeededIdentifierValue(value.asString()))) {
+                throw AiAssistantLoopException.refusedArguments("identifier_from_another_record");
+            }
+        }
+    }
+
+    /**
+     * Records raw identifier substitutions for recoverable refusal at tool execution, before
+     * demasking erases their provenance. Schema refusals retain their existing repair behavior.
+     */
+    AiRawOutputGuard guardRawIdentifiers(
+            AiRawOutputGuard guard, MaskingContext context, Set<String> refusedTools) {
+        return new AiRawOutputGuard() {
+            @Override
+            public boolean permits(JsonNode output) {
+                return rejectionReason(output) == null;
+            }
+
+            @Override
+            public String rejectionReason(JsonNode output) {
+                String reason = guard.rejectionReason(output);
+                if (reason != null && !"bare_placeholder".equals(reason)) {
+                    return reason;
+                }
+                JsonNode rawTool = output.path("tool");
+                Optional<AiAssistantWriteTool> tool = writeToolRegistry.find(rawTool.path("name").asString());
+                if (tool.isPresent() && context.privacyMode() != AiPrivacyMode.UNMASKED) {
+                    for (String field : tool.get().identifierValueFields()) {
+                        JsonNode value = rawTool.path("args").path(field);
+                        if (value.isString() && MaskingEngine.containsIssuedPlaceholder(value.asString(), context)) {
+                            refusedTools.add(tool.get().name());
+                            return null;
+                        }
+                    }
+                }
+                return reason;
+            }
+        };
+    }
+
     /**
      * Resolves, once, what a confirm-tier proposal will be reviewed against, and pins it.
      *
@@ -231,6 +314,7 @@ public class AiAssistantWriteToolService {
     private void requireOwnedTarget(ResourceRef target) {
         boolean owned = switch (target.kind()) {
             case "person" -> personService.isOwnedByCurrentWorkspace(target.id());
+            case "company" -> companyService.isOwnedByCurrentWorkspace(target.id());
             case "deal" -> {
                 try {
                     yield dealService.getDealById(target.id()) != null;
@@ -239,7 +323,7 @@ public class AiAssistantWriteToolService {
                 }
             }
             default -> throw new IllegalStateException(
-                    "Assistant ownership is checked only for a person or a deal");
+                    "Assistant ownership requires a record target");
         };
         if (!owned) {
             throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
@@ -745,6 +829,10 @@ public class AiAssistantWriteToolService {
             case TASK_ROW -> new PreparedMutation(null, resolution, null,
                     TaskService.assistantStateVersion(taskService.lockTaskForUpdate(write.targetId())));
             case RECORD_UPDATE -> new PreparedMutation(null, resolution, lockTargetForUpdate(write));
+            case DUPLICATE_DECISION_RECORD_UPDATE -> {
+                duplicateDecisionLockService.lockCurrentOrganization();
+                yield new PreparedMutation(null, resolution, lockTargetForUpdate(write));
+            }
             case DEAL_STAGE_CHANGE -> {
                 if (resolution == null) {
                     throw new IllegalStateException("Assistant deal stage was not resolved");
@@ -853,6 +941,8 @@ public class AiAssistantWriteToolService {
                 throw new IllegalStateException("Assistant tool proposal is invalid");
             }
             AiAssistantWriteToolRequest typedRequest = readRequest(tool, request);
+            requireNoRedactedValues(tool, request);
+            tool.validateFor(targetKind, request);
             return new StoredWrite(
                     tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest,
                     AiAssistantProposalPins.read(root),

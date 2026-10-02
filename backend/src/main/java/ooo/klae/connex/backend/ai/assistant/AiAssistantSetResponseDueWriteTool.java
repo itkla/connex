@@ -32,9 +32,8 @@ import tools.jackson.databind.JsonNode;
  * is when the service starts the clock. It is a bounded integer the model works out from the
  * member's wording rather than a date or time it transcribes: a date or time the member typed with
  * seven or more digits is redacted before the model sees it, so a transcribed one could only be
- * the redaction marker or a guess, and an integer argument can carry neither. The framework's
- * redaction-marker refusal is not yet on {@code main}; this tool needs none, because the catalog
- * refuses any argument here that is not an integer.
+ * the redaction marker or a guess, and an integer argument can carry neither. The catalog refuses
+ * any deadline argument here that is not an integer.
  *
  * <p>A contact whose clock is already running, answered or breached is left exactly as it is: the
  * service never extends a running deadline. The card states that before the approval, from the

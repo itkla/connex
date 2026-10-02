@@ -3451,7 +3451,8 @@ export type AiAssistantToolCallTarget = {
 };
 
 /** The field an assistant proposal would rewrite on an existing record. */
-export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag' | 'responseDue' | 'taskStatus' | 'dueDate' | 'document';
+export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag' | 'responseDue' | 'taskStatus' | 'dueDate'
+    | 'document' | 'title' | 'website' | 'industry' | 'address' | 'value' | 'expectedCloseDate';
 
 /**
  * Whether a reviewed change can still be applied as reviewed.
@@ -3467,7 +3468,8 @@ export type AiAssistantToolCallChangeState =
     | 'unchanged'
     | 'recordChanged'
     | 'permissionLost'
-    | 'unresolved';
+    | 'unresolved'
+    | 'withheld';
 
 /**
  * The exact before and after values one pending proposal would write.
@@ -3519,6 +3521,7 @@ export type AiAssistantToolCall = {
     requestSummary: string;
     outcomeSummary: string | null;
     change: AiAssistantToolCallChange | null;
+    changes?: AiAssistantToolCallChange[];
     outcomeValues: AiAssistantToolCallOutcomeValue[];
     createdRecord: AiAssistantToolCallCreatedRecord | null;
     messageId: number | null;

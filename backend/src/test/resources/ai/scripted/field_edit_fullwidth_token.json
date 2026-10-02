@@ -1,0 +1,33 @@
+{
+  "id": "field_edit_fullwidth_token",
+  "selector": "connex_script_field_edit_fullwidth_token",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_fields\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "update_record_fields",
+        "arguments": "{\"handle\":\"r1\",\"website\":\"target.example/｛｛C2｝｝/path\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"No change was proposed. You can update the record directly.\",\"citations\":[],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}

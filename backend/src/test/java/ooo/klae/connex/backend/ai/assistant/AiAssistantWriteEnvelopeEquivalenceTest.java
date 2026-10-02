@@ -83,6 +83,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Pins every durable, API and model-visible byte the tools moved onto the write-tool SPI emit.
@@ -220,6 +221,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         tagService, personService, companyService, dealService),
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
@@ -249,6 +251,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 personService,
                 companyService,
                 dealService,
+                mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class),
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
@@ -519,6 +522,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -614,7 +618,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}")) + "]",
-                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+                legacyCardJson(readService.list(TURN.sessionId(), false)));
     }
 
     @Test
@@ -945,6 +949,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1028,7 +1033,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"messageId\":null,\"turnId\":17,"
                                 + "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\","
                                 + "\"undoAvailable\":false," + TIMES + "}")) + "]",
-                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+                legacyCardJson(readService.list(TURN.sessionId(), false)));
 
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.complementOf(
@@ -1193,6 +1198,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1264,7 +1270,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"outcomeValues\":[],\"createdRecord\":null,"
                                 + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
                                 + "\"undoAvailable\":false," + TIMES + "}")) + "]",
-                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+                legacyCardJson(readService.list(TURN.sessionId(), false)));
     }
 
     @ParameterizedTest
@@ -1486,6 +1492,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1582,7 +1589,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"requestSummary\":\"Assign owner: Grace Hopper\","
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
-                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+                legacyCardJson(readService.list(TURN.sessionId(), false)));
         verify(pipelineMapper, never()).getAllStages(anyInt());
     }
 
@@ -1643,6 +1650,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
@@ -1686,7 +1694,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"requestSummary\":\"Assign an owner\","
                                 + "\"outcomeSummary\":null,\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
-                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+                legacyCardJson(readService.list(TURN.sessionId(), false)));
     }
 
     private static final String TIMES = "\"createdAt\":\"2026-03-06 14:59:00.000000\","
@@ -1726,6 +1734,18 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         return "{\"tool\":\"add_tag\",\"tier\":\"auto\",\"restrictionEpoch\":23,"
                 + "\"target\":{\"kind\":\"" + kind + "\",\"id\":" + id + "},"
                 + "\"request\":{\"handle\":\"r1\",\"tag\":\"priority \"}}";
+    }
+
+    /** The sole additive drift is changes, exactly [change] or [] for every existing tool. */
+    private String legacyCardJson(List<ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto> cards) {
+        var legacy = objectMapper.createArrayNode();
+        for (var card : cards) {
+            assertEquals(card.change() == null ? List.of() : List.of(card.change()), card.changes());
+            ObjectNode row = objectMapper.valueToTree(card);
+            row.remove("changes");
+            legacy.add(row);
+        }
+        return objectMapper.writeValueAsString(legacy);
     }
 
     private static String tagResult(String kind, int id, boolean changed) {
