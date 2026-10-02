@@ -16,6 +16,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.services.WorkflowActionRetryPolicy.RetrySafety;
@@ -54,6 +56,22 @@ class WorkflowActionRetryPolicyTest {
             new DuplicateKeyException("business conflict")));
         assertFalse(policy.transientDatabaseFailure(
             new IllegalStateException("unexpected")));
+    }
+
+    /**
+     * A transaction the database lost, or one that could not begin, clears on a retry in a new
+     * transaction (#1947).
+     */
+    @Test
+    void aLostOrUnstartableTransactionRetries() {
+        WorkflowActionRetryPolicy policy = policy();
+        TransactionSystemException lostSavepoint =
+            new TransactionSystemException("Could not roll back to JDBC savepoint");
+        lostSavepoint.initApplicationException(new IllegalStateException("audit append failed"));
+
+        assertTrue(policy.transientDatabaseFailure(lostSavepoint));
+        assertTrue(policy.transientDatabaseFailure(new IllegalStateException(
+            "wrapper", new CannotCreateTransactionException("Could not open JDBC Connection"))));
     }
 
     @Test

@@ -11,6 +11,8 @@ import org.springframework.dao.CannotSerializeTransactionException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -35,6 +37,16 @@ public class WorkflowActionRetryPolicy {
         };
     }
 
+    /**
+     * Whether a failure is one a later attempt can clear: a lock wait, a serialization failure, a
+     * deadlock or a timeout, or a transaction the database lost, which surfaces as a savepoint, commit
+     * or rollback that failed or a transaction that could not begin. A transaction the database
+     * rolled back under code that swallowed the failure fails its commit with the deadlock or lock
+     * failure itself (#1947).
+     *
+     * @param failure the failure, walked through its causes
+     * @return whether the action should be retried
+     */
     public boolean transientDatabaseFailure(Throwable failure) {
         Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable current = failure;
@@ -42,7 +54,9 @@ public class WorkflowActionRetryPolicy {
             if (current instanceof CannotAcquireLockException
                     || current instanceof CannotSerializeTransactionException
                     || current instanceof DeadlockLoserDataAccessException
-                    || current instanceof QueryTimeoutException) {
+                    || current instanceof QueryTimeoutException
+                    || current instanceof TransactionSystemException
+                    || current instanceof CannotCreateTransactionException) {
                 return true;
             }
             current = current.getCause();

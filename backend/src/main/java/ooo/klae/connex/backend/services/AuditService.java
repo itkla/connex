@@ -12,6 +12,7 @@ import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestAttributes;
@@ -201,6 +202,7 @@ public class AuditService {
                 null,
                 false);
         } catch (Exception exception) {
+            rethrowIfTransactionLost(exception, false);
             log.error(
                 "Failed to record audit event action={} entityType={} entityId={}",
                 action,
@@ -376,8 +378,25 @@ public class AuditService {
                 appendAndObserve(entry, independent);
             }
         } catch (Exception e) {
+            rethrowIfTransactionLost(e, independent);
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
+        }
+    }
+
+    /**
+     * Rethrows an audit failure that means the caller's transaction no longer exists.
+     *
+     * <p>An audit failure normally must not break the operation it records. But a {@code NESTED}
+     * append fails with {@link TransactionSystemException} only when the savepoint it would roll back
+     * to is gone, as it is after the database rolled the whole transaction back on a deadlock.
+     * Swallowing that would let the caller keep writing into the implicit transaction that replaced
+     * it and commit only the work after the audit (#1947). An independent append runs in its own
+     * transaction, so its failure never means that.
+     */
+    private static void rethrowIfTransactionLost(Exception failure, boolean independent) {
+        if (!independent && failure instanceof TransactionSystemException lost) {
+            throw lost;
         }
     }
 
