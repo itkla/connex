@@ -374,8 +374,8 @@ public class RuleEngineService {
                     } catch (RuleActionRetryRequiredException retry) {
                         log.warn(
                             "Rule action failed transiently; retrying the delivery ruleId={} actionType={}"
-                                + " exceptionClass={}",
-                            rule.getId(), action.getType(), retry.rootCauseClass());
+                                + " exceptionClass={} rootCauseClass={}",
+                            rule.getId(), action.getType(), retry.failureClass(), retry.rootCauseClass());
                         throw retry;
                     } catch (Exception actionError) {
                         log.warn(

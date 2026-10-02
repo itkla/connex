@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -118,9 +120,9 @@ class RuleActionIsolationTest {
         }
     }
 
-    /** The retry is logged by its root cause's class alone, so no SQL or record data reaches the log. */
+    /** The retry is logged by class names alone, so no SQL or record data reaches the log. */
     @Test
-    void aRetryNamesItsRootCauseClass() {
+    void aRetryNamesItsFailureAndRootCauseClasses() {
         IllegalStateException wrapper = new IllegalStateException("wrapper",
                 new DeadlockLoserDataAccessException("Deadlock found when trying to get lock", null));
 
@@ -129,7 +131,33 @@ class RuleActionIsolationTest {
                     throw wrapper;
                 }));
 
+        assertEquals("IllegalStateException", retry.failureClass());
         assertEquals("DeadlockLoserDataAccessException", retry.rootCauseClass());
+    }
+
+    /** The walks run on a preemptible thread, which needs its own delivery transaction state. */
+    @Test
+    void cyclicCauseChainsEndEveryWalk() {
+        IllegalStateException first = new IllegalStateException("first");
+        IllegalStateException second = new IllegalStateException("second", first);
+        first.initCause(second);
+
+        IllegalStateException thrown = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            insideADeliveryTransaction();
+            try {
+                return assertThrows(IllegalStateException.class, () -> isolation.run(() -> {
+                    throw first;
+                }));
+            } finally {
+                clearTransactionState();
+            }
+        });
+        String rootCauseClass = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> new RuleActionRetryRequiredException(first).rootCauseClass());
+
+        assertSame(first, thrown);
+        verify(transactionManager).rollback(any());
+        assertEquals("IllegalStateException", rootCauseClass);
     }
 
     /** Even if a caller commits the delivery anyway, the retried action's side effects never fire. */

@@ -18,6 +18,16 @@ public class RuleActionRetryRequiredException extends RuntimeException {
     }
 
     /**
+     * Names the failure that required the retry, for logs that must not carry exception messages.
+     *
+     * @return the simple class name of the direct cause
+     */
+    public String failureClass() {
+        Throwable failure = getCause();
+        return failure == null ? getClass().getSimpleName() : failure.getClass().getSimpleName();
+    }
+
+    /**
      * Names the deepest cause, for logs that must not carry exception messages.
      *
      * @return the simple class name of the innermost cause
