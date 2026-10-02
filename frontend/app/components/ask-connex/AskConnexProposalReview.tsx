@@ -6,6 +6,7 @@ import {
     NoSymbolIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import {
     AskConnexChangeNotice,
@@ -15,7 +16,6 @@ import {
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import {
     askConnexProposalAppliable,
-    askConnexProposalChange,
     askConnexToolChanges,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
@@ -176,7 +176,6 @@ export default function AskConnexProposalReview({
                     const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card);
                     const changes = askConnexToolChanges(card);
-                    const proposal = askConnexProposalChange(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
                     return (
@@ -217,25 +216,22 @@ export default function AskConnexProposalReview({
                                         </span>
                                     )}
                                 </div>
-                                {proposal !== null ? (
-                                    <>
-                                        {changes.map((change) => (
-                                            <AskConnexChangeRow
-                                                key={change.field}
-                                                change={change}
-                                                removal={removal}
-                                                labels={cardLabels}
-                                            />
-                                        ))}
-                                        <AskConnexChangeNotice
-                                            field={proposal.field}
-                                            state={proposal.state}
-                                            currentValue={proposal.currentValue}
+                                {changes.map((change) => (
+                                    <Fragment key={change.field}>
+                                        <AskConnexChangeRow
+                                            change={change}
                                             removal={removal}
                                             labels={cardLabels}
                                         />
-                                    </>
-                                ) : null}
+                                        <AskConnexChangeNotice
+                                            field={change.field}
+                                            state={change.state}
+                                            currentValue={change.currentValue}
+                                            removal={removal}
+                                            labels={cardLabels}
+                                        />
+                                    </Fragment>
+                                ))}
                                 {card.failure !== null ? (
                                     <div
                                         role="alert"

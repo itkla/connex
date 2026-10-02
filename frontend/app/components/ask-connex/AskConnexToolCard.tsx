@@ -14,13 +14,12 @@ import {
     XCircleIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
-import { useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
     ANSWER_ROW_PLACEHOLDER,
     askConnexCreatedRecordHref,
-    askConnexProposalChange,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
     askConnexToolChanges,
@@ -414,8 +413,7 @@ export default function AskConnexToolCard({
     const outcomeSummary = askConnexToolOutcomeSummary(card, labels.summaries);
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
-    const changes = askConnexToolChanges(card);
-    const proposal = status === 'proposed' ? askConnexProposalChange(card) : null;
+    const changes = status === 'proposed' ? askConnexToolChanges(card) : [];
     const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'
@@ -554,19 +552,21 @@ export default function AskConnexToolCard({
                         )}
                     </div>
 
-                    {proposal !== null ? (
+                    {changes.length > 0 ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
                             {changes.map((change) => (
-                                <AskConnexChangeRow key={change.field} change={change} removal={removal} labels={labels} />
+                                <Fragment key={change.field}>
+                                    <AskConnexChangeRow change={change} removal={removal} labels={labels} />
+                                    <AskConnexChangeNotice
+                                        field={change.field}
+                                        state={change.state}
+                                        currentValue={change.currentValue}
+                                        removal={removal}
+                                        labels={labels}
+                                    />
+                                </Fragment>
                             ))}
-                            <AskConnexChangeNotice
-                                field={proposal.field}
-                                state={proposal.state}
-                                currentValue={proposal.currentValue}
-                                removal={removal}
-                                labels={labels}
-                            />
                         </div>
                     ) : null}
 
@@ -617,7 +617,7 @@ export default function AskConnexToolCard({
                         </div>
                     ) : null}
 
-                    {affordances.length > 0 || (proposal !== null && targetHref !== null) ? (
+                    {affordances.length > 0 || (changes.length > 0 && targetHref !== null) ? (
                         <div className="flex flex-wrap justify-end gap-2 pt-1">
                             {affordances.includes('reject') ? (
                                 <Button
@@ -631,7 +631,7 @@ export default function AskConnexToolCard({
                                     {card.pendingAction === 'reject' ? labels.discarding : labels.discard}
                                 </Button>
                             ) : null}
-                            {proposal !== null && targetHref !== null ? (
+                            {changes.length > 0 && targetHref !== null ? (
                                 <Button asChild variant="outline" size="dialog">
                                     <Link
                                         href={targetHref}

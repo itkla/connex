@@ -582,23 +582,12 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
     return change.state === 'ready';
 }
 
-/** Reads modern proposal rows, falling back to a legacy server's single change. */
+/** Keeps existing tools on their single change and reads every record-field update row. */
 export function askConnexToolChanges(
-    card: Pick<AiAssistantToolCall, 'change' | 'changes'>,
+    card: Pick<AiAssistantToolCall, 'toolName' | 'change' | 'changes'>,
 ): AiAssistantToolCallChange[] {
-    return card.changes ?? (card.change ? [card.change] : []);
-}
-
-/** Selects the row explaining whether the complete proposal can be applied. */
-export function askConnexProposalChange(
-    card: Pick<AiAssistantToolCall, 'change' | 'changes'>,
-): AiAssistantToolCallChange | null {
-    const changes = askConnexToolChanges(card);
-    for (const state of ['unresolved', 'withheld', 'permissionLost', 'recordChanged'] as const) {
-        const blocking = changes.find((change) => change.state === state);
-        if (blocking) return blocking;
-    }
-    return changes.find((change) => change.state === 'ready') ?? changes[0] ?? null;
+    const singleChange = card.change ? [card.change] : [];
+    return card.toolName === 'update_record_fields' ? card.changes ?? singleChange : singleChange;
 }
 
 /**

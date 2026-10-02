@@ -18,6 +18,7 @@ import {
     askConnexToolCardAffordances,
     askConnexUndoWindow,
     mergeAskConnexToolCalls,
+    reduceAskConnexToolCards,
     toggleAskConnexProposalExclusion,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
@@ -74,6 +75,46 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it.each([
+        "withheld", "unresolved", "permissionLost", "recordChanged", "unchanged",
+    ] as const)("shows each field's notice and blocks an inapplicable %s proposal on both surfaces", (state) => {
+        const industry = change({ field: "industry", state: "unchanged" });
+        const address = change({ field: "address", state });
+        const website = change({ field: "website", state: state === "unchanged" ? "unchanged" : "ready" });
+        const proposal = card({
+            toolName: "update_record_fields",
+            change: industry,
+            changes: [industry, address, website],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(3);
+            expect(markup).toContain(escaped(cardLabels.changeState.unchanged));
+            expect(markup).toContain(escaped(cardLabels.changeState[state]));
+            if (state === "unchanged") {
+                expect(markup.split(escaped(cardLabels.changeState.unchanged))).toHaveLength(4);
+            }
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toEqual(["reject"]);
+        expect(askConnexProposalAppliable(proposal)).toBe(false);
+        expect(group.selected).toBe(0);
+        expect(group.applicable).toBe(0);
+        expect(review).toMatch(/<button[^>]*disabled=""[^>]*>Apply 0 changes<\/button>/);
+    });
+
     it("renders and applies a legacy proposal without changes on both review surfaces", () => {
         const legacy = card({ change: change({ currentValue: "Discovery", proposedValue: "Proposal" }) });
         delete legacy.changes;
@@ -152,9 +193,12 @@ describe("assistant proposal review", () => {
     it("refreshes later rows even when the legacy projection and timestamp stay the same", () => {
         const industry = change({ field: "industry" });
         const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
-        const proposal = card({ change: { ...industry, state: "unresolved" }, changes: [industry, address] });
+        const proposal = card({ toolName: "update_record_fields", change: { ...industry, state: "unresolved" }, changes: [industry, address] });
         const incoming = { ...proposal, changes: [industry, { ...address, state: "permissionLost" as const }] };
-        const [merged] = mergeAskConnexToolCalls([proposal], [incoming]);
+        const [merged] = reduceAskConnexToolCards([proposal], {
+            type: "replace",
+            toolCalls: mergeAskConnexToolCalls([proposal], [incoming]),
+        });
         expect(merged.changes).toEqual(incoming.changes);
         expect(askConnexProposalAppliable(merged)).toBe(false);
     });
