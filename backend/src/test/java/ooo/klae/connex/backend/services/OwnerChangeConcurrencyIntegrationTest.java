@@ -17,6 +17,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -26,6 +29,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,6 +87,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class OwnerChangeConcurrencyIntegrationTest {
+    private static final int MYSQL_LOCK_NOWAIT = 3572;
 
     @Autowired private DealService dealService;
     @Autowired private PersonService personService;
@@ -92,6 +98,7 @@ class OwnerChangeConcurrencyIntegrationTest {
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private DataSource dataSource;
     @MockitoSpyBean private WorkspaceMapper workspaceMapper;
     @MockitoSpyBean private NotificationMapper notificationMapper;
     @MockitoSpyBean private DealMapper dealMapper;
@@ -218,10 +225,12 @@ class OwnerChangeConcurrencyIntegrationTest {
         int workspaceId = workspace.getId();
         int ownerId = newOwner.getId();
         pauseInTheNewOwnersMembershipLock(() -> verify(personMapper).existsOwned(workspaceId, person.getId()));
+        AtomicReference<Person> returned = new AtomicReference<>();
 
-        changeOwnerWhileTheSameChangeCommits(() -> personService.updateOwner(person.getId(), ownerId));
+        changeOwnerWhileTheSameChangeCommits(() -> returned.set(personService.updateOwner(person.getId(), ownerId)));
 
         assertEquals(Integer.valueOf(ownerId), committedOwner("person", person.getId()));
+        assertEquals(Integer.valueOf(ownerId), returned.get().getOwnerId());
         verify(auditService).singleChange("ownerId", currentUser.getId(), ownerId);
         verify(auditService).singleChange("ownerId", ownerId, ownerId);
         verify(ruleTriggers, times(1)).publish(workspaceId, "person", person.getId(), "person.owner_changed");
@@ -232,14 +241,54 @@ class OwnerChangeConcurrencyIntegrationTest {
         int workspaceId = workspace.getId();
         int ownerId = newOwner.getId();
         pauseInTheNewOwnersMembershipLock(() -> verify(companyMapper).existsOwned(workspaceId, company.getId()));
+        AtomicReference<Company> returned = new AtomicReference<>();
 
-        changeOwnerWhileTheSameChangeCommits(() -> companyService.updateOwner(company.getId(), ownerId));
+        changeOwnerWhileTheSameChangeCommits(() -> returned.set(companyService.updateOwner(company.getId(), ownerId)));
 
         assertEquals(Integer.valueOf(ownerId), committedOwner("company", company.getId()));
+        assertEquals(Integer.valueOf(ownerId), returned.get().getOwnerId());
         verify(auditService).singleChange("ownerId", currentUser.getId(), ownerId);
         verify(auditService).singleChange("ownerId", ownerId, ownerId);
         verify(ruleTriggers, times(1)).publish(
             workspaceId, "company", company.getId(), "company.owner_changed");
+    }
+
+    /**
+     * The locking read holds the contact row from the audited old owner through the write, so no
+     * change can land between them. Under {@code READ_COMMITTED} a plain read after the membership
+     * lock would already see committed owners; the lock is what the locking read adds (#1961).
+     */
+    @Test
+    void aContactOwnerChangeHoldsTheRowFromItsReadToItsWrite() {
+        int workspaceId = workspace.getId();
+        AtomicReference<Integer> probe = new AtomicReference<>();
+        PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        doAnswer(invocation -> {
+            Person locked = realPersonMapper.getOwnedPersonByIdForUpdate(workspaceId, person.getId());
+            probe.set(lockErrorFromAnotherConnection("person", person.getId()));
+            return locked;
+        }).when(personMapper).getOwnedPersonByIdForUpdate(workspaceId, person.getId());
+
+        asCurrentUser(() -> personService.updateOwner(person.getId(), newOwner.getId()));
+
+        assertEquals(Integer.valueOf(MYSQL_LOCK_NOWAIT), probe.get());
+    }
+
+    /** The same for a company. */
+    @Test
+    void aCompanyOwnerChangeHoldsTheRowFromItsReadToItsWrite() {
+        int workspaceId = workspace.getId();
+        AtomicReference<Integer> probe = new AtomicReference<>();
+        CompanyMapper realCompanyMapper = sqlSessionTemplate.getMapper(CompanyMapper.class);
+        doAnswer(invocation -> {
+            Company locked = realCompanyMapper.getOwnedCompanyByIdForUpdate(workspaceId, company.getId());
+            probe.set(lockErrorFromAnotherConnection("company", company.getId()));
+            return locked;
+        }).when(companyMapper).getOwnedCompanyByIdForUpdate(workspaceId, company.getId());
+
+        asCurrentUser(() -> companyService.updateOwner(company.getId(), newOwner.getId()));
+
+        assertEquals(Integer.valueOf(MYSQL_LOCK_NOWAIT), probe.get());
     }
 
     /**
@@ -395,6 +444,22 @@ class OwnerChangeConcurrencyIntegrationTest {
         jdbcTemplate.update(
             "UPDATE " + table + " SET archived_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?",
             workspace.getId(), id);
+    }
+
+    /** Tries to lock the row from an independent connection without waiting, and reports the error. */
+    private Integer lockErrorFromAnotherConnection(String table, int id) throws SQLException {
+        try (Connection other = dataSource.getConnection(); Statement statement = other.createStatement()) {
+            other.setAutoCommit(false);
+            try {
+                statement.executeQuery("SELECT id FROM " + table + " WHERE id = " + id + " FOR UPDATE NOWAIT")
+                    .close();
+                return null;
+            } catch (SQLException refused) {
+                return refused.getErrorCode();
+            } finally {
+                other.rollback();
+            }
+        }
     }
 
     private boolean archived(String table, int id) {
