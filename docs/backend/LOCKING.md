@@ -523,15 +523,32 @@ The framework acquires its locks in exactly this order:
 7. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
    tool only links to it (task creation on a person), otherwise the person, company or deal
    `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
+   `TargetLock.NONE` skips this step entirely: `create_person` and `create_deal` use the company
+   only as a visible anchor. Their guided delegate re-enters the authority roots, then takes the
+   organization duplicate mutex, identity groups and template set/reference hierarchy in the
+   existing guided-create order. No path takes that mutex before an `ai_chat_*` row.
+
+Prepare-time duplicate checks are advisory reads with no mutex and no proof issuance. They hold
+no domain lock across a model call. Person preparation includes the selected template's effective
+email/phone defaults only in transient preflight state. Approval's duplicate recheck under the mutex is authoritative,
+and the pinned template version/set revision is validated by guided creation both preliminarily
+and under the template hierarchy. A new candidate or changed template refuses without a create.
+Deal creation submits the proposal's pinned pipeline id and carries its exact reviewed stage name
+through server-only augmentation. After locking the stage, canonical creation compares that name
+and refuses drift before insertion; stage-to-pipeline validation retains the pinned pipeline under
+the existing stage-before-pipeline hierarchy. No new lock or lock-order edge is introduced.
 
 After step 7 the framework, still in this order and taking no further lock of its own: retains the
-restriction-epoch read fence to completion; for every confirm-tier tool refuses a target written
-after the proposal (`AiAssistantProposalFreshness`) — the freshness check is derived from the tier,
-and no tool can opt out of it; re-asserts the tool's permissions from the step-1 snapshot; runs the
+restriction-epoch read fence to completion; for confirm-tier tools compares their declared freshness
+(`AiAssistantProposalFreshness` timestamps or the task semantic fingerprint). `Freshness.NONE`
+requires `TargetLock.NONE`, no writable anchor fields and a duplicate probe; creates instead rely
+on the canonical duplicate recheck and pinned template contract. The framework then re-asserts the tool's permissions from the step-1 snapshot; runs the
 owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
 target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier
 the write returned with the one resolved before the lock, recording any divergence as a
-`verification` sibling of the stored outcome (for the create tools that comparison is structural:
+`verification` sibling of the stored outcome (`create_person` compares company id and `create_deal`
+compares the pinned stage id on the delegate's returned record; for the existing immediate creates
+that comparison is structural:
 `TaskService.create`, `ActivityService.create` and `NoteService.create` return the very bean the tool
 built, so its link cannot diverge from the target while that holds, and nothing is re-read from
 the database; it is structural for `add_tag` too, whose record services' `addTag` reports only

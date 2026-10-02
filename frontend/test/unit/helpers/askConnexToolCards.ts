@@ -1,6 +1,6 @@
 import type { AskConnexProposalReviewLabels } from "@/app/components/ask-connex/AskConnexProposalReview";
 import type { AskConnexToolCardLabels } from "@/app/components/ask-connex/AskConnexToolCard";
-import { askConnexChangeValueText, type AskConnexToolCardState } from "@/app/lib/askConnex";
+import { askConnexChangeValueText, askConnexTemplateDefaultsText, type AskConnexToolCardState } from "@/app/lib/askConnex";
 import type { AiAssistantToolCall, AiAssistantToolCallChange } from "@/app/lib/types";
 
 /**
@@ -29,15 +29,28 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         address: "Address",
         value: "Value",
         expectedCloseDate: "Expected close date",
+        name: "Name",
+        currency: "Currency",
+        template: "Creation template",
+        templateDefaults: "Filled by the template",
     },
-    changeValue: (field, value, side) => askConnexChangeValueText(
-        field,
-        value,
-        side,
-        "en",
-        (hours) => `${hours} ${hours === 1 ? "hour" : "hours"} after it's applied`,
-        { open: "Open", done: "Done" },
-    ),
+    changeValue: (field, value, side) => field === "templateDefaults"
+        ? askConnexTemplateDefaultsText(value, "en", {
+            field: (key) => key === "leadSource" ? "Source" : key === "tags" ? "Tags"
+                : key === "customFields" ? "Custom fields" : "Other fields",
+            leadSource: (source) => source === "REFERRAL" ? "Referral" : "Details unavailable",
+            fieldValue: (fieldLabel, defaultValue) => `${fieldLabel}: ${defaultValue}`,
+            none: "No additional fields",
+            unavailable: "Details unavailable",
+        })
+        : askConnexChangeValueText(
+            field,
+            value,
+            side,
+            "en",
+            (hours) => `${hours} ${hours === 1 ? "hour" : "hours"} after it's applied`,
+            { open: "Open", done: "Done" },
+        ),
     changeNotSet: "Not set",
     changeCurrentUnresolved: {
         owner: "Someone no longer in this workspace",
@@ -53,6 +66,10 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         address: "A value that cannot be shown",
         value: "A value that cannot be shown",
         expectedCloseDate: "A value that cannot be shown",
+        name: "A value that cannot be shown",
+        currency: "A value that cannot be shown",
+        template: "A value that cannot be shown",
+        templateDefaults: "A value that cannot be shown",
     },
     changeProposedUnresolved: "No longer exists",
     changeProposedWithheld: "Withheld",
@@ -108,6 +125,8 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         address: "Address",
         value: "Value",
         expectedCloseDate: "Expected close date",
+        name: "Name",
+        currency: "Currency",
         other: "Detail",
     },
     outcomeValue: (field, value) => `${field}:${value}`,
@@ -136,6 +155,10 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
         updateRecordFields: "Update record fields",
         recordFieldsUpdated: "Record fields updated",
         createNote: "Create a note",
+        createPerson: "Create a contact",
+        createDeal: "Create a deal",
+        personCreated: "Contact created",
+        dealCreated: "Deal created",
         addTag: "Add an existing tag",
         removeTag: "Remove a tag",
         removeTagNamed: (value) => `Remove tag: ${value}`,

@@ -85,6 +85,13 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createDeal(GuidedDealCreateRequestDto request) {
+        return createDeal(request, null);
+    }
+
+    /** Creates against a server-reviewed stage name, revalidated under the canonical stage lock. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName) {
         lockPermission(Permission.DEAL_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
             RecordCreationRecordType.deal, request.templateUse());
@@ -100,7 +107,7 @@ public class GuidedRecordCreationService {
         return dealService.createReviewed(
             deal,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds));
+            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName));
     }
 
     private void lockPermission(Permission permission) {
@@ -368,6 +375,14 @@ public class GuidedRecordCreationService {
             RecordCreationTemplateUseDto use,
             Map<Integer, JsonNode> customFields,
             List<Integer> tagIds) {
+        return augmentation(use, customFields, tagIds, null);
+    }
+
+    private static RecordCreationAugmentation augmentation(
+            RecordCreationTemplateUseDto use,
+            Map<Integer, JsonNode> customFields,
+            List<Integer> tagIds,
+            String reviewedStageName) {
         return new RecordCreationAugmentation(
             use.templateId(),
             use.templateVersion(),
@@ -375,7 +390,8 @@ public class GuidedRecordCreationService {
             use.entryPoint(),
             use.context(),
             customFields,
-            tagIds);
+            tagIds,
+            reviewedStageName);
     }
 
     private static List<ResolvedCreationFieldDto> fields(ResolvedCreationTemplateDto resolved) {

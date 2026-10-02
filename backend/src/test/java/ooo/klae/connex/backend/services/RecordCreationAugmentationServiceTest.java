@@ -15,6 +15,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUseDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationGroupDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -222,6 +225,32 @@ class RecordCreationAugmentationServiceTest {
         order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, 8);
         order.verify(shareMapper).lockPipelineShareForWorkspace(8, 7);
         verify(customFieldValueService, never()).applyJsonValuesForCreate(any(), eq(201), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Renamed", "DISCOVERY"})
+    void reviewedStageNameMustMatchTheLockedStageExactly(String currentName) {
+        RecordCreationContextDto context = new RecordCreationContextDto(null);
+        RecordCreationAugmentation augmentation = new RecordCreationAugmentation(
+            "system:deal:standard", 1, 0, RecordCreationEntryPoint.quick_create,
+            context, Map.of(), List.of(), "Discovery");
+        when(templateMapper.getSetForUpdate(7, "deal")).thenReturn(set(0));
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, context))
+            .thenReturn(resolved(RecordCreationRecordType.deal));
+        Pipeline pipeline = new Pipeline();
+        pipeline.setId(8);
+        Stage stage = new Stage();
+        stage.setId(10);
+        stage.setName(currentName);
+        stage.setPipeline(pipeline);
+        when(pipelineMapper.getVisibleStageByIdForUpdate(7, 10)).thenReturn(stage);
+
+        ConflictException refused = assertThrows(ConflictException.class,
+            () -> service.prepareDeal(8, 10, null, augmentation));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 10);
+        verify(pipelineMapper, never()).getVisiblePipelineByIdForUpdate(7, 8);
     }
 
     @Test

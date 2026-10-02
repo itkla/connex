@@ -80,6 +80,7 @@ import {
     askConnexRetryPrompt,
     askConnexScopePreview,
     askConnexSessionStorageKey,
+    askConnexTemplateDefaultsText,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     formatAnswerInstant,
@@ -161,6 +162,7 @@ import {
 } from '@/app/lib/askConnexStream';
 import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
+import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
@@ -411,6 +413,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
     const tDisclosure = useTranslations('Assistant.disclosure');
     const tWarmth = useTranslations('Temperature');
+    const tProvenance = useTranslations('ContactProvenance');
     const locale = useLocale();
     const now = useLiveNow();
     const router = useRouter();
@@ -2509,14 +2512,48 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         field: AiAssistantToolCallChangeField,
         value: string,
         side: 'current' | 'proposed',
-    ): string => askConnexChangeValueText(
-        field,
-        value,
-        side,
-        locale,
-        (hours) => t('toolCards.change.responseDueInHours', { hours }),
-        { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
-    ), [locale, t]);
+    ): string => {
+        if (field === 'templateDefaults') {
+            const fields: Readonly<Record<string, string>> = {
+                name: t('toolCards.change.fieldName'),
+                title: t('toolCards.change.fieldTitle'),
+                email: t('toolCards.templateDefaults.email'),
+                phone: t('toolCards.templateDefaults.phone'),
+                company: t('toolCards.templateDefaults.company'),
+                leadSource: tProvenance('sourceLabel'),
+                leadSourceDetail: tProvenance('detailLabel'),
+                referrerPerson: tProvenance('referrerLabel'),
+                value: t('toolCards.change.fieldValue'),
+                currency: t('toolCards.change.fieldCurrency'),
+                pipeline: t('toolCards.templateDefaults.pipeline'),
+                stage: t('toolCards.change.fieldStage'),
+                expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                tags: t('toolCards.templateDefaults.tags'),
+                customFields: t('toolCards.templateDefaults.customFields'),
+            };
+            return askConnexTemplateDefaultsText(value, locale, {
+                field: (key) => Object.hasOwn(fields, key)
+                    ? fields[key] : t('toolCards.templateDefaults.other'),
+                leadSource: (source) => {
+                    const known = LEAD_SOURCES.find((candidate) => candidate === source);
+                    return known === undefined ? t('toolCards.templateDefaults.unavailable')
+                        : tProvenance(`source.${known}`);
+                },
+                fieldValue: (fieldLabel, defaultValue) =>
+                    t('toolCards.templateDefaults.fieldValue', { field: fieldLabel, value: defaultValue }),
+                none: t('toolCards.templateDefaults.none'),
+                unavailable: t('toolCards.templateDefaults.unavailable'),
+            });
+        }
+        return askConnexChangeValueText(
+            field,
+            value,
+            side,
+            locale,
+            (hours) => t('toolCards.change.responseDueInHours', { hours }),
+            { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
+        );
+    }, [locale, t, tProvenance]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2683,6 +2720,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 address: t('toolCards.change.fieldAddress'),
                 value: t('toolCards.change.fieldValue'),
                 expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                name: t('toolCards.change.fieldName'),
+                currency: t('toolCards.change.fieldCurrency'),
+                template: t('toolCards.change.fieldTemplate'),
+                templateDefaults: t('toolCards.change.fieldTemplateDefaults'),
             },
             changeValue: changeValueText,
             changeNotSet: t('toolCards.change.notSet'),
@@ -2700,6 +2741,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 address: t('toolCards.change.currentUnresolvedField'),
                 value: t('toolCards.change.currentUnresolvedField'),
                 expectedCloseDate: t('toolCards.change.currentUnresolvedField'),
+                name: t('toolCards.change.currentUnresolvedField'),
+                currency: t('toolCards.change.currentUnresolvedField'),
+                template: t('toolCards.change.currentUnresolvedField'),
+                templateDefaults: t('toolCards.change.currentUnresolvedField'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
             changeProposedWithheld: t('toolCards.change.proposedWithheld'),
@@ -2755,6 +2800,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 address: t('toolCards.change.fieldAddress'),
                 value: t('toolCards.change.fieldValue'),
                 expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                name: t('toolCards.change.fieldName'),
+                currency: t('toolCards.change.fieldCurrency'),
                 other: t('toolCards.outcomeFields.other'),
             },
             outcomeValue: outcomeValueText,
@@ -2784,6 +2831,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 updateRecordFields: t('toolCards.summaries.updateRecordFields'),
                 recordFieldsUpdated: t('toolCards.summaries.recordFieldsUpdated'),
                 createNote: t('toolCards.summaries.createNote'),
+                createPerson: t('toolCards.summaries.createPerson'),
+                createDeal: t('toolCards.summaries.createDeal'),
+                personCreated: t('toolCards.summaries.personCreated'),
+                dealCreated: t('toolCards.summaries.dealCreated'),
                 addTag: t('toolCards.summaries.addTag'),
                 removeTag: t('toolCards.summaries.removeTag'),
                 removeTagNamed: (value: string) => t('toolCards.summaries.removeTagNamed', { value }),

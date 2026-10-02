@@ -107,7 +107,7 @@ public interface AiAssistantWriteTool {
         return Set.of();
     }
 
-    /** Proposal freshness policies; NONE is reserved for future structural creates. */
+    /** Proposal freshness policies; structural creates revalidate their pinned domain state. */
     enum Freshness { TARGET_UPDATED_AT, TARGET_FINGERPRINT, NONE }
 
     /**
@@ -154,6 +154,46 @@ public interface AiAssistantWriteTool {
      */
     default Resolution resolve(Target target, AiAssistantWriteToolRequest request) {
         return null;
+    }
+
+    /** Proposal-time server state; only durable scalar values and nested string-keyed maps. */
+    default Map<String, Object> pin(Target target, AiAssistantWriteToolRequest request) {
+        return Map.of();
+    }
+
+    /** Keeps private preflight identity values transient and separate from durable proposal pins. */
+    default Preparation prepare(Target target, AiAssistantWriteToolRequest request) {
+        return new Preparation(pin(target, request), duplicateProbe(target, request));
+    }
+
+    /** Only pinned metadata is persisted; duplicate inputs live for this preparation alone. */
+    record Preparation(Map<String, Object> pinned, DuplicateProbe duplicateProbe) {
+        public Preparation {
+            pinned = Map.copyOf(pinned);
+        }
+    }
+
+    /** Pure duplicate-check inputs; the framework alone performs the advisory read. */
+    default DuplicateProbe duplicateProbe(Target target, AiAssistantWriteToolRequest request) {
+        return null;
+    }
+
+    /** Identity values for a framework-owned check, never candidate records or a review proof. */
+    record DuplicateProbe(
+            String kind, String name, Integer companyId, String title,
+            List<String> emails, List<String> phones) {
+        public DuplicateProbe(String kind, String name, Integer companyId, String title) {
+            this(kind, name, companyId, title, List.of(), List.of());
+        }
+
+        public DuplicateProbe {
+            emails = List.copyOf(emails);
+            phones = List.copyOf(phones);
+            if ((!"person".equals(kind) && !"deal".equals(kind)) || name == null || name.isBlank()
+                    || companyId == null || companyId <= 0) {
+                throw new IllegalArgumentException("Invalid assistant duplicate probe");
+            }
+        }
     }
 
     /**
@@ -475,7 +515,9 @@ public interface AiAssistantWriteTool {
         /** The ordered board rows of a deal stage change toward the resolved stage. */
         DEAL_STAGE_CHANGE,
         /** The exact task row, after the board root when the write changes positions. */
-        TASK_ROW
+        TASK_ROW,
+        /** Creates delegate their own hierarchy without locking their company anchor. */
+        NONE
     }
 
     /**
@@ -530,8 +572,17 @@ public interface AiAssistantWriteTool {
             List<PrincipalRequest> principals,
             Resolution resolution,
             LockedTarget lockedTarget,
-            ScheduleConflicts scheduleConflicts) {
+            ScheduleConflicts scheduleConflicts,
+            Map<String, Object> pinned) {
+        /** Existing writes carry no proposal-time domain state. */
+        public Execution(
+                Authority authority, Row row, List<PrincipalRequest> principals,
+                Resolution resolution, LockedTarget lockedTarget, ScheduleConflicts scheduleConflicts) {
+            this(authority, row, principals, resolution, lockedTarget, scheduleConflicts, Map.of());
+        }
+
         public Execution {
+            pinned = AiAssistantToolProposalPin.copy(pinned);
             principals = List.copyOf(principals);
             Objects.requireNonNull(
                     scheduleConflicts, "An assistant write is handed the schedule read");
@@ -759,7 +810,20 @@ public interface AiAssistantWriteTool {
             Integer pinnedResolutionId,
             List<Integer> pinnedPrincipalIds,
             List<DocumentTemplate> templates,
-            Map<Integer, Integer> documentVersions) {
+            Map<Integer, Integer> documentVersions,
+            Map<String, Object> pinned) {
+
+        /** Existing reviews carry no proposal-time domain state. */
+        public Review(
+                String targetKind, int targetId, boolean detailsReadable, RecordSnapshot target,
+                JsonNode request, JsonNode outcome, List<User> members, List<Stage> stages,
+                List<Tag> tags, List<RecordTag> targetTags, Set<Permission> viewerPermissions,
+                Integer pinnedResolutionId, List<Integer> pinnedPrincipalIds,
+                List<DocumentTemplate> templates, Map<Integer, Integer> documentVersions) {
+            this(targetKind, targetId, detailsReadable, target, request, outcome, members, stages,
+                    tags, targetTags, viewerPermissions, pinnedResolutionId, pinnedPrincipalIds,
+                    templates, documentVersions, Map.of());
+        }
 
         /** Existing review inputs for tools that do not read document templates. */
         public Review(
@@ -785,6 +849,7 @@ public interface AiAssistantWriteTool {
         }
 
         public Review {
+            pinned = detailsReadable ? AiAssistantToolProposalPin.copy(pinned) : Map.of();
             documentVersions = Map.copyOf(documentVersions);
             pinnedPrincipalIds = pinnedPrincipalIds == null ? null : List.copyOf(pinnedPrincipalIds);
         }

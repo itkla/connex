@@ -32,7 +32,9 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantAssignOwnerWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateDealWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreatePersonWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDateResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantDraftDocumentWriteTool;
@@ -47,10 +49,12 @@ import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealDocumentService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.DocumentTemplateService;
+import ooo.klae.connex.backend.services.GuidedRecordCreationService;
 import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.RecordCreationPresetService;
 import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import tools.jackson.databind.ObjectMapper;
@@ -150,6 +154,8 @@ class AiAssistantWriteToolSpiArchTest {
             PersonService.class,
             CompanyService.class,
             LeadResponseSlaService.class,
+            GuidedRecordCreationService.class,
+            RecordCreationPresetService.class,
             AiAssistantDateResolver.class,
             ObjectMapper.class);
 
@@ -209,6 +215,13 @@ class AiAssistantWriteToolSpiArchTest {
             PERMITTED_SERVICE_METHODS = Map.ofEntries(
                     Map.entry(AiAssistantCreateActivityWriteTool.class,
                             Map.of(ActivityService.class, Set.of("create", "deleteIf"))),
+                    Map.entry(AiAssistantCreatePersonWriteTool.class,
+                            Map.of(GuidedRecordCreationService.class, Set.of("createPerson"),
+                                    RecordCreationPresetService.class, Set.of("persons"))),
+                    Map.entry(AiAssistantCreateDealWriteTool.class,
+                            Map.of(GuidedRecordCreationService.class, Set.of("createDeal"),
+                                    RecordCreationPresetService.class, Set.of("deals"),
+                                    PipelineService.class, Set.of("getAllStages", "getStageById"))),
                     Map.entry(AiAssistantCreateNoteWriteTool.class,
                             Map.of(NoteService.class, Set.of("create", "deleteIf"))),
                     Map.entry(AiAssistantCreateTaskWriteTool.class,

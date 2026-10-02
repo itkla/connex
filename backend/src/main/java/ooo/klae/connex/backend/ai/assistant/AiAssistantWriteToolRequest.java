@@ -126,4 +126,24 @@ public sealed interface AiAssistantWriteToolRequest {
             @Size(min = 10, max = 10) String expectedCloseDate)
             implements AiAssistantWriteToolRequest {
     }
+
+    /** Contact creation anchored to a visible company; contact channels cannot be supplied. */
+    record CreatePerson(
+            @NotBlank @Pattern(regexp = HANDLE) String handle,
+            @NotBlank @Size(max = 255) String name,
+            @Size(min = 1, max = 128) String title)
+            implements AiAssistantWriteToolRequest {
+    }
+
+    /** Deal creation anchored to a visible company, with its stage pinned by the framework. */
+    record CreateDeal(
+            @NotBlank @Pattern(regexp = HANDLE) String handle,
+            @NotBlank @Size(max = 255) String name,
+            @NotBlank @Size(max = 128) String stage,
+            @NotBlank @Size(max = 16) String value,
+            @NotBlank @Pattern(regexp = "[A-Z]{3}") String currency,
+            @JsonProperty("expected_close_date")
+            @Size(min = 10, max = 10) String expectedCloseDate)
+            implements AiAssistantWriteToolRequest {
+    }
 }

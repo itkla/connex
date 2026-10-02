@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,15 +48,20 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
+import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
+import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
+import ooo.klae.connex.backend.services.DuplicatePreflightService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -103,6 +109,7 @@ public class AiAssistantWriteToolService {
     private final CompanyService companyService;
     private final DealService dealService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final DuplicatePreflightService duplicatePreflightService;
     private final AiRestrictionEpoch restrictionEpoch;
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
@@ -174,6 +181,22 @@ public class AiAssistantWriteToolService {
                 : storedArgumentsJson.isPresent()
                         ? storedPins(storedArgumentsJson.get())
                         : pins(tool, new Target(target.kind(), target.id()), request);
+        Map<String, Object> pinned;
+        if (storedArgumentsJson.isPresent()) {
+            pinned = AiAssistantToolProposalPin.read(objectMapper.readTree(storedArgumentsJson.get()));
+        } else {
+            Target anchor = new Target(target.kind(), target.id());
+            try {
+                if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+                    requireTargetAccessible(anchor);
+                }
+                AiAssistantWriteTool.Preparation preparation = tool.prepare(anchor, request);
+                pinned = AiAssistantToolProposalPin.copy(preparation.pinned());
+                requireNoKnownDuplicate(tool, preparation.duplicateProbe());
+            } catch (ResourceNotFoundException exception) {
+                throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+            }
+        }
         ObjectNode storedRequest = objectMapper.valueToTree(request);
         storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
         Map<String, Object> targetData = new LinkedHashMap<>();
@@ -198,12 +221,44 @@ public class AiAssistantWriteToolService {
         if (pins != null) {
             pins.writeTo(durable);
         }
+        if (!pinned.isEmpty()) {
+            durable.put("pinned", pinned);
+        }
         return new AiAssistantPreparedWrite(
                 name,
                 toolCatalog.tier(name),
                 target.kind(),
                 target.id(),
                 serialize(durable));
+    }
+
+    /** Strict assistant-create policy: any visible candidate or truncation refuses a proposal. */
+    private void requireNoKnownDuplicate(
+            AiAssistantWriteTool tool, AiAssistantWriteTool.DuplicateProbe probe) {
+        if (probe == null) {
+            if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+                throw new IllegalStateException("Assistant create has no duplicate probe");
+            }
+            return;
+        }
+        boolean candidates;
+        try {
+            candidates = switch (probe.kind()) {
+                case "person" -> {
+                    DuplicatePreflightResponse response = duplicatePreflightService.preflightPerson(
+                            new PersonDuplicatePreflightRequest(probe.name(), probe.emails(), probe.phones()));
+                    yield response.truncated() || !response.candidates().isEmpty();
+                }
+                case "deal" -> duplicatePreflightService.dealCandidatesExist(
+                        new DealDuplicatePreflightRequest(probe.name(), probe.companyId(), null));
+                default -> throw new IllegalStateException("Unsupported assistant duplicate probe");
+            };
+        } catch (TooManyRequestsException | DataAccessException exception) {
+            throw AiAssistantLoopException.refusedArguments("duplicate_check_unavailable");
+        }
+        if (candidates) {
+            throw AiAssistantLoopException.refusedArguments("possible_duplicate");
+        }
     }
 
     private static void requireNoRedactedValues(AiAssistantWriteTool tool, JsonNode args) {
@@ -569,7 +624,7 @@ public class AiAssistantWriteToolService {
             Authority authority,
             PreliminaryPrincipals principals,
             PreparedMutation mutation) {
-        requireTargetAccessible(write);
+        requireTargetAccessible(new Target(write.targetKind(), write.targetId()));
         return apply(write, authority, principals.principals(), mutation);
     }
 
@@ -592,7 +647,7 @@ public class AiAssistantWriteToolService {
                 principals,
                 mutation.resolution(),
                 new LockedTarget(mutation.targetUpdatedAt(), mutation.stageChange()),
-                scheduleOf(row.target())));
+                scheduleOf(row.target()), write.pinned()));
         Inverse inverse = outcome.inverse();
         Map<String, Object> undo = null;
         if (inverse != null) {
@@ -629,13 +684,13 @@ public class AiAssistantWriteToolService {
         return verification;
     }
 
-    private void requireTargetAccessible(StoredWrite write) {
-        switch (write.targetKind()) {
-            case "person" -> personService.getPersonById(write.targetId());
-            case "company" -> companyService.getCompanyById(write.targetId());
-            case "deal" -> dealService.getDealById(write.targetId());
+    private void requireTargetAccessible(Target target) {
+        switch (target.kind()) {
+            case "person" -> personService.getPersonById(target.id());
+            case "company" -> companyService.getCompanyById(target.id());
+            case "deal" -> dealService.getDealById(target.id());
             case "task" -> {
-                var task = taskService.getTaskById(write.targetId());
+                var task = taskService.getTaskById(target.id());
                 if (task.getPerson() != null) {
                     personService.getPersonById(task.getPerson().getId());
                 }
@@ -817,6 +872,7 @@ public class AiAssistantWriteToolService {
             }
         }
         return switch (lock.target()) {
+            case NONE -> new PreparedMutation(null, resolution, null);
             case PERSON_SHARE -> {
                 if (!"person".equals(write.targetKind())) {
                     throw new BadRequestException("Unsupported assistant record kind");
@@ -883,6 +939,9 @@ public class AiAssistantWriteToolService {
      */
     private static void requireTargetUnchangedSinceProposal(
             StoredWrite write, AiChatToolCall toolCall, PreparedMutation mutation) {
+        if (write.tool().freshness() == AiAssistantWriteTool.Freshness.NONE) {
+            return;
+        }
         if (write.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
             if (write.targetVersion() == null
                     || !write.targetVersion().equals(mutation.targetVersion())) {
@@ -947,7 +1006,8 @@ public class AiAssistantWriteToolService {
                     tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest,
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
-                            ? text(root, "targetVersion") : null);
+                            ? text(root, "targetVersion") : null,
+                    AiAssistantToolProposalPin.read(root));
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
@@ -1189,7 +1249,8 @@ public class AiAssistantWriteToolService {
             long restrictionEpoch,
             AiAssistantWriteToolRequest typedRequest,
             AiAssistantProposalPins pins,
-            String targetVersion) {
+            String targetVersion,
+            Map<String, Object> pinned) {
     }
 
     private record PreparedMutation(

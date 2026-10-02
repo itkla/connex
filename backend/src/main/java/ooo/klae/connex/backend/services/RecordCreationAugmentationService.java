@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUseDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -207,7 +208,7 @@ public class RecordCreationAugmentationService {
         Map<Integer, CustomFieldDefinition> lockedCustomFields =
             lockCustomFields(workspaceId, preliminaryLocked);
         lockTags(workspaceId, augmentation.tagIds());
-        lockReferences(workspaceId, pipelineIds, stageIds, personIds, companyIds);
+        lockReferences(workspaceId, pipelineIds, stageIds, personIds, companyIds, augmentation.reviewedStageName());
         ResolvedCreationTemplateDto resolved = requireAvailable(resolveAgain(exact, augmentation));
         validatePayload(recordType, resolved, augmentation);
         return new PreparedAugmentation(recordType, augmentation, lockedCustomFields);
@@ -339,12 +340,16 @@ public class RecordCreationAugmentationService {
             List<Integer> pipelineIds,
             List<Integer> stageIds,
             List<Integer> personIds,
-            List<Integer> companyIds) {
+            List<Integer> companyIds,
+            String reviewedStageName) {
         Map<Integer, Stage> stages = new LinkedHashMap<>();
         for (int stageId : sortedUnique(stageIds)) {
             Stage stage = pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, stageId);
             if (stage == null) {
                 throw relatedRecordNotFound();
+            }
+            if (reviewedStageName != null && !reviewedStageName.equals(stage.getName())) {
+                throw new ConflictException("Assistant proposal target changed");
             }
             stages.put(stageId, stage);
         }

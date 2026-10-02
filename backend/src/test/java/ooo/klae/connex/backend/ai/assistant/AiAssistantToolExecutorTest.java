@@ -129,6 +129,8 @@ class AiAssistantToolExecutorTest {
         arguments.put("complete_task", "");
         arguments.put("reschedule_task", ",\"due_date\":\"2026-10-15\"");
         arguments.put("update_record_fields", ",\"title\":\"Director\"");
+        arguments.put("create_person", ",\"name\":\"Morgan\"");
+        arguments.put("create_deal", ",\"name\":\"Expansion\",\"stage\":\"Discovery\",\"value\":\"1250\",\"currency\":\"JPY\"");
         Map<String, Set<String>> accepted = new HashMap<>(Map.of(
                 "create_activity", Set.of("person", "deal"),
                 "create_task", Set.of("person", "deal"),
@@ -140,6 +142,8 @@ class AiAssistantToolExecutorTest {
                 "assign_owner", Set.of("person", "company", "deal"),
                 "get_deal_brief", Set.of("deal"),
                 "find_schedule_conflicts", Set.of("person")));
+        accepted.put("create_person", Set.of("company"));
+        accepted.put("create_deal", Set.of("company"));
         accepted.put("draft_document", Set.of("deal"));
         accepted.put("complete_task", Set.of("task"));
         accepted.put("reschedule_task", Set.of("task"));
