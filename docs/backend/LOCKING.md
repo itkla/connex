@@ -50,9 +50,9 @@ exclusively there is a defect. Every audited transaction in the workspace takes 
 mutations — person owner change, deal, deal-collaborator replacement, company, task, saved views, AI
 chat turn persistence — lock the `workspace_member` row before reaching the root in that trailing
 audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
-in ascending user-id order, then the deal row `FOR UPDATE`, then replaces the `deal_collaborator`
-rows, before its trailing audit — the order `DealService.updateOwner` uses — so a member offboarded
-concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
+in ascending user-id order, then the deal row `FOR UPDATE`, then reads the deal's `deal_collaborator`
+rows `FOR UPDATE` and replaces them, before its trailing audit — the order `DealService.updateOwner`
+uses — so a member offboarded concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
@@ -313,6 +313,11 @@ service-level cleanup.
   the last two explicit, and none of them is introduced or worsened here.
 - Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
 - Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
+  - The replacement reads the collaborator rows `FOR UPDATE` through the primary key twice: before the clear, and again after the insert. That makes the audited and returned lists current reads rather than the snapshot that its unlocked existence check opened before any lock was held (#1942).
+  - The first read takes the clustered-row locks one round trip before the clear reaches the two secondary indexes. That widens two existing deadlock windows without adding a cycle:
+    - Offboarding's `removeCollaboratorFromWorkspace` and `removeCollaboratorAnywhere` lock a member's secondary-index entry before its clustered row, and never take the deal row. A replacement that drops a member while that member is being offboarded can therefore deadlock.
+    - Replacements on adjacent deals insert into the same gap.
+  - Either deadlock rolls the replacement back. No handler maps it to a conflict, so the caller sees a 500 and must retry.
 
 ## Lifecycle, APPI requests, and organization SSO
 

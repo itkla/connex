@@ -1923,6 +1923,10 @@ public class DealService {
      * and are held until it commits, so a member offboarded concurrently either waits for this write or
      * is refused by it, and the tenant-only insert never needs to join the control plane (#1793).
      *
+     * <p>The audited and returned lists both come from locking reads taken after the deal lock. The
+     * unlocked existence check opens this transaction's read view before any lock is held, so a plain
+     * read would still list a collaborator row that a concurrent owner change deleted (#1942).
+     *
      * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
      * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
      * transaction and borrow a second pooled connection while the deal's collaborator row locks and
@@ -1957,12 +1961,12 @@ public class DealService {
         List<Integer> normalized = requested.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
-        List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);
+        List<Integer> before = dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
         dealMapper.clearCollaborators(workspaceId, dealId);
         if (!normalized.isEmpty()) {
             dealMapper.insertCollaborators(workspaceId, dealId, normalized);
         }
-        List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, dealId);
+        List<Integer> after = dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
         auditService.record("deal.updateCollaborators", "deal", dealId, deal.getName(),
             "Updated collaborators on " + deal.getName(),
             auditService.singleChange("collaboratorIds", before, after));

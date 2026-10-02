@@ -4,10 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
@@ -277,6 +280,57 @@ class DealCollaboratorConcurrencyIntegrationTest {
     }
 
     /**
+     * An owner change commits after a replacement has opened its read view but before it holds any lock,
+     * deleting the new owner's collaborator row. The replacement's audited and returned lists must be
+     * current reads: from its snapshot they would still list the new owner as a collaborator (#1942).
+     */
+    @Test
+    void aReplacementRacingAnOwnerChangeReturnsAndAuditsTheCommittedCollaborators() throws Exception {
+        int workspaceId = workspace.getId();
+        int newOwnerId = targetMember.getId();
+        User kept = user("deal-collaborators-kept-" + UUID.randomUUID().toString().substring(0, 8));
+        additionalUsers.add(kept);
+        workspaceMapper.addMember(workspaceId, kept.getId(), "member");
+        for (int collaboratorId : List.of(newOwnerId, kept.getId())) {
+            jdbcTemplate.update("INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?)",
+                workspaceId, deal.getId(), collaboratorId);
+        }
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        CountDownLatch readViewOpen = new CountDownLatch(1);
+        CountDownLatch ownerChanged = new CountDownLatch(1);
+        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        doAnswer(invocation -> {
+            verify(dealMapper).getDealById(workspaceId, deal.getId());
+            readViewOpen.countDown();
+            assertTrue(ownerChanged.await(30, TimeUnit.SECONDS));
+            return realWorkspaceMapper.lockActiveMembership(workspaceId, kept.getId());
+        }).when(workspaceMapper).lockActiveMembership(workspaceId, kept.getId());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        List<UserDto> returned;
+        try {
+            Future<List<UserDto>> replacement = executor.submit(
+                () -> addCollaborators(workspaceId, List.of(kept.getId())));
+            assertTrue(readViewOpen.await(10, TimeUnit.SECONDS));
+            changeOwner(workspaceId, newOwnerId);
+            assertEquals(Integer.valueOf(newOwnerId), jdbcTemplate.queryForObject(
+                "SELECT owner_id FROM deal WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspaceId, deal.getId()));
+            assertEquals(List.of(kept.getId()), committedCollaborators(workspaceId));
+            ownerChanged.countDown();
+            returned = replacement.get(20, TimeUnit.SECONDS);
+        } finally {
+            ownerChanged.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(List.of(kept.getId()), returned.stream().map(UserDto::getId).toList());
+        assertEquals(List.of(kept.getId()), committedCollaborators(workspaceId));
+        verify(auditService).singleChange("collaboratorIds", List.of(kept.getId()), List.of(kept.getId()));
+    }
+
+    /**
      * Pins the lock order the replacement shares with {@code updateOwner} and offboarding: each requested
      * membership in ascending user id, then the deal row, then its collaborator rows.
      */
@@ -296,8 +350,10 @@ class DealCollaboratorConcurrencyIntegrationTest {
         order.verify(workspaceMapper).lockActiveMembership(workspaceId, lower);
         order.verify(workspaceMapper).lockActiveMembership(workspaceId, higher);
         order.verify(dealMapper).getDealByIdForUpdate(workspaceId, deal.getId());
+        order.verify(dealMapper).getCollaboratorIdsForUpdate(workspaceId, deal.getId());
         order.verify(dealMapper).clearCollaborators(workspaceId, deal.getId());
         order.verify(dealMapper).insertCollaborators(eq(workspaceId), eq(deal.getId()), anyList());
+        order.verify(dealMapper).getCollaboratorIdsForUpdate(workspaceId, deal.getId());
     }
 
     private Integer lockErrorFromAnotherConnection(int workspaceId, int userId) throws SQLException {
@@ -326,6 +382,21 @@ class DealCollaboratorConcurrencyIntegrationTest {
 
     private List<UserDto> addTargetAsCollaborator(int workspaceId) {
         return addCollaborators(workspaceId, List.of(targetMember.getId()));
+    }
+
+    private void changeOwner(int workspaceId, int ownerId) {
+        authenticate(workspaceId);
+        try {
+            dealService.updateOwner(deal.getId(), ownerId);
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    private List<Integer> committedCollaborators(int workspaceId) {
+        return jdbcTemplate.queryForList(
+            "SELECT user_id FROM deal_collaborator WHERE workspace_id = ? AND deal_id = ? ORDER BY user_id",
+            Integer.class, workspaceId, deal.getId());
     }
 
     private List<UserDto> addCollaborators(int workspaceId, List<Integer> userIds) {

@@ -160,6 +160,23 @@ class DealMapperXmlTest {
         assertFalse(mapperXml.contains("password_hash"));
     }
 
+    /**
+     * The replacement's audited and returned collaborator lists must be current reads of exactly this
+     * deal's rows: a covering scan of the workspace-wide user index would lock every collaborator row
+     * in the workspace, and a cached answer would replay a pre-lock or pre-write result (#1942).
+     */
+    @Test
+    void lockedCollaboratorLookupIsAnUncachedCurrentReadOfTheDealsPrimaryKeyRange() throws Exception {
+        Configuration configuration = configuration();
+
+        String sql = sql(configuration, "getCollaboratorIdsForUpdate", MemberScope.allTeam());
+
+        assertEquals("SELECT dc.user_id FROM deal_collaborator dc FORCE INDEX (PRIMARY) "
+            + "WHERE dc.workspace_id = ? AND dc.deal_id = ? ORDER BY dc.user_id FOR UPDATE", sql);
+        assertTrue(configuration.getMappedStatement(DealMapper.class.getName() + ".getCollaboratorIdsForUpdate")
+            .isFlushCacheRequired());
+    }
+
     @Test
     void collaboratorProfileHydrationSelectsOnlyDisplaySafeColumns() throws Exception {
         Configuration configuration = new Configuration();
