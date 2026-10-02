@@ -91,6 +91,7 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -581,7 +582,8 @@ class SecurityConfigOAuthTest {
                     mock(DbRelyingPartyRegistrationRepository.class), success,
                     mock(SessionSecurityService.class), mock(UserMapper.class), mock(WebSocketSessionRegistry.class),
                     new PrivilegedMfaProperties(), mock(PrivilegedAccountService.class), mock(WebAuthnService.class),
-                    mock(AuditService.class), mock(BusinessCardRateLimiter.class), mock(CapabilityEntitlement.class),
+                    mock(AuditService.class), mock(DenialAuditRateLimiter.class), mock(BusinessCardRateLimiter.class),
+                    mock(CapabilityEntitlement.class),
                     mock(WorkspaceRequestResolver.class), mock(WorkspaceService.class), mock(WorkspaceCookie.class),
                     mock(OneTimeLinkFlowCookie.class), mock(LogoutAuditHandler.class), mock(LoginRateLimiter.class),
                     mock(ClientIpResolver.class), new tools.jackson.databind.ObjectMapper(),

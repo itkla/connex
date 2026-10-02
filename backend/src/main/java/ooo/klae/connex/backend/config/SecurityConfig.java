@@ -90,6 +90,7 @@ import ooo.klae.connex.backend.sso.SsoHttpClient;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -256,6 +257,7 @@ public class SecurityConfig {
             PrivilegedAccountService privilegedAccountService,
             WebAuthnService webAuthnService,
             AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
             BusinessCardRateLimiter businessCardRateLimiter,
             CapabilityEntitlement capabilityEntitlement,
             WorkspaceRequestResolver workspaceRequestResolver,
@@ -295,7 +297,9 @@ public class SecurityConfig {
                 privilegedAccountService,
                 webAuthnService,
                 sessionSecurityService,
-                auditService),
+                auditService,
+                denialAuditRateLimiter,
+                clientIpResolver),
             AuthorizationFilter.class);
         CorsFilter corsFilter = new CorsFilter(corsConfigurationSource);
         corsFilter.setCorsProcessor(new PublicApiCorsProcessor(objectMapper));
