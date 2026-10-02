@@ -50,9 +50,9 @@ exclusively there is a defect. Every audited transaction in the workspace takes 
 mutations — person owner change, deal, deal-collaborator replacement, company, task, saved views, AI
 chat turn persistence — lock the `workspace_member` row before reaching the root in that trailing
 audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
-in ascending user-id order, then the deal row `FOR UPDATE`, then replaces the `deal_collaborator`
-rows, before its trailing audit — the order `DealService.updateOwner` uses — so a member offboarded
-concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
+in ascending user-id order, then the deal row `FOR UPDATE`, then reads the deal's `deal_collaborator`
+rows `FOR UPDATE` and replaces them, before its trailing audit — the order `DealService.updateOwner`
+uses — so a member offboarded concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
@@ -313,6 +313,12 @@ service-level cleanup.
   the last two explicit, and none of them is introduced or worsened here.
 - Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
 - Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
+  - The replacement reads the collaborator rows `FOR UPDATE` through the primary key twice: before the clear, and again after the clear and any insert. That makes the audited and returned lists current reads rather than the snapshot that its unlocked existence check opened before any lock was held (#1942).
+  - The first read takes the deal's clustered-row locks, and the gap lock on the next primary-key record, one statement before the clear. Its locks are a subset of the clear's, so it adds no wait-for edge. It does lengthen three existing deadlock windows:
+    - **A member dropped while being offboarded.** Offboarding's `removeCollaboratorFromWorkspace` and `removeCollaboratorAnywhere` lock a member's secondary-index entry before its clustered row. The replacement locks the clustered rows first, and reaches the secondary entries only in the clear.
+    - **Account erasure.** Erasure deletes the user's collaborator rows, with their `idx_deal_collaborator_user_only` gaps, before it clears deal ownership. That is the reverse of the replacement's deal row, then collaborator rows. The cycle needs the replacement's insert to wait on erasure's user-index gap, and it predates #1942.
+    - **Replacements sharing a gap.** The gap before the next primary-key record is shared. For a deal with no collaborators it spans every collaborator-less deal up to the next row, so two deals receiving their first collaborators at once can deadlock on their inserts. In a pooled catalog the gap can end at another workspace's first row or at the supremum, so the other side can be a different tenant's replacement. That costs availability; it leaks nothing.
+  - InnoDB rolls back the lighter transaction, usually but not always the replacement. No handler maps either side to a conflict, so the losing request gets a 500 and must be retried.
 
 ## Lifecycle, APPI requests, and organization SSO
 

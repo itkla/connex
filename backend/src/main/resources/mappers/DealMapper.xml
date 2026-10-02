@@ -1332,6 +1332,17 @@
     ORDER BY dc.user_id
   </select>
 
+  <!-- A current read of one deal's primary-key range. FORCE INDEX keeps the lock off the
+       workspace-wide user index, and flushCache keeps a cached answer from hiding this
+       transaction's own writes or a concurrent commit. -->
+  <select id="getCollaboratorIdsForUpdate" resultType="int" flushCache="true">
+    SELECT dc.user_id
+    FROM deal_collaborator dc FORCE INDEX (PRIMARY)
+    WHERE dc.workspace_id = #{workspaceId} AND dc.deal_id = #{dealId}
+    ORDER BY dc.user_id
+    FOR UPDATE
+  </select>
+
   <delete id="clearCollaborators">
     DELETE FROM deal_collaborator
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}

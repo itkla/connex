@@ -467,6 +467,21 @@ public interface DealMapper {
      * @return collaborator user ids in ascending order
      */
     List<Integer> getCollaboratorIds(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    /**
+     * Lists one deal's collaborator rows and locks them, with the gap after them, {@code FOR UPDATE}
+     * through the primary key. A current read returns the committed rows plus this transaction's own
+     * writes, never a consistent read view opened before the caller took its locks (#1942). Callers
+     * take it after the deal row, which is where the collaborator rows sit in the documented lock
+     * order.
+     *
+     * @param workspaceId workspace that owns the deal
+     * @param dealId deal whose collaborators are listed
+     * @return collaborator user ids in ascending order
+     */
+    List<Integer> getCollaboratorIdsForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId
+    );
     int clearCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int removeCollaborator(
         @Param("workspaceId") int workspaceId,
