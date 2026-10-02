@@ -27,8 +27,9 @@ import org.springframework.jdbc.support.SQLExceptionTranslator;
 
 /**
  * Extends the JDBC and MyBatis exception-translation chains for request-owned MySQL CHECK
- * constraints, and reports every translated failure to the {@link RolledBackTransactionGuard} so a
- * transaction the database already rolled back can never commit (#1947).
+ * constraints, and reports every failure either chain translates to the
+ * {@link RolledBackTransactionGuard}, so a transaction the database already rolled back fails its
+ * commit (#1947).
  */
 @Configuration(proxyBeanMethods = false)
 public class SqlExceptionTranslationConfig {
@@ -60,7 +61,10 @@ public class SqlExceptionTranslationConfig {
         return withConnexTranslation(new SQLExceptionSubclassTranslator(), rolledBackTransactionGuard);
     }
 
-    /** Supplies MyBatis with its existing vendor-code chain plus request-owned CHECK translation. */
+    /**
+     * Supplies MyBatis with its existing vendor-code chain plus request-owned CHECK translation, and
+     * reports every failure it translates to the rolled-back-transaction guard.
+     */
     @Bean
     SqlSessionTemplate sqlSessionTemplate(
             SqlSessionFactory sqlSessionFactory,

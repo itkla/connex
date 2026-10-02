@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.config;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.Ordered;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -62,14 +64,15 @@ class RolledBackTransactionGuardTest {
         assertSame(deadlock, refused.getCause());
     }
 
+    /** Unswallowed, a full lock table is uncategorized and not retried; swallowed, it stays so. */
     @Test
-    void aFullLockTableFailsTheCommitAsALockFailure() {
+    void aFullLockTableFailsTheCommitAsTheUncategorizedFailureItIs() {
         SQLException tableFull = failure(RolledBackTransactionGuard.LOCK_TABLE_FULL);
 
         guard.observe(tableFull);
 
-        CannotAcquireLockException refused = assertThrows(
-                CannotAcquireLockException.class, () -> commitCallbacks().getFirst().beforeCommit(false));
+        UncategorizedSQLException refused = assertThrows(
+                UncategorizedSQLException.class, () -> commitCallbacks().getFirst().beforeCommit(false));
         assertSame(tableFull, refused.getCause());
     }
 
@@ -79,10 +82,12 @@ class RolledBackTransactionGuardTest {
         guard.observe(failure(RolledBackTransactionGuard.LOCK_WAIT_TIMEOUT));
         assertTrue(commitCallbacks().isEmpty());
 
-        new RolledBackTransactionGuard(dataSource, true)
-                .observe(failure(RolledBackTransactionGuard.LOCK_WAIT_TIMEOUT));
+        SQLException timeout = failure(RolledBackTransactionGuard.LOCK_WAIT_TIMEOUT);
+        new RolledBackTransactionGuard(dataSource, true).observe(timeout);
 
-        assertThrows(CannotAcquireLockException.class, () -> commitCallbacks().getFirst().beforeCommit(true));
+        CannotAcquireLockException refused = assertThrows(
+                CannotAcquireLockException.class, () -> commitCallbacks().getFirst().beforeCommit(true));
+        assertSame(timeout, refused.getCause());
     }
 
     @Test
@@ -99,7 +104,7 @@ class RolledBackTransactionGuardTest {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public int getOrder() {
-                return Ordered.HIGHEST_PRECEDENCE + 1;
+                return Ordered.HIGHEST_PRECEDENCE;
             }
         });
 
@@ -109,6 +114,25 @@ class RolledBackTransactionGuardTest {
         List<TransactionSynchronization> callbacks = commitCallbacks();
         assertEquals(2, callbacks.size());
         assertThrows(DeadlockLoserDataAccessException.class, () -> callbacks.getFirst().beforeCommit(false));
+    }
+
+    /** Without synchronization there is nothing to register with, and observing must not fail. */
+    @Test
+    void withoutSynchronizationNothingIsPoisoned() {
+        TransactionSynchronizationManager.clearSynchronization();
+
+        assertDoesNotThrow(() -> guard.observe(failure(RolledBackTransactionGuard.DEADLOCK)));
+    }
+
+    /** A connection bound outside a transaction runs in auto-commit, so it has no transaction to poison. */
+    @Test
+    void aConnectionNotSynchronizedWithTheTransactionIsLeftAlone() {
+        ((ConnectionHolder) TransactionSynchronizationManager.getResource(dataSource))
+                .setSynchronizedWithTransaction(false);
+
+        guard.observe(failure(RolledBackTransactionGuard.DEADLOCK));
+
+        assertTrue(commitCallbacks().isEmpty());
     }
 
     @Test
@@ -124,8 +148,10 @@ class RolledBackTransactionGuardTest {
     @Test
     void aTransactionOnAnotherDataSourceIsLeftAlone() {
         DataSource other = mock(DataSource.class);
+        ConnectionHolder otherHolder = new ConnectionHolder(mock(Connection.class));
+        otherHolder.setSynchronizedWithTransaction(true);
         TransactionSynchronizationManager.unbindResource(dataSource);
-        TransactionSynchronizationManager.bindResource(other, new ConnectionHolder(mock(Connection.class)));
+        TransactionSynchronizationManager.bindResource(other, otherHolder);
         try {
             guard.observe(failure(RolledBackTransactionGuard.DEADLOCK));
 

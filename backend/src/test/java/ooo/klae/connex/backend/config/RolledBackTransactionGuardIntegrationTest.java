@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -116,29 +117,44 @@ class RolledBackTransactionGuardIntegrationTest {
                 })));
 
         assertInstanceOf(DeadlockLoserDataAccessException.class, refused.getCause());
-        assertNotNull(swallowed.get());
+        assertInstanceOf(DeadlockLoserDataAccessException.class, swallowed.get());
+        assertSame(swallowed.get().getCause(), refused.getCause().getCause());
         assertEquals(List.of(), companiesNamed("victim-"));
         assertEquals(SURVIVOR_ROWS, companiesNamed("survivor-").size());
     }
 
-    /** The deadlock poisons only the inner transaction it arrived in, never the one it suspended. */
+    /**
+     * The deadlock poisons only the inner transaction it arrived in, never the one it suspended: the
+     * inner one swallows it and still cannot commit, and the outer one that catches that refusal
+     * commits everything it wrote.
+     */
     @Test
-    void aDeadlockInsideRequiresNewLeavesTheTransactionAroundItCommittable() throws Exception {
+    void aDeadlockInsideRequiresNewPoisonsOnlyThatTransaction() throws Exception {
         AtomicReference<PessimisticLockingFailureException> swallowed = new AtomicReference<>();
+        AtomicReference<DeadlockLoserDataAccessException> innerRefused = new AtomicReference<>();
         TransactionTemplate inner = new TransactionTemplate(transactionManager);
         inner.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
         runDeadlock(() -> new TransactionTemplate(transactionManager).executeWithoutResult(outer -> {
             company("outer-before");
             try {
-                inner.executeWithoutResult(status -> loseTheDeadlock("inner-before"));
-            } catch (PessimisticLockingFailureException deadlock) {
-                swallowed.set(deadlock);
+                inner.executeWithoutResult(status -> {
+                    try {
+                        loseTheDeadlock("inner-before");
+                    } catch (PessimisticLockingFailureException deadlock) {
+                        swallowed.set(deadlock);
+                    }
+                    company("inner-after");
+                });
+            } catch (DeadlockLoserDataAccessException refused) {
+                innerRefused.set(refused);
             }
             company("outer-after");
         }));
 
-        assertNotNull(swallowed.get());
+        assertInstanceOf(DeadlockLoserDataAccessException.class, swallowed.get());
+        assertNotNull(innerRefused.get());
+        assertSame(swallowed.get().getCause(), innerRefused.get().getCause());
         assertEquals(List.of(), companiesNamed("inner-"));
         assertEquals(List.of("outer-after", "outer-before"), companiesNamed("outer-"));
     }

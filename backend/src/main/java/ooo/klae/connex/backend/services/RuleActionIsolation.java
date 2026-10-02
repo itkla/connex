@@ -7,8 +7,10 @@ import java.util.Set;
 
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -31,9 +33,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       dropped, so deferred audits and lock bookkeeping still run.</li>
  *   <li>A transient failure is not the action's fault and may have taken the whole transaction with
  *       it, so it fails the delivery with {@link RuleActionRetryRequiredException} and the worker
- *       retries it. Transient means exactly what the canonical engine retries
- *       ({@link WorkflowActionRetryPolicy#transientDatabaseFailure}), which includes a savepoint
- *       that could not be created or was already discarded.</li>
+ *       retries it. Transient means what the canonical engine retries
+ *       ({@link WorkflowActionRetryPolicy#transientDatabaseFailure}), plus a savepoint that could not
+ *       be created or was already discarded.</li>
  *   <li>MyBatis has no savepoint hook, so the session cache is cleared before a later action, or the
  *       run's own bookkeeping, can read state the savepoint undid.</li>
  * </ul>
@@ -89,6 +91,12 @@ public class RuleActionIsolation {
     }
 
     private boolean requiresRetry(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof TransactionSystemException || cause instanceof CannotCreateTransactionException) {
+                return true;
+            }
+        }
         return retryPolicy.transientDatabaseFailure(failure);
     }
 

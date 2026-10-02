@@ -5,8 +5,10 @@ import java.sql.SQLException;
 import javax.sql.DataSource;
 
 import org.springframework.core.Ordered;
+import org.springframework.core.PriorityOrdered;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -21,8 +23,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * commit only the work done after it. Both translation chains report every translated
  * {@link SQLException} here first; when one of these errors arrives inside a Spring transaction on
  * the application data source, the transaction gets a synchronization whose {@code beforeCommit}
- * throws the typed failure, so its commit rolls back and the failure reaches the caller as the
- * transient lock failure it is, which both workflow engines retry.
+ * throws it again, classified exactly as when nobody swallowed it: a deadlock or a lock-wait timeout
+ * as the transient lock failure both workflow engines retry, a full lock table as uncategorized. The
+ * commit therefore rolls back.
+ *
+ * <p>A lock failure that also crossed a participating {@code @Transactional} proxy has already marked
+ * the transaction rollback-only, so its commit rolls back before any callback runs and fails with a
+ * cause-less {@code UnexpectedRollbackException}: no work is lost, but the engines treat that as
+ * permanent.
  *
  * <p>A deadlock swallowed inside another synchronization's {@code beforeCommit} or
  * {@code beforeCompletion} registers too late to be seen; nothing runs database work there that
@@ -79,10 +87,11 @@ public final class RolledBackTransactionGuard {
 
     /**
      * Refuses the commit of a transaction the database rolled back, ahead of every other commit
-     * callback, so none of them writes into the implicit transaction that replaced it.
+     * callback, so none of them writes into the implicit transaction that replaced it. It is
+     * priority-ordered, so even another callback at the highest precedence sorts after it.
      */
     private record RolledBackTransaction(int errorCode, SQLException failure)
-            implements TransactionSynchronization {
+            implements TransactionSynchronization, PriorityOrdered {
         @Override
         public int getOrder() {
             return Ordered.HIGHEST_PRECEDENCE;
@@ -95,7 +104,10 @@ public final class RolledBackTransactionGuard {
             if (errorCode == DEADLOCK) {
                 throw new DeadlockLoserDataAccessException(message, failure);
             }
-            throw new CannotAcquireLockException(message, failure);
+            if (errorCode == LOCK_WAIT_TIMEOUT) {
+                throw new CannotAcquireLockException(message, failure);
+            }
+            throw new UncategorizedSQLException(message, null, failure);
         }
     }
 }

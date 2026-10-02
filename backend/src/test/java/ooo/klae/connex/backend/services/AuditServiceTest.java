@@ -708,12 +708,30 @@ class AuditServiceTest {
     void aLostTransactionUnderANestedAppendReachesTheCaller() {
         TransactionSystemException lost = new TransactionSystemException("Could not roll back to JDBC savepoint");
         doThrow(lost).when(auditIntegrityService).append(any(AuditLog.class));
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertSame(lost, assertThrows(TransactionSystemException.class,
+                    () -> service.record("deal.update", "deal", 5, "Deal", "Updated deal", null)));
+            assertSame(lost, assertThrows(TransactionSystemException.class,
+                    () -> service.recordWithoutRequestMetadata(
+                            "document.accept", "document", 6, "Quote", "Accepted quote", null)));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
 
-        assertSame(lost, assertThrows(TransactionSystemException.class,
-                () -> service.record("deal.update", "deal", 5, "Deal", "Updated deal", null)));
-        assertSame(lost, assertThrows(TransactionSystemException.class,
-                () -> service.recordWithoutRequestMetadata(
-                        "document.accept", "document", 6, "Quote", "Accepted quote", null)));
+    /**
+     * Without a caller transaction the append runs on its own, so even its transaction failure
+     * leaves nothing of the caller's to protect and must not break the operation.
+     */
+    @Test
+    void aTransactionFailureOutsideACallerTransactionNeverBreaksTheOperation() {
+        doThrow(new TransactionSystemException("Could not commit JDBC transaction"))
+                .when(auditIntegrityService).append(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.record("mail.test", "workspace", 7, "Workspace", "Sent a test", null));
+        assertDoesNotThrow(() -> service.recordWithoutRequestMetadata(
+                "document.accept", "document", 6, "Quote", "Accepted quote", null));
     }
 
     @Test

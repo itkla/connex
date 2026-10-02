@@ -59,19 +59,23 @@ class WorkflowActionRetryPolicyTest {
     }
 
     /**
-     * A transaction the database lost, or one that could not begin, clears on a retry in a new
-     * transaction (#1947).
+     * A savepoint a deadlock destroyed carries the deadlock as its application exception, not as a
+     * cause, and retries; a transaction failure that carries none, such as an unclassified commit
+     * whose outcome is unknown, does not (#1947).
      */
     @Test
-    void aLostOrUnstartableTransactionRetries() {
+    void aSavepointLostToADeadlockRetriesButAnUnclassifiedTransactionFailureDoesNot() {
         WorkflowActionRetryPolicy policy = policy();
         TransactionSystemException lostSavepoint =
             new TransactionSystemException("Could not roll back to JDBC savepoint");
-        lostSavepoint.initApplicationException(new IllegalStateException("audit append failed"));
+        lostSavepoint.initApplicationException(new DeadlockLoserDataAccessException("Deadlock found", null));
 
         assertTrue(policy.transientDatabaseFailure(lostSavepoint));
-        assertTrue(policy.transientDatabaseFailure(new IllegalStateException(
-            "wrapper", new CannotCreateTransactionException("Could not open JDBC Connection"))));
+        assertTrue(policy.transientDatabaseFailure(new IllegalStateException("wrapper", lostSavepoint)));
+        assertFalse(policy.transientDatabaseFailure(
+            new TransactionSystemException("Could not commit JDBC transaction")));
+        assertFalse(policy.transientDatabaseFailure(new CannotCreateTransactionException(
+            "Cannot create savepoint for transaction which is already marked as rollback-only")));
     }
 
     @Test
