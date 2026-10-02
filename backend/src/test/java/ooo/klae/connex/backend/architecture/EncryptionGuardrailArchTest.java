@@ -274,7 +274,7 @@ class EncryptionGuardrailArchTest {
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_EMAIL", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_SMS", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3),
-        Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3),
+        Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 4),
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_OIDC_CLIENT_SECRET", 3),
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_SAML_SP_PRIVATE_KEY", 3),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#USER_PROVIDER_GOOGLE_TOKEN", 1),

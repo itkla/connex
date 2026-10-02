@@ -675,10 +675,12 @@ unchanged. Any other change requires re-entry, so a settings delegate cannot red
 password to a new endpoint. Port comparison uses the resolved effective port, so a client that echoes
 the instance default for a stored `NULL` port is not treated as an endpoint change.
 
-Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — locks the
-authenticated actor's `app_user` root `FOR SHARE` when a `User` principal is present, then the workspace
-root `FOR SHARE`. It holds these roots across the configuration and secret reads so the endpoint and
-password come from one generation. `SecretStore.get` reacquires those same roots in that order;
+Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — and readiness —
+`canSendForWorkspace` and `readinessForWorkspace` — lock the authenticated actor's `app_user` root
+`FOR SHARE` when a `User` principal is present, then the workspace root `FOR SHARE`. Readiness never
+decrypts: it only checks, with a non-locking primary-key read after those roots, that a selected
+override's stored password still resolves. Resolution holds these roots across the configuration and
+secret reads so the endpoint and password come from one generation. `SecretStore.get` reacquires those same roots in that order;
 acquiring the actor root first avoids an inversion with a queued exclusive user lock. Background
 resolution without an actor takes only the workspace root. Callers already holding roots must follow
 the same actor-before-workspace order. Resolution performs no provider I/O; the SMTP connection is

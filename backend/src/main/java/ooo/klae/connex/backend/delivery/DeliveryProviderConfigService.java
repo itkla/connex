@@ -136,8 +136,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                     && !isBlank(config.getCredentialRef())
                     && deliveryProviderSecretCipher.isAvailable();
         }
-        ResolvedMailConfig mail = mailConfigResolver.resolveForWorkspace(workspaceId);
-        return mail != null && mail.usable();
+        return mailConfigResolver.canSendForWorkspace(workspaceId);
     }
 
     /**

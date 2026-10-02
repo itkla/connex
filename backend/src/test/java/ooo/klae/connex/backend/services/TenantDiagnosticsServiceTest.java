@@ -82,6 +82,8 @@ class TenantDiagnosticsServiceTest {
             }
             return resolved.workspaceSupplied() ? "workspace_override" : "instance_default";
         });
+        when(mailConfigResolver.readinessForWorkspace(anyInt())).thenAnswer(invocation ->
+                new MailConfigResolver.WorkspaceMailReadiness(managedMail ? "managed" : "unconfigured", false));
         deliveryProviderReadiness = mock(DeliveryProviderReadiness.class);
         businessCardService = mock(BusinessCardService.class);
         providerCaptureMapper = mock(ProviderCaptureMapper.class);
@@ -123,7 +125,8 @@ class TenantDiagnosticsServiceTest {
         when(capabilityRegistry.isAvailableWithoutProbing(Capability.MANAGED_MAIL)).thenReturn(true);
         when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
                 .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID, 12), "[11,12]"));
-        when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID)).thenReturn(config(true));
+        when(mailConfigResolver.readinessForWorkspace(WORKSPACE_ID))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("workspace_override", true));
         when(deliveryProviderReadiness.isReady(WORKSPACE_ID, DeliveryChannel.EMAIL)).thenReturn(true);
         when(deliveryProviderReadiness.isReady(WORKSPACE_ID, DeliveryChannel.SMS)).thenReturn(false);
         when(providerCaptureMapper.findDiagnosticsAggregates(WORKSPACE_ID, "[11]"))
@@ -218,9 +221,12 @@ class TenantDiagnosticsServiceTest {
     void organizationReportsOverrideFallbackAndUnconfiguredMailModes() {
         WorkspaceScope scope = new WorkspaceScope(ORG_ID, List.of(11, 12, 13), "[11,12,13]");
         when(scopeControlAccess.getForOrg(ORG_ID)).thenReturn(scope);
-        when(mailConfigResolver.resolveForWorkspace(11)).thenReturn(config(true));
-        when(mailConfigResolver.resolveForWorkspace(12)).thenReturn(config(false));
-        when(mailConfigResolver.resolveForWorkspace(13)).thenReturn(null);
+        when(mailConfigResolver.readinessForWorkspace(11))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("workspace_override", true));
+        when(mailConfigResolver.readinessForWorkspace(12))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("instance_default", true));
+        when(mailConfigResolver.readinessForWorkspace(13))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false));
 
         TenantDiagnosticsDto result = service.forOrganization(ORG_ID, ACTOR_ID);
 
@@ -238,7 +244,8 @@ class TenantDiagnosticsServiceTest {
         managedMail = true;
         when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
                 .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
-        when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID)).thenReturn(null);
+        when(mailConfigResolver.readinessForWorkspace(WORKSPACE_ID))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("managed", false));
 
         TenantDiagnosticsDto result = service.forWorkspace(WORKSPACE_ID, ACTOR_ID);
 
@@ -246,11 +253,33 @@ class TenantDiagnosticsServiceTest {
         assertFalse(result.providers().workspaces().getFirst().mail().configured());
     }
 
+    /**
+     * A stored SMTP password that no longer resolves is reported as mail not ready, through the same
+     * decision a send makes, and the readiness check never decrypts it (#1932).
+     */
     @Test
-    void corruptStoredMailCredentialDegradesToRedactedFindings() {
+    void anUnresolvableStoredMailCredentialReportsMailAndEmailNotReady() {
         when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
                 .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
-        when(mailConfigResolver.resolveForWorkspace(WORKSPACE_ID))
+        when(mailConfigResolver.readinessForWorkspace(WORKSPACE_ID))
+                .thenReturn(new MailConfigResolver.WorkspaceMailReadiness("unconfigured", false));
+        when(deliveryProviderReadiness.isReady(WORKSPACE_ID, DeliveryChannel.EMAIL)).thenReturn(false);
+
+        TenantDiagnosticsDto result = service.forWorkspace(WORKSPACE_ID, ACTOR_ID);
+
+        assertEquals("unconfigured", result.providers().workspaces().getFirst().mail().mode());
+        assertFalse(result.providers().workspaces().getFirst().mail().configured());
+        assertFalse(result.providers().workspaces().getFirst().delivery().getFirst().ready());
+        assertTrue(result.findings().stream().anyMatch(finding ->
+                "mail_unconfigured".equals(finding.code())));
+        verify(mailConfigResolver, never()).resolveForWorkspace(anyInt());
+    }
+
+    @Test
+    void aFailingMailReadinessCheckDegradesToRedactedFindings() {
+        when(scopeControlAccess.getForWorkspace(WORKSPACE_ID))
+                .thenReturn(new WorkspaceScope(ORG_ID, List.of(WORKSPACE_ID), "[11]"));
+        when(mailConfigResolver.readinessForWorkspace(WORKSPACE_ID))
                 .thenThrow(new IllegalStateException("ciphertext=credential-sentinel"));
         when(deliveryProviderReadiness.isReady(WORKSPACE_ID, DeliveryChannel.EMAIL))
                 .thenThrow(new IllegalStateException("password=credential-sentinel"));
@@ -360,22 +389,5 @@ class TenantDiagnosticsServiceTest {
         run.setFinishedAt(LocalDateTime.of(2026, 7, id, 1, 1));
         run.setDetail(detail);
         return run;
-    }
-
-    private static ResolvedMailConfig config(boolean workspaceSupplied) {
-        return new ResolvedMailConfig(
-                "smtp.example.com",
-                587,
-                "credential-user",
-                "credential-password",
-                "sender@example.com",
-                "Connex",
-                true,
-                false,
-                true,
-                1000,
-                1000,
-                1000,
-                workspaceSupplied);
     }
 }
