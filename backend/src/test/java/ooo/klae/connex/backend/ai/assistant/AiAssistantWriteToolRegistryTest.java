@@ -345,7 +345,7 @@ class AiAssistantWriteToolRegistryTest {
     @Test
     void refusesAnAcceptedKindOutsideTheRecordKinds() {
         assertRefused("create_task must accept a non-empty subset", List.of(
-                tool("create_task", ToolTier.AUTO, Set.of("person", "workspace"))));
+                tool("create_task", ToolTier.AUTO, Set.of("person", "pipeline"))));
         assertRefused("create_task must accept a non-empty subset", List.of(
                 tool("create_task", ToolTier.AUTO, Set.of())));
     }

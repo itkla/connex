@@ -149,7 +149,7 @@ public class AiAssistantCreateCompanyWriteTool implements AiAssistantWriteTool {
         return new Outcome(
                 outcome,
                 new Inverse("company", created.getId(), "", false, Map.of()),
-                ReadBack.structural());
+                ReadBack.structural("companyId", created.getId()));
     }
 
     @Override

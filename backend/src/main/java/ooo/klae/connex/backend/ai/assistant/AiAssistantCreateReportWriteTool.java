@@ -116,7 +116,7 @@ public class AiAssistantCreateReportWriteTool implements AiAssistantWriteTool {
             outcome.put("name", created.name());
         }
         return new Outcome(outcome, new Inverse("report", created.id(), "", false, Map.of()),
-                ReadBack.structural());
+                ReadBack.structural("reportId", created.id()));
     }
 
     @Override

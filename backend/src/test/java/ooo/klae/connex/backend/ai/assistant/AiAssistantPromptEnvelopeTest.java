@@ -151,7 +151,10 @@ class AiAssistantPromptEnvelopeTest {
      * decision recorded on issue #1817; the entry stays under the per-toolset cap, so every
      * floor-admissibility guarantee is unchanged. {@code write_fields} likewise measured
      * 1,029 / 825 against its 1,000 / 800 allocation with {@code update_record_fields} after its
-     * description was shortened, so its entry was raised to 1,100 / 875 under the same rule. The
+     * description was shortened, so its entry was raised to 1,100 / 875 under the same rule.
+     * {@code write_create} measured 1,875 / 1,396 with {@code create_person}, {@code create_deal}
+     * and {@code create_company} against its 1,800 / 1,400 allocation, so its entry was raised to
+     * 1,950 / 1,450 under the same rule. The
      * workspace allocation was committed before its first tool existed; every allocated set is
      * now declared. A toolset's cost to the core
      * (its directory line and {@code find_tools} value) is not part of its entry here; it is
@@ -166,7 +169,7 @@ class AiAssistantPromptEnvelopeTest {
             new EnvelopeCeiling("write_pipeline", 859 + 450, 640 + 350),
             new EnvelopeCeiling("write_followup", 1_300, 950),
             new EnvelopeCeiling("write_fields", 1_100, 875),
-            new EnvelopeCeiling("write_create", 1_800, 1_400),
+            new EnvelopeCeiling("write_create", 1_950, 1_450),
             new EnvelopeCeiling("write_workspace", 1_700, 1_350));
 
     private final ObjectMapper objectMapper = new ObjectMapper();
