@@ -12,6 +12,7 @@ import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestAttributes;
@@ -185,6 +186,7 @@ public class AuditService {
             String targetLabel,
             String summary,
             Object changes) {
+        boolean inTransaction = TransactionSynchronizationManager.isActualTransactionActive();
         try {
             writeUnchecked(
                 action,
@@ -201,6 +203,7 @@ public class AuditService {
                 null,
                 false);
         } catch (Exception exception) {
+            rethrowIfTransactionLost(exception, false, inTransaction);
             log.error(
                 "Failed to record audit event action={} entityType={} entityId={}",
                 action,
@@ -367,6 +370,7 @@ public class AuditService {
     private void write(String action, String entityType, Integer entityId, String targetLabel,
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId) {
+        boolean inTransaction = TransactionSynchronizationManager.isActualTransactionActive();
         try {
             AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, outcome, summary,
                     changes, context, explicitScope, workspaceId, orgId, true);
@@ -376,8 +380,26 @@ public class AuditService {
                 appendAndObserve(entry, independent);
             }
         } catch (Exception e) {
+            rethrowIfTransactionLost(e, independent, inTransaction);
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
+        }
+    }
+
+    /**
+     * Rethrows an audit failure that means the caller's transaction no longer exists.
+     *
+     * <p>An audit failure normally must not break the operation it records. But inside the caller's
+     * transaction a {@code NESTED} append runs on a savepoint, and fails with
+     * {@link TransactionSystemException} only when that savepoint is gone, as it is after the database
+     * rolled the whole transaction back on a deadlock. That transaction can no longer commit, so the
+     * operation stops here instead of running on into the implicit transaction that replaced it
+     * (#1947). Without a caller transaction the append runs on its own, and an independent append
+     * always does, so their failures never mean that.
+     */
+    private static void rethrowIfTransactionLost(Exception failure, boolean independent, boolean inTransaction) {
+        if (inTransaction && !independent && failure instanceof TransactionSystemException lost) {
+            throw lost;
         }
     }
 

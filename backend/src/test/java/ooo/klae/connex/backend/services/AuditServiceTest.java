@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +29,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -695,5 +697,67 @@ class AuditServiceTest {
         assertEquals("Probe/1.0", row.getUserAgent());
         assertNotNull(row.getSessionId());
         assertNotNull(row.getRequestId());
+    }
+
+    /**
+     * A {@code NESTED} append fails with {@link TransactionSystemException} only when its savepoint is
+     * gone, as after the database rolled the whole transaction back on a deadlock: swallowing it would
+     * let the caller commit only the work after the audit, so it reaches the caller (#1947).
+     */
+    @Test
+    void aLostTransactionUnderANestedAppendReachesTheCaller() {
+        TransactionSystemException lost = new TransactionSystemException("Could not roll back to JDBC savepoint");
+        doThrow(lost).when(auditIntegrityService).append(any(AuditLog.class));
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertSame(lost, assertThrows(TransactionSystemException.class,
+                    () -> service.record("deal.update", "deal", 5, "Deal", "Updated deal", null)));
+            assertSame(lost, assertThrows(TransactionSystemException.class,
+                    () -> service.recordWithoutRequestMetadata(
+                            "document.accept", "document", 6, "Quote", "Accepted quote", null)));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
+
+    /**
+     * Without a caller transaction the append runs on its own, so even its transaction failure
+     * leaves nothing of the caller's to protect and must not break the operation.
+     */
+    @Test
+    void aTransactionFailureOutsideACallerTransactionNeverBreaksTheOperation() {
+        doThrow(new TransactionSystemException("Could not commit JDBC transaction"))
+                .when(auditIntegrityService).append(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.record("mail.test", "workspace", 7, "Workspace", "Sent a test", null));
+        assertDoesNotThrow(() -> service.recordWithoutRequestMetadata(
+                "document.accept", "document", 6, "Quote", "Accepted quote", null));
+    }
+
+    @Test
+    void anyOtherAuditFailureStillNeverBreaksTheOperation() {
+        doThrow(new IllegalStateException("audit row rejected"))
+                .when(auditIntegrityService).append(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.record("deal.update", "deal", 5, "Deal", "Updated deal", null));
+        assertDoesNotThrow(() -> service.recordWithoutRequestMetadata(
+                "document.accept", "document", 6, "Quote", "Accepted quote", null));
+    }
+
+    /**
+     * An independent append runs in its own transaction, so even inside the caller's transaction its
+     * failed commit leaves the caller's transaction standing.
+     */
+    @Test
+    void aFailedIndependentAppendNeverBreaksTheOperation() {
+        doThrow(new TransactionSystemException("Could not commit JDBC transaction"))
+                .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertDoesNotThrow(() -> service.recordFailureScoped(
+                    "deal.update", "deal", 5, 7, 8, "Deal", "Deal update refused", "ForbiddenException"));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 }
