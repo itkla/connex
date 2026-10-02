@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationTemplateAvailability;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /** Exercises workspace creation through the same preparation, replay and approval gates as CRM writes. */
 class AiAssistantWorkspaceCreatesFrameworkTest extends AbstractAiAssistantWriteToolTest {
@@ -123,6 +125,14 @@ class AiAssistantWorkspaceCreatesFrameworkTest extends AbstractAiAssistantWriteT
         assertNull(request.getValue().templateUse().context().relatedCompanyId());
         assertEquals(3, request.getValue().templateUse().templateVersion());
         assertEquals(4, request.getValue().templateUse().templateSetRevision());
+        ObjectNode outcome = assertInstanceOf(ObjectNode.class,
+                objectMapper.readTree(capturedExecutedResult()).path("outcome"));
+        outcome.put("website", "new.example");
+        outcome.put("industry", "Software");
+        outcome.put("templateName", "Reviewed");
+        assertEquals(Map.of("recordType", "company", "created", true),
+                new AiAssistantCreateCompanyWriteTool(creationService, presetService, objectMapper)
+                        .modelOutcome(outcome));
         verifyNoInteractions(presetService, duplicatePreflightService, duplicateDecisionLockService, companyService);
     }
 
@@ -191,8 +201,11 @@ class AiAssistantWorkspaceCreatesFrameworkTest extends AbstractAiAssistantWriteT
         JsonNode result = objectMapper.readTree(capturedExecutedResult());
         assertEquals("report", result.path("undo").path("entityKind").asString());
         assertEquals("unavailable", result.path("undo").path("status").asString());
+        ObjectNode outcome = assertInstanceOf(ObjectNode.class, result.path("outcome"));
+        outcome.put("templateName", "English name");
+        outcome.put("templateLabel", "English name");
         assertEquals(Map.of("recordType", "report", "template", "sales-performance"),
-                new AiAssistantCreateReportWriteTool(reportService).modelOutcome(result.path("outcome")));
+                new AiAssistantCreateReportWriteTool(reportService).modelOutcome(outcome));
     }
 
     private AiAssistantPreparedWrite workspaceProposal(AiAssistantWriteToolService service, String tool, String json) {
