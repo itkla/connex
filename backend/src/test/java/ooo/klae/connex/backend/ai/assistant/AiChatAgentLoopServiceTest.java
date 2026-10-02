@@ -3045,12 +3045,19 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
         verify(toolExecutor).execute(eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, never()).proposeTool(eq(TURN), eq(2), anyInt(), any(), any());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
         ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
         verify(invocationService, times(3)).completeStructuredRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.class),
+                invocations.capture(), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), schemas.capture(),
                 eq(directAdmission), any(Runnable.class));
         assertEquals("ask_connex_closing_step", schemas.getAllValues().getLast().name());
+        String closingPrompt = invocations.getAllValues().getLast().prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertEquals(1, closingPrompt.split("\"type\":\"tool_result\"", -1).length - 1,
+                "the closing request must replay the admitted read, not the abandoned cache hit");
         verify(persistenceService).resolve(
                 eq(TURN), eq("From what I gathered."), any(), anyInt(), anyInt());
     }
