@@ -1058,7 +1058,6 @@ public class AiChatAgentLoopService {
                     exception.detailReason(),
                     !nativeTools || state.nativeCalls.containsKey(callRef));
         }
-        boolean batched = call.ordinal() != AiAssistantToolCallRef.SOLE_CALL;
         boolean findTools = AiAssistantToolCatalog.FIND_TOOLS.equals(toolName);
         AiAssistantToolResult cachedResult = findTools
                 ? null
@@ -1078,8 +1077,7 @@ public class AiChatAgentLoopService {
                         context.maskingContext(),
                         context.budget());
             } catch (AiAssistantLoopException capacity) {
-                if (batched
-                        && !closingAttempted
+                if (!closingAttempted
                         && CLOSABLE_REASONS.contains(capacity.terminalReason())) {
                     return new StepCallOutcome.Close(capacity.terminalReason());
                 }

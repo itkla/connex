@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -129,6 +131,7 @@ class AiChatAgentLoopServiceTest {
     private Clock clock;
     private AiSkillRouter skillRouter;
     private AiSkillPlanRunner skillPlanRunner;
+    private AiAssistantPromptAssembler promptAssembler;
     private AiChatAgentLoopService service;
 
     @BeforeEach
@@ -166,7 +169,7 @@ class AiChatAgentLoopServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         var catalog = new AiAssistantToolCatalog();
-        var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        promptAssembler = spy(new AiAssistantPromptAssembler(objectMapper, catalog));
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
@@ -3009,6 +3012,47 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
         verify(persistenceService).markTerminal(
                 TURN, "failed", "tool_result_budget_exhausted");
+    }
+
+    /**
+     * A repeated read answered from the cache is admitted to the tool-result budget like a fresh one,
+     * and running out of room there hands a call that came alone to the closing step instead of
+     * failing its turn, exactly as a fresh result over the budget does (#1955). The refusal is raised
+     * at the cached result's admission, so the loop's handling of it, not the assembler's byte
+     * arithmetic that the assembler's own tests own, is what is pinned.
+     */
+    @Test
+    void aSoleCachedResultOverTheToolResultBudgetClosesTheTurnInsteadOfFailingIt() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenReturn(
+                new AiAssistantToolResult(Map.of("records", List.of()), List.of()));
+        doThrow(new AiAssistantLoopException(
+                        "tool_result_budget_exhausted", "tool_result_budget_exhausted"))
+                .when(promptAssembler).requireAdditionalToolResultCapacity(
+                        argThat(turns -> turns.size() == 1), any(), any(), any());
+        AiAssistantStep read = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(read))
+                .thenReturn(parsed(read))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("From what I gathered.", List.of()))));
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor).execute(eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals("ask_connex_closing_step", schemas.getAllValues().getLast().name());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("From what I gathered."), any(), anyInt(), anyInt());
     }
 
     @Test
