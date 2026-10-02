@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.CannotSerializeTransactionException;
@@ -33,8 +36,9 @@ public class WorkflowActionRetryPolicy {
     }
 
     public boolean transientDatabaseFailure(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable current = failure;
-        while (current != null) {
+        while (current != null && seen.add(current)) {
             if (current instanceof CannotAcquireLockException
                     || current instanceof CannotSerializeTransactionException
                     || current instanceof DeadlockLoserDataAccessException
