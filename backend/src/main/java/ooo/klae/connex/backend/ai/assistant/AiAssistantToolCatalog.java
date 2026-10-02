@@ -74,7 +74,8 @@ public class AiAssistantToolCatalog {
         WRITE_PIPELINE("write_pipeline", "Propose stages, owners, and deal documents"),
         WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks"),
         WRITE_FIELDS("write_fields", "Correct record fields"),
-        WRITE_CREATE("write_create", "Create contacts and deals");
+        WRITE_CREATE("write_create", "Create contacts and deals"),
+        WRITE_WORKSPACE("write_workspace", "Create reports and draft workflows");
 
         private final String key;
         private final String summary;
@@ -546,6 +547,12 @@ public class AiAssistantToolCatalog {
                 string("name", true, 1, 255, Set.of()), string("stage", true, 1, 128, Set.of()),
                 string("value", true, 1, 16, Set.of()), string("currency", true, 3, 3, Set.of()),
                 string("expected_close_date", false, 10, 10, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CREATE, "create_company",
+                string("name", true, 1, 255, Set.of()), string("website", false, 1, 255, Set.of()),
+                string("industry", false, 1, 128, Set.of())));
+        add(tools, confirm(Toolset.WRITE_WORKSPACE, "create_report",
+                string("template", true, 1, 32, AiAssistantCreateReportWriteTool.TEMPLATE_KEYS),
+                string("name", true, 1, 128, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
@@ -596,6 +603,8 @@ public class AiAssistantToolCatalog {
             case "reschedule_task" -> "Reschedule task: YYYY-MM-DD";
             case "create_person" -> "Propose a contact at a company.";
             case "create_deal" -> "Propose a deal at a company.";
+            case "create_company" -> "Create company; website: bare host";
+            case "create_report" -> "Create report; name in user language";
             case "update_record_fields" -> "Propose correcting record fields.";
             case "set_response_due" -> "Propose a contact's first-response deadline, in hours "
                     + "from approval, that requires human confirmation.";

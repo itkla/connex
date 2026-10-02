@@ -20,7 +20,7 @@ public sealed interface AiAssistantWriteToolRequest {
     String HANDLE = "r[1-9][0-9]*";
     String TASK_HANDLE = "t[1-9][0-9]*";
 
-    /** Provider-visible handle resolved to a server-side target before persistence. */
+    /** Provider-visible handle, or null for a server-filled workspace target. */
     String handle();
 
     /** Typed activity creation request. */
@@ -145,5 +145,28 @@ public sealed interface AiAssistantWriteToolRequest {
             @JsonProperty("expected_close_date")
             @Size(min = 10, max = 10) String expectedCloseDate)
             implements AiAssistantWriteToolRequest {
+    }
+
+    /** Company creation in the active workspace, without a model-selected target. */
+    record CreateCompany(
+            @NotBlank @Size(max = 255) String name,
+            @Size(min = 1, max = 255) String website,
+            @Size(min = 1, max = 128) String industry)
+            implements AiAssistantWriteToolRequest {
+        @Override
+        public String handle() {
+            return null;
+        }
+    }
+
+    /** Saved report creation from a closed built-in template and a member-language name. */
+    record CreateReport(
+            @NotBlank @Size(max = 32) String template,
+            @NotBlank @Size(max = 128) String name)
+            implements AiAssistantWriteToolRequest {
+        @Override
+        public String handle() {
+            return null;
+        }
     }
 }

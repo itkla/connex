@@ -209,6 +209,8 @@ export default function AskConnexProposalReview({
                                         >
                                             <span className="truncate">{card.target.label}</span>
                                         </Link>
+                                    ) : card.target.kind === 'workspace' && card.target.label !== null ? (
+                                        <span className="break-words text-xs text-muted-foreground">{card.target.label}</span>
                                     ) : (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                                             <NoSymbolIcon aria-hidden className="size-3.5 shrink-0" />
@@ -219,6 +221,7 @@ export default function AskConnexProposalReview({
                                 {changes.map((change) => (
                                     <Fragment key={change.field}>
                                         <AskConnexChangeRow
+                                            toolName={card.toolName}
                                             change={change}
                                             removal={removal}
                                             labels={cardLabels}

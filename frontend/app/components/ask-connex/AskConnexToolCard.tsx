@@ -62,6 +62,7 @@ export type AskConnexChangeFieldLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    report: string;
     title: string;
     website: string;
     industry: string;
@@ -89,6 +90,7 @@ export type AskConnexUnresolvedValueLabels = {
     taskStatus: string;
     dueDate: string;
     document: string;
+    report: string;
     title: string;
     website: string;
     industry: string;
@@ -116,6 +118,7 @@ export type AskConnexToolCardLabels = {
         field: AiAssistantToolCallChangeField,
         value: string,
         side: 'current' | 'proposed',
+        toolName: string,
     ) => string;
     changeNotSet: string;
     /** What the record currently holds, when this workspace can no longer name who or what it is. */
@@ -155,7 +158,7 @@ export type AskConnexToolCardLabels = {
     outcome: string;
     outcomeField: AskConnexOutcomeFieldLabels;
     /** States one written value in the reader's own locale, by the kind of value the field holds. */
-    outcomeValue: (field: string, value: string) => string;
+    outcomeValue: (field: string, value: string, toolName: string) => string;
     pendingDetail: string;
     pendingStatus: string;
     proposalChanged: string;
@@ -305,10 +308,12 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  * date-time and its proposal as a count of hours, and neither is quoted back as it stands.
  */
 export function AskConnexChangeRow({
+    toolName,
     change,
     removal,
     labels,
 }: {
+    toolName: string;
     change: AiAssistantToolCallChange;
     removal: boolean;
     labels: AskConnexToolCardLabels;
@@ -328,7 +333,7 @@ export function AskConnexChangeRow({
                             {change.currentValueUnresolved
                                 ? labels.changeCurrentUnresolved[change.field]
                                 : change.currentValue !== null
-                                    ? labels.changeValue(change.field, change.currentValue, 'current')
+                                    ? labels.changeValue(change.field, change.currentValue, 'current', toolName)
                                     : <NotSetValue labels={labels} />}
                         </span>
                     </>
@@ -341,7 +346,7 @@ export function AskConnexChangeRow({
                         : change.state === 'unresolved' && !removal && change.proposedValue === null
                         ? labels.changeProposedUnresolved
                         : change.proposedValue !== null
-                            ? labels.changeValue(change.field, change.proposedValue, 'proposed')
+                            ? labels.changeValue(change.field, change.proposedValue, 'proposed', toolName)
                             : <NotSetValue labels={labels} />}
                 </span>
             </div>
@@ -552,6 +557,8 @@ export default function AskConnexToolCard({
                                 ) : null}
                                 <span className="truncate">{card.target.label}</span>
                             </Link>
+                        ) : card.target.kind === 'workspace' && card.target.label !== null ? (
+                            <span className="break-words text-sm text-muted-foreground">{card.target.label}</span>
                         ) : (
                             <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
                                 <NoSymbolIcon aria-hidden className="size-4 shrink-0" />
@@ -565,7 +572,12 @@ export default function AskConnexToolCard({
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
                             {changes.map((change) => (
                                 <Fragment key={change.field}>
-                                    <AskConnexChangeRow change={change} removal={removal} labels={labels} />
+                                    <AskConnexChangeRow
+                                        toolName={card.toolName}
+                                        change={change}
+                                        removal={removal}
+                                        labels={labels}
+                                    />
                                     <AskConnexChangeNotice
                                         field={change.field}
                                         state={change.state}
@@ -592,7 +604,7 @@ export default function AskConnexToolCard({
                                                     : labels.outcomeField.other}
                                             </dt>
                                             <dd className="min-w-0 break-words text-sm text-foreground">
-                                                {labels.outcomeValue(value.field, value.value)}
+                                                {labels.outcomeValue(value.field, value.value, card.toolName)}
                                             </dd>
                                         </div>
                                     ))}

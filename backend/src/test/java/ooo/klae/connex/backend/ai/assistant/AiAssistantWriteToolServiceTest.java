@@ -166,6 +166,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 new AiAssistantSetResponseDueWriteTool(leadResponseSlaService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,

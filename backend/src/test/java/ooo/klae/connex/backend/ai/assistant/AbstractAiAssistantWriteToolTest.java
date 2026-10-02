@@ -80,6 +80,7 @@ abstract class AbstractAiAssistantWriteToolTest {
     ooo.klae.connex.backend.services.DuplicatePreflightService duplicatePreflightService;
     ooo.klae.connex.backend.services.GuidedRecordCreationService creationService;
     ooo.klae.connex.backend.services.RecordCreationPresetService presetService;
+    ooo.klae.connex.backend.services.ReportService reportService;
     TaskService taskService;
     DealDocumentService documentService;
     DocumentTemplateService templateService;
@@ -115,6 +116,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         creationService = mock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
         presetService = mock(ooo.klae.connex.backend.services.RecordCreationPresetService.class);
         dealService = mock(DealService.class);
+        reportService = mock(ooo.klae.connex.backend.services.ReportService.class);
         taskService = mock(TaskService.class);
         documentService = mock(DealDocumentService.class);
         templateService = mock(DocumentTemplateService.class);
@@ -213,6 +215,12 @@ abstract class AbstractAiAssistantWriteToolTest {
         }
         if (complete.stream().noneMatch(tool -> "create_deal".equals(tool.name()))) {
             complete.add(new AiAssistantCreateDealWriteTool(creationService, presetService, pipelineService, objectMapper));
+        }
+        if (complete.stream().noneMatch(tool -> "create_company".equals(tool.name()))) {
+            complete.add(new AiAssistantCreateCompanyWriteTool(creationService, presetService, objectMapper));
+        }
+        if (complete.stream().noneMatch(tool -> "create_report".equals(tool.name()))) {
+            complete.add(new AiAssistantCreateReportWriteTool(reportService));
         }
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, complete);
         readExecutor = new AiAssistantToolExecutor(

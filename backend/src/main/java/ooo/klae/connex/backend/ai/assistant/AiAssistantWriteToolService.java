@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
+import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
@@ -171,7 +172,20 @@ public class AiAssistantWriteToolService {
         requireNoRedactedValues(tool, args);
         requireNoSeededIdentifiers(tool, args, resources.maskingContext());
         AiAssistantWriteToolRequest request = readRequest(tool, args);
-        ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
+        Target target;
+        if (tool.acceptedTargetKinds().equals(Set.of("workspace"))) {
+            target = new Target("workspace", workspaceService.getCurrentWorkspaceId());
+            if (storedArgumentsJson.isPresent()) {
+                JsonNode storedTarget = objectMapper.readTree(storedArgumentsJson.get()).get("target");
+                if (!"workspace".equals(text(storedTarget, "kind"))
+                        || integer(storedTarget, "id") != target.id()) {
+                    throw new ConflictException(PROPOSAL_CHANGED);
+                }
+            }
+        } else {
+            ResourceRef resource = resources.resolve(request.handle(), tool.acceptedTargetKinds());
+            target = new Target(resource.kind(), resource.id());
+        }
         tool.validateFor(target.kind(), args);
         if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
             requireOwnedTarget(target);
@@ -198,7 +212,9 @@ public class AiAssistantWriteToolService {
             }
         }
         ObjectNode storedRequest = objectMapper.valueToTree(request);
-        storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
+        if (!"workspace".equals(target.kind())) {
+            storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
+        }
         Map<String, Object> targetData = new LinkedHashMap<>();
         targetData.put("kind", target.kind());
         targetData.put("id", target.id());
@@ -236,7 +252,8 @@ public class AiAssistantWriteToolService {
     private void requireNoKnownDuplicate(
             AiAssistantWriteTool tool, AiAssistantWriteTool.DuplicateProbe probe) {
         if (probe == null) {
-            if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+            if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE
+                    && !tool.acceptedTargetKinds().equals(Set.of("workspace"))) {
                 throw new IllegalStateException("Assistant create has no duplicate probe");
             }
             return;
@@ -247,6 +264,11 @@ public class AiAssistantWriteToolService {
                 case "person" -> {
                     DuplicatePreflightResponse response = duplicatePreflightService.preflightPerson(
                             new PersonDuplicatePreflightRequest(probe.name(), probe.emails(), probe.phones()));
+                    yield response.truncated() || !response.candidates().isEmpty();
+                }
+                case "company" -> {
+                    DuplicatePreflightResponse response = duplicatePreflightService.preflightCompany(
+                            new CompanyDuplicatePreflightRequest(probe.name(), probe.websites(), probe.phones()));
                     yield response.truncated() || !response.candidates().isEmpty();
                 }
                 case "deal" -> duplicatePreflightService.dealCandidatesExist(
@@ -366,7 +388,7 @@ public class AiAssistantWriteToolService {
      * record, and no card is ever shown for an approval the delegate could only refuse. A record's
      * owning workspace never changes, so a replayed proposal is not checked again.
      */
-    private void requireOwnedTarget(ResourceRef target) {
+    private void requireOwnedTarget(Target target) {
         boolean owned = switch (target.kind()) {
             case "person" -> personService.isOwnedByCurrentWorkspace(target.id());
             case "company" -> companyService.isOwnedByCurrentWorkspace(target.id());
@@ -686,6 +708,13 @@ public class AiAssistantWriteToolService {
 
     private void requireTargetAccessible(Target target) {
         switch (target.kind()) {
+            case "workspace" -> {
+                Actor actor = currentActor();
+                if (target.id() != actor.workspaceId()) {
+                    throw inaccessible();
+                }
+                requireActiveMembership(actor.workspaceId(), actor.userId());
+            }
             case "person" -> personService.getPersonById(target.id());
             case "company" -> companyService.getCompanyById(target.id());
             case "deal" -> dealService.getDealById(target.id());
@@ -996,6 +1025,8 @@ public class AiAssistantWriteToolService {
                     || tool == null
                     || !tool.acceptedTargetKinds().contains(targetKind)
                     || targetId <= 0
+                    || ("workspace".equals(targetKind)
+                            && targetId != workspaceService.getCurrentWorkspaceId())
                     || request == null || !request.isObject()) {
                 throw new IllegalStateException("Assistant tool proposal is invalid");
             }

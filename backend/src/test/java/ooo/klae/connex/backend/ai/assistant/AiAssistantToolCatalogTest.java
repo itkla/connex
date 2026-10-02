@@ -26,6 +26,28 @@ class AiAssistantToolCatalogTest {
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
+    void workspaceCreatesHaveNoModelTargetAndReportTemplatesExcludeQuotaAttainment() {
+        for (String key : AiAssistantCreateReportWriteTool.TEMPLATE_KEYS) {
+            assertTrue(catalog.permitsArguments("create_report",
+                    objectMapper.createObjectNode().put("template", key).put("name", "Sales report")));
+        }
+        assertEquals(10, AiAssistantCreateReportWriteTool.TEMPLATE_KEYS.size());
+        assertFalse(catalog.permitsArguments("create_report",
+                objectMapper.createObjectNode().put("template", "quota-attainment").put("name", "Quota")));
+        for (String tool : List.of("create_company", "create_report")) {
+            var args = objectMapper.createObjectNode().put("name", "New record");
+            if ("create_report".equals(tool)) {
+                args.put("template", "sales-performance");
+            }
+            assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier(tool));
+            assertTrue(catalog.permitsArguments(tool, args));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("handle", "r1")));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("workspaceId", 99)));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("name", "")));
+        }
+    }
+
+    @Test
     void draftDocumentsRequireABoundedTemplateName() throws Exception {
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("draft_document"));
         for (int length : List.of(1, 128)) {
@@ -50,7 +72,7 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal", "create_company", "create_report"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
         assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).size() - 1L,
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
@@ -177,10 +199,11 @@ class AiAssistantToolCatalogTest {
                 byToolset.get(Toolset.WRITE_PIPELINE));
         assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
         assertEquals(List.of("update_record_fields"), byToolset.get(Toolset.WRITE_FIELDS));
-        assertEquals(List.of("create_person", "create_deal"), byToolset.get(Toolset.WRITE_CREATE));
+        assertEquals(List.of("create_person", "create_deal", "create_company"), byToolset.get(Toolset.WRITE_CREATE));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
+        assertEquals(List.of("create_report"), byToolset.get(Toolset.WRITE_WORKSPACE));
         assertEquals(Toolset.CORE, catalog.toolsetOf("list_tasks"));
         assertNull(catalog.toolsetOf("delete_record"));
     }
@@ -217,11 +240,11 @@ class AiAssistantToolCatalogTest {
     void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
         assertEquals(
                 List.of("core", "analytics", "schedule",
-                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields", "write_create"),
+                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 Arrays.stream(Toolset.values()).map(Toolset::key).toList());
         assertEquals(
                 List.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup", "write_fields", "write_create"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
         assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
         for (Map.Entry<Toolset, String> entry : catalog.directory()) {
@@ -286,7 +309,7 @@ class AiAssistantToolCatalogTest {
         assertTrue(argument.required());
         assertEquals(
                 Set.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup", "write_fields", "write_create"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 argument.values());
         assertFalse(argument.values().contains("core"));
     }

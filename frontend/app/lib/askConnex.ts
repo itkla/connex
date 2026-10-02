@@ -333,8 +333,12 @@ export type AskConnexToolSummaryLabels = {
     createNote: string;
     createPerson: string;
     createDeal: string;
+    createCompany: string;
+    createReport: string;
     personCreated: string;
     dealCreated: string;
+    companyCreated: string;
+    reportCreated: string;
     addTag: string;
     removeTag: string;
     removeTagNamed: (value: string) => string;
@@ -591,7 +595,7 @@ export function askConnexToolChanges(
     card: Pick<AiAssistantToolCall, 'toolName' | 'change' | 'changes'>,
 ): AiAssistantToolCallChange[] {
     const singleChange = card.change ? [card.change] : [];
-    return ['update_record_fields', 'create_person', 'create_deal'].includes(card.toolName)
+    return ['update_record_fields', 'create_person', 'create_deal', 'create_company', 'create_report'].includes(card.toolName)
         ? card.changes ?? singleChange : singleChange;
 }
 
@@ -776,7 +780,7 @@ export function toggleAskConnexProposalExclusion(
 
 /** Resolves a viewer-authorized assistant tool target to its record-detail route. */
 export function askConnexToolTargetHref(target: AiAssistantToolCall['target']): string | null {
-    if (target.id === null || target.kind === 'task') return null;
+    if (target.id === null || target.kind === 'task' || target.kind === 'workspace') return null;
     if (target.kind === 'person') return `/records/contacts/${target.id}`;
     if (target.kind === 'company') return `/records/companies/${target.id}`;
     return `/records/deals/${target.id}`;
@@ -799,12 +803,15 @@ export function askConnexCreatedRecordHref(
     if (createdRecord.kind === 'task') return `/activity/tasks/${createdRecord.id}`;
     if (createdRecord.kind === 'person') return `/records/contacts/${createdRecord.id}`;
     if (createdRecord.kind === 'deal') return `/records/deals/${createdRecord.id}`;
+    if (createdRecord.kind === 'company') return `/records/companies/${createdRecord.id}`;
+    if (createdRecord.kind === 'report') return `/insights/reports/${createdRecord.id}`;
     return `/activity/notes/${createdRecord.id}`;
 }
 
 /** The fields a completed assistant action reports values for, in the order they are shown. */
 export const ASK_CONNEX_OUTCOME_FIELDS = [
     'name',
+    'template',
     'currency',
     'type',
     'subject',
@@ -923,6 +930,8 @@ export function askConnexToolRequestSummary(
     if (toolCall.toolName === 'create_note') return labels.createNote;
     if (toolCall.toolName === 'create_person') return labels.createPerson;
     if (toolCall.toolName === 'create_deal') return labels.createDeal;
+    if (toolCall.toolName === 'create_company') return labels.createCompany;
+    if (toolCall.toolName === 'create_report') return labels.createReport;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
     if (toolCall.toolName === 'remove_tag') {
         const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
@@ -968,6 +977,8 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
     if (toolCall.toolName === 'create_person') return labels.personCreated;
     if (toolCall.toolName === 'create_deal') return labels.dealCreated;
+    if (toolCall.toolName === 'create_company') return labels.companyCreated;
+    if (toolCall.toolName === 'create_report') return labels.reportCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
         if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;

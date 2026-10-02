@@ -826,7 +826,8 @@
         "fieldName": "Name",
         "fieldCurrency": "Currency",
         "fieldTemplate": "Creation template",
-        "fieldTemplateDefaults": "Filled by the template"
+        "fieldTemplateDefaults": "Filled by the template",
+        "fieldReport": "Report name"
       },
       "actions": {
         "undo": "Undo",
@@ -891,7 +892,11 @@
         "createPerson": "Create a contact",
         "createDeal": "Create a deal",
         "personCreated": "Contact created",
-        "dealCreated": "Deal created"
+        "dealCreated": "Deal created",
+        "createCompany": "Create a company",
+        "createReport": "Create a report",
+        "companyCreated": "Company created",
+        "reportCreated": "Report created"
       },
       "outcomeFields": {
         "type": "Type",
@@ -928,14 +933,18 @@
         "task": "Open task",
         "note": "Open note",
         "person": "Open contact",
-        "deal": "Open deal"
+        "deal": "Open deal",
+        "company": "Open company",
+        "report": "Open report"
       },
       "openCreatedAria": {
         "activity": "Open the activity this action created",
         "task": "Open the task this action created",
         "note": "Open the note this action created",
         "person": "Open the contact this action created",
-        "deal": "Open the deal this action created"
+        "deal": "Open the deal this action created",
+        "company": "Open the company this action created",
+        "report": "Open the report this action created"
       },
       "undoWindow": "You can undo this until {deadline} — {remaining}.",
       "templateDefaults": {

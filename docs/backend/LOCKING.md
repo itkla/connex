@@ -535,13 +535,17 @@ The framework acquires its locks in exactly this order:
    An `assign_owner` write's `updateOwner` then re-acquires the owner's membership, if it names
    one, and this row, all already held.
    `TargetLock.NONE` skips this step entirely: `create_person` and `create_deal` use the company
-   only as a visible anchor. Their guided delegate re-enters the authority roots, then takes the
+   only as a visible anchor. Workspace-targeted `create_company` and `create_report` also skip
+   a target lock. Company creation uses the same guided hierarchy; report creation retains the
+   delegate's workspace report-definition locks after the assistant locks and the framework's
+   REPORT_CREATE/REPORT_READ assertion. Guided record creation re-enters the authority roots, then takes the
    organization duplicate mutex, identity groups and template set/reference hierarchy in the
    existing guided-create order. No path takes that mutex before an `ai_chat_*` row.
 
 Prepare-time duplicate checks are advisory reads with no mutex and no proof issuance. They hold
 no domain lock across a model call. Person preparation includes the selected template's effective
-email/phone defaults only in transient preflight state. Approval's duplicate recheck under the mutex is authoritative,
+email/phone defaults only in transient preflight state. Company preparation likewise checks its
+effective website and template phone default from the same selected preset snapshot. Approval's duplicate recheck under the mutex is authoritative,
 and the pinned template version/set revision is validated by guided creation both preliminarily
 and under the template hierarchy. A new candidate or changed template refuses without a create.
 Deal creation submits the proposal's pinned pipeline id and carries its exact reviewed stage name
@@ -552,7 +556,10 @@ the existing stage-before-pipeline hierarchy. No new lock or lock-order edge is 
 After step 7 the framework, still in this order and taking no further lock of its own: retains the
 restriction-epoch read fence to completion; for confirm-tier tools compares their declared freshness
 (`AiAssistantProposalFreshness` timestamps or the task semantic fingerprint). `Freshness.NONE`
-requires `TargetLock.NONE`, no writable anchor fields and a duplicate probe; creates instead rely
+requires `TargetLock.NONE`, no writable anchor fields, and either a duplicate probe or an exclusive
+workspace target. Workspace requests carry no handle; the server fills the workspace id and
+refuses mismatches on replay and approval, then checks active membership before the delegate.
+Record creates instead rely
 on the canonical duplicate recheck and pinned template contract. The framework then re-asserts the tool's permissions from the step-1 snapshot; runs the
 owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
 target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier

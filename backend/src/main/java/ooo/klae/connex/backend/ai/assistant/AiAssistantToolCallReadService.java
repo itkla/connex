@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -49,6 +50,7 @@ import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.DealDocumentService;
@@ -77,7 +79,7 @@ public class AiAssistantToolCallReadService {
      * workspace's live rows. An inverse naming its target instead, as a tag association does, names
      * no created record.
      */
-    private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note", "person", "deal");
+    private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note", "person", "company", "deal", "report");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiChatMapper chatMapper;
@@ -96,6 +98,7 @@ public class AiAssistantToolCallReadService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final ReferenceService referenceService;
+    private final ReportMapper reportMapper;
 
     /** Returns up to 100 safe write-tool cards in one authorized session. */
     @Transactional
@@ -208,7 +211,7 @@ public class AiAssistantToolCallReadService {
         Map<Integer, Integer> assistantMessages = assistantMessages(
                 viewer.workspaceId(), session.getId(), stored);
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> createdRecords = liveCreatedRecords(
-                viewer, stored, visibleTargets);
+                viewer, stored, visibleTargets, viewerPermissions);
         boolean undoAvailable = mutationsAvailable && ACTIVE.equals(session.getStatus());
         List<AiAssistantToolCallReadDto> projected = new ArrayList<>();
         for (StoredToolCall call : stored) {
@@ -334,6 +337,8 @@ public class AiAssistantToolCallReadService {
                     || tier != toolCatalog.tier(toolName)
                     || (tier != ToolTier.AUTO && tier != ToolTier.CONFIRM)
                     || !tool.acceptedTargetKinds().contains(targetKind)
+                    || ("workspace".equals(targetKind)
+                            && targetId != workspaceService.getCurrentWorkspaceId())
                     || !holdsRequiredText(tool, root.get("request"))) {
                 return null;
             }
@@ -367,6 +372,15 @@ public class AiAssistantToolCallReadService {
             }
         }
         Map<RecordKey, RecordSnapshot> visible = new LinkedHashMap<>();
+        if (requested.contains(new RecordKey("workspace", workspaceId))) {
+            Workspace workspace = workspaceService.getCurrentWorkspace();
+            if (workspace.getId() == workspaceId
+                    && workspace.getName() != null
+                    && !SpecialCareTextScreen.screen(workspace.getName()).excluded()) {
+                putVisible(visible, "workspace", workspaceId,
+                        new RecordSnapshot(workspace.getName(), null, null, null, null, Map.of(), false));
+            }
+        }
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
@@ -906,7 +920,8 @@ public class AiAssistantToolCallReadService {
     private Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> liveCreatedRecords(
             Viewer viewer,
             List<StoredToolCall> stored,
-            Map<RecordKey, RecordSnapshot> visibleTargets) {
+            Map<RecordKey, RecordSnapshot> visibleTargets,
+            Set<Permission> viewerPermissions) {
         Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> candidates = new LinkedHashMap<>();
         for (StoredToolCall call : stored) {
             if (!detailsReadable(call, viewer.userId(), visibleTargets)) {
@@ -921,15 +936,29 @@ public class AiAssistantToolCallReadService {
         if (candidates.isEmpty()) {
             return Map.of();
         }
-        Set<RecordKey> live = liveCreatedRecordKeys(viewer, candidates.values());
+        Set<RecordKey> live = liveCreatedRecordKeys(viewer, candidates.values(), viewerPermissions);
         candidates.values().removeIf(candidate ->
                 !live.contains(new RecordKey(candidate.kind(), candidate.id())));
         return Map.copyOf(candidates);
     }
 
     private Set<RecordKey> liveCreatedRecordKeys(
-            Viewer viewer, Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates) {
+            Viewer viewer, Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates,
+            Set<Permission> viewerPermissions) {
         Set<RecordKey> live = new LinkedHashSet<>();
+        List<Integer> companyIds = createdIds(candidates, "company");
+        if (!companyIds.isEmpty()) {
+            for (Company company : companyMapper.getByIds(viewer.workspaceId(), companyIds)) {
+                live.add(new RecordKey("company", company.getId()));
+            }
+        }
+        List<Integer> reportIds = createdIds(candidates, "report");
+        if (!reportIds.isEmpty()
+                && viewerPermissions.contains(Permission.REPORT_READ)) {
+            for (Integer id : reportMapper.getDefinitionIdsIn(viewer.workspaceId(), reportIds)) {
+                live.add(new RecordKey("report", id));
+            }
+        }
         List<Integer> personIds = createdIds(candidates, "person");
         List<Integer> dealIds = createdIds(candidates, "deal");
         if (!personIds.isEmpty()) {

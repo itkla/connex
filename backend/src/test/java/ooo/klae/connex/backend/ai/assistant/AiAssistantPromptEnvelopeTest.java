@@ -136,7 +136,7 @@ class AiAssistantPromptEnvelopeTest {
      * planned.
      */
     private static final Set<String> PLANNED_TOOLSET_KEYS =
-            Set.of("write_workspace");
+            Set.of();
 
     /**
      * The most each loadable toolset may add over the core envelope, per protocol.
@@ -152,8 +152,8 @@ class AiAssistantPromptEnvelopeTest {
      * floor-admissibility guarantee is unchanged. {@code write_fields} likewise measured
      * 1,029 / 825 against its 1,000 / 800 allocation with {@code update_record_fields} after its
      * description was shortened, so its entry was raised to 1,100 / 875 under the same rule. The
-     * last entry is in {@link #PLANNED_TOOLSET_KEYS}; its allocation is committed here so
-     * each is proven to fit the floor before its first tool exists. A toolset's cost to the core
+     * workspace allocation was committed before its first tool existed; every allocated set is
+     * now declared. A toolset's cost to the core
      * (its directory line and {@code find_tools} value) is not part of its entry here; it is
      * funded by {@link #CORE_CEILING}. Raising any entry is a budget decision, not a
      * re-measurement.
@@ -307,8 +307,8 @@ class AiAssistantPromptEnvelopeTest {
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
                         "list_activities", "list_tasks", "list_scope_activities", "find_tools",
-                        "aggregate_metric", "create_activity", "create_task",
-                        "create_note", "add_tag", "remove_tag"),
+                        "aggregate_metric", "create_note", "add_tag", "remove_tag",
+                        "create_person", "create_deal", "create_company"),
                 promptAssembler.nativeToolDefinitions(toolCatalog.reservationToolsets()).stream()
                         .map(definition -> definition.name())
                         .toList(),
@@ -318,7 +318,7 @@ class AiAssistantPromptEnvelopeTest {
                         + " rather than deriving it from the call under test");
         assertEquals(
                 Set.of(Toolset.CORE, Toolset.ANALYTICS,
-                        Toolset.WRITE_ACTIVITY, Toolset.WRITE_CONTENT),
+                        Toolset.WRITE_CREATE, Toolset.WRITE_CONTENT),
                 Set.copyOf(toolCatalog.reservationToolsets()));
 
         String coreReactPrompt =

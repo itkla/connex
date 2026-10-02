@@ -826,7 +826,8 @@
         "fieldName": "名前",
         "fieldCurrency": "通貨",
         "fieldTemplate": "作成テンプレート",
-        "fieldTemplateDefaults": "テンプレートで入力する項目"
+        "fieldTemplateDefaults": "テンプレートで入力する項目",
+        "fieldReport": "レポート名"
       },
       "actions": {
         "undo": "取り消す",
@@ -891,7 +892,11 @@
         "createPerson": "連絡先を作成",
         "createDeal": "案件を作成",
         "personCreated": "連絡先を作成しました",
-        "dealCreated": "案件を作成しました"
+        "dealCreated": "案件を作成しました",
+        "createCompany": "会社を作成",
+        "createReport": "レポートを作成",
+        "companyCreated": "会社を作成しました",
+        "reportCreated": "レポートを作成しました"
       },
       "outcomeFields": {
         "type": "種別",
@@ -928,14 +933,18 @@
         "task": "タスクを開く",
         "note": "メモを開く",
         "person": "連絡先を開く",
-        "deal": "案件を開く"
+        "deal": "案件を開く",
+        "company": "会社を開く",
+        "report": "レポートを開く"
       },
       "openCreatedAria": {
         "activity": "この操作で作成された活動を開く",
         "task": "この操作で作成されたタスクを開く",
         "note": "この操作で作成されたメモを開く",
         "person": "この操作で作成した連絡先を開く",
-        "deal": "この操作で作成した案件を開く"
+        "deal": "この操作で作成した案件を開く",
+        "company": "この操作で作成した会社を開く",
+        "report": "この操作で作成したレポートを開く"
       },
       "undoWindow": "{deadline}まで取り消せます（{remaining}）。",
       "templateDefaults": {

@@ -91,6 +91,7 @@ class AiAssistantToolCallReadServiceTest {
     private TaskMapper taskMapper;
     private ooo.klae.connex.backend.services.ReferenceService referenceService;
     private NoteMapper noteMapper;
+    private ooo.klae.connex.backend.mappers.ReportMapper reportMapper;
     private AiAssistantSessionReadAudit sessionReadAudit;
     private AiChatSession accessibleSession;
     private AiAssistantToolCallReadService service;
@@ -112,6 +113,7 @@ class AiAssistantToolCallReadServiceTest {
         when(referenceService.hydrateTasks(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
         noteMapper = mock(NoteMapper.class);
+        reportMapper = mock(ooo.klae.connex.backend.mappers.ReportMapper.class);
         sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
@@ -149,6 +151,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
@@ -173,7 +177,7 @@ class AiAssistantToolCallReadServiceTest {
                 noteMapper,
                 sessionReadAudit,
                 JsonMapper.builder().build(),
-                CLOCK, referenceService);
+                CLOCK, referenceService, reportMapper);
     }
 
     private static AiAssistantCreateActivityWriteTool activityTool() {
@@ -1464,6 +1468,73 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals(List.of(), inaccessible.outcomeValues());
     }
 
+    @Test
+    void workspaceReportsScreenNamesAndWithholdForeignTargetsAndOtherRequesters() {
+        stubVisibleWorkspace();
+        when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID))
+                .thenReturn(Set.of(Permission.REPORT_READ, Permission.REPORT_CREATE));
+        AiChatToolCall call = workspaceCall("create_report", "proposed", null);
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100)).thenReturn(List.of(call));
+        AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
+        assertEquals("workspace", ready.target().kind());
+        assertEquals("Workspace name", ready.target().label());
+        assertEquals(List.of("report", "template"), ready.changes().stream().map(AiAssistantToolCallReadDto.Change::field).toList());
+        assertTrue(ready.changes().stream().allMatch(change -> "ready".equals(change.state())));
+        call.setArgumentsJson(call.getArgumentsJson().replace("Sales report", "medical history"));
+        AiAssistantToolCallReadDto withheld = service.list(SESSION_ID, false).getFirst();
+        assertEquals("withheld", withheld.changes().getFirst().state());
+        assertNull(withheld.changes().getFirst().proposedValue());
+        call.setRequestedByUserId(USER_ID + 1);
+        assertEquals(List.of(), service.list(SESSION_ID, false).getFirst().changes());
+        call.setArgumentsJson(call.getArgumentsJson().replace(
+                "\"kind\":\"workspace\",\"id\":" + WORKSPACE_ID,
+                "\"kind\":\"workspace\",\"id\":" + (WORKSPACE_ID + 1)));
+        assertEquals(List.of(), service.list(SESSION_ID, false));
+    }
+
+    @Test
+    void workspaceLabelsAreScreenedAndCreatedCompanyAndReportLinksRequireLiveVisibleRows() {
+        var workspace = stubVisibleWorkspace();
+        when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID)).thenReturn(Set.of(Permission.REPORT_READ));
+        AiChatToolCall company = workspaceCall("create_company", "executed",
+                "{\"undo\":{\"status\":\"unavailable\",\"entityKind\":\"company\",\"entityId\":75}}");
+        AiChatToolCall report = workspaceCall("create_report", "executed",
+                "{\"undo\":{\"status\":\"unavailable\",\"entityKind\":\"report\",\"entityId\":76}}");
+        report.setId(company.getId() + 1);
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100)).thenReturn(List.of(company, report));
+        Company created = new Company();
+        created.setId(75);
+        when(companyMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of(created));
+        when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of(76));
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+        assertEquals(new AiAssistantToolCallReadDto.CreatedRecord("company", 75), cards.getFirst().createdRecord());
+        assertEquals(new AiAssistantToolCallReadDto.CreatedRecord("report", 76), cards.getLast().createdRecord());
+        when(companyMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of());
+        when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of());
+        assertTrue(service.list(SESSION_ID, false).stream().allMatch(card -> card.createdRecord() == null));
+        when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of(76));
+        when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID)).thenReturn(Set.of());
+        assertNull(service.list(SESSION_ID, false).getLast().createdRecord());
+        workspace.setName("medical history");
+        assertNull(service.list(SESSION_ID, false).getFirst().target().label());
+    }
+
+    private ooo.klae.connex.backend.beans.Workspace stubVisibleWorkspace() {
+        var workspace = new ooo.klae.connex.backend.beans.Workspace();
+        workspace.setId(WORKSPACE_ID);
+        workspace.setName("Workspace name");
+        when(workspaceService.getCurrentWorkspace()).thenReturn(workspace);
+        return workspace;
+    }
+
+    private static AiChatToolCall workspaceCall(String tool, String status, String result) {
+        AiChatToolCall call = toolCall(93, USER_ID, tool, "confirm", status, "workspace", WORKSPACE_ID, 93, result);
+        call.setArgumentsJson(call.getArgumentsJson().replace("{\"handle\":\"r1\"}",
+                "create_report".equals(tool) ? "{\"name\":\"Sales report\",\"template\":\"sales-performance\"}"
+                        : "{\"name\":\"New company\"}"));
+        return call;
+    }
+
     private static AiChatToolCall createPersonCall(int id, String status, String result) {
         AiChatToolCall call = toolCall(id, USER_ID, "create_person", "confirm", status, "company", 52, id, result);
         call.setArgumentsJson(call.getArgumentsJson().replace("{\"handle\":\"r1\"}",
@@ -1484,6 +1555,7 @@ class AiAssistantToolCallReadServiceTest {
         stubVisiblePerson();
         stubVisibleTask();
         stubVisibleCompany();
+        stubVisibleWorkspace();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(99));
         List<AiAssistantToolCallReadDto> participant = echoing.list(SESSION_ID, false);
@@ -1552,6 +1624,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
@@ -1594,6 +1668,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
@@ -1670,6 +1746,7 @@ class AiAssistantToolCallReadServiceTest {
         stubVisiblePerson();
         stubVisibleTask();
         stubVisibleCompany();
+        stubVisibleWorkspace();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
                 .thenReturn(declaredToolCards(USER_ID));
 
@@ -1679,7 +1756,8 @@ class AiAssistantToolCallReadServiceTest {
             assertTrue(card.requestSummary().contains(
                     "deal".equals(card.target().kind()) ? "Acme renewal"
                             : "task".equals(card.target().kind()) ? "Agenda"
-                            : "company".equals(card.target().kind()) ? "Acme company" : "Ada Lovelace"),
+                            : "company".equals(card.target().kind()) ? "Acme company"
+                            : "workspace".equals(card.target().kind()) ? "Workspace name" : "Ada Lovelace"),
                     card.toolName());
             assertTrue(card.requestSummary().contains("secret request"), card.toolName());
         }
@@ -2131,6 +2209,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
@@ -2170,6 +2250,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 new AiAssistantAssignOwnerWriteTool(
@@ -2223,6 +2305,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
@@ -2263,6 +2347,8 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateDealWriteTool(null, null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 setResponseDueTool(),
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
@@ -2422,10 +2508,11 @@ class AiAssistantToolCallReadServiceTest {
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
             String tier = tool.tier().name().toLowerCase();
             String kind = "update_record_fields".equals(tool.name()) ? "person"
+                    : tool.acceptedTargetKinds().contains("workspace") ? "workspace"
                     : tool.acceptedTargetKinds().contains("task") ? "task"
                     : tool.acceptedTargetKinds().contains("deal") ? "deal"
                     : tool.acceptedTargetKinds().contains("company") ? "company" : "person";
-            int targetId = "task".equals(kind) ? 73 : "deal".equals(kind) ? 41
+            int targetId = "workspace".equals(kind) ? WORKSPACE_ID : "task".equals(kind) ? 73 : "deal".equals(kind) ? 41
                     : "company".equals(kind) ? 52 : 31;
             for (String status : List.of("proposed", "executed")) {
                 AiChatToolCall card = toolCall(

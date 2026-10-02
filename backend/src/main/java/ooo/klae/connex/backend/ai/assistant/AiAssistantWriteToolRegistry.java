@@ -40,7 +40,7 @@ import ooo.klae.connex.backend.tenant.Permission;
  */
 @Component
 public class AiAssistantWriteToolRegistry {
-    private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal", "task");
+    private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal", "task", "workspace");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");
     private static final Pattern FLAG_NAME = Pattern.compile("[a-z][A-Za-z]*");
 
@@ -132,6 +132,16 @@ public class AiAssistantWriteToolRegistry {
         if (kinds == null || kinds.isEmpty() || !RECORD_KINDS.containsAll(kinds)) {
             throw refused(name, "must accept a non-empty subset of " + RECORD_KINDS);
         }
+        if (kinds.contains("workspace")) {
+            if (kinds.size() != 1 || tool.freshness() != AiAssistantWriteTool.Freshness.NONE) {
+                throw refused(name, "workspace must be the only target kind with NONE freshness");
+            }
+            for (RecordComponent component : tool.requestType().getRecordComponents()) {
+                if ("handle".equals(component.getName())) {
+                    throw refused(name, "workspace requests must not declare a handle");
+                }
+            }
+        }
         if (tool.requiresOwnedTarget() && !Set.of("person", "company", "deal").containsAll(kinds)) {
             throw refused(name, "requires an owned record target");
         }
@@ -156,7 +166,8 @@ public class AiAssistantWriteToolRegistry {
                     != (tool.freshness() == AiAssistantWriteTool.Freshness.NONE)) {
                 throw refused(name, "NONE lock and NONE freshness must be declared together");
             }
-            if (lock.target() == TargetLock.NONE && (lock.taskBoard() || !declaresDuplicateProbe(tool))) {
+            if (lock.target() == TargetLock.NONE && (lock.taskBoard()
+                    || (!"workspace".equals(kind) && !declaresDuplicateProbe(tool)))) {
                 throw refused(name, "a structural create requires a duplicate probe and no board lock");
             }
             if (lock.target() == TargetLock.PERSON_SHARE && !"person".equals(kind)) {

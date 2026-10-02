@@ -5,7 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +24,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
@@ -34,14 +41,18 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.ReportConfig;
+import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
+import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.ReportService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
@@ -92,6 +103,8 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private AiAssistantToolCallReadService toolCallReadService;
+    @Autowired private IdentityMapper identityMapper;
+    @MockitoSpyBean private ReportService reportService;
 
     /** The tool calls the drift scripts complete before their write: a search and a load. */
     private static final int CALLS_BEFORE_WRITE = 2;
@@ -105,6 +118,182 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
     private final List<Integer> extraMembers = new ArrayList<>();
     private final List<Integer> sharedPeople = new ArrayList<>();
     private final List<Integer> siblingWorkspaces = new ArrayList<>();
+
+    @AfterEach
+    void removeWorkspaceCreateReferencesBeforeTenantCleanup() {
+        jdbcTemplate.update("DELETE FROM report_definition WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("UPDATE record_creation_template SET current_version_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("UPDATE record_creation_template_set SET default_template_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template_version WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template_set WHERE workspace_id = ?", workspaceId());
+    }
+
+    @Test
+    void aDuplicateCompanyWebsiteRefusesBeforeAnyProposalExists() {
+        Company existing = company("Unrelated Coastal Holdings");
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE company SET website = ? WHERE workspace_id = ? AND id = ?",
+                "cresthaven.example", workspaceId(), existing.getId()));
+        identityMapper.upsertCompanyDomainIdentity(workspaceId(), existing.getId(),
+                "cresthaven.example", "cresthaven.example", "interactive_create", null, LocalDateTime.now());
+        int before = companyCount();
+
+        Trajectory trajectory = run("connex_script_create_company_proposal", "add an organization");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_company"), trajectory.toolNames());
+        AiChatToolCall refused = trajectory.toolCalls().stream()
+                .filter(call -> "create_company".equals(call.getToolName())).findFirst().orElseThrow();
+        assertEquals("failed", refused.getStatus());
+        assertTrue(refused.getResultJson().contains("possible_duplicate"), refused.getResultJson());
+        assertFalse(trajectory.toolCalls().stream().anyMatch(call -> "proposed".equals(call.getStatus())));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = ?"
+                        + " AND tool_name = 'create_company' AND status = 'proposed'",
+                Integer.class, workspaceId()));
+        assertEquals(before, companyCount());
+        assertEquals(0, auditRows("company.create"));
+    }
+
+    @Test
+    void aCompanyIsCreatedOnlyOnApprovalWithItsWorkspaceTargetAndLiveLink() {
+        int before = companyCount();
+        Trajectory trajectory = run("connex_script_create_company_proposal", "add an organization");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_company"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_company");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("workspace", stored.path("target").path("kind").asString());
+        assertEquals(workspaceId(), stored.path("target").path("id").asInt());
+        assertFalse(stored.path("request").has("handle"));
+        assertTrue(stored.path("pinned").path("templateVersion").asInt() > 0);
+        assertEquals(before, companyCount());
+        assertEquals(0, auditRows("company.create"));
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            var target = Objects.requireNonNull(card.target());
+            assertEquals("workspace", target.kind());
+            assertEquals(workspaceId(), target.id());
+            assertEquals(jdbcTemplate.queryForObject("SELECT name FROM workspace WHERE id = ?",
+                    String.class, workspaceId()), target.label());
+            assertTrue(card.changes().stream().allMatch(change -> "ready".equals(change.state())));
+            assertTrue(card.changes().stream().anyMatch(change -> "templateDefaults".equals(change.field())));
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals("executed", approved.status());
+            assertEquals(approved.result(), writeToolService().approve(trajectory.sessionId(), proposal.getId()).result());
+            var created = Objects.requireNonNull(toolCallReadService.get(
+                    trajectory.sessionId(), proposal.getId()).createdRecord());
+            assertEquals("company", created.kind());
+            assertEquals("Cresthaven Labs", jdbcTemplate.queryForObject(
+                    "SELECT name FROM company WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before + 1, companyCount());
+        assertEquals(1, auditRows("company.create"));
+        assertEquals("cresthaven.example", jdbcTemplate.queryForObject(
+                "SELECT website FROM company WHERE workspace_id = ?", String.class, workspaceId()));
+        assertEquals("Research", jdbcTemplate.queryForObject(
+                "SELECT industry FROM company WHERE workspace_id = ?", String.class, workspaceId()));
+    }
+
+    /** The real delegate is observed so its identical permission message cannot satisfy this golden. */
+    @Test
+    void approvingAReportAfterLosingReportCreateIsRefusedBeforeTheDelegate() {
+        int before = reportCount();
+        Trajectory trajectory = run("connex_script_create_report_proposal", "prepare a saved view");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_report"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_report");
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        customRoleWithout(Permission.REPORT_CREATE);
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_role_permission wrp"
+                        + " JOIN workspace_member wm ON wm.role_id = wrp.workspace_role_id"
+                        + " WHERE wm.workspace_id = ? AND wm.user_id = ? AND wrp.permission = ?",
+                Integer.class, workspaceId(), member().getId(), Permission.REPORT_READ.name()));
+        ReportService delegate = AopTestUtils.getUltimateTargetObject(reportService);
+        clearInvocations(delegate);
+        authenticate();
+        try {
+            ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Requires the REPORT_CREATE permission in this workspace", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        verify(delegate, never()).templates();
+        verify(delegate, never()).create(any(ReportDefinitionRequest.class));
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    @Test
+    void aReportIsCreatedOnlyOnApprovalWithLocalizableWidgetsAndNoProviderCall() {
+        int before = reportCount();
+        Trajectory trajectory = run("connex_script_create_report_proposal", "prepare a saved view");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_report"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_report");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("workspace", stored.path("target").path("kind").asString());
+        assertEquals(workspaceId(), stored.path("target").path("id").asInt());
+        assertFalse(stored.path("request").has("handle"));
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        int requestsBeforeApproval = journal().recorded().size();
+        int dispatchesBeforeApproval = journal().dispatched().size();
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            assertEquals(List.of("report", "template"), card.changes().stream().map(change -> change.field()).toList());
+            assertTrue(card.changes().stream().allMatch(change -> "ready".equals(change.state())));
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals("executed", approved.status());
+            assertEquals(approved.result(), writeToolService().approve(trajectory.sessionId(), proposal.getId()).result());
+            var created = Objects.requireNonNull(toolCallReadService.get(
+                    trajectory.sessionId(), proposal.getId()).createdRecord());
+            assertEquals("report", created.kind());
+            assertEquals("Pipeline overview", jdbcTemplate.queryForObject(
+                    "SELECT name FROM report_definition WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before + 1, reportCount());
+        assertEquals(1, auditRows("report.create"));
+        assertEquals(member().getId(), jdbcTemplate.queryForObject(
+                "SELECT created_by FROM report_definition WHERE workspace_id = ?", Integer.class, workspaceId()));
+        assertEquals("sales-performance", jdbcTemplate.queryForObject(
+                "SELECT template_key FROM report_definition WHERE workspace_id = ?", String.class, workspaceId()));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT description FROM report_definition WHERE workspace_id = ?", String.class, workspaceId()));
+        ReportConfig config = objectMapper.readValue(Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT config_json FROM report_definition WHERE workspace_id = ?", String.class, workspaceId())),
+                ReportConfig.class);
+        assertFalse(Objects.requireNonNull(config.widgets()).isEmpty());
+        config.widgets().forEach(widget -> assertNull(widget.title()));
+        assertEquals(requestsBeforeApproval, journal().recorded().size());
+        assertEquals(dispatchesBeforeApproval, journal().dispatched().size());
+    }
+
+    private int companyCount() {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM company WHERE workspace_id = ?", Integer.class, workspaceId()));
+    }
+
+    private int reportCount() {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_definition WHERE workspace_id = ?", Integer.class, workspaceId()));
+    }
 
     @AfterEach
     void removeSharedInContacts() {
