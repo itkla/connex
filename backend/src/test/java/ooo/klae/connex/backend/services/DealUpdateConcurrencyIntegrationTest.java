@@ -1,16 +1,23 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -38,6 +45,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -62,7 +70,6 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class DealUpdateConcurrencyIntegrationTest {
-
 
     @Autowired private DealService dealService;
     @Autowired private OrganizationMapper organizationMapper;
@@ -137,7 +144,6 @@ class DealUpdateConcurrencyIntegrationTest {
         SecurityContextHolder.clearContext();
         tenantContext.clear();
         if (workspace != null) {
-            jdbcTemplate.update("DELETE FROM deal_collaborator WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM deal WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM stage WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM pipeline WHERE workspace_id = ?", workspace.getId());
@@ -164,6 +170,28 @@ class DealUpdateConcurrencyIntegrationTest {
         verify(auditService).singleChange("expectedCloseDate", null, "2026-11-02");
         verify(auditService).singleChange("expectedCloseDate", "2026-11-02", "2026-12-03");
         assertEquals("2026-12-03", returned.get().getExpectedCloseDate());
+        verify(dealMapper, never()).getDealByIdForUpdate(anyInt(), anyInt());
+    }
+
+    /**
+     * A deal deleted while its reschedule waited is refused under the lock. Before #1958 the
+     * reschedule updated no row yet still audited and published, and answered 200.
+     */
+    @Test
+    void aDealDeletedWhileItsRescheduleWaitedIsRefusedBeforeAnyWrite() throws Exception {
+        int workspaceId = workspace.getId();
+        pauseBeforeTheDealLock();
+
+        ExecutionException refused = assertThrows(ExecutionException.class, () -> runWhilePaused(
+            () -> dealService.reschedule(deal.getId(), "2026-12-03"),
+            () -> jdbcTemplate.update(
+                "DELETE FROM deal WHERE workspace_id = ? AND id = ?", workspaceId, deal.getId())));
+
+        assertTrue(paused.get());
+        assertInstanceOf(ResourceNotFoundException.class, refused.getCause());
+        verify(dealMapper, never()).updateExpectedCloseDate(anyInt(), anyInt(), anyString());
+        verify(auditService, never()).singleChange(eq("expectedCloseDate"), any(), any());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
     }
 
     @Test
@@ -178,6 +206,7 @@ class DealUpdateConcurrencyIntegrationTest {
         verify(auditService).singleChange("riskExcluded", false, true);
         verify(auditService).singleChange("riskExcluded", true, true);
         assertTrue(returned.get().isRiskExcluded());
+        verify(dealMapper, never()).getDealByIdForUpdate(anyInt(), anyInt());
     }
 
     /**
@@ -205,7 +234,7 @@ class DealUpdateConcurrencyIntegrationTest {
             Future<?> firstChange = executor.submit(() -> asCurrentUser(change));
             if (!readViewOpen.await(10, TimeUnit.SECONDS)) {
                 firstChange.get(0, TimeUnit.SECONDS);
-                throw new AssertionError("The first owner change never reached its pause");
+                throw new AssertionError("The first update never reached its pause");
             }
             try {
                 concurrentCommit.run();

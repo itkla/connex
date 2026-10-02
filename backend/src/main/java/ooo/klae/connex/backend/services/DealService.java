@@ -1236,8 +1236,9 @@ public class DealService {
      * every other field untouched. Unlike {@link #update(int, Deal)} this cannot clobber other
      * fields — or reopen a concurrently-closed deal — from a stale client payload: it writes a
      * single column after confirming the deal belongs to the caller's workspace. The audited old
-     * date, and the deal returned, come from the deal row locked before the write, not from the
-     * unlocked existence check that opens this transaction's read view (#1958).
+     * date comes from the deal row locked before the write, and the deal returned is re-read under
+     * that lock after it, not from the unlocked existence check that opens this transaction's read
+     * view; a deal deleted since that check is refused before anything is written (#1958).
      * @param id the deal to reschedule
      * @param expectedCloseDate the target expected close date as a {@code YYYY-MM-DD} calendar day
      * @return the rescheduled deal
@@ -1900,9 +1901,10 @@ public class DealService {
     /**
      * Sets the deal's risk-evaluation opt-out (issue #358): an excluded deal is skipped by the
      * deal-risk engine and its existing deal.risk notifications resolve on the next scheduled
-     * sweep. Plain close-date reminders are unaffected. The audited old value, and the deal
-     * returned, come from the deal row locked before the write, not from the unlocked existence
-     * check that opens this transaction's read view (#1958).
+     * sweep. Plain close-date reminders are unaffected. The audited old value comes from the deal
+     * row locked before the write, and the deal returned is re-read under that lock after it, not
+     * from the unlocked existence check that opens this transaction's read view; a deal deleted
+     * since that check is refused before anything is written (#1958).
      */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)

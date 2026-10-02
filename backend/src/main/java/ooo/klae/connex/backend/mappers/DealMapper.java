@@ -316,10 +316,11 @@ public interface DealMapper {
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /**
-     * Reads and locks one deal {@code FOR UPDATE} through the primary key alone: the record an
-     * owner change's {@code UPDATE} locks anyway. Unlike {@link #getDealByIdForUpdate} it takes no
-     * lock on {@code uq_deal_workspace_id}, so an owner change never waits behind a composite
-     * foreign-key child insert holding that entry (#1948).
+     * Reads and locks one deal {@code FOR UPDATE} through the primary key alone: the record a
+     * single-column update of its owner, expected close date or risk exclusion locks anyway. Unlike
+     * {@link #getDealByIdForUpdate} it takes no lock on {@code uq_deal_workspace_id}, so those
+     * updates never wait behind a composite foreign-key child insert holding that entry (#1948,
+     * #1958).
      *
      * @param workspaceId the deal's workspace
      * @param id the deal

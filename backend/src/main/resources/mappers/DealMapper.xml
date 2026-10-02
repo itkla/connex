@@ -1030,10 +1030,10 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <!-- The owner change's lock: only the PRIMARY record its UPDATE locks anyway. Also taking
-       uq_deal_workspace_id would queue it behind a composite foreign-key child insert that goes on
-       to take locks the owner change's own transaction may already hold. flushCache keeps a cached
-       pre-lock answer from standing in for it. -->
+  <!-- The lock for single-column deal updates (owner, expected close date, risk exclusion): only
+       the PRIMARY record their UPDATE locks anyway. Also taking uq_deal_workspace_id would queue
+       them behind a composite foreign-key child insert that goes on to take locks their own
+       transaction may already hold. flushCache keeps a cached pre-lock answer from standing in. -->
   <select id="getDealByPrimaryKeyForUpdate" resultMap="DealResult" flushCache="true">
     SELECT <include refid="dealColumns"/>
     FROM deal FORCE INDEX (PRIMARY)

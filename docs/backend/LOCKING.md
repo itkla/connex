@@ -72,7 +72,9 @@ from that row rather than from their unlocked existence check (#1948). Each read
 `uq_deal_workspace_id`. A composite-foreign-key child insert, such as an approval request, holds that
 entry shared and then takes the workspace audit head or the workflow gate. A legacy delivery's
 `assign_owner` reaches the owner change holding the gate, and the audit head too once an earlier
-action has audited. Either one would close a deadlock if the owner change locked that entry. The collaborator path is in the #1582 class
+action has audited. Either one would close a deadlock if the owner change locked that entry. The
+other single-column deal updates, `reschedule` and `updateRiskExcluded`, read the deal through the
+same primary-key lock for the same reason (#1958). The collaborator path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
