@@ -2282,11 +2282,58 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("no_progress", result.reason());
         assertTrue(step.get() >= 9, "The provider must be allowed to attempt the excess publication");
         verify(toolExecutor, times(8)).execute(
                 eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
         verify(persistenceService, times(8)).finishTool(
                 eq(TURN), anyInt(), eq("executed"), any());
+        verify(persistenceService, times(2)).failTool(eq(TURN), anyInt(), contains("plan_updates_exhausted"));
+    }
+
+    /**
+     * A plan published past the turn's allowance is refused, not fatal: the model reads the refusal
+     * in its next prompt and the turn goes on to its answer, whether the excess call came alone or
+     * in a batch (#1913).
+     */
+    @Test
+    void anExcessPlanPublicationIsReplayedAsARecoverableRefusal() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AtomicInteger step = new AtomicInteger();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    int current = step.incrementAndGet();
+                    if (current <= 9) {
+                        return parsed(toolStep("set_todos",
+                                "{\"items\":[\"Step " + current + "\"],\"statuses\":[\"active\"]}"));
+                    }
+                    return parsed(new AiAssistantStep(
+                            null, new AiAssistantStep.FinalAnswer("The plan is ready.", List.of())));
+                });
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor, times(8)).execute(
+                eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).failTool(eq(TURN), anyInt(), contains("plan_updates_exhausted"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(10)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String retryPrompt = invocations.getAllValues().getLast().prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(retryPrompt.contains("\"error\":\"plan_updates_exhausted\""));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The plan is ready."), any(), anyInt(), anyInt());
     }
 
     @Test

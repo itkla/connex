@@ -787,9 +787,8 @@ public class AiChatAgentLoopService {
      * handles it had been shown, so a handle an earlier call of the batch mints was never visible to
      * it: a later call naming one guessed it, and settles as {@code unknown_handle} exactly as it
      * would emitted alone, while its siblings still run. Placeholders obey the same rule at the
-     * parse boundary. A per-call refusal a single call raises outside the recoverable path — a plan
-     * published past the turn's allowance — is settled as that call's own replayed refusal inside a
-     * batch, so its siblings still run.
+     * parse boundary. A plan published past the turn's allowance is settled as that call's own
+     * replayed refusal, as it is for a call emitted alone, so its siblings still run.
      *
      * <p>A step's replay exchanges are all or nothing. If any call ends the batch early — a lost
      * owner, a passed deadline, a closable or non-recoverable refusal, or an exception — the step's
@@ -1091,12 +1090,9 @@ public class AiChatAgentLoopService {
         }
         if ("set_todos".equals(toolName)
                 && state.planPublications >= MAX_TURN_PLAN_PUBLICATIONS) {
-            if (batched) {
-                return refuseCall(
-                        context, stepNumber, closingAttempted, nativeTools, call, state,
-                        progress, PLAN_UPDATES_EXHAUSTED, true);
-            }
-            throw AiAssistantLoopException.refusedArguments(PLAN_UPDATES_EXHAUSTED);
+            return refuseCall(
+                    context, stepNumber, closingAttempted, nativeTools, call, state,
+                    progress, PLAN_UPDATES_EXHAUSTED, true);
         }
         if ("set_todos".equals(toolName)) {
             state.planPublications++;
