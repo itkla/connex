@@ -318,7 +318,7 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
                 "workflow_intervention", "workflow_invocation_record", "workflow_invocation",
                 "workflow_recipe_origin", "workflow_step_attempt", "workflow_step_run",
                 "workflow_run", "workflow_trigger_outbox", "workflow_runtime_workspace",
-                "rule_execution", "job_run", "workflow_version", "workflow", "rule")) {
+                "rule_execution", "job_run", "workflow_version", "workflow", "rule", "activity", "note")) {
             TableLifecycle declaration = TenantLifecycleRegistry.require(table);
             while (tenantTeardownTransaction.deleteBatch(freshWorkspaceId, declaration, 100) > 0) {
             }

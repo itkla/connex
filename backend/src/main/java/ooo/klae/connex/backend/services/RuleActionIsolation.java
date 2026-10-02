@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.mybatis.spring.SqlSessionTemplate;
-import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -34,7 +33,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       dropped, so deferred audits and lock bookkeeping still run.</li>
  *   <li>A transient failure is not the action's fault and may have taken the whole transaction with
  *       it, so it fails the delivery with {@link RuleActionRetryRequiredException} and the worker
- *       retries it.</li>
+ *       retries it. Transient means what the canonical engine retries
+ *       ({@link WorkflowActionRetryPolicy#transientDatabaseFailure}), plus a savepoint that could not
+ *       be created or was already discarded.</li>
  *   <li>MyBatis has no savepoint hook, so the session cache is cleared before a later action, or the
  *       run's own bookkeeping, can read state the savepoint undid.</li>
  * </ul>
@@ -42,7 +43,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>The callbacks that are forwarded still run for undone work. An undone notification can bump its
  * recipient's state version and send a content-free refresh, which costs a client refetch and reveals
  * nothing. A transactional event listener in a phase other than {@code AFTER_COMMIT} would likewise run,
- * so a listener added in another phase must tolerate undone work.
+ * so a listener added in another phase must tolerate undone work. Everything a failed action registered
+ * is treated as its own: a once-per-transaction accumulator first registered by a failed action keeps
+ * every callback except {@code afterCommit}, so such an accumulator must do its work in
+ * {@code beforeCommit} or a status-agnostic {@code afterCompletion}, as the current ones do.
  *
  * <p>Without an active transaction, on the non-durable dispatch path, the action runs exactly as before.
  */
@@ -50,11 +54,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class RuleActionIsolation {
     private final TransactionTemplate nested;
     private final SqlSessionTemplate sqlSessionTemplate;
+    private final WorkflowActionRetryPolicy retryPolicy;
 
-    public RuleActionIsolation(PlatformTransactionManager transactionManager, SqlSessionTemplate sqlSessionTemplate) {
+    public RuleActionIsolation(PlatformTransactionManager transactionManager, SqlSessionTemplate sqlSessionTemplate,
+            WorkflowActionRetryPolicy retryPolicy) {
         this.nested = new TransactionTemplate(transactionManager);
         this.nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         this.sqlSessionTemplate = sqlSessionTemplate;
+        this.retryPolicy = retryPolicy;
     }
 
     /**
@@ -75,23 +82,22 @@ public class RuleActionIsolation {
             nested.executeWithoutResult(status -> action.run());
         } catch (RuntimeException failure) {
             sqlSessionTemplate.clearCache();
+            neutraliseRegisteredSince(registeredBefore);
             if (requiresRetry(failure)) {
                 throw new RuleActionRetryRequiredException(failure);
             }
-            neutraliseRegisteredSince(registeredBefore);
             throw failure;
         }
     }
 
-    static boolean requiresRetry(Throwable failure) {
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof TransientDataAccessException
-                    || cause instanceof TransactionSystemException
-                    || cause instanceof CannotCreateTransactionException) {
+    private boolean requiresRetry(Throwable failure) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof TransactionSystemException || cause instanceof CannotCreateTransactionException) {
                 return true;
             }
         }
-        return false;
+        return retryPolicy.transientDatabaseFailure(failure);
     }
 
     private static void neutraliseRegisteredSince(Set<TransactionSynchronization> registeredBefore) {

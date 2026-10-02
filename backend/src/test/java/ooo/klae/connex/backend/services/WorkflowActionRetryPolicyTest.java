@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -53,6 +54,18 @@ class WorkflowActionRetryPolicyTest {
             new DuplicateKeyException("business conflict")));
         assertFalse(policy.transientDatabaseFailure(
             new IllegalStateException("unexpected")));
+    }
+
+    @Test
+    void aCyclicCauseChainEndsTheWalk() {
+        IllegalStateException first = new IllegalStateException("first");
+        IllegalStateException second = new IllegalStateException("second", first);
+        first.initCause(second);
+
+        WorkflowActionRetryPolicy policy = policy();
+
+        assertFalse(assertTimeoutPreemptively(
+            Duration.ofSeconds(5), () -> policy.transientDatabaseFailure(first)));
     }
 
     @Test
