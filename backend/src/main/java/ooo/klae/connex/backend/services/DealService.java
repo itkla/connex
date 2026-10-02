@@ -1917,6 +1917,12 @@ public class DealService {
      * Replaces a deal's collaborators with the given workspace members, excluding the owner. The
      * audit entry records the raw collaborator ids before and after the change.
      *
+     * <p>Every requested member's active membership row is locked {@code FOR UPDATE} in ascending id
+     * order, then the deal row, before the collaborator rows are replaced: the order {@link #updateOwner}
+     * uses. The membership locks run on this transaction's connection through the control-catalog scope
+     * and are held until it commits, so a member offboarded concurrently either waits for this write or
+     * is refused by it, and the tenant-only insert never needs to join the control plane (#1793).
+     *
      * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
      * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
      * transaction and borrow a second pooled connection while the deal's collaborator row locks and
@@ -1939,14 +1945,16 @@ public class DealService {
     }
 
     private List<Integer> replaceCollaboratorIds(int workspaceId, int dealId, List<Integer> userIds) {
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        List<Integer> normalized = userIds == null ? List.of() : userIds.stream().distinct().toList();
-        for (Integer userId : normalized) {
-            if (userId == null) throw new BadRequestException("Collaborator IDs cannot be null");
-            workspaceService.requireMember(workspaceId, userId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found");
         }
-        normalized = normalized.stream()
+        List<Integer> requested = userIds == null ? List.of() : userIds.stream().distinct().toList();
+        if (requested.stream().anyMatch(Objects::isNull)) {
+            throw new BadRequestException("Collaborator IDs cannot be null");
+        }
+        workspaceService.lockAndRequireMembers(workspaceId, requested);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
+        List<Integer> normalized = requested.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
         List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);

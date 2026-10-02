@@ -1346,15 +1346,15 @@
 
   <insert id="insertCollaborators">
     INSERT INTO deal_collaborator (workspace_id, deal_id, user_id)
-    SELECT d.workspace_id, d.id, wm.user_id
+    SELECT d.workspace_id, d.id, requested.user_id
     FROM deal d
-    JOIN workspace_member wm ON wm.workspace_id = d.workspace_id
+    JOIN (
+      <foreach collection="userIds" item="userId" separator=" UNION ALL ">
+        SELECT #{userId} AS user_id
+      </foreach>
+    ) requested
     WHERE d.workspace_id = #{workspaceId}
       AND d.id = #{dealId}
-      AND wm.user_id IN
-      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
-        #{userId}
-      </foreach>
   </insert>
 
   <update id="clearMemberDealOwnership">
