@@ -203,6 +203,7 @@ class HttpListConnectorTest {
         assertTrue(Duration.ofMillis(dripMillis * response.length)
                 .compareTo(deadline.plusMillis(200)) >= 0);
         CountDownLatch responseStarted = new CountDownLatch(1);
+        CountDownLatch dripAborted = new CountDownLatch(1);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/slow", exchange -> {
             responseStarted.countDown();
@@ -215,7 +216,8 @@ class HttpListConnectorTest {
                         Thread.sleep(dripMillis);
                     }
                 }
-            } catch (IOException ignored) {
+            } catch (IOException aborted) {
+                dripAborted.countDown();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
             } finally {
@@ -242,6 +244,7 @@ class HttpListConnectorTest {
             assertEquals("Connector audience push exceeded its hard deadline", result.detail());
             assertTrue(elapsed.compareTo(deadline.minusMillis(50)) >= 0);
             assertTrue(elapsed.compareTo(properties.audienceExportLeaseDuration()) < 0);
+            assertTrue(dripAborted.await(10, TimeUnit.SECONDS));
         } finally {
             connector.shutdown();
             server.stop(0);

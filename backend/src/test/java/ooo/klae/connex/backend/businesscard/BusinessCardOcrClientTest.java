@@ -228,9 +228,10 @@ class BusinessCardOcrClientTest {
     }
 
     /**
-     * With a 1 ms readiness cache the background prober keeps probing after the recovery probe, so
-     * every later probe is answered the same way instead of exactly once: an exact count raced the
-     * prober and failed the final verify on a busy runner (#1834).
+     * With a 1 ms readiness cache every {@code isReady()} call after the cache expires starts a new
+     * probe, so the test's own polling after the recovery probe, and its final {@code isReady()}, send
+     * further {@code /ready} requests. Every one is answered the same way instead of exactly once:
+     * an exact count raced that polling and failed the final verify on a busy runner (#1834).
      */
     @Test
     void staleProbeCannotReopenReadinessAfterWorkerFailure() throws Exception {

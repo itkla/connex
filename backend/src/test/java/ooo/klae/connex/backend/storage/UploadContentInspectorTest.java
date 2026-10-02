@@ -64,16 +64,20 @@ class UploadContentInspectorTest {
     private BoundedImageValidationExecutor imageValidationExecutor;
 
     /**
-     * Builds the inspector with the production executor's shape but a 30-second inspection budget
-     * instead of five. These tests are about what inspection accepts and refuses, not its deadline,
-     * which the short-timeout test pins; on a starved CI host a small JPEG's decode has outlasted five
-     * seconds and turned an acceptance into a timeout refusal (#1914).
+     * Builds the inspector and its image validator with the production executors' shape but
+     * 30-second budgets instead of five, for both the inspection and the image decode inside it.
+     * These tests are about what inspection accepts and refuses, not its deadlines, which
+     * {@code timeoutFailsClosed} and {@code BoundedImageValidationExecutorTest} pin; on a starved
+     * CI host a small JPEG's decode has outlasted five seconds and turned an acceptance into a
+     * timeout refusal (#1914).
      */
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
         UploadPolicy policy = new UploadPolicy(properties);
-        imageValidationExecutor = new BoundedImageValidationExecutor();
+        imageValidationExecutor = new BoundedImageValidationExecutor(
+            new ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(8)),
+            Duration.ofSeconds(30));
         ImageUploadValidator imageValidator = new ImageUploadValidator(
             properties,
             policy,
