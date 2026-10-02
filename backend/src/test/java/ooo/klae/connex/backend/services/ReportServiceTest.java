@@ -104,6 +104,39 @@ class ReportServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"sales-performance", "pipeline-health", "forecasting", "relationship-coverage",
+            "relationship-health", "network-warm-intros", "employment-moves", "commercial-documents",
+            "lead-lifecycle", "activity-team"})
+    void assistantTemplatesCreateSavedDefinitionsWithLocalizableTitlesAndNoDescription(String key) {
+        var template = service.templates().stream().filter(candidate -> key.equals(candidate.key())).findFirst().orElseThrow();
+        var source = template.config();
+        var config = new ooo.klae.connex.backend.dto.ReportConfig(source.widgets().stream()
+                .map(widget -> new ReportWidgetConfig(widget.id(), null, widget.dataSource(), widget.measure(),
+                        widget.groupBy(), widget.chartType())).toList(),
+                source.filters(), source.range(), source.bucket(), source.layout());
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ReportDefinition definition = invocation.getArgument(0);
+            definition.setId(REPORT_ID);
+            when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(definition);
+            return null;
+        }).when(reportMapper).insertDefinition(any());
+
+        var created = service.create(new ooo.klae.connex.backend.dto.ReportDefinitionRequest(
+                "営業レポート", null, template.cadence(), key, config));
+
+        assertEquals(ACTOR_ID, created.createdBy());
+        assertEquals("営業レポート", created.name());
+        assertNull(created.description());
+        assertTrue(created.config().widgets().stream().allMatch(widget -> widget.title() == null));
+        assertEquals(config, created.config());
+        verifyNoInteractions(aiReportNarrativeService);
+        verify(auditService).record("report.create", "report", REPORT_ID, "営業レポート", "Created report 営業レポート", null);
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportExportsRequireStepUpBeforeGeneratingOrLoadingSnapshots(boolean snapshot) {
         doThrow(new RecentAuthenticationRequiredException())

@@ -79,7 +79,7 @@ final class AiAssistantCreationTemplatePin {
     }
 
     /** Submits the proposal's exact template version; approval never selects a replacement. */
-    static RecordCreationTemplateUseDto use(Map<String, Object> pinned, int companyId) {
+    static RecordCreationTemplateUseDto use(Map<String, Object> pinned, Integer companyId) {
         Object id = pinned.get("templateId");
         Object version = pinned.get("templateVersion");
         Object revision = pinned.get("templateSetRevision");
@@ -129,7 +129,8 @@ final class AiAssistantCreationTemplatePin {
 
     /** Keeps create inputs closed even when an old stored request bypasses catalog validation. */
     static void validateShape(String kind, JsonNode request, Set<String> fields) {
-        if (!"company".equals(kind) || request == null || !request.isObject()) {
+        if (!("company".equals(kind) || "workspace".equals(kind))
+                || request == null || !request.isObject()) {
             throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
         }
         for (Map.Entry<String, JsonNode> entry : request.properties()) {
@@ -137,6 +138,12 @@ final class AiAssistantCreationTemplatePin {
                     || (!entry.getValue().isNull() && !entry.getValue().isString())) {
                 throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
             }
+        }
+        if ("workspace".equals(kind)) {
+            if (request.has("handle")) {
+                throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
+            }
+            return;
         }
         String handle = requiredText(request, "handle", 32);
         if (!handle.matches(AiAssistantWriteToolRequest.HANDLE)) {

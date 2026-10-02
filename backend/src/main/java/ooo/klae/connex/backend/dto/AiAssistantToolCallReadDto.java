@@ -27,8 +27,8 @@ public record AiAssistantToolCallReadDto(
         String executedAt) {
 
     /**
-     * Viewer-authorized person, company, deal or task identity, with null details when only its
-     * kind is safe. Task targets have no record navigation link.
+     * Viewer-authorized person, company, deal, task or workspace identity, with null details when only its
+     * kind is safe. Task and workspace targets have no record navigation link.
      */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Target(

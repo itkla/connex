@@ -109,7 +109,9 @@ class AiAssistantWriteToolRegistryTest {
             "remove_tag", Set.of("tag"),
             "draft_document", Set.of("template"),
             "create_person", Set.of("name"),
-            "create_deal", Set.of("name", "stage"));
+            "create_deal", Set.of("name", "stage"),
+            "create_company", Set.of("name"),
+            "create_report", Set.of("template", "name"));
     /** Reviewed legacy prose exceptions; no field-edit argument tolerates a marker. */
     private static final Map<String, Set<String>> MARKER_TOLERANT_PROSE = Map.of(
             "create_note", Set.of("content", "title"),
@@ -124,11 +126,14 @@ class AiAssistantWriteToolRegistryTest {
             boolean editing = "update_record_fields".equals(tool.name());
             assertEquals(editing ? Set.of("website")
                     : Set.of("create_person", "create_deal").contains(tool.name()) ? Set.of("name")
+                    : "create_company".equals(tool.name()) ? Set.of("name", "website")
                     : Set.of(), tool.identifierValueFields());
             assertEquals(editing
                     ? Set.of("title", "website", "industry", "address", "value", "expectedCloseDate")
                     : "create_person".equals(tool.name()) ? Set.of("name", "title")
                     : "create_deal".equals(tool.name()) ? Set.of("name")
+                    : "create_company".equals(tool.name()) ? Set.of("name", "website", "industry")
+                    : "create_report".equals(tool.name()) ? Set.of("report")
                     : Set.of(), tool.modelAuthoredDiffFields());
             if (Set.of("create_person", "create_deal").contains(tool.name())) {
                 ObjectNode request = JSON.createObjectNode().put("handle", "r1").put("name", "Expansion");
@@ -138,6 +143,16 @@ class AiAssistantWriteToolRegistryTest {
                 tool.validateFor("company", request);
                 tool.duplicateProbe(new AiAssistantWriteTool.Target("company", 31),
                         JSON.treeToValue(request, tool.requestType()));
+            } else if (tool.acceptedTargetKinds().equals(Set.of("workspace"))) {
+                ObjectNode request = JSON.createObjectNode().put("name", "Expansion");
+                if ("create_report".equals(tool.name())) {
+                    request.put("template", "sales-performance");
+                } else {
+                    request.put("website", "acme.example");
+                }
+                tool.validateFor("workspace", request);
+                tool.duplicateProbe(new AiAssistantWriteTool.Target("workspace", 7),
+                        JSON.treeToValue(request, tool.requestType()));
             } else {
                 tool.validateFor("person", JSON.createObjectNode().put("handle", "r1").put("title", "Director"));
             }
@@ -145,6 +160,40 @@ class AiAssistantWriteToolRegistryTest {
                 verifyNoInteractions(dependency);
             }
         }
+    }
+
+    @Test
+    void workspaceTargetsAreExclusiveHandleFreeStructuralCreates() {
+        assertRefused("workspace must be the only target kind", List.of(new AiAssistantCreateReportWriteTool(null) {
+            @Override
+            public Set<String> acceptedTargetKinds() {
+                return Set.of("workspace", "company");
+            }
+        }));
+        assertRefused("workspace must be the only target kind", List.of(new AiAssistantCreateReportWriteTool(null) {
+            @Override
+            public Freshness freshness() {
+                return Freshness.TARGET_UPDATED_AT;
+            }
+        }));
+        assertRefused("NONE lock and NONE freshness", List.of(new AiAssistantCreateReportWriteTool(null) {
+            @Override
+            public Lock lock(String kind) {
+                return new Lock(false, TargetLock.RECORD_UPDATE);
+            }
+        }));
+        assertRefused("workspace requests must not declare a handle", List.of(new AiAssistantCreateReportWriteTool(null) {
+            @Override
+            public Class<? extends AiAssistantWriteToolRequest> requestType() {
+                return AiAssistantWriteToolRequest.CreatePerson.class;
+            }
+        }));
+        assertRefused("NONE freshness may not write its anchor fields", List.of(new AiAssistantCreateReportWriteTool(null) {
+            @Override
+            public Set<String> declaredWritableFields() {
+                return Set.of("workspace.name");
+            }
+        }));
     }
 
     @Test
@@ -231,13 +280,15 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 tool("set_response_due", ToolTier.CONFIRM, Set.of("person")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal", "create_company", "create_report"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -261,6 +312,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 new AiAssistantSetResponseDueWriteTool(null)));
 
         assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).stream()
@@ -292,7 +345,7 @@ class AiAssistantWriteToolRegistryTest {
     @Test
     void refusesAnAcceptedKindOutsideTheRecordKinds() {
         assertRefused("create_task must accept a non-empty subset", List.of(
-                tool("create_task", ToolTier.AUTO, Set.of("person", "workspace"))));
+                tool("create_task", ToolTier.AUTO, Set.of("person", "pipeline"))));
         assertRefused("create_task must accept a non-empty subset", List.of(
                 tool("create_task", ToolTier.AUTO, Set.of())));
     }
@@ -692,6 +745,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -717,6 +772,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
+                new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
+                new AiAssistantCreateReportWriteTool(null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override

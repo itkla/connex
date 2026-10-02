@@ -57,12 +57,15 @@ public interface AiAssistantWriteTool {
     Class<? extends AiAssistantWriteToolRequest> requestType();
 
     /**
-     * The record kinds this tool's target handle may name.
+     * The kinds this tool accepts as its target.
      *
      * <p>It is the only statement of them: the read-tool executor's handle check, the framework's
      * proposal and revalidation, and the card projection all read it from here.
      *
-     * @return the non-empty set of record kinds a target handle may name
+     * <p>A workspace target must be the only accepted kind and has no request handle. The framework
+     * supplies the current workspace id; its lock and freshness policies must both be {@code NONE}.
+     *
+     * @return the non-empty set of accepted target kinds
      */
     Set<String> acceptedTargetKinds();
 
@@ -181,16 +184,24 @@ public interface AiAssistantWriteTool {
     /** Identity values for a framework-owned check, never candidate records or a review proof. */
     record DuplicateProbe(
             String kind, String name, Integer companyId, String title,
-            List<String> emails, List<String> phones) {
+            List<String> emails, List<String> phones, List<String> websites) {
         public DuplicateProbe(String kind, String name, Integer companyId, String title) {
-            this(kind, name, companyId, title, List.of(), List.of());
+            this(kind, name, companyId, title, List.of(), List.of(), List.of());
+        }
+
+        public DuplicateProbe(
+                String kind, String name, Integer companyId, String title,
+                List<String> emails, List<String> phones) {
+            this(kind, name, companyId, title, emails, phones, List.of());
         }
 
         public DuplicateProbe {
             emails = List.copyOf(emails);
             phones = List.copyOf(phones);
-            if ((!"person".equals(kind) && !"deal".equals(kind)) || name == null || name.isBlank()
-                    || companyId == null || companyId <= 0) {
+            websites = List.copyOf(websites);
+            if (kind == null || !Set.of("person", "company", "deal").contains(kind) || name == null || name.isBlank()
+                    || (!"company".equals(kind) && (companyId == null || companyId <= 0))
+                    || ("company".equals(kind) && companyId != null)) {
                 throw new IllegalArgumentException("Invalid assistant duplicate probe");
             }
         }
@@ -516,7 +527,7 @@ public interface AiAssistantWriteTool {
         DEAL_STAGE_CHANGE,
         /** The exact task row, after the board root when the write changes positions. */
         TASK_ROW,
-        /** Creates delegate their own hierarchy without locking their company anchor. */
+        /** Creates delegate their own hierarchy without locking an existing target record. */
         NONE
     }
 

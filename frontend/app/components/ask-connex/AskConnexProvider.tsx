@@ -414,6 +414,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const tDisclosure = useTranslations('Assistant.disclosure');
     const tWarmth = useTranslations('Temperature');
     const tProvenance = useTranslations('ContactProvenance');
+    const tReports = useTranslations('Reports.templates');
     const locale = useLocale();
     const now = useLiveNow();
     const router = useRouter();
@@ -2492,7 +2493,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * English database back at them. A token this client has no word for is left as it stands rather
      * than guessed at.
      */
-    const outcomeValueText = useCallback((field: string, value: string): string => {
+    const outcomeValueText = useCallback((field: string, value: string, toolName: string): string => {
+        if (toolName === 'create_report' && field === 'template') {
+            return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
+                : t('toolCards.templateDefaults.unavailable');
+        }
         if (field === 'start') return formatUtcDateTime(value, locale, value);
         if (field === 'dueDate') return formatDate(value, locale);
         if (field === 'visibility') {
@@ -2506,17 +2511,25 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 : value;
         }
         return value;
-    }, [locale, t]);
+    }, [locale, t, tReports]);
     /** States one value a pending proposal reviews; see `askConnexChangeValueText`. */
     const changeValueText = useCallback((
         field: AiAssistantToolCallChangeField,
         value: string,
         side: 'current' | 'proposed',
+        toolName: string,
     ): string => {
+        if (toolName === 'create_report' && field === 'template') {
+            return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
+                : t('toolCards.templateDefaults.unavailable');
+        }
         if (field === 'templateDefaults') {
             const fields: Readonly<Record<string, string>> = {
                 name: t('toolCards.change.fieldName'),
                 title: t('toolCards.change.fieldTitle'),
+                website: t('toolCards.change.fieldWebsite'),
+                industry: t('toolCards.change.fieldIndustry'),
+                address: t('toolCards.change.fieldAddress'),
                 email: t('toolCards.templateDefaults.email'),
                 phone: t('toolCards.templateDefaults.phone'),
                 company: t('toolCards.templateDefaults.company'),
@@ -2553,7 +2566,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             (hours) => t('toolCards.change.responseDueInHours', { hours }),
             { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
         );
-    }, [locale, t, tProvenance]);
+    }, [locale, t, tProvenance, tReports]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2714,6 +2727,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 taskStatus: t('toolCards.change.fieldTaskStatus'),
                 dueDate: t('toolCards.change.fieldDueDate'),
                 document: t('toolCards.change.fieldDocument'),
+                report: t('toolCards.change.fieldReport'),
                 title: t('toolCards.change.fieldTitle'),
                 website: t('toolCards.change.fieldWebsite'),
                 industry: t('toolCards.change.fieldIndustry'),
@@ -2735,6 +2749,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 taskStatus: t('toolCards.change.currentUnresolvedTaskStatus'),
                 dueDate: t('toolCards.change.currentUnresolvedDueDate'),
                 document: t('toolCards.change.currentUnresolvedDocument'),
+                report: t('toolCards.change.currentUnresolvedField'),
                 title: t('toolCards.change.currentUnresolvedField'),
                 website: t('toolCards.change.currentUnresolvedField'),
                 industry: t('toolCards.change.currentUnresolvedField'),
@@ -2802,6 +2817,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
                 name: t('toolCards.change.fieldName'),
                 currency: t('toolCards.change.fieldCurrency'),
+                template: t('toolCards.change.fieldTemplate'),
                 other: t('toolCards.outcomeFields.other'),
             },
             outcomeValue: outcomeValueText,
@@ -2833,8 +2849,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 createNote: t('toolCards.summaries.createNote'),
                 createPerson: t('toolCards.summaries.createPerson'),
                 createDeal: t('toolCards.summaries.createDeal'),
+                createCompany: t('toolCards.summaries.createCompany'),
+                createReport: t('toolCards.summaries.createReport'),
                 personCreated: t('toolCards.summaries.personCreated'),
                 dealCreated: t('toolCards.summaries.dealCreated'),
+                companyCreated: t('toolCards.summaries.companyCreated'),
+                reportCreated: t('toolCards.summaries.reportCreated'),
                 addTag: t('toolCards.summaries.addTag'),
                 removeTag: t('toolCards.summaries.removeTag'),
                 removeTagNamed: (value: string) => t('toolCards.summaries.removeTagNamed', { value }),

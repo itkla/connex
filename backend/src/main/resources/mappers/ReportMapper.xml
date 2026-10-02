@@ -19,6 +19,18 @@
     ORDER BY updated_at DESC, id DESC
   </select>
 
+  <select id="getDefinitionIdsIn" resultType="int">
+    SELECT id FROM report_definition
+    WHERE workspace_id = #{workspaceId}
+    <choose>
+      <when test="ids != null and !ids.isEmpty()">
+        AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <otherwise>AND 1 = 0</otherwise>
+    </choose>
+  </select>
+
   <select id="searchDefinitions" resultType="ooo.klae.connex.backend.dto.ReportSummaryDto">
     SELECT id, name, description, cadence, updated_at FROM report_definition
     WHERE workspace_id = #{workspaceId}

@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantChangeDealStageWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCompleteTaskWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateActivityWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateDealWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateCompanyWriteTool;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateReportWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateNoteWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreatePersonWriteTool;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantCreateTaskWriteTool;
@@ -55,6 +57,7 @@ import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.RecordCreationPresetService;
+import ooo.klae.connex.backend.services.ReportService;
 import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import tools.jackson.databind.ObjectMapper;
@@ -156,6 +159,7 @@ class AiAssistantWriteToolSpiArchTest {
             LeadResponseSlaService.class,
             GuidedRecordCreationService.class,
             RecordCreationPresetService.class,
+            ReportService.class,
             AiAssistantDateResolver.class,
             ObjectMapper.class);
 
@@ -210,11 +214,22 @@ class AiAssistantWriteToolSpiArchTest {
      * <p>{@code draft_document} is granted the workspace-scoped {@code getById} template read to
      * recheck the pinned template's active state after the framework's locks and before generation.
      * No template mutator or lock is granted.
+     *
+     * <p>{@code create_company} reads the quick-create preset and invokes only guided company
+     * creation, retaining template validation and the canonical duplicate recheck. The framework
+     * owns the advisory preflight. {@code create_report} reads built-in templates and creates a
+     * saved definition through the audited REPORT_READ/REPORT_CREATE delegates; no generation,
+     * aggregation, snapshot or provider method is granted.
      */
     private static final Map<Class<? extends AiAssistantWriteTool>, Map<Class<?>, Set<String>>>
             PERMITTED_SERVICE_METHODS = Map.ofEntries(
                     Map.entry(AiAssistantCreateActivityWriteTool.class,
                             Map.of(ActivityService.class, Set.of("create", "deleteIf"))),
+                    Map.entry(AiAssistantCreateCompanyWriteTool.class,
+                            Map.of(GuidedRecordCreationService.class, Set.of("createCompany"),
+                                    RecordCreationPresetService.class, Set.of("companies"))),
+                    Map.entry(AiAssistantCreateReportWriteTool.class,
+                            Map.of(ReportService.class, Set.of("templates", "create"))),
                     Map.entry(AiAssistantCreatePersonWriteTool.class,
                             Map.of(GuidedRecordCreationService.class, Set.of("createPerson"),
                                     RecordCreationPresetService.class, Set.of("persons"))),
@@ -270,11 +285,14 @@ class AiAssistantWriteToolSpiArchTest {
      * they report only whether they removed it; neither is granted a read of the association.
      * {@code set_response_due} is here because {@code startFirstResponseClock} reports only whether
      * it started a clock, never the deadline it wrote, and the tool is granted no read of the
-     * contact. Adding a tool is a reviewed decision to ship a write with no verify-after-write.
+     * contact. Workspace company/report creates have no existing record field to compare; their
+     * unavailable inverse names the returned created id for tenant-scoped liveness projection.
+     * Adding a tool is a reviewed decision to ship a write with no verify-after-write.
      */
     private static final Set<String> STRUCTURAL_READ_BACK = Set.of(
             "AiAssistantAddTagWriteTool", "AiAssistantRemoveTagWriteTool",
-            "AiAssistantSetResponseDueWriteTool");
+            "AiAssistantSetResponseDueWriteTool",
+            "AiAssistantCreateCompanyWriteTool", "AiAssistantCreateReportWriteTool");
 
     private static final Pattern SELF_COMPARED_READ_BACK = Pattern.compile(
             "new\\s+ReadBack\\s*\\(\\s*[^,]+,\\s*([^,]+?)\\s*,\\s*\\1\\s*\\)");

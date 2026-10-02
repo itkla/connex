@@ -131,6 +131,8 @@ class AiAssistantToolExecutorTest {
         arguments.put("update_record_fields", ",\"title\":\"Director\"");
         arguments.put("create_person", ",\"name\":\"Morgan\"");
         arguments.put("create_deal", ",\"name\":\"Expansion\",\"stage\":\"Discovery\",\"value\":\"1250\",\"currency\":\"JPY\"");
+        arguments.put("create_company", ",\"name\":\"New company\"");
+        arguments.put("create_report", ",\"template\":\"sales-performance\",\"name\":\"Sales report\"");
         Map<String, Set<String>> accepted = new HashMap<>(Map.of(
                 "create_activity", Set.of("person", "deal"),
                 "create_task", Set.of("person", "deal"),
@@ -144,6 +146,8 @@ class AiAssistantToolExecutorTest {
                 "find_schedule_conflicts", Set.of("person")));
         accepted.put("create_person", Set.of("company"));
         accepted.put("create_deal", Set.of("company"));
+        accepted.put("create_company", Set.of("workspace"));
+        accepted.put("create_report", Set.of("workspace"));
         accepted.put("draft_document", Set.of("deal"));
         accepted.put("complete_task", Set.of("task"));
         accepted.put("reschedule_task", Set.of("task"));
@@ -158,6 +162,10 @@ class AiAssistantToolExecutorTest {
             assertEquals(accepted.get(tool.getKey()), tool.getValue(), tool.getKey());
         }
         for (Map.Entry<String, Set<String>> tool : accepted.entrySet()) {
+            if (tool.getValue().equals(Set.of("workspace"))) {
+                executor.validateReferences(tool.getKey(),
+                        objectMapper.readTree("{" + arguments.get(tool.getKey()).substring(1) + "}"), resources);
+            }
             for (Map.Entry<String, String> handle : handles.entrySet()) {
                 var args = objectMapper.readTree("{\"handle\":\"" + handle.getValue() + "\""
                         + arguments.get(tool.getKey()) + "}");
@@ -169,6 +177,7 @@ class AiAssistantToolExecutorTest {
                             () -> executor.validateReferences(tool.getKey(), args, resources),
                             tool.getKey() + " on a " + handle.getKey());
                     assertEquals("task".equals(handle.getKey()) || tool.getValue().equals(Set.of("task"))
+                            || tool.getValue().equals(Set.of("workspace"))
                             ? "invalid_tool_arguments" : "wrong_handle_kind", refused.detailReason());
                 }
             }

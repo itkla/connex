@@ -3445,7 +3445,7 @@ export type AiChatTurn = {
 
 /** Viewer-authorized target identity for an assistant write-tool call. */
 export type AiAssistantToolCallTarget = {
-    kind: AiChatPageContextKind | 'task';
+    kind: AiChatPageContextKind | 'task' | 'workspace';
     id: number | null;
     label: string | null;
 };
@@ -3453,7 +3453,7 @@ export type AiAssistantToolCallTarget = {
 /** A field or template detail reviewed before an assistant edit or creation. */
 export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag' | 'responseDue' | 'taskStatus' | 'dueDate'
     | 'document' | 'title' | 'website' | 'industry' | 'address' | 'value' | 'expectedCloseDate'
-    | 'name' | 'currency' | 'template' | 'templateDefaults';
+    | 'name' | 'currency' | 'template' | 'templateDefaults' | 'report';
 
 /**
  * Whether a reviewed change can still be applied as reviewed.
@@ -3498,7 +3498,7 @@ export type AiAssistantToolCallOutcomeValue = {
 };
 
 /** The record kinds an assistant action can create, each of which has a detail route. */
-export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note' | 'person' | 'deal';
+export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note' | 'person' | 'deal' | 'company' | 'report';
 
 /**
  * The record a completed assistant action created.

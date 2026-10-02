@@ -25,6 +25,8 @@ import {
 import type { AiAssistantToolCallChangeState } from "@/app/lib/types";
 import enCommon from "@/messages/en/common.json";
 import jaCommon from "@/messages/ja/common.json";
+import enReports from "@/messages/en/reports.json";
+import jaReports from "@/messages/ja/reports.json";
 import {
     askConnexCard as card,
     askConnexCardLabels as cardLabels,
@@ -75,6 +77,109 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it.each([
+        { locale: "en", messages: enCommon, reports: enReports },
+        { locale: "ja", messages: jaCommon, reports: jaReports },
+    ])("reviews a report and its localized template in $locale on both surfaces", ({ locale, messages, reports }) => {
+        const t = createTranslator({ locale, messages, namespace: "AskConnex.toolCards" });
+        const tReports = createTranslator({ locale, messages: reports, namespace: "Reports.templates" });
+        const labels: AskConnexToolCardLabels = {
+            ...cardLabels,
+            changeField: { ...cardLabels.changeField, report: t("change.fieldReport") },
+            changeValue: (field, value, side, toolName) => toolName === "create_report"
+                && field === "template" && value === "sales-performance"
+                ? tReports("sales-performance.name") : cardLabels.changeValue(field, value, side, toolName),
+            outcomeValue: (field, value, toolName) => toolName === "create_report"
+                && field === "template" && value === "sales-performance"
+                ? tReports("sales-performance.name") : value,
+            openCreatedRecord: (kind) => t(`openCreated.${kind}`),
+            openCreatedRecordAria: (kind) => t(`openCreatedAria.${kind}`),
+            summaries: {
+                ...cardLabels.summaries,
+                createReport: t("summaries.createReport"),
+                reportCreated: t("summaries.reportCreated"),
+            },
+        };
+        const report = change({ field: "report", currentValue: null, proposedValue: "Monthly review" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "sales-performance" });
+        const proposal = card({
+            toolName: "create_report",
+            target: { kind: "workspace", id: 42, label: "Japan sales" },
+            change: report,
+            changes: [report, template],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        if (group === undefined) throw new Error("Missing proposal group");
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={labels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal, labels), review]) {
+            expect(markup).toContain("Japan sales");
+            expect(markup).toContain("Monthly review");
+            expect(markup).toContain(escaped(t("change.fieldReport")));
+            expect(markup).toContain(escaped(tReports("sales-performance.name")));
+            expect(markup).not.toContain("sales-performance");
+            expect(markup).not.toContain('href="/records/deals/42"');
+            expect(markup).not.toContain('href="/records/companies/42"');
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(askConnexToolCardAffordances(card({
+            ...proposal,
+            changes: [{ ...report, proposedValue: null, state: "withheld" }, template],
+        }), NOW)).not.toContain("approve");
+        const executed = renderCard(card({
+            ...proposal,
+            status: "executed",
+            outcomeSummary: "Report created",
+            outcomeValues: [{ field: "name", value: "Monthly review" }, { field: "template", value: "sales-performance" }],
+            createdRecord: { kind: "report", id: 74 },
+        }), labels);
+        expect(executed).toContain('href="/insights/reports/74"');
+        expect(executed).toContain(escaped(t("summaries.reportCreated")));
+        expect(executed).toContain(escaped(t("openCreated.report")));
+        expect(executed).toContain(escaped(tReports("sales-performance.name")));
+        expect(executed).not.toContain("sales-performance");
+    });
+
+    it("reviews company fields and template defaults against an unlinked workspace", () => {
+        const name = change({ field: "name", currentValue: null, proposedValue: "Acme" });
+        const website = change({ field: "website", currentValue: null, proposedValue: "acme.example" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "sales-performance" });
+        const defaults = change({ field: "templateDefaults", currentValue: null, proposedValue: '{"tags":""}' });
+        const changes = [name, website, template, defaults];
+        const proposal = card({
+            toolName: "create_company",
+            target: { kind: "workspace", id: 42, label: "Japan sales" },
+            change: name,
+            changes,
+        });
+        const markup = renderCard(proposal);
+        expect(markup).toContain("Japan sales");
+        expect(markup).toContain("acme.example");
+        expect(markup).toContain("sales-performance");
+        expect(markup).toContain("Filled by the template");
+        expect(markup).not.toContain(escaped(cardLabels.restrictedTarget));
+        expect(markup).not.toContain("href=");
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(changes.length);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(renderCard(card({
+            ...proposal,
+            status: "executed",
+            outcomeSummary: "Company created",
+            createdRecord: { kind: "company", id: 74 },
+        }))).toContain('href="/records/companies/74"');
+    });
+
     it.each(["create_person", "create_deal"])("reviews every %s field and template default on both surfaces", (toolName) => {
         const name = change({ field: "name", currentValue: null, proposedValue: "New record" });
         const template = change({ field: "template", currentValue: null, proposedValue: "Referral template" });

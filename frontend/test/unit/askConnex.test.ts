@@ -75,8 +75,12 @@ const TOOL_SUMMARY_LABELS = {
     createNote: 'メモを作成',
     createPerson: '連絡先を作成',
     createDeal: '案件を作成',
+    createCompany: '会社を作成',
+    createReport: 'レポートを作成',
     personCreated: '連絡先を作成しました',
     dealCreated: '案件を作成しました',
+    companyCreated: '会社を作成しました',
+    reportCreated: 'レポートを作成しました',
     addTag: 'タグを追加',
     removeTag: 'タグを削除',
     removeTagNamed: (value: string) => `タグ削除: ${value}`,
@@ -1061,6 +1065,25 @@ describe('Ask Connex tool-call cards', () => {
         expect(askConnexToolOutcomeSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(outcome);
         expect(askConnexCreatedRecordHref(createCall.createdRecord)).toBe(href);
         expect(askConnexToolTargetHref(createCall.target)).toBe('/records/companies/42');
+    });
+
+    it.each([
+        { toolName: 'create_company', kind: 'company', request: '会社を作成', outcome: '会社を作成しました', href: '/records/companies/74' },
+        { toolName: 'create_report', kind: 'report', request: 'レポートを作成', outcome: 'レポートを作成しました', href: '/insights/reports/74' },
+    ] as const)('localizes $toolName without linking its workspace target', ({ toolName, kind, request, outcome, href }) => {
+        const createCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName,
+            tier: 'confirm',
+            target: { kind: 'workspace', id: 42, label: 'Japan sales' },
+            requestSummary: 'Create a record',
+            outcomeSummary: 'Record created',
+            createdRecord: { kind, id: 74 },
+        };
+        expect(askConnexToolRequestSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(request);
+        expect(askConnexToolOutcomeSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(outcome);
+        expect(askConnexCreatedRecordHref(createCall.createdRecord)).toBe(href);
+        expect(askConnexToolTargetHref(createCall.target)).toBeNull();
     });
 
     it.each([
