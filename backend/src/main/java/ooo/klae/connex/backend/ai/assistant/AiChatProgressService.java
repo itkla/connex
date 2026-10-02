@@ -132,7 +132,7 @@ public class AiChatProgressService {
             case "aggregate_metric" -> "metrics";
             case "create_note" -> "notes";
             case "add_tag", "remove_tag", "change_deal_stage", "draft_document", "assign_owner",
-                    "set_response_due", "update_record_fields" -> "actions";
+                    "set_response_due", "update_record_fields", "create_person", "create_deal" -> "actions";
             default -> "other";
         };
     }
@@ -166,7 +166,7 @@ public class AiChatProgressService {
             case "search_records", "get_records" -> arraySize(result, "records");
             case "get_record", "create_activity", "create_task", "create_note",
                     "add_tag", "remove_tag", "change_deal_stage", "assign_owner", "draft_document",
-                    "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "relationship_metrics" -> 1;
+                    "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal", "relationship_metrics" -> 1;
             case "list_activities", "list_scope_activities" ->
                     arraySize(result, "activities");
             case "deal_attention" -> arraySize(result, "deals");

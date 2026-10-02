@@ -136,7 +136,7 @@ class AiAssistantPromptEnvelopeTest {
      * planned.
      */
     private static final Set<String> PLANNED_TOOLSET_KEYS =
-            Set.of("write_create", "write_workspace");
+            Set.of("write_workspace");
 
     /**
      * The most each loadable toolset may add over the core envelope, per protocol.
@@ -152,7 +152,7 @@ class AiAssistantPromptEnvelopeTest {
      * floor-admissibility guarantee is unchanged. {@code write_fields} likewise measured
      * 1,029 / 825 against its 1,000 / 800 allocation with {@code update_record_fields} after its
      * description was shortened, so its entry was raised to 1,100 / 875 under the same rule. The
-     * last two entries are {@link #PLANNED_TOOLSET_KEYS}; their allocations are committed here so
+     * last entry is in {@link #PLANNED_TOOLSET_KEYS}; its allocation is committed here so
      * each is proven to fit the floor before its first tool exists. A toolset's cost to the core
      * (its directory line and {@code find_tools} value) is not part of its entry here; it is
      * funded by {@link #CORE_CEILING}. Raising any entry is a budget decision, not a

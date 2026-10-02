@@ -151,6 +151,26 @@ public class DuplicatePreflightService {
     }
 
     /**
+     * Advisory, visibility-bounded deal duplicate check for assistant preparation.
+     *
+     * <p>Uses the interactive matcher's workspace-owned candidate set and rate limit, takes no
+     * mutex and issues no proof. Approval still calls {@link #requireReviewedDealCreation} under
+     * the ordinary duplicate-decision hierarchy; a clear result is never authorization to create.
+     *
+     * @param request proposed deal identity
+     * @return whether any candidate exists or the bounded query was truncated
+     */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public boolean dealCandidatesExist(DealDuplicatePreflightRequest request) {
+        NormalizedDealRequest normalized = normalizeDeal(Objects.requireNonNull(request, "request"));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        rateLimiter.requireAllowed(1);
+        DealMatch match = matchDeal(workspaceId, normalized, dealWorkflowFingerprint(workspaceId, normalized));
+        return match.truncated() || !match.candidates().isEmpty();
+    }
+
+    /**
      * Rechecks a reviewed person immediately before interactive creation.
      *
      * @param request exact values about to be created

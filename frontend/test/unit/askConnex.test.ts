@@ -18,6 +18,8 @@ import {
     anchorAskConnexToolCards,
     appendAskConnexTurnSegment,
     askConnexChangeValueText,
+    askConnexCreatedRecordHref,
+    askConnexTemplateDefaultsText,
     askConnexReasoningSurvives,
     askConnexMessageNarration,
     askConnexCitationHref,
@@ -71,6 +73,10 @@ const TOOL_SUMMARY_LABELS = {
     updateRecordFields: 'レコードの項目を更新する',
     recordFieldsUpdated: 'レコードの項目を更新しました',
     createNote: 'メモを作成',
+    createPerson: '連絡先を作成',
+    createDeal: '案件を作成',
+    personCreated: '連絡先を作成しました',
+    dealCreated: '案件を作成しました',
     addTag: 'タグを追加',
     removeTag: 'タグを削除',
     removeTagNamed: (value: string) => `タグ削除: ${value}`,
@@ -1036,6 +1042,50 @@ describe('Ask Connex tool-call cards', () => {
             { ...draft, requestSummary: 'Draft a deal document' }, TOOL_SUMMARY_LABELS,
         )).toBe('書類の下書きを作成');
         expect(askConnexToolOutcomeSummary(draft, TOOL_SUMMARY_LABELS)).toBe('書類の下書き作成済み');
+    });
+
+    it.each([
+        { toolName: 'create_person', kind: 'person', request: '連絡先を作成', outcome: '連絡先を作成しました', href: '/records/contacts/74' },
+        { toolName: 'create_deal', kind: 'deal', request: '案件を作成', outcome: '案件を作成しました', href: '/records/deals/74' },
+    ] as const)('localizes $toolName and links to its created record', ({ toolName, kind, request, outcome, href }) => {
+        const createCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName,
+            tier: 'confirm',
+            target: { kind: 'company', id: 42, label: 'Acme' },
+            requestSummary: 'Create a record',
+            outcomeSummary: 'Record created',
+            createdRecord: { kind, id: 74 },
+        };
+        expect(askConnexToolRequestSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(request);
+        expect(askConnexToolOutcomeSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(outcome);
+        expect(askConnexCreatedRecordHref(createCall.createdRecord)).toBe(href);
+        expect(askConnexToolTargetHref(createCall.target)).toBe('/records/companies/42');
+    });
+
+    it.each([
+        { locale: 'en', messages: enCommon, source: 'Source', referral: 'Referral', expected: 'Source: Referral and Tags' },
+        { locale: 'ja', messages: jaCommon, source: '流入元', referral: '紹介', expected: '流入元：紹介、タグ' },
+    ])('renders pinned template defaults in $locale without exposing private values or keys', ({ locale, messages, source, referral, expected }) => {
+        const t = createTranslator({ locale, messages, namespace: 'AskConnex.toolCards.templateDefaults' });
+        const labels = {
+            field: (key: string) => key === 'leadSource' ? source
+                : key === 'tags' ? t('tags') : t('other'),
+            leadSource: (value: string) => value === 'REFERRAL' ? referral : t('unavailable'),
+            fieldValue: (field: string, value: string) => t('fieldValue', { field, value }),
+            none: t('none'),
+            unavailable: t('unavailable'),
+        };
+        expect(askConnexTemplateDefaultsText('{"leadSource":"REFERRAL","tags":""}', locale, labels))
+            .toBe(expected);
+        expect(askConnexTemplateDefaultsText('{"tags":"private tag","unrecognizedKey":"private value"}', locale, labels))
+            .toBe(new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format([t('tags'), t('other')]));
+        expect(askConnexTemplateDefaultsText('{"leadSource":"UNKNOWN_SOURCE"}', locale, labels))
+            .toBe(t('fieldValue', { field: source, value: t('unavailable') }));
+        expect(askConnexTemplateDefaultsText('{}', locale, labels)).toBe(t('none'));
+        for (const malformed of ['{', 'null', '[]', '{"tags":1}', '{"tags":{"name":"private"}}']) {
+            expect(askConnexTemplateDefaultsText(malformed, locale, labels)).toBe(t('unavailable'));
+        }
     });
 
     it('localizes field-edit requests and outcomes without interpreting proposed values', () => {

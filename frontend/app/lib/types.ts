@@ -3450,9 +3450,10 @@ export type AiAssistantToolCallTarget = {
     label: string | null;
 };
 
-/** The field an assistant proposal would rewrite on an existing record. */
+/** A field or template detail reviewed before an assistant edit or creation. */
 export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag' | 'responseDue' | 'taskStatus' | 'dueDate'
-    | 'document' | 'title' | 'website' | 'industry' | 'address' | 'value' | 'expectedCloseDate';
+    | 'document' | 'title' | 'website' | 'industry' | 'address' | 'value' | 'expectedCloseDate'
+    | 'name' | 'currency' | 'template' | 'templateDefaults';
 
 /**
  * Whether a reviewed change can still be applied as reviewed.
@@ -3497,7 +3498,7 @@ export type AiAssistantToolCallOutcomeValue = {
 };
 
 /** The record kinds an assistant action can create, each of which has a detail route. */
-export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note';
+export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note' | 'person' | 'deal';
 
 /**
  * The record a completed assistant action created.

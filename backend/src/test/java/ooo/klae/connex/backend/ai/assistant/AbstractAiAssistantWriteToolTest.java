@@ -77,6 +77,9 @@ abstract class AbstractAiAssistantWriteToolTest {
     CompanyService companyService;
     DealService dealService;
     ooo.klae.connex.backend.services.DuplicateDecisionLockService duplicateDecisionLockService;
+    ooo.klae.connex.backend.services.DuplicatePreflightService duplicatePreflightService;
+    ooo.klae.connex.backend.services.GuidedRecordCreationService creationService;
+    ooo.klae.connex.backend.services.RecordCreationPresetService presetService;
     TaskService taskService;
     DealDocumentService documentService;
     DocumentTemplateService templateService;
@@ -108,6 +111,9 @@ abstract class AbstractAiAssistantWriteToolTest {
         companyService = mock(CompanyService.class);
         when(companyService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         duplicateDecisionLockService = mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class);
+        duplicatePreflightService = mock(ooo.klae.connex.backend.services.DuplicatePreflightService.class);
+        creationService = mock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
+        presetService = mock(ooo.klae.connex.backend.services.RecordCreationPresetService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
         documentService = mock(DealDocumentService.class);
@@ -197,11 +203,18 @@ abstract class AbstractAiAssistantWriteToolTest {
     }
 
     /**
-     * @param tools exactly the declared tools the framework is built over
-     * @return the framework over those tools
+     * @param tools the declared tools under test, with structural creates supplied when absent
+     * @return the framework over the complete declaration set
      */
     AiAssistantWriteToolService framework(List<AiAssistantWriteTool> tools) {
-        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, tools);
+        List<AiAssistantWriteTool> complete = new ArrayList<>(tools);
+        if (complete.stream().noneMatch(tool -> "create_person".equals(tool.name()))) {
+            complete.add(new AiAssistantCreatePersonWriteTool(creationService, presetService, objectMapper));
+        }
+        if (complete.stream().noneMatch(tool -> "create_deal".equals(tool.name()))) {
+            complete.add(new AiAssistantCreateDealWriteTool(creationService, presetService, pipelineService, objectMapper));
+        }
+        AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, complete);
         readExecutor = new AiAssistantToolExecutor(
                 catalog,
                 registry,
@@ -230,6 +243,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 companyService,
                 dealService,
                 duplicateDecisionLockService,
+                duplicatePreflightService,
                 restrictionEpoch,
                 governanceService,
                 objectMapper,

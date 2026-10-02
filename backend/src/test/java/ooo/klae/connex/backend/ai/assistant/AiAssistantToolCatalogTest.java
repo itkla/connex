@@ -50,7 +50,7 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
         assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).size() - 1L,
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
@@ -177,6 +177,7 @@ class AiAssistantToolCatalogTest {
                 byToolset.get(Toolset.WRITE_PIPELINE));
         assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
         assertEquals(List.of("update_record_fields"), byToolset.get(Toolset.WRITE_FIELDS));
+        assertEquals(List.of("create_person", "create_deal"), byToolset.get(Toolset.WRITE_CREATE));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
@@ -216,11 +217,11 @@ class AiAssistantToolCatalogTest {
     void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
         assertEquals(
                 List.of("core", "analytics", "schedule",
-                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields"),
+                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields", "write_create"),
                 Arrays.stream(Toolset.values()).map(Toolset::key).toList());
         assertEquals(
                 List.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup", "write_fields"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create"),
                 AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
         assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
         for (Map.Entry<Toolset, String> entry : catalog.directory()) {
@@ -285,7 +286,7 @@ class AiAssistantToolCatalogTest {
         assertTrue(argument.required());
         assertEquals(
                 Set.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline", "write_followup", "write_fields"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create"),
                 argument.values());
         assertFalse(argument.values().contains("core"));
     }

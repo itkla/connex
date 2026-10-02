@@ -822,7 +822,11 @@
         "fieldExpectedCloseDate": "Expected close date",
         "currentUnresolvedField": "A value that cannot be shown",
         "proposedWithheld": "Withheld",
-        "stateWithheld": "This proposed value cannot be shown. Make this change on the record."
+        "stateWithheld": "This proposed value cannot be shown. Make this change on the record.",
+        "fieldName": "Name",
+        "fieldCurrency": "Currency",
+        "fieldTemplate": "Creation template",
+        "fieldTemplateDefaults": "Filled by the template"
       },
       "actions": {
         "undo": "Undo",
@@ -883,7 +887,11 @@
         "taskCompleted": "Task completed",
         "taskRescheduled": "Task rescheduled",
         "updateRecordFields": "Update record fields",
-        "recordFieldsUpdated": "Record fields updated"
+        "recordFieldsUpdated": "Record fields updated",
+        "createPerson": "Create a contact",
+        "createDeal": "Create a deal",
+        "personCreated": "Contact created",
+        "dealCreated": "Deal created"
       },
       "outcomeFields": {
         "type": "Type",
@@ -918,14 +926,30 @@
       "openCreated": {
         "activity": "Open activity",
         "task": "Open task",
-        "note": "Open note"
+        "note": "Open note",
+        "person": "Open contact",
+        "deal": "Open deal"
       },
       "openCreatedAria": {
         "activity": "Open the activity this action created",
         "task": "Open the task this action created",
-        "note": "Open the note this action created"
+        "note": "Open the note this action created",
+        "person": "Open the contact this action created",
+        "deal": "Open the deal this action created"
       },
-      "undoWindow": "You can undo this until {deadline} — {remaining}."
+      "undoWindow": "You can undo this until {deadline} — {remaining}.",
+      "templateDefaults": {
+        "email": "Email",
+        "phone": "Phone",
+        "company": "Company",
+        "pipeline": "Pipeline",
+        "tags": "Tags",
+        "customFields": "Custom fields",
+        "other": "Other fields",
+        "none": "No additional fields",
+        "unavailable": "Details unavailable",
+        "fieldValue": "{field}: {value}"
+      }
     },
     "upload": {
       "progress": "Uploading {progress}%",

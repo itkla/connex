@@ -77,7 +77,7 @@ public class AiAssistantToolCallReadService {
      * workspace's live rows. An inverse naming its target instead, as a tag association does, names
      * no created record.
      */
-    private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
+    private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note", "person", "deal");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiChatMapper chatMapper;
@@ -342,7 +342,8 @@ public class AiAssistantToolCallReadService {
                     toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"),
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
-                            ? text(root, "targetVersion") : null);
+                            ? text(root, "targetVersion") : null,
+                    AiAssistantToolProposalPin.read(root));
         } catch (JacksonException | IllegalArgumentException | AiAssistantLoopException exception) {
             return null;
         }
@@ -714,7 +715,7 @@ public class AiAssistantToolCallReadService {
                 call.pins() == null ? null : call.pins().resolutionId(),
                 call.pins() == null ? null : call.pins().principalIds(),
                 inputs.contains(ReviewInput.TEMPLATES) ? templates : List.of(),
-                inputs.contains(ReviewInput.DOCUMENTS) ? documentVersions : Map.of());
+                inputs.contains(ReviewInput.DOCUMENTS) ? documentVersions : Map.of(), call.pinned());
     }
 
     /**
@@ -834,6 +835,9 @@ public class AiAssistantToolCallReadService {
         if (unchanged) {
             return "unchanged";
         }
+        if (call.tool().freshness() == AiAssistantWriteTool.Freshness.NONE) {
+            return "ready";
+        }
         boolean changed = call.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                 ? call.targetVersion() == null || !call.targetVersion().equals(target.targetVersion())
                 : AiAssistantProposalFreshness.changedSince(
@@ -926,6 +930,20 @@ public class AiAssistantToolCallReadService {
     private Set<RecordKey> liveCreatedRecordKeys(
             Viewer viewer, Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates) {
         Set<RecordKey> live = new LinkedHashSet<>();
+        List<Integer> personIds = createdIds(candidates, "person");
+        List<Integer> dealIds = createdIds(candidates, "deal");
+        if (!personIds.isEmpty()) {
+            for (Person person : personMapper.getByIds(viewer.workspaceId(), personIds)) {
+                if (isProcessable(person)) {
+                    live.add(new RecordKey("person", person.getId()));
+                }
+            }
+        }
+        if (!dealIds.isEmpty()) {
+            for (Deal deal : dealMapper.getByIds(viewer.workspaceId(), dealIds)) {
+                live.add(new RecordKey("deal", deal.getId()));
+            }
+        }
         List<Integer> activityIds = createdIds(candidates, "activity");
         List<Integer> taskIds = createdIds(candidates, "task");
         List<Integer> noteIds = createdIds(candidates, "note");
@@ -1122,7 +1140,8 @@ public class AiAssistantToolCallReadService {
             int turnId,
             JsonNode request,
             AiAssistantProposalPins pins,
-            String targetVersion) {
+            String targetVersion,
+            Map<String, Object> pinned) {
     }
 
     private record RecordKey(String kind, int id) {

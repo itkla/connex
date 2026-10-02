@@ -107,7 +107,9 @@ class AiAssistantWriteToolRegistryTest {
             "assign_owner", Set.of("owner"),
             "change_deal_stage", Set.of("stage"),
             "remove_tag", Set.of("tag"),
-            "draft_document", Set.of("template"));
+            "draft_document", Set.of("template"),
+            "create_person", Set.of("name"),
+            "create_deal", Set.of("name", "stage"));
     /** Reviewed legacy prose exceptions; no field-edit argument tolerates a marker. */
     private static final Map<String, Set<String>> MARKER_TOLERANT_PROSE = Map.of(
             "create_note", Set.of("content", "title"),
@@ -123,12 +125,53 @@ class AiAssistantWriteToolRegistryTest {
             assertEquals(editing ? Set.of("website") : Set.of(), tool.identifierValueFields());
             assertEquals(editing
                     ? Set.of("title", "website", "industry", "address", "value", "expectedCloseDate")
+                    : "create_person".equals(tool.name()) ? Set.of("name", "title")
+                    : "create_deal".equals(tool.name()) ? Set.of("name")
                     : Set.of(), tool.modelAuthoredDiffFields());
-            tool.validateFor("person", JSON.createObjectNode().put("handle", "r1").put("title", "Director"));
+            if (Set.of("create_person", "create_deal").contains(tool.name())) {
+                ObjectNode request = JSON.createObjectNode().put("handle", "r1").put("name", "Expansion");
+                if ("create_deal".equals(tool.name())) {
+                    request.put("stage", "Discovery").put("value", "1250").put("currency", "JPY");
+                }
+                tool.validateFor("company", request);
+                tool.duplicateProbe(new AiAssistantWriteTool.Target("company", 31),
+                        JSON.treeToValue(request, tool.requestType()));
+            } else {
+                tool.validateFor("person", JSON.createObjectNode().put("handle", "r1").put("title", "Director"));
+            }
             for (Object dependency : discovered.dependencies()) {
                 verifyNoInteractions(dependency);
             }
         }
+    }
+
+    @Test
+    void noneLockRequiresNoneFreshnessAndCannotWriteTheCompanyAnchor() {
+        AiAssistantCreatePersonWriteTool locked = new AiAssistantCreatePersonWriteTool(null, null, null) {
+            @Override
+            public Lock lock(String kind) {
+                return new Lock(false, TargetLock.RECORD_UPDATE);
+            }
+        };
+        assertRefused("NONE lock and NONE freshness must be declared together", List.of(locked));
+        AiAssistantCreatePersonWriteTool editsAnchor = new AiAssistantCreatePersonWriteTool(null, null, null) {
+            @Override
+            public Set<String> declaredWritableFields() {
+                return Set.of("company.industry");
+            }
+        };
+        assertRefused("NONE freshness may not write its anchor fields", List.of(editsAnchor));
+        AiAssistantCreatePersonWriteTool boardLock = new AiAssistantCreatePersonWriteTool(null, null, null) {
+            @Override
+            public Lock lock(String kind) {
+                return new Lock(true, TargetLock.NONE);
+            }
+        };
+        assertRefused("requires a duplicate probe and no board lock", List.of(boardLock));
+        AiAssistantWriteTool noProbe = spy(tool("create_person", ToolTier.CONFIRM, Set.of("company")));
+        doReturn(AiAssistantWriteTool.Freshness.NONE).when(noProbe).freshness();
+        doReturn(new Lock(false, TargetLock.NONE)).when(noProbe).lock("company");
+        assertRefused("requires a duplicate probe and no board lock", List.of(noProbe));
     }
 
     @Test
@@ -184,13 +227,15 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCompleteTaskWriteTool(null),
                 new AiAssistantRescheduleTaskWriteTool(null),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 tool("set_response_due", ToolTier.CONFIRM, Set.of("person")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isPresent());
@@ -212,6 +257,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null)));
 
         assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).stream()
@@ -641,6 +688,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
@@ -664,6 +713,8 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
+                new AiAssistantCreatePersonWriteTool(null, null, null),
+                new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantSetResponseDueWriteTool(null),
                 new AiAssistantAssignOwnerWriteTool(null, null, null) {
                     @Override
