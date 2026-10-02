@@ -63,7 +63,13 @@ chat turn persistence — lock the `workspace_member` row before reaching the ro
 audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
 in ascending user-id order, then the deal row `FOR UPDATE`, then reads the deal's `deal_collaborator`
 rows `FOR UPDATE` and replaces them, before its trailing audit — the order `DealService.updateOwner`
-uses — so a member offboarded concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
+uses — so a member offboarded concurrently is never written back as a collaborator (#1793). The owner
+changes (`DealService`, `PersonService` and `CompanyService.updateOwner`) lock the new owner's membership,
+then read the record row `FOR UPDATE`, and take the audited old owner and the `owner_changed` decision
+from that row rather than from their unlocked existence check (#1948). For a deal that read locks the
+`uq_deal_workspace_id` entry every other deal mutation takes, so an owner change newly waits behind a
+composite-foreign-key child insert, such as an approval request, that holds a shared lock on it; none of
+those inserts takes a lock after it. The collaborator path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
@@ -523,6 +529,8 @@ The framework acquires its locks in exactly this order:
 7. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
    tool only links to it (task creation on a person), otherwise the person, company or deal
    `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
+   An `assign_owner` write's `updateOwner` then re-acquires the owner's membership and this row,
+   both already held.
 
 After step 7 the framework, still in this order and taking no further lock of its own: retains the
 restriction-epoch read fence to completion; for every confirm-tier tool refuses a target written

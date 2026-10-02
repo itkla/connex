@@ -1853,13 +1853,22 @@ public class DealService {
         }
     }
 
+    /**
+     * Assigns or clears a deal's owner. The audited old owner and the {@code deal.owner_changed}
+     * decision come from the deal row locked after the new owner's membership, not from the unlocked
+     * existence check, which opens this transaction's read view before any lock is held (#1948).
+     *
+     * @param dealId the deal in the current workspace
+     * @param ownerId the new owner, or {@code null} to unassign
+     * @return the updated deal
+     */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);
