@@ -11,7 +11,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
-- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 ## Workflow lifecycle and account offboarding
@@ -47,8 +47,13 @@ Version/rule key discovery is non-locking and Java-sorted before individual exac
 The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes, and taking it
 exclusively there is a defect. Every audited transaction in the workspace takes that same row
 `FOR SHARE` at its end (`AuditIntegrityService.lockForeignKeyParents`), and membership-first record
-mutations — person owner change, deal, company, task, saved views, AI chat turn persistence — lock
-the `workspace_member` row before reaching the root in that trailing audit. An exclusive root at
+mutations — person owner change, deal, deal-collaborator replacement, company, task, saved views, AI
+chat turn persistence — lock the `workspace_member` row before reaching the root in that trailing
+audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
+in ascending user-id order, then the deal row `FOR UPDATE`, then replaces the `deal_collaborator`
+rows, before its trailing audit — the order `DealService.updateOwner` uses — so a member offboarded
+concurrently is never written back as a collaborator (#1793). That path is in the #1582 class
+below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
 class). Mutual exclusion for the trigger-capacity count comes from step 3b instead, which is scoped
@@ -307,6 +312,7 @@ service-level cleanup.
   exists on `main` through the same transactions' trailing audits; credential cleanup only makes
   the last two explicit, and none of them is introduced or worsened here.
 - Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
+- Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
 
 ## Lifecycle, APPI requests, and organization SSO
 

@@ -473,6 +473,17 @@ public interface DealMapper {
         @Param("dealId") int dealId,
         @Param("userId") int userId
     );
+    /**
+     * Inserts the given users as collaborators on the deal, if the deal is in the workspace. The
+     * statement is tenant-only and trusts the ids: callers must already hold each user's active
+     * membership row locked in this transaction ({@code WorkspaceService.lockAndRequireMembers}), which
+     * is what stops a member offboarded concurrently from being written back (#1793).
+     *
+     * @param workspaceId the deal's workspace
+     * @param dealId the deal
+     * @param userIds locked, active members of the workspace
+     * @return the number of collaborator rows inserted
+     */
     int insertCollaborators(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,
