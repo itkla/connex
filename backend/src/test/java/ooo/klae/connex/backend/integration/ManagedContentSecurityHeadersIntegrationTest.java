@@ -29,7 +29,6 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -37,6 +36,9 @@ import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
+import ooo.klae.connex.backend.storage.ObjectStorage;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins, over real HTTP on a real servlet container, that a managed download which sets its own
@@ -46,7 +48,12 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * <p>#1894 made the security header writer eager so it no longer writes twice, and every assertion it
  * added ran on MockMvc. MockMvc is not proof of what Tomcat sends: #1780 was a case where it hid a
  * container-only dispatch. What this pins on Tomcat itself is the merge of a controller's
- * {@code ResponseEntity} headers over the headers the filter already wrote.
+ * {@code ResponseEntity} headers over the headers the filter already wrote, and that the headers only
+ * the filter writes stay single-valued too.
+ *
+ * <p>It is not a guard for #1894's eager writer itself: with the lazy writer every header here is
+ * still single-valued, because Spring Security's writers skip a header the controller already set.
+ * {@code SecurityHeadersTest} pins that every chain writes eagerly.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"server.address=127.0.0.1", "server.servlet.session.cookie.secure=false"})
@@ -61,11 +68,13 @@ class ManagedContentSecurityHeadersIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private ObjectStorage storage;
     @LocalServerPort private int port;
 
     private Organization organization;
     private Workspace workspace;
     private User member;
+    private String storedImageKey;
 
     @BeforeEach
     void createFixtures() {
@@ -91,8 +100,12 @@ class ManagedContentSecurityHeadersIntegrationTest {
 
     @AfterEach
     void deleteFixtures() {
+        if (storedImageKey != null) {
+            storage.delete(storedImageKey);
+        }
         if (member != null) {
-            jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", member.getUsername());
+            jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?",
+                new AccountSessionIndex(member.getId()).getName());
         }
         if (workspace != null) {
             jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
@@ -122,6 +135,8 @@ class ManagedContentSecurityHeadersIntegrationTest {
                 assertEquals(200, uploaded.statusCode(), uploaded.body());
                 String pictureUrl = objectMapper.readTree(uploaded.body()).path("profilePictureUrl").asString();
                 assertFalse(pictureUrl.isBlank(), uploaded.body());
+                storedImageKey = "users/" + member.getId() + "/profile-images/"
+                    + pictureUrl.substring(pictureUrl.lastIndexOf('/') + 1);
 
                 HttpResponse<byte[]> download = client.send(HttpRequest.newBuilder(httpUri(pictureUrl))
                     .timeout(Duration.ofSeconds(15))
@@ -135,12 +150,16 @@ class ManagedContentSecurityHeadersIntegrationTest {
                 assertEquals(List.of("same-origin"),
                     download.headers().allValues("Cross-Origin-Resource-Policy"));
                 assertEquals(List.of("no-store"), download.headers().allValues("Cache-Control"));
+                assertEquals(List.of("DENY"), download.headers().allValues("X-Frame-Options"));
+                assertEquals(List.of("strict-origin-when-cross-origin"),
+                    download.headers().allValues("Referrer-Policy"));
             } finally {
-                client.send(HttpRequest.newBuilder(httpUri("/api/auth/logout"))
+                HttpResponse<Void> logout = client.send(HttpRequest.newBuilder(httpUri("/api/auth/logout"))
                     .timeout(Duration.ofSeconds(15))
                     .header("X-Workspace-Id", Integer.toString(workspace.getId()))
                     .header(csrf.headerName(), csrf.token())
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.discarding());
+                assertEquals(200, logout.statusCode());
             }
         }
     }
@@ -173,7 +192,7 @@ class ManagedContentSecurityHeadersIntegrationTest {
     }
 
     private HttpClient httpClient() {
-        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
+        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15))
             .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL)).build();
     }
 
