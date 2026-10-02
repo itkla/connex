@@ -1857,7 +1857,10 @@ public class DealService {
      * Assigns or clears a deal's owner. The audited old owner and the {@code deal.owner_changed}
      * decision come from the deal row locked after the new owner's membership, if any, not from the
      * unlocked existence check, which opens this transaction's read view before any lock is held. A
-     * deal deleted since that check is refused under the lock, before anything is written (#1948).
+     * deal deleted since that check is refused under the lock, before anything is written, and the
+     * deal returned is read under the same lock, since an unchanged owner leaves no newer row version
+     * for the snapshot to show (#1948). The lock goes through the primary key alone, the record the
+     * {@code UPDATE} locks anyway.
      *
      * @param dealId the deal in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign
@@ -1869,7 +1872,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
-        Deal deal = requireDealForUpdate(workspaceId, dealId);
+        Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);
@@ -1881,7 +1884,15 @@ public class DealService {
         if (!Objects.equals(deal.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
         }
-        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
+        return hydrateReferences(workspaceId, requireDealByPrimaryKeyForUpdate(workspaceId, dealId));
+    }
+
+    private Deal requireDealByPrimaryKeyForUpdate(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByPrimaryKeyForUpdate(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found");
+        }
+        return deal;
     }
 
     /**

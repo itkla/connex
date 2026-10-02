@@ -25,6 +25,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -200,10 +201,13 @@ class OwnerChangeConcurrencyIntegrationTest {
         int ownerId = newOwner.getId();
         when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
         pauseInTheNewOwnersMembershipLock(() -> verify(dealMapper).getDealById(workspaceId, deal.getId()));
+        AtomicReference<Deal> returned = new AtomicReference<>();
 
-        changeOwnerWhileTheSameChangeCommits(() -> dealService.updateOwner(deal.getId(), ownerId));
+        changeOwnerWhileTheSameChangeCommits(() -> returned.set(dealService.updateOwner(deal.getId(), ownerId)));
 
         assertEquals(Integer.valueOf(ownerId), committedOwner("deal", deal.getId()));
+        assertEquals(Integer.valueOf(ownerId), returned.get().getOwnerId());
+        verify(dealMapper, never()).getDealByIdForUpdate(anyInt(), anyInt());
         verify(auditService).singleChange("ownerId", currentUser.getId(), ownerId);
         verify(auditService).singleChange("ownerId", ownerId, ownerId);
         verify(ruleTriggers, times(1)).publish(workspaceId, "deal", deal.getId(), "deal.owner_changed");

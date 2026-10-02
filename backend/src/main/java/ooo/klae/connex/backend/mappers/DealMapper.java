@@ -315,6 +315,17 @@ public interface DealMapper {
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Reads and locks one deal {@code FOR UPDATE} through the primary key alone: the record an
+     * owner change's {@code UPDATE} locks anyway. Unlike {@link #getDealByIdForUpdate} it takes no
+     * lock on {@code uq_deal_workspace_id}, so an owner change never waits behind a composite
+     * foreign-key child insert holding that entry (#1948).
+     *
+     * @param workspaceId the deal's workspace
+     * @param id the deal
+     * @return the current deal, or {@code null} when it no longer exists in the workspace
+     */
+    Deal getDealByPrimaryKeyForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
         @Param("workspaceId") int workspaceId,
