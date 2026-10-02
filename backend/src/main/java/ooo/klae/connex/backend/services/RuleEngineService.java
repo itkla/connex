@@ -48,6 +48,7 @@ public class RuleEngineService {
     private final PersonMapper personMapper;
     private final SegmentService segmentService;
     private final RuleActionExecutor actionExecutor;
+    private final RuleActionIsolation actionIsolation;
     private final AutomationExecutor automationExecutor;
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
@@ -369,7 +370,9 @@ public class RuleEngineService {
             automationExecutor.runAs(workspaceId, principal.user(), principal.role(), () -> {
                 for (RuleAction action : actions) {
                     try {
-                        actionExecutor.execute(action, ctx);
+                        actionIsolation.run(() -> actionExecutor.execute(action, ctx));
+                    } catch (RuleActionRetryRequiredException retry) {
+                        throw retry;
                     } catch (Exception actionError) {
                         log.warn(
                             "Rule action failed ruleId={} actionType={} exceptionClass={}",
@@ -382,6 +385,8 @@ public class RuleEngineService {
             });
             finishExecution(execution, failures.isEmpty() ? "matched" : "partial", null,
                 failures.isEmpty() ? null : String.join("; ", failures));
+        } catch (RuleActionRetryRequiredException retry) {
+            throw retry;
         } catch (Exception e) {
             log.warn(
                 "Rule execution failed ruleId={} recordType={} recordId={} exceptionClass={}",

@@ -1,8 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -11,10 +17,11 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,16 +49,16 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 
 /**
- * Drives #1879's chain end to end: a legacy rule whose first action audits a success and whose
- * second fails and audits the failure, delivered through the durable trigger outbox with the real
- * action executor and the real audit services.
+ * Drives a legacy rule whose first action succeeds and whose second fails through the durable trigger
+ * outbox, with the real worker, action executor and audit services.
  *
  * <p>{@code create_note} audits by joining the delivery transaction, which locks the workspace's
- * integrity head on it. {@code log_activity} then fails inside {@code ActivityService.create}'s
- * {@code try} — an activity type longer than the 32-character column — and records the failure. That
- * failure append used to wait on the delivery transaction's own head for the InnoDB lock-wait
- * timeout and was then lost. The failing action also rethrows through a participating transactional
- * proxy, so the whole delivery is rolled back; the failure audit must survive that too.
+ * integrity head on it. When {@code log_activity} then fails, its failure audit must not wait on that
+ * head for the InnoDB lock-wait timeout and be lost (#1879). And because the failing action rethrows
+ * through a participating transactional proxy, the delivery used to roll back entirely and be retried
+ * until it dead-lettered, losing the note too (#1928). Each action now runs in its own savepoint, so
+ * the delivery commits {@code "partial"}: the note stays, the failed action's own writes are undone,
+ * and the workspace's audit chain stays unbroken across the savepoint.
  */
 @TestPropertySource(properties = {
     "connex.workflows.runtime.enabled=true",
@@ -65,7 +72,7 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkflowService workflowService;
     @Autowired private WorkflowRuntimeOwnershipService ownershipService;
     @Autowired private WorkflowRuntimeClaimTransaction claimTransaction;
-    @Autowired private WorkflowTriggerOutboxDeliveryService outboxDeliveryService;
+    @Autowired private WorkflowTriggerOutboxWorker outboxWorker;
     @Autowired private WorkflowTriggerOutboxMapper outboxMapper;
     @Autowired private WorkflowMapper workflowMapper;
     @Autowired private RuleTriggerPublisher ruleTriggerPublisher;
@@ -75,16 +82,91 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
+    @MockitoSpyBean private ReferenceService referenceService;
 
     private Integer freshWorkspaceId;
     private Integer rewrittenRuleId;
+    private Long deliveredOutboxId;
     private String originalActionsJson;
 
     @Test
-    void aFailingActionAfterAnAuditedOneIsAuditedWithoutStallingTheDelivery() throws Exception {
+    void aFailingActionAfterAnAuditedOneFinishesPartialWithoutStallingTheDelivery() throws Exception {
+        String activityTitle = "Probe activity " + unique();
+
+        long elapsedMs = deliverRule(List.of(
+                action("create_note", "Probe note", null, null),
+                action("log_activity", "Probe activity body", activityTitle, "t".repeat(40))));
+
+        assertTrue(elapsedMs < WELL_INSIDE_LOCK_WAIT_MS,
+                "the delivery stalled " + elapsedMs + " ms on its own integrity head");
+        assertCompletedPartially("log_activity");
+        assertEquals(1, notes("Probe note"));
+        assertEquals(1, audits("note.create", "success", null));
+        assertEquals(0, activities(activityTitle));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log"
+                        + " WHERE action = 'activity.create' AND outcome = 'failure' AND target_label = ?"
+                        + " AND workspace_id = ? AND actor_id = ?",
+                Integer.class, activityTitle, freshWorkspaceId, currentUser.getId()),
+                "the failing action's audit must be recorded in the tenant's own chain, attributed to"
+                        + " the rule's actor");
+        assertWorkspaceAuditChainIsUnbroken();
+    }
+
+    /**
+     * The failing action writes and audits its activity before it throws through
+     * {@code ActivityService}'s transactional proxy, so only its savepoint can explain why that row
+     * and its audit are gone while the earlier note and its audit stay.
+     */
+    @Test
+    void aFailingActionsOwnWritesAreUndoneWhileEarlierActionsAreKept() throws Exception {
+        String activityTitle = "Undone activity " + unique();
+        doThrow(new IllegalStateException("reference sync failed"))
+                .when(referenceService).syncReferences(anyInt(), eq(ReferenceService.SOURCE_ACTIVITY),
+                        anyInt(), any());
+
+        deliverRule(List.of(
+                action("create_note", "Kept note", null, null),
+                action("log_activity", "Undone activity body", activityTitle, "call")));
+
+        assertCompletedPartially("log_activity");
+        assertEquals(1, notes("Kept note"));
+        assertEquals(1, audits("note.create", "success", null));
+        assertEquals(0, activities(activityTitle));
+        assertEquals(0, audits("activity.create", "success", activityTitle));
+        assertWorkspaceAuditChainIsUnbroken();
+    }
+
+    /**
+     * A transient failure inside an action is not the action's fault, and a deadlock takes the
+     * delivery's transaction with it, so the delivery must not commit "partial": it rolls back whole,
+     * keeping nothing from the earlier action, and the worker schedules a retry.
+     */
+    @Test
+    void aTransientActionFailureRollsTheWholeDeliveryBackForRetry() throws Exception {
+        doThrow(new CannotAcquireLockException("simulated lock wait timeout"))
+                .when(referenceService).syncReferences(anyInt(), eq(ReferenceService.SOURCE_ACTIVITY),
+                        anyInt(), any());
+
+        deliverRule(List.of(
+                action("create_note", "Retried note", null, null),
+                action("log_activity", "Retried activity body", "Retried activity " + unique(), "call")));
+
+        Map<String, Object> outbox = jdbcTemplate.queryForMap(
+                "SELECT status, last_error_code FROM workflow_trigger_outbox WHERE workspace_id = ? AND id = ?",
+                freshWorkspaceId, deliveredOutboxId);
+        assertEquals("pending", outbox.get("status"), "the delivery must be released for retry: " + outbox);
+        assertEquals("trigger_delivery_failed", outbox.get("last_error_code"));
+        assertEquals(0, notes("Retried note"));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM rule_execution WHERE workspace_id = ? AND rule_id = ?",
+                Integer.class, freshWorkspaceId, rewrittenRuleId));
+        assertWorkspaceAuditChainIsUnbroken();
+    }
+
+    private long deliverRule(List<RuleAction> actions) throws Exception {
         committedWorkspace();
         Person person = newPerson(null);
-        String activityTitle = "Probe activity " + unique();
         WorkflowDto workflow = createEnabledWorkflow("Failure audit " + unique());
         ownershipService.rollBackToLegacy(workflow.id(), workflow.activeVersionId());
         Workflow legacy = workflowMapper.getById(workspace.getId(), workflow.id());
@@ -95,11 +177,7 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         rewrittenRuleId = legacy.getLegacyRuleId();
         assertEquals(1, jdbcTemplate.update(
                 "UPDATE rule SET actions_json = ? WHERE workspace_id = ? AND id = ?",
-                objectMapper.writeValueAsString(List.of(
-                        action("create_note", "Probe note", null, null),
-                        action("log_activity", "Probe activity body", activityTitle,
-                                "t".repeat(40)))),
-                workspace.getId(), legacy.getLegacyRuleId()));
+                objectMapper.writeValueAsString(actions), workspace.getId(), legacy.getLegacyRuleId()));
 
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 ruleTriggerPublisher.publish(workspace.getId(), "person", person.getId(), "person.updated"));
@@ -107,36 +185,73 @@ class WorkflowDeliveryFailureAuditIntegrationTest extends AbstractServiceTest {
         WorkflowWorkClaim claim = claimTransaction.claimNext(workspace.getId());
         assertNotNull(claim);
         assertEquals(outbox.getId(), claim.id());
+        deliveredOutboxId = outbox.getId();
 
         long started = System.nanoTime();
-        RuntimeException outcome = null;
-        try {
-            outboxDeliveryService.deliver(workspace.getId(), outbox.getId(), claim.leaseOwner());
-        } catch (RuntimeException rolledBack) {
-            outcome = rolledBack;
-        }
-        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        outboxWorker.process(workspace.getId(), outbox.getId(), claim.leaseOwner());
+        return (System.nanoTime() - started) / 1_000_000;
+    }
 
-        assertTrue(elapsedMs < WELL_INSIDE_LOCK_WAIT_MS,
-                "the delivery stalled " + elapsedMs + " ms on its own integrity head");
-        assertTrue(outcome instanceof UnexpectedRollbackException,
-                "known bug #1928: the failing action rethrows through a participating transactional"
-                        + " proxy, so today the whole delivery rolls back instead of committing"
-                        + " \"partial\". If #1928 is fixed this tripwire fires; revisit this test then."
-                        + " Was " + outcome);
-        assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM audit_log"
-                        + " WHERE action = 'note.create' AND outcome = 'success' AND workspace_id = ?",
-                Integer.class, workspace.getId()),
-                "create_note's audit must have joined the delivery transaction and rolled back with"
-                        + " it; otherwise that transaction never held the head and nothing was deferred");
-        assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM audit_log"
-                        + " WHERE action = 'activity.create' AND outcome = 'failure' AND target_label = ?"
-                        + " AND workspace_id = ? AND actor_id = ?",
-                Integer.class, activityTitle, workspace.getId(), currentUser.getId()),
-                "the failing action's audit must be recorded in the tenant's own chain, attributed to"
-                        + " the rule's actor, even though the delivery rolled back");
+    private void assertCompletedPartially(String failedActionType) {
+        Map<String, Object> outbox = jdbcTemplate.queryForMap(
+                "SELECT status, last_error_code FROM workflow_trigger_outbox WHERE workspace_id = ? AND id = ?",
+                freshWorkspaceId, deliveredOutboxId);
+        assertEquals("completed", outbox.get("status"), "the delivery must commit, not retry: " + outbox);
+        assertNull(outbox.get("last_error_code"));
+        Map<String, Object> run = jdbcTemplate.queryForMap(
+                "SELECT status, detail FROM rule_execution WHERE workspace_id = ? AND rule_id = ?"
+                        + " ORDER BY id DESC LIMIT 1",
+                freshWorkspaceId, rewrittenRuleId);
+        assertEquals("partial", run.get("status"));
+        assertTrue(String.valueOf(run.get("detail")).contains(failedActionType), String.valueOf(run.get("detail")));
+    }
+
+    private int notes(String content) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM note WHERE workspace_id = ? AND content = ?",
+                Integer.class, freshWorkspaceId, content);
+    }
+
+    private int activities(String subject) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM activity WHERE workspace_id = ? AND subject = ?",
+                Integer.class, freshWorkspaceId, subject);
+    }
+
+    private int audits(String action, String outcome, String targetLabel) {
+        return targetLabel == null
+                ? jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM audit_log WHERE action = ? AND outcome = ? AND workspace_id = ?",
+                        Integer.class, action, outcome, freshWorkspaceId)
+                : jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM audit_log WHERE action = ? AND outcome = ? AND workspace_id = ?"
+                                + " AND target_label = ?",
+                        Integer.class, action, outcome, freshWorkspaceId, targetLabel);
+    }
+
+    /**
+     * Every row in the workspace's integrity chain links to the one before it, and the head names the
+     * last row: an append undone with a savepoint must leave no gap and no dangling head.
+     */
+    private void assertWorkspaceAuditChainIsUnbroken() {
+        List<Map<String, Object>> chain = jdbcTemplate.queryForList(
+                "SELECT chain_index, prev_hash, row_hash FROM audit_log"
+                        + " WHERE chain_scope_type = 'workspace' AND chain_scope_id = ? ORDER BY chain_index",
+                freshWorkspaceId);
+        assertFalse(chain.isEmpty());
+        long expectedIndex = ((Number) chain.getFirst().get("chain_index")).longValue();
+        String previousHash = null;
+        for (Map<String, Object> row : chain) {
+            assertEquals(expectedIndex++, ((Number) row.get("chain_index")).longValue());
+            if (previousHash != null) {
+                assertEquals(previousHash, row.get("prev_hash"));
+            }
+            previousHash = (String) row.get("row_hash");
+        }
+        Map<String, Object> head = jdbcTemplate.queryForMap(
+                "SELECT next_chain_index, current_hash FROM audit_log_integrity_head"
+                        + " WHERE scope_type = 'workspace' AND scope_id = ?",
+                freshWorkspaceId);
+        assertEquals(expectedIndex, ((Number) head.get("next_chain_index")).longValue());
+        assertEquals(previousHash, head.get("current_hash"));
     }
 
     /**
