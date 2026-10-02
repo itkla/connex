@@ -1925,7 +1925,8 @@ public class DealService {
      *
      * <p>The audited and returned lists both come from locking reads taken after the deal lock. The
      * unlocked existence check opens this transaction's read view before any lock is held, so a plain
-     * read would still list a collaborator row that a concurrent owner change deleted (#1942).
+     * read would still list a collaborator row that a concurrent owner change, replacement or
+     * offboarding deleted (#1942).
      *
      * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
      * only once that transaction has completed. Hydrating inside it would suspend a routed tenant

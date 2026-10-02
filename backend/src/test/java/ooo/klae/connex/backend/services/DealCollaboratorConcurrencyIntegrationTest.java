@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -288,46 +289,46 @@ class DealCollaboratorConcurrencyIntegrationTest {
     void aReplacementRacingAnOwnerChangeReturnsAndAuditsTheCommittedCollaborators() throws Exception {
         int workspaceId = workspace.getId();
         int newOwnerId = targetMember.getId();
-        User kept = user("deal-collaborators-kept-" + UUID.randomUUID().toString().substring(0, 8));
-        additionalUsers.add(kept);
-        workspaceMapper.addMember(workspaceId, kept.getId(), "member");
-        for (int collaboratorId : List.of(newOwnerId, kept.getId())) {
-            jdbcTemplate.update("INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?)",
-                workspaceId, deal.getId(), collaboratorId);
-        }
+        User kept = member("deal-collaborators-kept-");
+        insertCollaborators(workspaceId, List.of(newOwnerId, kept.getId()));
         when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
-        CountDownLatch readViewOpen = new CountDownLatch(1);
-        CountDownLatch ownerChanged = new CountDownLatch(1);
-        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
-        doAnswer(invocation -> {
-            verify(dealMapper).getDealById(workspaceId, deal.getId());
-            readViewOpen.countDown();
-            assertTrue(ownerChanged.await(30, TimeUnit.SECONDS));
-            return realWorkspaceMapper.lockActiveMembership(workspaceId, kept.getId());
-        }).when(workspaceMapper).lockActiveMembership(workspaceId, kept.getId());
-        ExecutorService executor = Executors.newSingleThreadExecutor();
 
-        List<UserDto> returned;
-        try {
-            Future<List<UserDto>> replacement = executor.submit(
-                () -> addCollaborators(workspaceId, List.of(kept.getId())));
-            assertTrue(readViewOpen.await(10, TimeUnit.SECONDS));
+        List<UserDto> returned = replaceWhileAnotherWriteCommits(workspaceId, List.of(kept.getId()), () -> {
             changeOwner(workspaceId, newOwnerId);
             assertEquals(Integer.valueOf(newOwnerId), jdbcTemplate.queryForObject(
                 "SELECT owner_id FROM deal WHERE workspace_id = ? AND id = ?",
                 Integer.class, workspaceId, deal.getId()));
             assertEquals(List.of(kept.getId()), committedCollaborators(workspaceId));
-            ownerChanged.countDown();
-            returned = replacement.get(20, TimeUnit.SECONDS);
-        } finally {
-            ownerChanged.countDown();
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
-        }
+        });
 
         assertEquals(List.of(kept.getId()), returned.stream().map(UserDto::getId).toList());
         assertEquals(List.of(kept.getId()), committedCollaborators(workspaceId));
         verify(auditService).singleChange("collaboratorIds", List.of(kept.getId()), List.of(kept.getId()));
+    }
+
+    /**
+     * Another replacement commits while this one has opened its read view but holds no lock. The audit's
+     * {@code before} must be the rows this replacement actually replaced, the other's committed set, and
+     * its {@code after} and response exactly what it commits: from its snapshot both lists would still
+     * hold the rows the other replacement removed (#1942).
+     */
+    @Test
+    void aReplacementRacingAnotherReplacementAuditsTheRowsItActuallyReplaced() throws Exception {
+        int workspaceId = workspace.getId();
+        User kept = member("deal-collaborators-kept-");
+        User committed = member("deal-collaborators-committed-");
+        User requested = member("deal-collaborators-requested-");
+        insertCollaborators(workspaceId, List.of(targetMember.getId(), kept.getId()));
+
+        List<UserDto> returned = replaceWhileAnotherWriteCommits(workspaceId, List.of(requested.getId()), () -> {
+            addCollaborators(workspaceId, List.of(committed.getId()));
+            assertEquals(List.of(committed.getId()), committedCollaborators(workspaceId));
+        });
+
+        assertEquals(List.of(requested.getId()), returned.stream().map(UserDto::getId).toList());
+        assertEquals(List.of(requested.getId()), committedCollaborators(workspaceId));
+        verify(auditService).singleChange(
+            "collaboratorIds", List.of(committed.getId()), List.of(requested.getId()));
     }
 
     /**
@@ -382,6 +383,61 @@ class DealCollaboratorConcurrencyIntegrationTest {
 
     private List<UserDto> addTargetAsCollaborator(int workspaceId) {
         return addCollaborators(workspaceId, List.of(targetMember.getId()));
+    }
+
+    /**
+     * Runs a replacement on another thread and pauses it inside its first membership lock: its unlocked
+     * existence check has opened its read view, but it holds no lock. {@code concurrentWrite} runs and
+     * commits on this thread in that window, and the replacement then resumes.
+     */
+    private List<UserDto> replaceWhileAnotherWriteCommits(
+            int workspaceId, List<Integer> requestedIds, Runnable concurrentWrite) throws Exception {
+        int firstLockedId = requestedIds.stream().min(Integer::compare).orElseThrow();
+        CountDownLatch readViewOpen = new CountDownLatch(1);
+        CountDownLatch writeCommitted = new CountDownLatch(1);
+        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        doAnswer(invocation -> {
+            verify(dealMapper).getDealById(workspaceId, deal.getId());
+            readViewOpen.countDown();
+            assertTrue(writeCommitted.await(30, TimeUnit.SECONDS));
+            return realWorkspaceMapper.lockActiveMembership(workspaceId, firstLockedId);
+        }).when(workspaceMapper).lockActiveMembership(workspaceId, firstLockedId);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<List<UserDto>> replacement = executor.submit(() -> addCollaborators(workspaceId, requestedIds));
+            awaitOrSurface(readViewOpen, replacement);
+            try {
+                concurrentWrite.run();
+            } finally {
+                writeCommitted.countDown();
+            }
+            return replacement.get(20, TimeUnit.SECONDS);
+        } finally {
+            writeCommitted.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    private static void awaitOrSurface(CountDownLatch latch, Future<?> task) throws Exception {
+        if (!latch.await(10, TimeUnit.SECONDS)) {
+            task.get(0, TimeUnit.SECONDS);
+            fail("The paused replacement never reached its first membership lock");
+        }
+    }
+
+    private User member(String usernamePrefix) {
+        User member = user(usernamePrefix + UUID.randomUUID().toString().substring(0, 8));
+        additionalUsers.add(member);
+        workspaceMapper.addMember(workspace.getId(), member.getId(), "member");
+        return member;
+    }
+
+    private void insertCollaborators(int workspaceId, List<Integer> userIds) {
+        for (int userId : userIds) {
+            jdbcTemplate.update("INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?)",
+                workspaceId, deal.getId(), userId);
+        }
     }
 
     private void changeOwner(int workspaceId, int ownerId) {

@@ -205,7 +205,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 Connection tenantConnection = DataSourceUtils.getConnection(routing);
                 assertEquals(scratchCatalog, catalogOf(tenantConnection));
                 assertEquals(1, dealMapper.removeCollaborator(workspaceId, DEAL_ID, zuluId));
-                List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, DEAL_ID);
+                List<Integer> after = dealMapper.getCollaboratorIdsForUpdate(workspaceId, DEAL_ID);
                 assertEquals(List.of(alphaId, pendingId, MISSING_USER_ID), after);
 
                 List<UserDto> hydrated = controlAccess.getProfiles(workspaceId, after);
@@ -214,7 +214,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 assertEquals(scratchCatalog, tenantContext.getCatalog());
                 assertSame(tenantConnection, DataSourceUtils.getConnection(routing));
                 assertEquals(scratchCatalog, catalogOf(tenantConnection));
-                assertEquals(after, dealMapper.getCollaboratorIds(workspaceId, DEAL_ID));
+                assertEquals(after, dealMapper.getCollaboratorIdsForUpdate(workspaceId, DEAL_ID));
                 status.setRollbackOnly();
                 return hydrated;
             });

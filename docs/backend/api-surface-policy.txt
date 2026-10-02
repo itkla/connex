@@ -306,7 +306,7 @@ src/main/java/ooo/klae/connex/backend/exceptions/SsoEnforcedException.java	6e961
 src/main/java/ooo/klae/connex/backend/mail/MailConfigResolver.java	a42d4cac37d2672026411e0ce89caa83349b576abec386ff4ef383beb8a5d580
 src/main/java/ooo/klae/connex/backend/mappers/AllowedDomainMapper.java	f43e45c208224693b849035d026eabcc3797ea745c6bf431034104b9a0521649
 src/main/java/ooo/klae/connex/backend/mappers/ConnectorConfigMapper.java	ee657e42bf38e75985d0dfefd85cadcd15897cc8f8174111b41ec246740ad680
-src/main/java/ooo/klae/connex/backend/mappers/DealMapper.java	7ee9a725d8972e473ae95b0ebbd8d80e8adcd850a7043b6a78b08ea9598c66f0
+src/main/java/ooo/klae/connex/backend/mappers/DealMapper.java	d4790d1d51a91bb89bbeef61f7ec82aaed540a2a781048978978fd1a3b61f51e
 src/main/java/ooo/klae/connex/backend/mappers/DeliveryProviderConfigMapper.java	8a1e7ac7e6a5745b4bcf540557252898f76651a9842320093d1300dbe9ce39bc
 src/main/java/ooo/klae/connex/backend/mappers/InviteLinkMapper.java	b959958f0b3069df596c6892088925d21b5c10c4ff70a8508e911c484a3971f5
 src/main/java/ooo/klae/connex/backend/mappers/MailConfigMapper.java	37696c6c7267a893db7d8006c3ac9199675be4abdade0ed312db0ecdd45eb2fb
@@ -400,7 +400,7 @@ src/main/java/ooo/klae/connex/backend/services/DealDuplicateReviewProofService.j
 src/main/java/ooo/klae/connex/backend/services/DealLineItemService.java	c34fab95df6e175f56596353dd92ae43dac927dd34ea5e630a096e8988406f11
 src/main/java/ooo/klae/connex/backend/services/DealOutcomeWriter.java	4dc45163be64a822cbfd589444921e6054092b491bbfb39f5429f72fa73a4d27
 src/main/java/ooo/klae/connex/backend/services/DealRiskService.java	e86de4c98c794612a7afeff66e0c0c645ef4f8bc5d1367252d240835148e1793
-src/main/java/ooo/klae/connex/backend/services/DealService.java	86f0e244723c868787337f6692faef58a78bd369537fd530ae5697adc7719666
+src/main/java/ooo/klae/connex/backend/services/DealService.java	ccb72ed8d3dced1363100f1b199e2a1a546687e530f6a85491cd6030755b83ab
 src/main/java/ooo/klae/connex/backend/services/DealStageHistoryService.java	a28a266903060162d488d773868ca10932a7e30c3befaa23e3087f1045b8c1a1
 src/main/java/ooo/klae/connex/backend/services/DealValueService.java	3090545989a2bae08435c419293b80aec26a974907f4282e2874940df5a0ea95
 src/main/java/ooo/klae/connex/backend/services/DeletionPolicy.java	f4bf7f860fc3a3992ee067213ba08a01295145a122acf14f481060e5b1e3fa36
