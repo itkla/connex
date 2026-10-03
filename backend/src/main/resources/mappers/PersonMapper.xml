@@ -544,7 +544,7 @@
     FOR SHARE
   </select>
 
-  <select id="getOwnedPersonByIdForUpdate" resultMap="PersonResult">
+  <select id="getOwnedPersonByIdForUpdate" resultMap="PersonResult" flushCache="true">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}

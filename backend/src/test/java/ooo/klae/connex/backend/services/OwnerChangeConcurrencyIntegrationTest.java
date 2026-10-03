@@ -373,10 +373,12 @@ class OwnerChangeConcurrencyIntegrationTest {
             }
             return realPersonMapper.getOwnedPersonByIdForUpdate(workspaceId, person.getId());
         }).when(personMapper).getOwnedPersonByIdForUpdate(workspaceId, person.getId());
+        AtomicReference<Person> returned = new AtomicReference<>();
 
-        changeOwnerWhileTheSameChangeCommits(() -> personService.updateOwner(person.getId(), null));
+        changeOwnerWhileTheSameChangeCommits(() -> returned.set(personService.updateOwner(person.getId(), null)));
 
         assertNull(committedOwner("person", person.getId()));
+        assertNull(returned.get().getOwnerId());
         verify(auditService).singleChange("ownerId", currentUser.getId(), null);
         verify(auditService).singleChange("ownerId", null, null);
         verify(ruleTriggers, times(1)).publish(workspaceId, "person", person.getId(), "person.owner_changed");
@@ -446,12 +448,16 @@ class OwnerChangeConcurrencyIntegrationTest {
             workspace.getId(), id);
     }
 
-    /** Tries to lock the row from an independent connection without waiting, and reports the error. */
+    /**
+     * Tries to share-lock the row from an independent connection without waiting, and reports the
+     * error. Only an exclusive lock refuses a shared one, so a refusal proves the row is held for
+     * update rather than merely for share.
+     */
     private Integer lockErrorFromAnotherConnection(String table, int id) throws SQLException {
         try (Connection other = dataSource.getConnection(); Statement statement = other.createStatement()) {
             other.setAutoCommit(false);
             try {
-                statement.executeQuery("SELECT id FROM " + table + " WHERE id = " + id + " FOR UPDATE NOWAIT")
+                statement.executeQuery("SELECT id FROM " + table + " WHERE id = " + id + " FOR SHARE NOWAIT")
                     .close();
                 return null;
             } catch (SQLException refused) {
