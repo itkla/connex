@@ -43,6 +43,10 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 @Service
 @RequiredArgsConstructor
 public class EmailChangeService {
+    private static final String REFUSED_ACTION = "auth.email_change.refused";
+    private static final String REFUSED_SUMMARY = "Email change refused for a privileged account";
+    private static final String ENROLLMENT_REQUIRED_REASON = "privileged_mfa_enrollment_required";
+    private static final String RECENT_AUTHENTICATION_REQUIRED_REASON = "recent_authentication_required";
 
     private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -101,9 +105,9 @@ public class EmailChangeService {
      * the second evaluation re-reads privilege and passkey state instead of reusing the pre-lock
      * answers, and a promotion committed while this request waited is observed.
      * The refusal audit is an independent append that takes the actor's {@code app_user} row
-     * shared, so it is written only on the pre-lock refusal; a refusal that first appears under the
-     * lock is not audited, because appending there would wait on this transaction's own exclusive
-     * lock until the InnoDB timeout.
+     * shared. A pre-lock refusal is audited at once. A refusal that first appears under the lock is
+     * audited once the transaction completes, because appending there would wait on this
+     * transaction's own exclusive lock until the InnoDB timeout (#1993).
      *
      * @param newEmailRaw the requested new email address
      * @param currentPassword the caller's current password, verified before issuing
@@ -141,7 +145,7 @@ public class EmailChangeService {
             throw new ForbiddenException("Your current password is incorrect");
         }
         userMapper.lockAssignedCustomRoleIds(user.getId());
-        requirePrivilegedStepUp(user.getId());
+        requirePrivilegedStepUpDeferringRefusalAudit(user.getId());
         user = lockedUser;
         emailChangeTokenMapper.invalidateForUser(user.getId());
         validateRequest(user, newEmail);
@@ -165,10 +169,29 @@ public class EmailChangeService {
         try {
             requirePrivilegedStepUp(userId);
         } catch (PasskeyEnrollmentRequiredException exception) {
-            auditEmailChangeRefusal(userId, "privileged_mfa_enrollment_required");
+            auditEmailChangeRefusal(userId, ENROLLMENT_REQUIRED_REASON);
             throw exception;
         } catch (RecentAuthenticationRequiredException exception) {
-            auditEmailChangeRefusal(userId, "recent_authentication_required");
+            auditEmailChangeRefusal(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
+            throw exception;
+        }
+    }
+
+    /**
+     * Applies the privileged-account gate again under the account lock, auditing a refusal once the
+     * transaction completes. This transaction then holds its own {@code app_user} row exclusively, so
+     * an immediate independent append would wait on that lock until the InnoDB timeout (#1993).
+     *
+     * @param userId the requesting account
+     */
+    private void requirePrivilegedStepUpDeferringRefusalAudit(int userId) {
+        try {
+            requirePrivilegedStepUp(userId);
+        } catch (PasskeyEnrollmentRequiredException exception) {
+            deferEmailChangeRefusalAudit(userId, ENROLLMENT_REQUIRED_REASON);
+            throw exception;
+        } catch (RecentAuthenticationRequiredException exception) {
+            deferEmailChangeRefusalAudit(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
             throw exception;
         }
     }
@@ -191,8 +214,11 @@ public class EmailChangeService {
     }
 
     private void auditEmailChangeRefusal(int userId, String reason) {
-        auditService.recordFailure("auth.email_change.refused", "user", userId, null,
-                "Email change refused for a privileged account", reason);
+        auditService.recordFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
+    }
+
+    private void deferEmailChangeRefusalAudit(int userId, String reason) {
+        auditService.deferFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
     }
 
     private void validateRequest(User user, String newEmail) {
