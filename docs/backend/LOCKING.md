@@ -77,9 +77,13 @@ other single-column deal updates, `reschedule` and `updateRiskExcluded`, read th
 same primary-key lock for the same reason (#1958). The contact and company tag replacements
 (`PersonService` and `CompanyService.replaceTags`) and the contact evaluation opt-out
 (`PersonService.updateEvaluationExclusions`) also read the record row `FOR UPDATE` first, refuse an
-archived row under it, and audit from what they read after it, at `READ_COMMITTED` (#1968). A tag
-replacement then reads the record's `person_tag` or `company_tag` rows `FOR UPDATE OF` the association
-table, driven from its primary-key prefix, before clearing them. A concurrent `addTag` blocks on the
+archived row under it, and audit from what they read after it, at `READ_COMMITTED` (#1968). The deal
+and attachment tag replacements do the same (#1980): the deal through `getDealByPrimaryKeyForUpdate`,
+whose `PRIMARY`-only lock is the record a `deal_tag` foreign-key check takes, refusing a deleted deal;
+the attachment through `getMetadataByIdForUpdate`, re-checking its type and note-target visibility
+under that lock. A tag replacement then reads the record's `person_tag`, `company_tag`, `deal_tag` or
+`attachment_tag` rows `FOR UPDATE OF` the association table, driven from its primary-key prefix,
+before clearing them. A concurrent `addTag` blocks on the
 record row at its foreign-key check, and a concurrent `removeTag`, which takes no record lock, blocks
 on the association row, so the audited previous tags are exactly the rows the replacement deletes. A
 tag deletion that cascades into a record while a replacement re-adds the same tag can still deadlock,

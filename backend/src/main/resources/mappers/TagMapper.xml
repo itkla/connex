@@ -91,6 +91,26 @@
     FOR UPDATE OF ct
   </select>
 
+  <!-- The deal counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByDealIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM deal_tag dt
+    STRAIGHT_JOIN tag t ON t.id = dt.tag_id
+    WHERE dt.deal_id = #{dealId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF dt
+  </select>
+
+  <!-- The attachment counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByAttachmentIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM attachment_tag att
+    STRAIGHT_JOIN tag t ON t.id = att.tag_id
+    WHERE att.attachment_id = #{attachmentId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF att
+  </select>
+
   <select id="getTagsByDealId" resultType="Tag">
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
