@@ -142,6 +142,18 @@ class MailConfigResolverTest {
     }
 
     @Test
+    void descriptionNeverRendersItsCredentialReference() {
+        MailConfigDescription description = new MailConfigDescription(
+                "smtp.workspace.test", 587, "workspace-user", "workspace@sender.test",
+                true, false, true, "workspace-smtp:7:1", "secret:v1:5", true);
+
+        String rendered = description.toString();
+
+        assertFalse(rendered.contains("secret:v1:5"));
+        assertTrue(rendered.contains("credentialReference=<redacted>"));
+    }
+
+    @Test
     void descriptionReturnsNullWithoutAUsableTransport() {
         assertNull(resolver.describeForWorkspace(7));
         verifyNoInteractions(secretCipher);

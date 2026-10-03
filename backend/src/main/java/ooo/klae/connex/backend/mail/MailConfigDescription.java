@@ -25,4 +25,12 @@ public record MailConfigDescription(
         String configurationVersion,
         String credentialReference,
         boolean usable) {
+
+    @Override
+    public String toString() {
+        return "MailConfigDescription[host=" + host + ", port=" + port + ", username=" + username
+                + ", fromAddress=" + fromAddress + ", starttls=" + starttls + ", ssl=" + ssl
+                + ", auth=" + auth + ", configurationVersion=" + configurationVersion
+                + ", credentialReference=<redacted>, usable=" + usable + "]";
+    }
 }
