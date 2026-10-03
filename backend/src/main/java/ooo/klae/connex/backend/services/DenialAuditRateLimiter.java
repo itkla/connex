@@ -7,9 +7,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -30,15 +33,27 @@ import org.springframework.stereotype.Component;
  * <p>The bound is per replica, and the address is only as distinct as {@link
  * ooo.klae.connex.backend.util.ClientIpResolver} makes it: behind a proxy that is not configured as
  * trusted, every request resolves to the proxy and the key narrows to user and action.
+ *
+ * <p>A suppressed row leaves no audit evidence, so suppression is counted instead:
+ * {@code connex.security.denial.audit.suppressed} per action, and
+ * {@code connex.security.denial.audit.evictions} for live windows dropped to bound the key set.
+ * Operators can then see a forged flood or a saturated limiter.
  */
 @Component
 public class DenialAuditRateLimiter {
     static final int MAX_ADDRESSES_PER_DENIAL = 8;
     static final int MAX_TRACKED_DENIALS = 4_096;
+    static final String SUPPRESSED_METRIC = "connex.security.denial.audit.suppressed";
+    static final String EVICTED_METRIC = "connex.security.denial.audit.evictions";
     private static final String UNRESOLVED_ADDRESS = "";
+    private static final Comparator<Map.Entry<Key, Window>> NEWEST_ADMISSION_FIRST = Comparator
+            .comparingLong((Map.Entry<Key, Window> entry) -> entry.getValue().latestAdmissionMillis())
+            .reversed();
 
     private final long windowMillis;
     private final Clock clock;
+    private final MeterRegistry meterRegistry;
+    private final Counter evictions;
     private final ConcurrentHashMap<Key, Window> windows = new ConcurrentHashMap<>();
 
     /**
@@ -55,12 +70,15 @@ public class DenialAuditRateLimiter {
 
     public DenialAuditRateLimiter(
             @Value("${connex.security.denial-audit-window-seconds:3600}") long windowSeconds,
-            Clock clock) {
+            Clock clock,
+            MeterRegistry meterRegistry) {
         if (windowSeconds <= 0) {
             throw new IllegalArgumentException("Denial audit window must be positive");
         }
         this.windowMillis = Math.multiplyExact(windowSeconds, 1_000L);
         this.clock = clock;
+        this.meterRegistry = meterRegistry;
+        this.evictions = meterRegistry.counter(EVICTED_METRIC);
     }
 
     /**
@@ -91,7 +109,11 @@ public class DenialAuditRateLimiter {
         if (windows.size() > MAX_TRACKED_DENIALS) {
             evict(now);
         }
-        return accepted.get() ? Optional.of(new Admission(userId, action, address, now)) : Optional.empty();
+        if (!accepted.get()) {
+            meterRegistry.counter(SUPPRESSED_METRIC, "action", action).increment();
+            return Optional.empty();
+        }
+        return Optional.of(new Admission(userId, action, address, now));
     }
 
     /**
@@ -119,10 +141,14 @@ public class DenialAuditRateLimiter {
      * While more keys than the limit stay live, the oldest can be evicted again and again, so the
      * per-key bound only holds below that limit. Losing evidence is the worse failure, so the limit is
      * enforced by dropping the oldest suppression rather than by refusing to admit a row.
+     *
+     * <p>Once saturated this runs for every new key, so it stays one pass over the cached latest
+     * admission of each window: the excess oldest are kept in a heap of that size, which is a single
+     * minimum scan for the usual excess of one.
      */
     private void evict(long now) {
         windows.forEach((key, window) -> {
-            if (window.liveAt(now, windowMillis).isEmpty()) {
+            if (window.expiredAt(now, windowMillis)) {
                 windows.remove(key, window);
             }
         });
@@ -130,12 +156,18 @@ public class DenialAuditRateLimiter {
         if (excess <= 0) {
             return;
         }
-        windows.entrySet().stream()
-                .sorted(Comparator.comparingLong(
-                        (Map.Entry<Key, Window> entry) -> entry.getValue().latestAdmissionMillis()))
-                .limit(excess)
-                .toList()
-                .forEach(entry -> windows.remove(entry.getKey(), entry.getValue()));
+        PriorityQueue<Map.Entry<Key, Window>> oldest = new PriorityQueue<>(excess, NEWEST_ADMISSION_FIRST);
+        for (Map.Entry<Key, Window> entry : windows.entrySet()) {
+            oldest.offer(entry);
+            if (oldest.size() > excess) {
+                oldest.poll();
+            }
+        }
+        for (Map.Entry<Key, Window> entry : oldest) {
+            if (windows.remove(entry.getKey(), entry.getValue())) {
+                evictions.increment();
+            }
+        }
     }
 
     int trackedDenials() {
@@ -152,15 +184,20 @@ public class DenialAuditRateLimiter {
     private record Admitted(String address, long admittedAtMillis) {
     }
 
-    private record Window(List<Admitted> admitted) {
+    private record Window(List<Admitted> admitted, long latestAdmissionMillis) {
+        private Window(List<Admitted> admitted) {
+            this(admitted,
+                    admitted.stream().mapToLong(Admitted::admittedAtMillis).max().orElse(Long.MIN_VALUE));
+        }
+
         private List<Admitted> liveAt(long now, long windowMillis) {
             return admitted.stream()
                     .filter(entry -> elapsed(now, entry.admittedAtMillis()) < windowMillis)
                     .toList();
         }
 
-        private long latestAdmissionMillis() {
-            return admitted.stream().mapToLong(Admitted::admittedAtMillis).max().orElse(Long.MIN_VALUE);
+        private boolean expiredAt(long now, long windowMillis) {
+            return admitted.isEmpty() || elapsed(now, latestAdmissionMillis) >= windowMillis;
         }
     }
 }

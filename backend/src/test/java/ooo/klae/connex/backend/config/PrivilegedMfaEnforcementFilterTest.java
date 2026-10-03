@@ -21,6 +21,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,7 +55,7 @@ class PrivilegedMfaEnforcementFilterTest {
             mock(UserMapper.class), mock(SpringSessionMapper.class)));
     private final AuditService auditService = mock(AuditService.class);
     private final DenialAuditRateLimiter denialAuditRateLimiter =
-            new DenialAuditRateLimiter(3_600, Clock.systemUTC());
+            new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry());
     private final FilterChain filterChain = mock(FilterChain.class);
     private PrivilegedMfaEnforcementFilter filter;
 
@@ -155,7 +156,7 @@ class PrivilegedMfaEnforcementFilterTest {
                 webAuthnService,
                 sessionSecurityService,
                 auditService,
-                new DenialAuditRateLimiter(3_600, Clock.systemUTC()),
+                new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry()),
                 new ClientIpResolver("10.0.0.0/8"));
 
         for (String client : List.of("203.0.113.5", "203.0.113.5", "198.51.100.9")) {
