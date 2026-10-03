@@ -196,13 +196,14 @@ class HttpListConnectorTest {
 
     @Test
     void pushAudience_hardDeadlineAbortsASlowDripWhileTheExportLeaseIsValid() throws Exception {
-        Duration deadline = Duration.ofMillis(500);
+        Duration deadline = Duration.ofSeconds(2);
         long dripMillis = 25;
         byte[] response = ("{\"added\":2,\"failed\":0,\"padding\":\""
-                + "x".repeat(32) + "\"}").getBytes(StandardCharsets.UTF_8);
+                + "x".repeat(120) + "\"}").getBytes(StandardCharsets.UTF_8);
         assertTrue(Duration.ofMillis(dripMillis * response.length)
                 .compareTo(deadline.plusMillis(200)) >= 0);
         CountDownLatch responseStarted = new CountDownLatch(1);
+        CountDownLatch dripAborted = new CountDownLatch(1);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/slow", exchange -> {
             responseStarted.countDown();
@@ -215,7 +216,8 @@ class HttpListConnectorTest {
                         Thread.sleep(dripMillis);
                     }
                 }
-            } catch (IOException ignored) {
+            } catch (IOException aborted) {
+                dripAborted.countDown();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
             } finally {
@@ -224,9 +226,9 @@ class HttpListConnectorTest {
         });
         server.start();
         DeliveryProperties properties = new DeliveryProperties();
-        properties.setEspConnectTimeoutMs(1_000);
-        properties.setEspRequestTimeoutMs(1_000);
-        properties.setAudienceExportProviderDeadlineMs(2_000);
+        properties.setEspConnectTimeoutMs(2_000);
+        properties.setEspRequestTimeoutMs(2_000);
+        properties.setAudienceExportProviderDeadlineMs(4_000);
         HttpListConnector connector = new HttpListConnector(
                 properties, objectMapper, host -> InetAddress.getLoopbackAddress());
         String endpoint = "http://list-provider.example.test:"
@@ -242,6 +244,7 @@ class HttpListConnectorTest {
             assertEquals("Connector audience push exceeded its hard deadline", result.detail());
             assertTrue(elapsed.compareTo(deadline.minusMillis(50)) >= 0);
             assertTrue(elapsed.compareTo(properties.audienceExportLeaseDuration()) < 0);
+            assertTrue(dripAborted.await(10, TimeUnit.SECONDS));
         } finally {
             connector.shutdown();
             server.stop(0);
