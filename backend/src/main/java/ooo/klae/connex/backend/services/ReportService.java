@@ -424,8 +424,10 @@ public class ReportService {
      * locked workspace authorization, and its assigned custom-role rows shared, which also flushes
      * the session cache, before {@code lockDefinitions}; at {@code READ_COMMITTED} the schedule and the
      * privilege are then re-read against committed state, so a promotion, or a schedule, committed
-     * while the delete waited is observed. That refusal is audited like the pre-check's: the account
-     * root is shared, so the independent audit's shared lock on the account row does not wait on it.
+     * while the delete waited is observed. That refusal is audited too, but deferred until the
+     * transaction completes: an immediate independent audit re-takes the account row on another
+     * connection and would queue behind any writer already waiting on this transaction's shared lock
+     * (#1986).
      *
      * @param id the report to delete
      */
@@ -437,7 +439,7 @@ public class ReportService {
         int currentUserId = workspaceService.getCurrentUserId();
         if (scheduleMapper.getByReport(workspaceId, id) != null
                 && privilegedAccountService.isPrivileged(actorId)) {
-            requireScheduleCascadeStepUp(actorId);
+            requireScheduleCascadeStepUp(actorId, auditService::recordScheduleDeleteStepUpRefused);
         }
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Authenticated user is unavailable");
@@ -452,7 +454,7 @@ public class ReportService {
         }
         if (scheduleMapper.getByReport(workspaceId, id) != null
                 && privilegedAccountService.isPrivileged(actorId)) {
-            requireScheduleCascadeStepUp(actorId);
+            requireScheduleCascadeStepUp(actorId, auditService::deferScheduleDeleteStepUpRefusal);
         }
         deletionPolicy.requireDeletable(definition.getCreatedBy(), builtInAdministrator);
         int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
@@ -828,12 +830,14 @@ public class ReportService {
      * {@code ScheduleService.delete} records one.
      *
      * @param actorId the account whose assertion freshness is checked
+     * @param recordRefusal records the refusal: immediately before any lock is taken, deferred until
+     *     completion once the actor's account row is held
      */
-    private void requireScheduleCascadeStepUp(int actorId) {
+    private void requireScheduleCascadeStepUp(int actorId, Runnable recordRefusal) {
         try {
             sessionSecurityService.requireRecentAuthentication(actorId);
         } catch (RecentAuthenticationRequiredException exception) {
-            auditService.recordScheduleDeleteStepUpRefused();
+            recordRefusal.run();
             throw exception;
         }
     }

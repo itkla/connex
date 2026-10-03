@@ -166,6 +166,38 @@ class ScheduleStepUpTest {
         verify(reportMapper).getDefinition(anyInt(), anyInt());
     }
 
+    /**
+     * A refusal found only under the account lock is deferred until the transaction completes, never
+     * appended while the account row is held: an immediate independent audit would queue behind any
+     * writer already waiting on that row (#1986). The unlocked pre-check passes, and the account is
+     * privileged by the time the locked re-check runs.
+     */
+    @ParameterizedTest
+    @CsvSource({"true,create", "true,update", "true,delete", "false,create", "false,update", "false,delete"})
+    void aRefusalFoundUnderTheAccountLockIsDeferredUntilCompletion(String enforced, String operation) {
+        ScheduleService service = service(enforced);
+        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false, true);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> {
+            if ("delete".equals(operation)) {
+                service.delete(REPORT_ID);
+            } else {
+                invoke(service, operation);
+            }
+        });
+
+        if ("delete".equals(operation)) {
+            verify(auditService).deferScheduleDeleteStepUpRefusal();
+            verify(auditService, never()).deferExportStepUpRefusal();
+        } else {
+            verify(auditService).deferExportStepUpRefusal();
+            verify(auditService, never()).deferScheduleDeleteStepUpRefusal();
+        }
+        verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
+        verifyNoInteractions(scheduleMapper, reportMapper);
+    }
+
     private static void invoke(ScheduleService service, String operation) {
         ReportScheduleRequest payload =
                 new ReportScheduleRequest("weekly", List.of(USER_ID), "UTC", 9, true);

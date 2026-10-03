@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,6 +46,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Organization;
@@ -147,6 +149,14 @@ class PrivilegedGateConcurrencyIntegrationTest {
     @ValueSource(strings = {"create", "update", "delete", "reportDelete"})
     void committedPromotionAfterPreCheckIsRefusedAndAuditedUnderTheLock(String operation) throws Exception {
         ReportSchedule original = prepareSchedule(operation);
+        AtomicBoolean deferredInsideTheGate = new AtomicBoolean();
+        Answer<Void> captureTransaction = invocation -> {
+            deferredInsideTheGate.set(TransactionSynchronizationManager.isActualTransactionActive()
+                    && TransactionSynchronizationManager.isSynchronizationActive());
+            return null;
+        };
+        doAnswer(captureTransaction).when(auditService).deferExportStepUpRefusal();
+        doAnswer(captureTransaction).when(auditService).deferScheduleDeleteStepUpRefusal();
         CountDownLatch preCheckRead = new CountDownLatch(1);
         CountDownLatch promotionCommitted = new CountDownLatch(1);
         AtomicBoolean firstRead = new AtomicBoolean(true);
@@ -180,6 +190,9 @@ class PrivilegedGateConcurrencyIntegrationTest {
         verify(privilegedAccountService, times(2)).isPrivileged(user.getId());
         verify(userMapper).lockAssignedCustomRoleRowsForShare(user.getId());
         verifyRefusalAuditedOnce(operation);
+        assertTrue(deferredInsideTheGate.get(),
+                "the under-lock refusal must be deferred from inside the gate's transaction, where its"
+                        + " completion callback can run after the account row is released");
         assertUnchanged(original);
     }
 
@@ -198,6 +211,8 @@ class PrivilegedGateConcurrencyIntegrationTest {
             verify(auditService).recordScheduleDeleteStepUpRefused();
             verify(auditService, never()).recordExportStepUpRefused();
         }
+        verify(auditService, never()).deferExportStepUpRefusal();
+        verify(auditService, never()).deferScheduleDeleteStepUpRefusal();
         verify(userMapper, never()).lockByIdForShare(user.getId());
         verify(userMapper, never()).lockAssignedCustomRoleRowsForShare(user.getId());
         assertUnchanged(original);
@@ -407,15 +422,21 @@ class PrivilegedGateConcurrencyIntegrationTest {
         throw new AssertionError("The mutation never waited behind the promotion");
     }
 
-    /** The refusal is audited exactly once, with the summary that matches what was attempted. */
+    /**
+     * The under-lock refusal is recorded exactly once, with the summary that matches what was
+     * attempted, and deferred until completion rather than appended while the account row is held
+     * (#1986).
+     */
     private void verifyRefusalAuditedOnce(String operation) {
         if ("create".equals(operation) || "update".equals(operation)) {
-            verify(auditService).recordExportStepUpRefused();
-            verify(auditService, never()).recordScheduleDeleteStepUpRefused();
+            verify(auditService).deferExportStepUpRefusal();
+            verify(auditService, never()).deferScheduleDeleteStepUpRefusal();
         } else {
-            verify(auditService).recordScheduleDeleteStepUpRefused();
-            verify(auditService, never()).recordExportStepUpRefused();
+            verify(auditService).deferScheduleDeleteStepUpRefusal();
+            verify(auditService, never()).deferExportStepUpRefusal();
         }
+        verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
     }
 
     /** Uses the grantee account, workspace and membership order of built-in role mutation. */

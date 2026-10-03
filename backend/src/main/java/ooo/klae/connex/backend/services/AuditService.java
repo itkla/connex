@@ -406,12 +406,17 @@ public class AuditService {
     /**
      * Appends an independent audit row once the current transaction has completed.
      *
-     * <p>Used only when this transaction already holds the entry's integrity head. An immediate
-     * {@code REQUIRES_NEW} append would suspend the holder and then wait on its own lock for the full
-     * InnoDB lock-wait timeout before failing, losing the row (#1879). After completion the head has
-     * been released, and the row is recorded whether the holder committed or rolled back — the same
-     * durability an independent append is for. The entry is built at the call, so its actor and
-     * request metadata are those of the refused operation, not of whatever runs later.
+     * <p>Used when an immediate {@code REQUIRES_NEW} append would wait on a lock this transaction
+     * holds or keeps contended. When this transaction already holds the entry's integrity head, the
+     * append would suspend the holder and then wait on its own lock for the full InnoDB lock-wait
+     * timeout before failing, losing the row (#1879). When it holds the actor's {@code app_user} row
+     * {@code FOR SHARE}, the append's own shared request on that row queues behind any exclusive
+     * request already waiting on it, which in turn waits on this transaction (#1986). After
+     * completion those locks have been released, and the row is recorded whether the holder
+     * committed or rolled back. Delivery is best-effort, as for any independent append: the
+     * append's own waits are not bounded, and a failure or a crash before it commits loses the row.
+     * The entry is built at the call, so its actor and request metadata are those of the refused
+     * operation, not of whatever runs later.
      */
     private void deferIndependent(AuditLog entry) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -602,12 +607,27 @@ public class AuditService {
      * matched the route, so a refusal reached only by the deeper control stays distinguishable in
      * the audit trail instead of looking like the filter refused it.
      *
-     * <p>The entry is appended in an independent transaction that re-takes the actor's
-     * {@code app_user} row {@code FOR SHARE}, so this must not be called from a transaction that
-     * already holds that row {@code FOR UPDATE}; it would wait on its own lock.
+     * <p>The entry is appended immediately in an independent transaction that re-takes the actor's
+     * {@code app_user} row {@code FOR SHARE}. A transaction that already holds that row, shared or
+     * exclusive, must use {@link #deferExportStepUpRefusal()} instead: holding it exclusively, the
+     * append would wait on its own lock, and holding it shared, the append would queue behind any
+     * writer already waiting on this transaction.
      */
     public void recordExportStepUpRefused() {
         recordStepUpRefused(EXPORT_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the same refusal as {@link #recordExportStepUpRefused()}, appended once the current
+     * transaction has completed.
+     *
+     * <p>For a gate that refuses while it holds the actor's {@code app_user} row. Deferring removes the
+     * wait cycle an immediate append can form with a writer queued on that row (#1986); it does not
+     * bound the append's own waits or guarantee delivery. Without an active transaction
+     * synchronization the row is appended immediately.
+     */
+    public void deferExportStepUpRefusal() {
+        deferStepUpRefusal(EXPORT_STEP_UP_SUMMARY);
     }
 
     /**
@@ -624,17 +644,44 @@ public class AuditService {
         recordStepUpRefused(SCHEDULE_DELETE_STEP_UP_SUMMARY);
     }
 
+    /**
+     * Records the same refusal as {@link #recordScheduleDeleteStepUpRefused()}, appended once the
+     * current transaction has completed, for a gate that refuses while it holds the actor's
+     * {@code app_user} row; see {@link #deferExportStepUpRefusal()}.
+     */
+    public void deferScheduleDeleteStepUpRefusal() {
+        deferStepUpRefusal(SCHEDULE_DELETE_STEP_UP_SUMMARY);
+    }
+
     private void recordStepUpRefused(String summary) {
-        Integer actorId = null;
-        String actorLabel = null;
+        StepUpActor actor = stepUpActor();
+        recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actor.id(), null, null, actor.label(),
+                summary, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+    }
+
+    private void deferStepUpRefusal(String summary) {
+        StepUpActor actor = stepUpActor();
+        try {
+            deferIndependent(buildEntry(EXPORT_STEP_UP_ACTION, "user", actor.id(), actor.label(),
+                    OUTCOME_FAILURE, summary, null,
+                    Map.of("error", truncate(EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON, ERROR_MAX)),
+                    true, null, null, true));
+        } catch (Exception e) {
+            log.error("Failed to record audit event action={} entityType={} entityId={}",
+                    EXPORT_STEP_UP_ACTION, "user", actor.id(), e);
+        }
+    }
+
+    private static StepUpActor stepUpActor() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && authentication.getPrincipal() instanceof User user) {
-            actorId = user.getId();
-            actorLabel = user.getDisplayName();
+            return new StepUpActor(user.getId(), user.getDisplayName());
         }
-        recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actorId, null, null, actorLabel,
-                summary, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+        return new StepUpActor(null, null);
+    }
+
+    private record StepUpActor(Integer id, String label) {
     }
 
     private void requireExportStepUp() {
