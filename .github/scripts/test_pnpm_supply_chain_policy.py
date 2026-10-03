@@ -632,6 +632,10 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
                 root,
                 {
                     WORKSPACE: (0, json.dumps(resolved)),
+                    Path("frontend/emails/pnpm-workspace.yaml"): (
+                        0,
+                        json.dumps({**RESOLVED_POLICY, "auditConfig": {"ignoreGhsas": None}}),
+                    ),
                     Path("landing/pnpm-workspace.yaml"): (0, json.dumps({**RESOLVED_POLICY, "auditConfig": {}})),
                 },
             )

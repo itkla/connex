@@ -35,7 +35,9 @@ adding another fails until this guard is changed in review. A lexical scan only 
 `--effective` adds a behavioural check: it asks pnpm itself what it resolves in each workspace
 (`pnpm config list --json` reports every explicitly configured setting after the pnpmfile hooks have
 run) and compares that with the policy, the pinned pnpm version, the registry and transport settings,
-and the exclusions the reader found.
+and the exclusions and ignored advisories the reader found. pnpm reports only keys that a configuration
+file sets, so a setting that a hook adds and no file declares, such as an `auditConfig` in a workspace
+that has none, is invisible here; the digest pin is what stops a hook from adding one.
 
 This is a tripwire against an accidental or overt weakening in a reviewed pull request. It is not a
 defence against a hostile committer, who can edit this guard in the same pull request.
@@ -525,7 +527,7 @@ def same_value(reported: object, expected: object) -> bool:
 
 
 def resolves_declared_ignores(reported: object, declared: list[str]) -> bool:
-    if not declared and reported in (None, {}, {IGNORED_ADVISORIES: []}):
+    if not declared and reported in (None, {}, {IGNORED_ADVISORIES: []}, {IGNORED_ADVISORIES: None}):
         return True
     return reported == {IGNORED_ADVISORIES: declared}
 
