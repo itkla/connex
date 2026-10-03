@@ -39,6 +39,13 @@ APPROVED_NEXT = (
     "  # GHSA-2222-3333-4444 platform binary. Approved: Hunter Nakagawa, 2026-09-19. Remove with next.\n"
     "  - '@next/swc-linux-x64-gnu@16.3.5'\n"
 )
+APPROVED_IGNORE = (
+    "auditConfig:\n"
+    "  ignoreGhsas:\n"
+    "    # braces stack exhaustion, no patched release; developer tooling only.\n"
+    "    # Approved: Hunter Nakagawa, 2026-10-02. Remove once braces ships a fix.\n"
+    "    - GHSA-vfj7-8cjw-p6xm\n"
+)
 READ_PACKAGE_PNPMFILE = (
     "function readPackage(pkg) {\n"
     "    return pkg;\n"
@@ -332,6 +339,101 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
             self.violations(POLICY + "minimumReleaseAgeExclude: [next@16.3.5]\n"),
         )
 
+    def test_an_owner_approved_audit_ignore_with_its_evidence_passes(self) -> None:
+        compact = APPROVED_IGNORE.replace("    - GHSA", "  - GHSA").replace("    # ", "  # ")
+        for text in (APPROVED_IGNORE, compact):
+            with self.subTest(text=text):
+                self.assertEqual([], self.violations(POLICY + text))
+
+    def test_the_uncommented_audit_ignore_pnpm_audit_writes_fails(self) -> None:
+        self.assertEqual(
+            [
+                "frontend/pnpm-workspace.yaml:10: auditConfig.ignoreGhsas entry 'GHSA-vfj7-8cjw-p6xm' "
+                "has no comment directly above it",
+            ],
+            self.violations(POLICY + "auditConfig:\n  ignoreGhsas:\n    - GHSA-vfj7-8cjw-p6xm\n"),
+        )
+
+    def test_the_empty_audit_config_pnpm_audit_ignore_unfixable_writes_fails(self) -> None:
+        self.assertEqual(
+            [
+                "frontend/pnpm-workspace.yaml:8: auditConfig must be a block mapping holding only an "
+                "ignoreGhsas block sequence",
+            ],
+            self.violations(POLICY + "auditConfig: {}\n"),
+        )
+
+    def test_an_audit_ignore_comment_must_record_approval_and_removal(self) -> None:
+        text = POLICY + "auditConfig:\n  ignoreGhsas:\n    # GHSA-vfj7-8cjw-p6xm is noisy.\n    - GHSA-vfj7-8cjw-p6xm\n"
+        self.assertEqual(
+            [
+                "frontend/pnpm-workspace.yaml:11: auditConfig.ignoreGhsas entry 'GHSA-vfj7-8cjw-p6xm' "
+                "comment records no owner approval (`Approved: <name>, <YYYY-MM-DD>`)",
+                "frontend/pnpm-workspace.yaml:11: auditConfig.ignoreGhsas entry 'GHSA-vfj7-8cjw-p6xm' "
+                "comment states no removal condition (`Remove ...`)",
+            ],
+            self.violations(text),
+        )
+
+    def test_audit_ignores_that_are_not_one_canonical_ghsa_id_fail(self) -> None:
+        note = "    # Approved: Hunter Nakagawa, 2026-10-02. Remove once braces ships a fix.\n"
+        entries = (
+            "CVE-2026-93687",
+            "ghsa-vfj7-8cjw-p6xm",
+            "GHSA-VFJ7-8CJW-P6XM",
+            "GHSA-vfj7-8cjw-p6xm GHSA-6j4f-fj2g-mc7p",
+            "*",
+        )
+        text = POLICY + "auditConfig:\n  ignoreGhsas:\n" + "".join(f"{note}    - '{entry}'\n" for entry in entries)
+        self.assertEqual(
+            [
+                f"frontend/pnpm-workspace.yaml:{11 + 2 * index}: auditConfig.ignoreGhsas entry {entry!r} "
+                "is not one GHSA id in pnpm's canonical `GHSA-xxxx-xxxx-xxxx` form"
+                for index, entry in enumerate(entries)
+            ],
+            self.violations(text),
+        )
+
+    def test_an_audit_config_other_than_one_ignore_sequence_fails(self) -> None:
+        note = "    # Approved: Hunter Nakagawa, 2026-10-02. Remove once braces ships a fix.\n"
+        cases = {
+            "auditConfig: {ignoreGhsas: [GHSA-vfj7-8cjw-p6xm]}\n": [
+                "frontend/pnpm-workspace.yaml:8: auditConfig must be a block mapping holding only an "
+                "ignoreGhsas block sequence",
+            ],
+            "auditConfig:\n  ignoreGhsas: [GHSA-vfj7-8cjw-p6xm]\n": [
+                "frontend/pnpm-workspace.yaml:9: auditConfig.ignoreGhsas must be a block sequence with one "
+                "commented entry per line",
+            ],
+            "auditConfig:\n  ignoreCves:\n    - CVE-2026-93687\n": [
+                "frontend/pnpm-workspace.yaml:9: auditConfig may hold only one ignoreGhsas block sequence; "
+                "'ignoreCves:' needs a reviewed change to this guard",
+                "frontend/pnpm-workspace.yaml:10: unrecognised line in auditConfig: '- CVE-2026-93687'",
+            ],
+            "auditConfig:\n  - GHSA-vfj7-8cjw-p6xm\n": [
+                "frontend/pnpm-workspace.yaml:9: unrecognised line in auditConfig: '- GHSA-vfj7-8cjw-p6xm'",
+            ],
+            "auditConfig:\n  ignoreGhsas:\n" + note + "    - GHSA-vfj7-8cjw-p6xm\n  ignoreGhsas:\n"
+            + note + "    - GHSA-6j4f-fj2g-mc7p\n": [
+                "frontend/pnpm-workspace.yaml:12: auditConfig may hold only one ignoreGhsas block sequence; "
+                "'ignoreGhsas:' needs a reviewed change to this guard",
+                "frontend/pnpm-workspace.yaml:14: unrecognised line in auditConfig: '- GHSA-6j4f-fj2g-mc7p'",
+            ],
+            "auditConfig:\n    ignoreGhsas:\n" + note + "  - GHSA-vfj7-8cjw-p6xm\n": [
+                "frontend/pnpm-workspace.yaml:11: unrecognised line in auditConfig: '- GHSA-vfj7-8cjw-p6xm'",
+            ],
+            "auditConfig:\n  ignoreGhsas:\n" + note + "    - GHSA-vfj7-8cjw-p6xm\n" + note
+            + "      - GHSA-6j4f-fj2g-mc7p\n": [
+                "frontend/pnpm-workspace.yaml:13: unrecognised line in auditConfig: '- GHSA-6j4f-fj2g-mc7p'",
+            ],
+            "auditConfig:\n  ignoreGhsas:\n" + note + "    - GHSA-vfj7-8cjw-p6xm\n      GHSA-6j4f-fj2g-mc7p\n": [
+                "frontend/pnpm-workspace.yaml:12: unrecognised line in auditConfig: 'GHSA-6j4f-fj2g-mc7p'",
+            ],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(expected, self.violations(POLICY + text))
+
     def test_the_reviewed_pnpmfile_matching_its_pinned_digest_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -520,6 +622,59 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
             write_workspaces(root)
             stub = write_pnpm_stub(root, {workspace: (0, json.dumps(report)) for workspace, report in reports.items()})
             return GUARD.effective_violations(root, pnpm=str(stub))
+
+    def test_resolved_audit_ignores_matching_the_file_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root, {WORKSPACE: POLICY + APPROVED_IGNORE})
+            resolved = {**RESOLVED_POLICY, "auditConfig": {"ignoreGhsas": ["GHSA-vfj7-8cjw-p6xm"]}}
+            stub = write_pnpm_stub(
+                root,
+                {
+                    WORKSPACE: (0, json.dumps(resolved)),
+                    Path("landing/pnpm-workspace.yaml"): (0, json.dumps({**RESOLVED_POLICY, "auditConfig": {}})),
+                },
+            )
+            self.assertEqual([], GUARD.effective_violations(root, pnpm=str(stub)))
+
+    def test_resolved_audit_ignores_that_differ_from_the_file_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root, {WORKSPACE: POLICY + APPROVED_IGNORE})
+            stub = write_pnpm_stub(
+                root,
+                {
+                    WORKSPACE: (
+                        0,
+                        json.dumps(
+                            {
+                                **RESOLVED_POLICY,
+                                "auditConfig": {"ignoreGhsas": ["GHSA-vfj7-8cjw-p6xm"], "ignoreCves": ["CVE-1"]},
+                            }
+                        ),
+                    ),
+                    Path("frontend/emails/pnpm-workspace.yaml"): (
+                        0,
+                        json.dumps({**RESOLVED_POLICY, "auditConfig": {"ignoreGhsas": ["GHSA-6j4f-fj2g-mc7p"]}}),
+                    ),
+                    Path("landing/pnpm-workspace.yaml"): (
+                        0,
+                        json.dumps({**RESOLVED_POLICY, "auditConfig": ["GHSA-vfj7-8cjw-p6xm"]}),
+                    ),
+                },
+            )
+            self.assertEqual(
+                [
+                    'frontend/pnpm-workspace.yaml: pnpm resolves auditConfig to {"ignoreGhsas": '
+                    '["GHSA-vfj7-8cjw-p6xm"], "ignoreCves": ["CVE-1"]}, but the annotated entries in the file are '
+                    '{"ignoreGhsas": ["GHSA-vfj7-8cjw-p6xm"]}',
+                    'frontend/emails/pnpm-workspace.yaml: pnpm resolves auditConfig to {"ignoreGhsas": '
+                    '["GHSA-6j4f-fj2g-mc7p"]}, but the annotated entries in the file are {"ignoreGhsas": []}',
+                    'landing/pnpm-workspace.yaml: pnpm resolves auditConfig to ["GHSA-vfj7-8cjw-p6xm"], but the '
+                    'annotated entries in the file are {"ignoreGhsas": []}',
+                ],
+                GUARD.effective_violations(root, pnpm=str(stub)),
+            )
 
     def test_a_pnpm_other_than_the_pinned_version_fails(self) -> None:
         without_agent = {key: value for key, value in RESOLVED_POLICY.items() if key != "userAgent"}
