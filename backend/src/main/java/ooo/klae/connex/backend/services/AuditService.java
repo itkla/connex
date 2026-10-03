@@ -331,8 +331,7 @@ public class AuditService {
      */
     public void recordFailure(String action, String entityType, Integer entityId,
             String targetLabel, String summary, String errorMessage) {
-        Object context = errorMessage == null ? null
-                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        Object context = failureContext(errorMessage);
         write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
                 false, null, null);
     }
@@ -341,13 +340,16 @@ public class AuditService {
      * Records the same failure as {@link #recordFailure}, appended once the current transaction has
      * completed.
      *
-     * <p>For a refusal decided while this transaction holds a row the independent append locks, such
-     * as the actor's {@code app_user} row. Holding it exclusively, an immediate append would wait on
-     * this transaction's own lock until the InnoDB timeout; holding it shared, it would queue behind
-     * any writer already waiting on this transaction (#1986, #1993). The entry, including its tenant
-     * scope, actor and request metadata, is built at the call. Delivery is best-effort, as for the
-     * deferred step-up recorders. Without an active transaction synchronization the row is appended
-     * immediately.
+     * <p>For a refusal decided while the <em>current</em> transaction holds a row the independent
+     * append locks, such as the actor's {@code app_user} row. Holding it exclusively, an immediate
+     * append would wait on this transaction's own lock until the InnoDB timeout; holding it shared, it
+     * would queue behind any writer already waiting on this transaction (#1986, #1993). It does not
+     * help from an inner {@code REQUIRES_NEW} transaction while a suspended outer one holds the lock:
+     * the append would run when the inner one completes and wait on the outer lock. Never use it where
+     * the row must exist before the operation continues; use a strict recorder there. The entry,
+     * including its tenant scope, actor and request metadata, is built at the call. Delivery is
+     * best-effort, as for the deferred step-up recorders, and this method never throws. Without an
+     * active transaction synchronization the row is appended immediately.
      *
      * @param action action name
      * @param entityType audited entity type
@@ -358,8 +360,7 @@ public class AuditService {
      */
     public void deferFailure(String action, String entityType, Integer entityId,
             String targetLabel, String summary, String errorMessage) {
-        Object context = errorMessage == null ? null
-                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        Object context = failureContext(errorMessage);
         try {
             deferIndependent(buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary,
                     null, context, false, null, null, true));
@@ -382,10 +383,13 @@ public class AuditService {
      */
     public void recordFailureScoped(String action, String entityType, Integer entityId,
             Integer workspaceId, Integer orgId, String targetLabel, String summary, String errorMessage) {
-        Object context = errorMessage == null ? null
-                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        Object context = failureContext(errorMessage);
         write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
                 true, workspaceId, orgId);
+    }
+
+    private static Object failureContext(String errorMessage) {
+        return errorMessage == null ? null : Map.of("error", truncate(errorMessage, ERROR_MAX));
     }
 
     /**

@@ -1289,7 +1289,7 @@ re-check of the privileged gate audits its refusal through `AuditService.deferFa
 entry, with its tenant scope, actor and request metadata, is built at the call and appended after the
 request's transaction completes, once its own exclusive lock is released (#1993). That append is
 best-effort with the bounds of the step-up deferral (#1986): `created_at` is the append time, and a
-row appended after its account was deleted keeps the actor only in `entity_id` and the labels.
+row appended after its account was deleted keeps the actor only in `entity_id` and its actor label.
 
 The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
 The corpus lookup runs before any lock, but the fail-open decision reads account privilege under

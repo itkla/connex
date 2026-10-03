@@ -799,7 +799,10 @@ class AuditServiceTest {
         assertEquals("user", row.getEntityType());
         assertEquals(42, row.getEntityId());
         assertEquals(42, row.getActorId());
+        assertEquals("Email Changer", row.getActorLabel());
+        assertNull(row.getTargetLabel());
         assertEquals("failure", row.getOutcome());
+        assertEquals("Email change refused for a privileged account", row.getSummary());
         assertTrue(row.getContext().contains("recent_authentication_required"));
         assertEquals(7, row.getWorkspaceId());
         assertEquals(8, row.getOrgId());

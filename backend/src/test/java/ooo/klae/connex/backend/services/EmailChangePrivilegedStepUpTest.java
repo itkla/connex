@@ -192,7 +192,7 @@ class EmailChangePrivilegedStepUpTest {
         order.verify(privilegedAccountService).isPrivileged(USER_ID);
         order.verify(webAuthnService).hasPasskey(USER_ID);
         order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), anyString(), eq("privileged_mfa_enrollment_required"));
+                isNull(), eq("Email change refused for a privileged account"), eq("privileged_mfa_enrollment_required"));
         verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
@@ -212,7 +212,7 @@ class EmailChangePrivilegedStepUpTest {
         InOrder order = inOrder(userMapper, auditService);
         order.verify(userMapper).lockById(USER_ID);
         order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), anyString(), eq("recent_authentication_required"));
+                isNull(), eq("Email change refused for a privileged account"), eq("recent_authentication_required"));
         verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
