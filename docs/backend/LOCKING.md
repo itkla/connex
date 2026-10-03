@@ -74,7 +74,17 @@ entry shared and then takes the workspace audit head or the workflow gate. A leg
 `assign_owner` reaches the owner change holding the gate, and the audit head too once an earlier
 action has audited. Either one would close a deadlock if the owner change locked that entry. The
 other single-column deal updates, `reschedule` and `updateRiskExcluded`, read the deal through the
-same primary-key lock for the same reason (#1958). The collaborator path is in the #1582 class
+same primary-key lock for the same reason (#1958). The contact and company tag replacements
+(`PersonService` and `CompanyService.replaceTags`) and the contact evaluation opt-out
+(`PersonService.updateEvaluationExclusions`) also read the record row `FOR UPDATE` first, refuse an
+archived row under it, and audit from what they read after it, at `READ_COMMITTED` (#1968). A tag
+replacement then reads the record's `person_tag` or `company_tag` rows `FOR UPDATE OF` the association
+table, driven from its primary-key prefix, before clearing them. A concurrent `addTag` blocks on the
+record row at its foreign-key check, and a concurrent `removeTag`, which takes no record lock, blocks
+on the association row, so the audited previous tags are exactly the rows the replacement deletes. A
+tag deletion that cascades into a record while a replacement re-adds the same tag can still deadlock,
+as it could before (the replacement holds the association row and waits on the tag row for its
+insert's foreign-key check); InnoDB rolls one back with a retryable error. The collaborator path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion

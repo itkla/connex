@@ -69,6 +69,28 @@
     ORDER BY t.name
   </select>
 
+  <!-- Driven from the association's primary-key prefix and locking only its rows: a tag
+       replacement reads the tags it is about to clear under these locks, so a concurrent removal
+       cannot change the set between the read and the delete. -->
+  <select id="getTagsByPersonIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM person_tag pt
+    STRAIGHT_JOIN tag t ON t.id = pt.tag_id
+    WHERE pt.person_id = #{personId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF pt
+  </select>
+
+  <!-- The company counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByCompanyIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM company_tag ct
+    STRAIGHT_JOIN tag t ON t.id = ct.tag_id
+    WHERE ct.company_id = #{companyId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF ct
+  </select>
+
   <select id="getTagsByDealId" resultType="Tag">
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t

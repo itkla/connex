@@ -740,14 +740,23 @@ public class CompanyService {
     }
 
     /**
-     * Replaces the tags associated with a company in the active workspace.
+     * Replaces the tags associated with a company in the active workspace. The company row is locked
+     * first and an archived company is refused under that lock; the audited previous tags are then
+     * read under locks on the association rows. A concurrent {@link #addTag} waits on the company row
+     * at its foreign-key check and a concurrent {@link #removeTag} waits on the association row, so
+     * the audit names exactly the tags this replacement removed (#1968). It runs at
+     * {@code READ_COMMITTED}, so the tags returned are a fresh read.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireOwnedCompany(workspaceId, companyId);
-        List<String> before = tagMapper.getTagsByCompanyId(workspaceId, companyId).stream().map(Tag::getName).toList();
+        Company company = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
+        if (company == null || company.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Company not found");
+        }
+        List<String> before = tagMapper.getTagsByCompanyIdForUpdate(workspaceId, companyId).stream()
+            .map(Tag::getName).toList();
         companyMapper.clearTags(workspaceId, companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceId, companyId, tagIds);
         List<Tag> after = tagMapper.getTagsByCompanyId(workspaceId, companyId);
