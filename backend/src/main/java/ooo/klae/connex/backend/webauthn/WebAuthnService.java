@@ -93,7 +93,9 @@ public class WebAuthnService {
      * stamp the session as stepped-up without the out-of-band proof ever being required.
      * Privilege can also arrive through a custom role the account already holds, which no
      * account-row lock serialises, so the assigned role rows are locked here too and the
-     * transaction reads committed state rather than a snapshot taken before the promotion.
+     * transaction reads committed state rather than a snapshot taken before the promotion. A
+     * refusal here is audited like the controller's, but only once the transaction completes: an
+     * immediate independent append would wait on this transaction's own account lock (#1995).
      *
      * @param expectedSessionEpoch the epoch stamped into the request's authenticated session
      * @param bootstrapConfirmationSatisfied whether the session carries a redeemed out-of-band
@@ -124,6 +126,7 @@ public class WebAuthnService {
         if (!hasPasskey(expectedUserId)
                 && !bootstrapConfirmationSatisfied
                 && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {
+            deferBootstrapConfirmationRefusalAudit(expectedUserId);
             throw new ForbiddenException(
                     "Confirm the emailed enrollment link before adding the first passkey");
         }
@@ -357,5 +360,26 @@ public class WebAuthnService {
             transports,
             row.getCreatedAt(),
             row.getLastUsedAt());
+    }
+
+    /**
+     * Records the refused first-passkey enrollment as the controller does at the ceremony phases,
+     * deferred until this transaction completes because it holds the account row exclusively. The
+     * target label is the account's display name, read under that lock as the confirmation policy
+     * reads it.
+     *
+     * @param userId the account whose enrollment was refused
+     */
+    private void deferBootstrapConfirmationRefusalAudit(int userId) {
+        User user = userMapper.getUserById(userId);
+        auditService.deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION,
+                "user",
+                userId,
+                null,
+                null,
+                user == null ? null : user.getDisplayName(),
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
     }
 }

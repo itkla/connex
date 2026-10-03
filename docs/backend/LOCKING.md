@@ -1206,6 +1206,13 @@ account root.
   MyBatis session, so without the flush the re-check would return the privilege and passkey answers
   cached by the pre-lock evaluation. A refusal that appears only under the root is audited once the
   transaction completes (see below).
+- `WebAuthnService.finishRegistration` takes the account root exclusively (`lockById`), checks the
+  `session_epoch`, locks the assigned custom roles `FOR SHARE`, and then evaluates the first-passkey
+  confirmation fence (#1506) against committed state. `WebAuthnController` audits that refusal
+  strictly at both ceremony phases, before any lock. A refusal that appears only under the root is
+  recorded with the same row through `AuditService.deferFailureScoped` and appended once the
+  transaction completes, because an immediate independent append would wait on the request's own
+  exclusive lock (#1995). It is best-effort, with the bounds of the step-up deferral (#1986).
 
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`

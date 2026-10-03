@@ -15,6 +15,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -605,6 +606,7 @@ class WebAuthnControllerTest {
 
         verify(webAuthnService, never()).createRegistrationOptions(any());
         verify(sessionSecurityService, never()).markFirstPasskeyBootstrap(any(), anyInt());
+        verifyBootstrapRefusalAuditedStrictlyOnce(user);
     }
 
     @Test
@@ -650,6 +652,45 @@ class WebAuthnControllerTest {
 
         verify(webAuthnService, never()).finishRegistration(
             anyInt(), any(), anyBoolean(), any(), any(), any());
+        verifyBootstrapRefusalAuditedStrictlyOnce(user);
+    }
+
+    /**
+     * When the controller's checks pass but the service's fence refuses under the account lock, the
+     * service records that refusal itself, deferred until its transaction completes (#1995). The
+     * controller must not add a row of its own on the way out.
+     */
+    @Test
+    void registerVerify_leavesTheUnderLockRefusalAuditToTheService() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        when(creationOptions.load(request)).thenReturn(options);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(sessionSecurityService.hasFreshFirstPasskeyBootstrap(request, 7)).thenReturn(true);
+        when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(false);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
+                .thenReturn(credential);
+        when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
+        when(webAuthnService.finishRegistration(7, 6, false, options, credential, "work key"))
+                .thenThrow(new ForbiddenException(
+                        "Confirm the emailed enrollment link before adding the first passkey"));
+
+        assertThrows(ForbiddenException.class,
+            () -> registrationController.registerVerify("work key", "{}", request, response));
+
+        verify(webAuthnService).finishRegistration(7, 6, false, options, credential, "work key");
+        verify(auditService, never()).recordStrictFailureIndependentScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -695,6 +736,22 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).completeRecoveryStamp(request, 9);
         verify(bootstrapConfirmationService).invalidateForUser(7);
+    }
+
+    private void verifyBootstrapRefusalAuditedStrictlyOnce(User user) {
+        verify(auditService).recordStrictFailureIndependentScoped(
+            eq(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION),
+            eq("user"),
+            eq(user.getId()),
+            isNull(),
+            isNull(),
+            eq(user.getDisplayName()),
+            eq(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY),
+            eq(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(
+            any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {

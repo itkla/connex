@@ -67,6 +67,12 @@ public class AuditService {
     public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
     public static final String SCHEDULE_DELETE_STEP_UP_SUMMARY =
             "Recent MFA required to delete a report delivery schedule";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION =
+            "auth.passkey.bootstrap_confirmation.required";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY =
+            "First-passkey enrollment refused pending emailed confirmation";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON =
+            "bootstrap_confirmation_required";
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -360,10 +366,38 @@ public class AuditService {
      */
     public void deferFailure(String action, String entityType, Integer entityId,
             String targetLabel, String summary, String errorMessage) {
+        deferFailureEntry(action, entityType, entityId, targetLabel, summary, errorMessage, false,
+                null, null);
+    }
+
+    /**
+     * Records the same failure as {@link #recordFailureScoped}, appended once the current transaction
+     * has completed, under the same contract as {@link #deferFailure}: for a refusal decided while
+     * the current transaction holds a row the independent append locks, built at the call with its
+     * explicit scope, actor and request metadata, best-effort, and never throwing (#1995).
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param errorMessage sanitized error class or reason
+     */
+    public void deferFailureScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String errorMessage) {
+        deferFailureEntry(action, entityType, entityId, targetLabel, summary, errorMessage, true,
+                workspaceId, orgId);
+    }
+
+    private void deferFailureEntry(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, String errorMessage, boolean explicitScope,
+            Integer workspaceId, Integer orgId) {
         Object context = failureContext(errorMessage);
         try {
             deferIndependent(buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary,
-                    null, context, false, null, null, true));
+                    null, context, explicitScope, workspaceId, orgId, true));
         } catch (Exception e) {
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
