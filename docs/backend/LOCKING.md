@@ -1231,10 +1231,13 @@ each other's. The account root is the only one of these locks that waits for a b
 promotion in another workspace: privilege is account-wide, and the role-row lock reaches memberships
 only through their custom roles (`PrivilegedGateConcurrencyIntegrationTest` pins both). The
 workspace root must precede custom-role locks to match `lockRoleMutation`. Both the unlocked
-pre-check and the under-lock re-check audit their refusals: with a shared account root, the
-independent audit's own shared lock on the account row does not wait on the operation's. The
-re-check catches a promotion, a newly committed schedule (G7), or a step-up that expired while the
-operation waited for its locks.
+pre-check and the under-lock re-check audit their refusals. The independent audit takes the account
+row `FOR SHARE` on its own connection. The operation's shared root doesn't block that, but InnoDB
+queues it behind an exclusive request already waiting on the root, such as a role change or an
+invite acceptance for the same account. InnoDB can't see that wait as a deadlock, because the
+operation waits for the audit in the application. So the refusal stalls until the queued writer's
+lock wait times out, and then completes (#1986). The re-check catches a promotion, a newly
+committed schedule (G7), or a step-up that expired while the operation waited for its locks.
 
 Residuals: two promotions are not serialized by these shared roots. `OrgMemberService.setMember`
 locks the grantee only `FOR SHARE`, and self-service workspace creation
