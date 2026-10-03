@@ -66,6 +66,15 @@ public record ResolvedMailConfig(
                 && fromAddress != null && !fromAddress.isBlank();
     }
 
+    /**
+     * Projects this transport onto its password-free, non-sendable identity.
+     * @return the configuration identity without credential material
+     */
+    public MailConfigDescription description() {
+        return new MailConfigDescription(host, port, username, fromAddress, starttls, ssl, auth,
+                configurationVersion, credentialReference, usable());
+    }
+
     @Override
     public String toString() {
         return "ResolvedMailConfig[host=" + host + ", port=" + port + ", username=" + username

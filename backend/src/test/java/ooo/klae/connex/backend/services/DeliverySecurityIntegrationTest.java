@@ -110,6 +110,7 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.secrets.SecretPurpose;
+import ooo.klae.connex.backend.secrets.SecretReference;
 import ooo.klae.connex.backend.tenant.Permission;
 
 import tools.jackson.databind.ObjectMapper;
@@ -202,6 +203,81 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         }
         jdbcTemplate.update("DELETE FROM secret_value WHERE scope_type = 'workspace' AND scope_id = ?",
                 workspace.getId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void expiredClaimRecoveryDescribesTheTargetWithoutAuditingSecretUse(boolean changedTarget) {
+        DeliveryProviderConfigRequest provider = providerRequest(DeliveryChannel.EMAIL, "key-a");
+        provider.setIdempotentSubmission(true);
+        configService.save(provider);
+        ResolvedDeliveryProvider target =
+                configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL);
+        Person person = recipient();
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = expiredTriggeredClaim(person, send, target);
+        if (changedTarget) {
+            DeliveryProviderConfigRequest rotation = providerRequest(DeliveryChannel.EMAIL, "key-b");
+            rotation.setIdempotentSubmission(true);
+            configService.save(rotation);
+        }
+        int usesBeforeRecovery = secretAuditCount("secret_store.secret.use");
+        int failuresBeforeRecovery = secretAuditCount("secret_store.secret.use_failed");
+        assertTrue(usesBeforeRecovery > 0);
+        when(triggeredSendGate.enabled()).thenReturn(false);
+
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+
+        CampaignDelivery delivery = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals(changedTarget ? "failed" : "pending", delivery.getStatus());
+        assertEquals(changedTarget ? "delivery_target_changed" : "deadline_ambiguous",
+                delivery.getLastErrorCode());
+        assertEquals(changedTarget, delivery.getReconciliationRequiredAt() != null);
+        assertEquals(usesBeforeRecovery, secretAuditCount("secret_store.secret.use"));
+        assertEquals(failuresBeforeRecovery, secretAuditCount("secret_store.secret.use_failed"));
+        assertTrue(submissions.isEmpty());
+    }
+
+    @Test
+    void tamperedCredentialRecoversToPendingButEachDispatchFailsClosedWithoutSending() {
+        DeliveryProviderConfigRequest provider = providerRequest(DeliveryChannel.EMAIL, "key-a");
+        provider.setIdempotentSubmission(true);
+        configService.save(provider);
+        ResolvedDeliveryProvider target =
+                configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL);
+        Person person = recipient();
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = expiredTriggeredClaim(person, send, target);
+        long secretId = SecretReference.parse(storedConfig(DeliveryChannel.EMAIL).getCredentialRef()).id();
+        assertEquals(1, jdbcTemplate.update("""
+                UPDATE secret_value
+                SET ciphertext = CONCAT(IF(LEFT(ciphertext, 1) = 'A', 'B', 'A'), SUBSTRING(ciphertext, 2))
+                WHERE id = ? AND scope_type = 'workspace' AND scope_id = ?
+                """, secretId, workspace.getId()));
+        int usesBeforeRecovery = secretAuditCount("secret_store.secret.use");
+        int failuresBeforeRecovery = secretAuditCount("secret_store.secret.use_failed");
+        assertTrue(usesBeforeRecovery > 0);
+        when(triggeredSendGate.enabled()).thenReturn(false);
+
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+
+        CampaignDelivery recovered = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("pending", recovered.getStatus());
+        assertEquals("deadline_ambiguous", recovered.getLastErrorCode());
+        assertNull(recovered.getReconciliationRequiredAt());
+        assertEquals(usesBeforeRecovery, secretAuditCount("secret_store.secret.use"));
+        assertEquals(failuresBeforeRecovery, secretAuditCount("secret_store.secret.use_failed"));
+        when(triggeredSendGate.enabled()).thenReturn(true);
+        for (int tick = 1; tick <= 2; tick++) {
+            assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+            assertEquals(failuresBeforeRecovery + tick, secretAuditCount("secret_store.secret.use_failed"));
+            CampaignDelivery pending = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("pending", pending.getStatus());
+            assertEquals(1, pending.getAttemptCount());
+            assertNull(pending.getReconciliationRequiredAt());
+            assertTrue(submissions.isEmpty());
+        }
+        assertEquals(usesBeforeRecovery, secretAuditCount("secret_store.secret.use"));
     }
 
     @ParameterizedTest
@@ -2266,6 +2342,13 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
                 "deadline_ambiguous");
         sqlSession.clearCache();
         return updated;
+    }
+
+    private int secretAuditCount(String action) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?",
+                Integer.class, workspace.getId(), action);
+        return count == null ? 0 : count;
     }
 
     private int lateTriggeredCorrelation(

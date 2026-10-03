@@ -103,6 +103,50 @@ class MailConfigResolverTest {
         verifyNoInteractions(workspaceMapper, mailConfigMapper, secretCipher);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"managed", "stored_password", "no_auth", "unusable_override", "instance_default"})
+    void descriptionMatchesResolutionWithoutDecrypting(String branch) {
+        enableInstance();
+        properties.setPassword("instance-secret");
+        properties.setManaged(branch.equals("managed"));
+        if (!branch.equals("managed") && !branch.equals("instance_default")) {
+            WorkspaceMailConfig override = authenticatingOverride(!branch.equals("unusable_override"), "secret:v1:5");
+            override.setAuth(!branch.equals("no_auth"));
+            when(mailConfigMapper.findByWorkspace(7)).thenReturn(override);
+        }
+        if (branch.equals("stored_password")) {
+            when(secretCipher.canResolveForWorkspace(7, "secret:v1:5")).thenReturn(true);
+        }
+
+        MailConfigDescription description = resolver.describeForWorkspace(7);
+
+        assertNotNull(description);
+        assertTrue(description.usable());
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), anyString());
+        if (branch.equals("stored_password")) {
+            when(secretCipher.decryptForWorkspace(7, "secret:v1:5")).thenReturn("workspace-secret");
+        }
+        ResolvedMailConfig resolved = resolver.resolveForWorkspace(7);
+        assertNotNull(resolved);
+        assertEquals(resolved.description(), description);
+    }
+
+    @Test
+    void descriptionRefusesUnresolvableOverrideWithoutFallback() {
+        enableInstance();
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(authenticatingOverride(true, "secret:v1:5"));
+        when(secretCipher.canResolveForWorkspace(7, "secret:v1:5")).thenReturn(false);
+
+        assertNull(resolver.describeForWorkspace(7));
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), anyString());
+    }
+
+    @Test
+    void descriptionReturnsNullWithoutAUsableTransport() {
+        assertNull(resolver.describeForWorkspace(7));
+        verifyNoInteractions(secretCipher);
+    }
+
     private static void authenticateActor() {
         User actor = new User();
         actor.setId(9);

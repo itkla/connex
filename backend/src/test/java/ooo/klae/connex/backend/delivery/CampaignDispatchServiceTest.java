@@ -258,8 +258,8 @@ class CampaignDispatchServiceTest {
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         when(providerRouter.adapterFor(current.providerId())).thenReturn(dispatcher);
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(13), anyString(),
@@ -281,6 +281,7 @@ class CampaignDispatchServiceTest {
 
         assertTrue(service.processSend(7, 11));
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(13), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()));
@@ -300,13 +301,14 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(current);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, providerConfigService, gate);
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).recoverExpiredTriggeredClaim(
                 7, expired.getId(), current.attemptTargetFingerprint());
         verify(deliveryMapper, never()).markExpiredTriggeredClaimAmbiguous(
@@ -324,8 +326,8 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(current);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token())))
@@ -335,6 +337,7 @@ class CampaignDispatchServiceTest {
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()));
@@ -355,8 +358,8 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(attempted);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(fallback);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(fallback));
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token())))
@@ -366,6 +369,7 @@ class CampaignDispatchServiceTest {
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()));
@@ -797,6 +801,11 @@ class CampaignDispatchServiceTest {
                         "http_esp", "delivery-provider:55:3",
                         endpoint + "|account=" + account, "secret:v1:55"),
                 null);
+    }
+
+    private static DeliveryClaimTarget claimTarget(ResolvedDeliveryProvider target) {
+        return new DeliveryClaimTarget(
+                target.providerId(), target.attemptTargetFingerprint(), target.idempotentSubmission());
     }
 
     private static CampaignDelivery expiredClaim(ResolvedDeliveryProvider attempted) {
