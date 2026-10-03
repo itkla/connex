@@ -219,6 +219,30 @@ class SecretStoreTest {
         assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, unsupported));
     }
 
+    /**
+     * With lazy rewrap on, a read re-wraps a row sealed under an older key, so it fails without a usable
+     * active key even though the row's own key decrypts it. {@code canDecrypt} must refuse that reference
+     * (#1974) and accept it once a read would not re-wrap.
+     */
+    @Test
+    void canDecrypt_requiresAnActiveKeyWhenAReadWouldRewrap() {
+        int workspaceId = workspaceId();
+        String oldKey = base64Key((byte) 12);
+        String reference = store("old-v4", oldKey, Map.of(), Set.of(), true)
+                .put(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, "connector");
+
+        SecretStore rewrapping = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of("new-v5"),
+                true);
+        assertFalse(rewrapping.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertThrows(SecretUnavailableException.class,
+                () -> rewrapping.get(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+
+        SecretStore readOnly = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of("new-v5"),
+                false);
+        assertTrue(readOnly.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertEquals("connector", readOnly.get(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+    }
+
     @Test
     void existsAndDelete_ignoreMalformedReferences() {
         int workspaceId = workspaceId();

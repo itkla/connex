@@ -121,8 +121,10 @@ public class SecretStore {
     /**
      * Whether {@link #get} has what it needs to decrypt the reference, decided without decrypting it or
      * writing a secret-use audit: the row exists in the asked scope, uses the supported algorithms, and
-     * its key-encryption key is configured and enabled. A ciphertext that has been altered in place still
-     * passes; only a decrypt can detect that.
+     * its key-encryption key is configured and enabled. When a read would also re-wrap the row under the
+     * active key (lazy rewrap is on and the row is sealed under an older key), the active key must be
+     * available to encrypt too, because {@link #get} fails without it. A ciphertext that has been
+     * altered in place still passes; only a decrypt can detect that.
      *
      * @param purpose the purpose and scope type the reference must belong to
      * @param scopeId the scope the reference must belong to
@@ -136,7 +138,9 @@ public class SecretStore {
         }
         StoredSecret secret = secretValueMapper.findById(parsed.id());
         return secret != null && matches(secret, purpose, scopeId)
-                && supportedAlgorithms(secret) && crypto.hasKey(secret.getKeyId());
+                && supportedAlgorithms(secret) && crypto.hasKey(secret.getKeyId())
+                && (!properties.isLazyRewrapEnabled() || crypto.isActiveKey(secret.getKeyId())
+                        || crypto.isAvailable());
     }
 
     /** Deletes the current scoped reference without consulting a potentially older transaction snapshot. */
