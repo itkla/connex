@@ -4,12 +4,16 @@ buildscript {
 	// dependencyManagement (ext overrides below) cannot reach that configuration, so the
 	// dependency-submission graph kept reporting the vulnerable declared nodes and Dependabot
 	// alerts #113/#114/#117 stayed open after PR #1552. Build-time tooling only - never shipped -
-	// but constrained here so the submitted graph carries no vulnerable node at all.
+	// but constrained here so the submitted graph carries no vulnerable node at all. The same
+	// plugin puts tools.jackson 3.1.4 on that classpath (#1971); keep the Jackson pins equal to
+	// ext['jackson-bom.version'] below, which this block cannot read.
 	configurations.classpath {
 		resolutionStrategy {
 			force 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
 			force 'org.apache.httpcomponents.core5:httpcore5:5.4.3'
 			force 'org.apache.httpcomponents.core5:httpcore5-h2:5.4.3'
+			force 'tools.jackson.core:jackson-core:3.1.7'
+			force 'tools.jackson.core:jackson-databind:3.1.7'
 		}
 	}
 }
@@ -62,9 +66,9 @@ repositories {
 	}
 }
 
-ext['tomcat.version'] = '11.0.23'
-ext['jackson-2-bom.version'] = '2.21.5'
-ext['jackson-bom.version'] = '3.1.5'
+ext['tomcat.version'] = '11.0.26'
+ext['jackson-2-bom.version'] = '2.21.7'
+ext['jackson-bom.version'] = '3.1.7'
 ext['logback.version'] = '1.5.35'
 
 // Spring Boot 4.1.0 manages these below their patched versions (netty 4.2.15.Final,
