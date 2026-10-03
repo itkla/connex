@@ -111,6 +111,24 @@ class DenialAuditRateLimiterTest {
     }
 
     /**
+     * Elapsed time saturates instead of wrapping, so an admission from beyond the clock's range is
+     * expired rather than live forever. Window expiry is decided by the latest admission alone, which
+     * matches checking every admission only while elapsed time never decreases for an earlier start.
+     */
+    @Test
+    void anAdmissionBeyondTheClockRangeExpiresInsteadOfStayingLive() {
+        TestClock clock = new TestClock(0);
+        clock.set(Long.MIN_VALUE);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+
+        clock.set(Duration.ofSeconds(WINDOW_SECONDS).toMillis());
+
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+    }
+
+    /**
      * An audit row that could not be written must not suppress the next denial's row for the rest of
      * the window: losing evidence is the worse failure.
      */
@@ -308,6 +326,10 @@ class DenialAuditRateLimiterTest {
 
         private void advance(Duration duration) {
             currentMillis.addAndGet(duration.toMillis());
+        }
+
+        private void set(long millis) {
+            currentMillis.set(millis);
         }
 
         @Override

@@ -174,8 +174,17 @@ public class DenialAuditRateLimiter {
         return windows.size();
     }
 
+    /**
+     * Returns the milliseconds since {@code startedAt}: zero for a start in the future, and saturated
+     * rather than wrapped for one beyond the {@code long} range. It therefore never decreases as the
+     * start moves earlier, which is what lets a window's expiry be decided by its latest admission.
+     */
     private static long elapsed(long now, long startedAt) {
-        return Math.max(0L, now - startedAt);
+        if (startedAt >= now) {
+            return 0L;
+        }
+        long elapsed = now - startedAt;
+        return elapsed < 0 ? Long.MAX_VALUE : elapsed;
     }
 
     private record Key(int userId, String action) {
