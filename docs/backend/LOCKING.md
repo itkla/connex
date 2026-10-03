@@ -755,6 +755,14 @@ the same actor-before-workspace order. Resolution performs no provider I/O; the 
 made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
 disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
 
+`DeliveryProviderConfigService.describeClaimTarget` takes the same actor/workspace roots and then
+`delivery_provider_config FOR SHARE` as resolution. `MailConfigResolver.describeForWorkspace`
+uses the same root-first selection as SMTP resolution (managed instance settings need no workspace
+lookup). Both descriptions are non-sendable and perform no decrypt or secret-use audit. Metadata
+checks cannot detect ciphertext or key-material corruption or lazy rewrap failures. These locks do
+not by themselves make recovery's replay decision correct: dispatch rechecks the claimed target
+before egress.
+
 ## Campaign mutations
 
 Campaign update, live-audience replacement, snapshot creation, and send creation acquire current

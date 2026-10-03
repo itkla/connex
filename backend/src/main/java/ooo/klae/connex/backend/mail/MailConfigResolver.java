@@ -90,6 +90,23 @@ public class MailConfigResolver {
     }
 
     /**
+     * Describes the selected transport without decrypting or auditing a password use. A selected
+     * override with an unresolvable stored password is refused without instance fallback. Metadata
+     * checks cannot detect corrupt ciphertext, incorrect key material, or lazy rewrap failures.
+     * @param workspaceId the workspace whose transport is described
+     * @return the password-free identity, or null when no usable, resolvable transport is selected
+     */
+    @Transactional
+    public MailConfigDescription describeForWorkspace(int workspaceId) {
+        Selection selection = select(workspaceId);
+        if (selection.override() != null) {
+            return passwordResolvable(selection.override())
+                    ? fromWorkspace(selection.override(), null).description() : null;
+        }
+        return selection.instance() == null ? null : selection.instance().description();
+    }
+
+    /**
      * Whether a send for the workspace would find a usable transport, without decrypting the
      * workspace SMTP password or writing a secret-use audit.
      *

@@ -190,8 +190,8 @@ to a SHA-256 of the endpoint/account identity and opaque credential reference; c
 enter it. Because the secret store keeps one row per workspace and purpose, rotating a send credential
 returns the same opaque reference, so the save path reports the rotation to the configuration upsert
 and the generation advances; rotating an inbound webhook token deliberately does not advance it. SMTP carries the exact resolved mail configuration from claim selection into dispatch. A
-workspace sweep returns an expired claim to `pending` only when the currently resolved target has the
-same fingerprint and that exact connector configuration has `idempotentSubmission=true`. A changed target, SMTP target, or
+workspace sweep returns an expired claim to `pending` only when the current target, described without
+decrypting the credential (#1938), has the same fingerprint and that exact connector configuration has `idempotentSubmission=true`. A changed target, SMTP target, or
 unknown provider instead becomes terminal `failed` evidence with `reconciliation_required_at`, and
 workspace discovery includes either expired shape even when no pending row exists. A target changed
 after recovery cannot replace the persisted fingerprint on the pending row; its next claim attempt

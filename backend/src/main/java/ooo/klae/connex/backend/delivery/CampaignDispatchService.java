@@ -570,6 +570,16 @@ public class CampaignDispatchService {
         }
     }
 
+    /**
+     * Recovers replay-safe targets using metadata only, without decrypting or auditing secret use.
+     * Corrupt ciphertext, wrong key material, edited key ids, and lazy rewrap failures can escape
+     * description: the claim returns to pending rather than DEADLINE_AMBIGUOUS. Subsequent dispatch
+     * ticks fail closed at decrypt with use_failed audits and FAILED job runs; nothing is sent.
+     * Re-entering the credential advances the generation, so claimTriggered refuses the old target
+     * and marks it ambiguous with DELIVERY_TARGET_CHANGED. Restoring key material preserves the
+     * idempotency key and allows isCurrentClaimTarget to pass. Dispatch rechecks the target before
+     * egress; the locks held while describing alone do not establish replay safety.
+     */
     private void recoverExpiredTriggeredClaims(int workspaceId) {
         for (CampaignDelivery claim : campaignDeliveryMapper.expiredTriggeredClaimsPage(
                 workspaceId, triggeredSendGate.dispatchPageSize())) {
@@ -577,8 +587,8 @@ public class CampaignDispatchService {
             boolean targetChanged = false;
             try {
                 DeliveryChannel channel = DeliveryChannel.fromToken(claim.getChannel());
-                ResolvedDeliveryProvider current =
-                        deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel);
+                DeliveryClaimTarget current =
+                        deliveryProviderConfigService.describeClaimTarget(workspaceId, channel);
                 targetChanged = !current.providerId().equals(claim.getProviderId())
                         || !current.attemptTargetFingerprint().equals(
                                 claim.getAttemptTargetFingerprint());

@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.DeliveryProviderConfigDto;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigRequest;
 import ooo.klae.connex.backend.dto.DeliveryWebhookTokenDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.mail.MailConfigDescription;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
@@ -89,31 +90,73 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ResolvedDeliveryProvider resolveForWorkspace(int workspaceId, DeliveryChannel channel) {
-        lockWorkspaceForResolution(workspaceId);
-        if (channel == DeliveryChannel.SMS) {
-            return resolveSms(deliveryProviderConfigMapper.findByWorkspaceChannelForShare(workspaceId, channel.token()));
-        }
-        requireEmail(channel);
-        DeliveryProviderConfig config =
-                deliveryProviderConfigMapper.findByWorkspaceChannelForShare(workspaceId, channel.token());
-        if (isEnabledEsp(config)) {
-            return resolveEsp(config);
-        }
-        ResolvedMailConfig mail = mailConfigResolver.resolveForWorkspace(workspaceId);
-        if (mail == null || !mail.usable()) {
-            throw new DeliveryProviderException("No usable mail transport is configured for delivery");
+        Selection selection = select(workspaceId, channel, true);
+        if (selection.config() != null) {
+            return channel == DeliveryChannel.SMS
+                    ? resolveSms(selection.config()) : resolveEsp(selection.config());
         }
         return ResolvedDeliveryProvider.of(
-                SmtpDeliveryProvider.PROVIDER_ID,
-                DeliveryChannel.EMAIL,
-                workspaceId,
-                DeliveryCredentials.none(),
-                DeliveryTargetFingerprint.create(
-                        SmtpDeliveryProvider.PROVIDER_ID,
-                        mail.configurationVersion(),
-                        smtpEndpointIdentity(mail),
-                        mail.credentialReference()),
-                mail);
+                SmtpDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId,
+                DeliveryCredentials.none(), smtpFingerprint(selection.mailDescription()), selection.resolvedMail());
+    }
+
+    /**
+     * Describes the claim target under resolution's root-first locks without decrypting or auditing
+     * secret use. This checks secret metadata, not ciphertext integrity or lazy rewrap success.
+     * Altered ciphertext, wrong configured key material, or an edited key id can pass these checks.
+     * Recovery then requeues a replay-safe claim instead of marking it DEADLINE_AMBIGUOUS; each later
+     * dispatch tick fails closed at decrypt, recording use_failed and a FAILED job run without sending.
+     * Re-entering the credential advances its generation: claimTriggered refuses the old target and
+     * ends it ambiguous with DELIVERY_TARGET_CHANGED. Restoring the key material instead preserves
+     * the idempotency key and permits the replay to pass isCurrentClaimTarget.
+     * @param workspaceId the workspace
+     * @param channel the delivery channel
+     * @return the non-sendable target identity and replay capability
+     * @throws DeliveryProviderException when no usable target or resolvable credential is selected
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public DeliveryClaimTarget describeClaimTarget(int workspaceId, DeliveryChannel channel) {
+        Selection selection = select(workspaceId, channel, false);
+        DeliveryProviderConfig config = selection.config();
+        if (config != null) {
+            if (!deliveryProviderSecretCipher.canDecryptCredential(workspaceId, channel, config.getCredentialRef())) {
+                throw new DeliveryProviderException("Delivery provider credential is not resolvable");
+            }
+            return new DeliveryClaimTarget(
+                    config.getProvider(), targetFingerprint(config), config.isIdempotentSubmission());
+        }
+        return new DeliveryClaimTarget(
+                SmtpDeliveryProvider.PROVIDER_ID, smtpFingerprint(selection.mailDescription()), false);
+    }
+
+    private Selection select(int workspaceId, DeliveryChannel channel, boolean resolveMail) {
+        lockWorkspaceForResolution(workspaceId);
+        if (channel != DeliveryChannel.SMS) {
+            requireEmail(channel);
+        }
+        DeliveryProviderConfig config =
+                deliveryProviderConfigMapper.findByWorkspaceChannelForShare(workspaceId, channel.token());
+        if (channel == DeliveryChannel.SMS && !isEnabledSms(config)) {
+            throw new DeliveryProviderException("No usable SMS transport is configured for delivery");
+        }
+        if (channel == DeliveryChannel.SMS || isEnabledEsp(config)) {
+            if (isBlank(config.getCredentialRef())) {
+                throw new DeliveryProviderException("Delivery provider credential is not configured");
+            }
+            return new Selection(config, null, null);
+        }
+        ResolvedMailConfig mail = resolveMail ? mailConfigResolver.resolveForWorkspace(workspaceId) : null;
+        MailConfigDescription description = resolveMail
+                ? (mail == null ? null : mail.description())
+                : mailConfigResolver.describeForWorkspace(workspaceId);
+        if (description == null || !description.usable()) {
+            throw new DeliveryProviderException("No usable mail transport is configured for delivery");
+        }
+        return new Selection(null, mail, description);
+    }
+
+    private record Selection(
+            DeliveryProviderConfig config, ResolvedMailConfig resolvedMail, MailConfigDescription mailDescription) {
     }
 
     @Override
@@ -124,7 +167,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             return isEnabledSms(smsConfig)
                     && !isBlank(smsConfig.getEndpoint())
                     && !isBlank(smsConfig.getCredentialRef())
-                    && deliveryProviderSecretCipher.isAvailable();
+                    && deliveryProviderSecretCipher.canDecryptCredential(
+                            workspaceId, channel, smsConfig.getCredentialRef());
         }
         if (channel != DeliveryChannel.EMAIL) {
             return false;
@@ -134,7 +178,8 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         if (isEnabledEsp(config)) {
             return !isBlank(config.getEndpoint())
                     && !isBlank(config.getCredentialRef())
-                    && deliveryProviderSecretCipher.isAvailable();
+                    && deliveryProviderSecretCipher.canDecryptCredential(
+                            workspaceId, channel, config.getCredentialRef());
         }
         return mailConfigResolver.canSendForWorkspace(workspaceId);
     }
@@ -349,9 +394,6 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
     }
 
     private ResolvedDeliveryProvider resolveEsp(DeliveryProviderConfig config) {
-        if (isBlank(config.getCredentialRef())) {
-            throw new DeliveryProviderException("Delivery provider credential is not configured");
-        }
         DeliveryChannel channel = DeliveryChannel.fromToken(config.getChannel());
         String apiKey = deliveryProviderSecretCipher.decryptCredential(
                 config.getWorkspaceId(), channel, config.getCredentialRef());
@@ -373,12 +415,6 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
     }
 
     private ResolvedDeliveryProvider resolveSms(DeliveryProviderConfig config) {
-        if (!isEnabledSms(config)) {
-            throw new DeliveryProviderException("No usable SMS transport is configured for delivery");
-        }
-        if (isBlank(config.getCredentialRef())) {
-            throw new DeliveryProviderException("Delivery provider credential is not configured");
-        }
         String apiKey = deliveryProviderSecretCipher.decryptCredential(
                 config.getWorkspaceId(), DeliveryChannel.SMS, config.getCredentialRef());
         if (isBlank(apiKey)) {
@@ -419,7 +455,12 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 config.getCredentialRef());
     }
 
-    private static String smtpEndpointIdentity(ResolvedMailConfig config) {
+    private static String smtpFingerprint(MailConfigDescription config) {
+        return DeliveryTargetFingerprint.create(SmtpDeliveryProvider.PROVIDER_ID,
+                config.configurationVersion(), smtpEndpointIdentity(config), config.credentialReference());
+    }
+
+    private static String smtpEndpointIdentity(MailConfigDescription config) {
         return "smtp://" + config.host() + ":" + config.port()
                 + "|username=" + String.valueOf(config.username())
                 + "|from=" + String.valueOf(config.fromAddress())
