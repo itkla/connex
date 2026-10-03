@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -28,10 +29,13 @@ import ooo.klae.connex.backend.dto.ReportScheduleRecipientDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -46,6 +50,8 @@ public class ScheduleService {
 
     private final ScheduleMapper scheduleMapper;
     private final ReportMapper reportMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
@@ -74,12 +80,13 @@ public class ScheduleService {
      * @param request the validated schedule payload
      * @return the stored schedule
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto create(int reportDefinitionId, ReportScheduleRequest request) {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
@@ -112,12 +119,13 @@ public class ScheduleService {
      * @param request the validated replacement payload
      * @return the stored schedule
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto update(int reportDefinitionId, ReportScheduleRequest request) {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
@@ -148,12 +156,14 @@ public class ScheduleService {
      *
      * @param reportDefinitionId the scheduled report
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public void delete(int reportDefinitionId) {
-        requireScheduleStepUp(authService.getCurrentUser().getId(),
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId,
                 auditService::recordScheduleDeleteStepUpRefused);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         if (scheduleMapper.deleteByReport(workspaceId, reportDefinitionId) == 0) {
@@ -346,6 +356,31 @@ public class ScheduleService {
         } catch (RecentAuthenticationRequiredException exception) {
             recordRefusal.run();
             throw exception;
+        }
+    }
+
+    /**
+     * Decides the privileged step-up again against committed state (#1897). It takes the actor's
+     * account row and the workspace row shared, then the actor's assigned custom roles shared, which
+     * also flushes the session cache so the unlocked check's cached answer is not reused, and re-reads
+     * privilege. A shared account root conflicts with every activation that can promote the account,
+     * each of which locks it for update, without blocking report writers that audit as the same user;
+     * see LOCKING.md. A refusal here is not audited: the unlocked check before it audits every refusal
+     * it sees, and this one only catches a promotion committed while the mutation waited.
+     *
+     * @param userId the account attempting the mutation
+     * @param workspaceId the workspace the schedule belongs to
+     */
+    private void lockAndRecheckScheduleStepUp(int userId, int workspaceId) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            throw new ForbiddenException("Authenticated user is unavailable");
+        }
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        userMapper.lockAssignedCustomRoleIds(userId);
+        if (privilegedAccountService.isPrivileged(userId)) {
+            sessionSecurityService.requireRecentAuthentication(userId);
         }
     }
 

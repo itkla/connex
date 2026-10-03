@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
@@ -181,9 +182,15 @@ class ScheduleStepUpTest {
         user.setId(USER_ID);
         user.setDisplayName("Scheduling Admin");
         when(authService.getCurrentUser()).thenReturn(user);
+        UserMapper userMapper = mock(UserMapper.class);
+        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+        when(userMapper.lockByIdForShare(USER_ID)).thenReturn(USER_ID);
+        when(workspaceMapper.lockWorkspaceForShare(anyInt())).thenReturn(1);
         return new ScheduleService(
                 scheduleMapper,
                 reportMapper,
+                userMapper,
+                workspaceMapper,
                 workspaceService,
                 authService,
                 auditService,

@@ -51,6 +51,7 @@ import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
 
@@ -72,6 +73,7 @@ class ReportServiceTest {
     private final PrivilegedAccountService privilegedAccountService =
             mock(PrivilegedAccountService.class);
     private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
+    private final UserMapper userMapper = mock(UserMapper.class);
     private final AuthService authService = mock(AuthService.class);
     private ReportService service;
 
@@ -82,6 +84,7 @@ class ReportServiceTest {
                 privilegedAccountService,
                 reportMapper,
                 scheduleMapper,
+                userMapper,
                 mock(GoalMapper.class),
                 workspaceService,
                 authService,
@@ -159,7 +162,7 @@ class ReportServiceTest {
      * boundary or a refused destructive attempt on a scheduled report leaves no audit trace (#1763).
      */
     @Test
-    void refusingTheParentDeleteStepUpIsAuditedAsADeletionAndDecidedBehindTheLock() {
+    void refusingTheParentDeleteStepUpBeforeLocksIsAuditedAsADeletion() {
         User actor = new User();
         actor.setId(ACTOR_ID);
         actor.setDisplayName("Scheduling Admin");
@@ -174,9 +177,38 @@ class ReportServiceTest {
 
         verify(auditService).recordScheduleDeleteStepUpRefused();
         verify(auditService, never()).recordExportStepUpRefused();
-        InOrder ordered = inOrder(reportMapper, scheduleMapper);
-        ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
+        verifyNoInteractions(userMapper, reportMapper);
+        verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
+    }
+
+    @Test
+    void refusingTheParentDeleteStepUpUnderLocksDoesNotAudit() {
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
+        when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
+        when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(false, true);
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+
+        InOrder ordered = inOrder(scheduleMapper, privilegedAccountService, userMapper,
+                workspaceService, reportMapper, sessionSecurityService);
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
+        ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        ordered.verify(workspaceService).isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID);
+        ordered.verify(userMapper).lockAssignedCustomRoleIds(ACTOR_ID);
+        ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
+        ordered.verify(reportMapper).getDefinition(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
+        ordered.verify(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+        verifyNoInteractions(auditService);
         verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 

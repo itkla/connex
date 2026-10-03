@@ -1203,6 +1203,36 @@ account root.
   cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
   below).
 
+- `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
+  step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
+  (`lockWorkspaceForShare`) → assigned custom roles `FOR SHARE` (`lockAssignedCustomRoleIds`,
+  flushing the MyBatis session cache) → privilege/step-up re-check without refusal audit →
+  existing schedule mutation and transactional success audit.
+- `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
+  and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
+  shared, active workspace shared, authorization membership exclusive) → assigned custom roles
+  shared with cache flush → `lockDefinitions` (workspace report definitions exclusive) →
+  `getDefinition` and not-found check → schedule/privilege re-check and unaudited step-up →
+  existing deletion policy, snapshot checks, cascade and transactional success audit. The
+  definition locks block schedule inserts through their parent foreign-key check.
+
+These schedule/report account roots are **shared**, unlike email-change, passkey and
+password-reset credential flows. Report writers (scheduled delivery, report creation and manual
+snapshots) run as the report's user, lock report definitions or schedule rows, then audit, taking
+`app_user` shared. An exclusive account root here would deadlock against those writers. The shared
+root still conflicts with every invitee-timed activation, which locks the grantee's `app_user`
+`FOR UPDATE`; `lockAssignedCustomRoleIds` also conflicts with `lockRole`. The account root is the only
+one of these locks that waits for a built-in role promotion in another workspace: privilege is
+account-wide, and `lockAssignedCustomRoleIds` reaches memberships only through their custom roles, so
+it never reads a built-in membership row (`PrivilegedGateConcurrencyIntegrationTest` pins this). The
+workspace root must precede custom-role locks to match `lockRoleMutation`. The unlocked pre-check
+audits every refusal it sees; the under-lock re-check only catches a promotion committed while the
+mutation waited, and refuses without a second audit.
+
+Residual: `OrgMemberService.setMember` locks the grantee only `FOR SHARE`, so these shared roots do
+not serialize organization grants. The grantee cannot time those grants, and organization membership
+confers no workspace permission.
+
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:
 
