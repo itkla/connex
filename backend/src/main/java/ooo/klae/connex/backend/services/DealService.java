@@ -1576,18 +1576,23 @@ public class DealService {
     }
 
     /**
-     * Replaces the tags associated with a deal.
-     * @param dealId
-     * @param tagIds
-     * @return
+     * Replaces the tags associated with a deal. The deal row is locked first through its primary key,
+     * and a deleted deal is refused under that lock; the audited previous tags are then read under
+     * locks on the association rows. A concurrent {@link #addTag} waits on the deal row at its
+     * foreign-key check and a concurrent {@link #removeTag} waits on the association row, so the audit
+     * names exactly the tags this replacement removed (#1980). It runs at {@code READ_COMMITTED}, so
+     * the tags returned are a fresh read.
+     * @param dealId the deal in the current workspace
+     * @param tagIds the complete set of tags the deal should carry
+     * @return the deal's tags after the replacement
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        List<String> before = tagMapper.getTagsByDealId(workspaceId, dealId).stream().map(Tag::getName).toList();
+        Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
+        List<String> before = tagMapper.getTagsByDealIdForUpdate(workspaceId, dealId).stream()
+            .map(Tag::getName).toList();
         dealMapper.clearTags(workspaceId, dealId);
         if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(workspaceId, dealId, tagIds);
         List<Tag> after = tagMapper.getTagsByDealId(workspaceId, dealId);

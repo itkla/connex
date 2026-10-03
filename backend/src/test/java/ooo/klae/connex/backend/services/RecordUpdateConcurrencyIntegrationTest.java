@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -48,18 +49,24 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -68,15 +75,15 @@ import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
- * Races contact and company updates that audit a previous value against concurrent writes to the same
- * record (#1968).
+ * Races record updates that audit a previous value against concurrent writes to the same record
+ * (#1968 for contacts and companies, #1980 for deals and attachments).
  *
  * <ul>
  *   <li>A tag replacement locks the record first and reads the tags it is about to clear under locks
  *       on the association rows. A tag added meanwhile waits on the record row at its foreign-key
  *       check, and a removal still in flight makes the replacement wait on the association row, so the
- *       audit names exactly the tags the replacement removed. A record archived meanwhile is refused
- *       under the lock, before anything is written.</li>
+ *       audit names exactly the tags the replacement removed. A record archived or deleted meanwhile is
+ *       refused under the lock, before anything is written.</li>
  *   <li>An evaluation opt-out audits from the contact row it locks, holds that row until it writes,
  *       and returns the committed flags even when a concurrent change already set the same ones.</li>
  * </ul>
@@ -86,12 +93,16 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-class PersonCompanyUpdateConcurrencyIntegrationTest {
+class RecordUpdateConcurrencyIntegrationTest {
     private static final int MYSQL_LOCK_NOWAIT = 3572;
     private static final int LOCK_WAIT_PROBE_SECONDS = 8;
 
     @Autowired private PersonService personService;
     @Autowired private CompanyService companyService;
+    @Autowired private DealService dealService;
+    @Autowired private AttachmentService attachmentService;
+    @Autowired private AttachmentMapper attachmentMapper;
+    @Autowired private PipelineMapper pipelineMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private TagMapper tagMapper;
@@ -117,6 +128,8 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
     private User currentUser;
     private Person person;
     private Company company;
+    private Deal deal;
+    private Attachment attachment;
 
     @BeforeEach
     void setUp() {
@@ -153,6 +166,35 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         company.setOwnerId(currentUser.getId());
         company.setName("Record updates " + unique);
         companyMapper.insert(company);
+
+        Pipeline pipeline = new Pipeline();
+        pipeline.setWorkspaceId(workspace.getId());
+        pipeline.setName("Record updates pipeline " + unique);
+        pipelineMapper.insertPipeline(pipeline);
+        Stage stage = new Stage();
+        stage.setWorkspaceId(workspace.getId());
+        stage.setPipeline(pipeline);
+        stage.setName("Open " + unique);
+        stage.setPosition(0);
+        pipelineMapper.insertStage(stage);
+        deal = new Deal();
+        deal.setWorkspaceId(workspace.getId());
+        deal.setOwnerId(currentUser.getId());
+        deal.setName("Record updates " + unique);
+        deal.setValue(new BigDecimal("1000.00"));
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setPosition(0);
+        dealMapper.insert(deal);
+
+        attachment = new Attachment();
+        attachment.setWorkspaceId(workspace.getId());
+        attachment.setEntityType("company");
+        attachment.setEntityId(company.getId());
+        attachment.setFileName("record-updates-" + unique + ".png");
+        attachment.setUrl("/api/attachments/content/record-updates-" + unique);
+        attachmentMapper.insert(attachment);
     }
 
     @AfterEach
@@ -160,6 +202,10 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         SecurityContextHolder.clearContext();
         tenantContext.clear();
         if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM attachment WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM deal WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM stage WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM pipeline WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM tag WHERE workspace_id = ?", workspace.getId());
@@ -287,9 +333,9 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
             return realPersonMapper.getOwnedPersonByIdForUpdate(workspace.getId(), person.getId());
         }).when(personMapper).getOwnedPersonByIdForUpdate(workspace.getId(), person.getId());
 
-        Throwable refused = refusedAfterArchive(
+        Throwable refused = refusedAfterConcurrentChange(
             () -> personService.replaceTags(person.getId(), List.of(replacement.getId())),
-            "person", person.getId(), reached, archivedMeanwhile);
+            () -> archive("person", person.getId()), reached, archivedMeanwhile);
 
         assertInstanceOf(ResourceNotFoundException.class, refused);
         assertEquals(Set.of(kept.getId()), committedTags("person_tag", "person_id", person.getId()));
@@ -312,9 +358,9 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
             return realCompanyMapper.getOwnedCompanyByIdForUpdate(workspace.getId(), company.getId());
         }).when(companyMapper).getOwnedCompanyByIdForUpdate(workspace.getId(), company.getId());
 
-        Throwable refused = refusedAfterArchive(
+        Throwable refused = refusedAfterConcurrentChange(
             () -> companyService.replaceTags(company.getId(), List.of(replacement.getId())),
-            "company", company.getId(), reached, archivedMeanwhile);
+            () -> archive("company", company.getId()), reached, archivedMeanwhile);
 
         assertInstanceOf(ResourceNotFoundException.class, refused);
         assertEquals(Set.of(kept.getId()), committedTags("company_tag", "company_id", company.getId()));
@@ -387,6 +433,163 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         assertEquals(Integer.valueOf(MYSQL_LOCK_NOWAIT), probe.get());
     }
 
+    /** A tag added while a replacement holds the deal row waits for the replacement to commit (#1980). */
+    @Test
+    void aTagAddedWhileADealsTagsAreReplacedWaitsForTheReplacement() throws Exception {
+        Tag kept = tag("kept");
+        Tag replacement = tag("replacement");
+        Tag added = tag("added");
+        attach("deal_tag", "deal_id", deal.getId(), kept.getId());
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Long> replacementConnection = new AtomicReference<>();
+        DealMapper realDealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        doAnswer(invocation -> {
+            Deal locked = realDealMapper.getDealByPrimaryKeyForUpdate(workspace.getId(), deal.getId());
+            replacementConnection.set(currentConnectionId());
+            lockHeld.countDown();
+            assertTrue(release.await(30, TimeUnit.SECONDS));
+            return locked;
+        }).when(dealMapper).getDealByPrimaryKeyForUpdate(workspace.getId(), deal.getId());
+
+        replaceWhileAnAdditionWaits(
+            () -> dealService.replaceTags(deal.getId(), List.of(replacement.getId())),
+            () -> dealService.addTag(deal.getId(), added.getId()),
+            "deal", replacementConnection, lockHeld, release);
+
+        assertEquals(Set.of(replacement.getId(), added.getId()), committedTags("deal_tag", "deal_id", deal.getId()));
+        verify(auditService).singleChange("tags", List.of("kept"), List.of("replacement"));
+    }
+
+    /** A deal replacement meeting an in-flight removal audits only the tags it removed (#1980). */
+    @Test
+    void aDealReplacementWaitsForAnInFlightRemovalAndAuditsOnlyTheTagsItRemoved() throws Exception {
+        Tag removed = tag("removed");
+        Tag kept = tag("kept");
+        Tag replacement = tag("replacement");
+        attach("deal_tag", "deal_id", deal.getId(), removed.getId());
+        attach("deal_tag", "deal_id", deal.getId(), kept.getId());
+
+        replaceWhileARemovalIsInFlight(
+            () -> dealService.replaceTags(deal.getId(), List.of(replacement.getId())),
+            "deal_tag", "deal_id", deal.getId(), removed.getId());
+
+        assertEquals(Set.of(replacement.getId()), committedTags("deal_tag", "deal_id", deal.getId()));
+        verify(auditService).singleChange("tags", List.of("kept"), List.of("replacement"));
+    }
+
+    /** A deal deleted while its tag replacement waited is refused under the lock, before any write. */
+    @Test
+    void aDealDeletedWhileItsTagsWereBeingReplacedIsRefusedBeforeAnyWrite() throws Exception {
+        Tag kept = tag("kept");
+        Tag replacement = tag("replacement");
+        attach("deal_tag", "deal_id", deal.getId(), kept.getId());
+        CountDownLatch reached = new CountDownLatch(1);
+        CountDownLatch deletedMeanwhile = new CountDownLatch(1);
+        DealMapper realDealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        doAnswer(invocation -> {
+            reached.countDown();
+            assertTrue(deletedMeanwhile.await(30, TimeUnit.SECONDS));
+            return realDealMapper.getDealByPrimaryKeyForUpdate(workspace.getId(), deal.getId());
+        }).when(dealMapper).getDealByPrimaryKeyForUpdate(workspace.getId(), deal.getId());
+
+        Throwable refused = refusedAfterConcurrentChange(
+            () -> dealService.replaceTags(deal.getId(), List.of(replacement.getId())),
+            () -> jdbcTemplate.update(
+                "DELETE FROM deal WHERE workspace_id = ? AND id = ?", workspace.getId(), deal.getId()),
+            reached, deletedMeanwhile);
+
+        assertInstanceOf(ResourceNotFoundException.class, refused);
+        verify(dealMapper, never()).clearTags(anyInt(), anyInt());
+        verify(auditService, never()).singleChange(eq("tags"), any(), any());
+    }
+
+    /**
+     * An attachment replacement holds the attachment row from its first statement (#1980). Waiting
+     * behind a removal still in flight, it already holds that row, so a tag added meanwhile waits on it
+     * at its foreign-key check; and the audit names only the tags the replacement removed.
+     */
+    @Test
+    void anAttachmentReplacementHoldsItsRowWhileItWaitsForAnInFlightRemoval() throws Exception {
+        Tag removed = tag("removed");
+        Tag kept = tag("kept");
+        Tag replacement = tag("replacement");
+        Tag added = tag("added");
+        attach("attachment_tag", "attachment_id", attachment.getId(), removed.getId());
+        attach("attachment_tag", "attachment_id", attachment.getId(), kept.getId());
+        CountDownLatch removalHeld = new CountDownLatch(1);
+        CountDownLatch commitRemoval = new CountDownLatch(1);
+        AtomicReference<Long> removalConnection = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> removal = executor.submit(() -> heldUntil(commitRemoval, removalHeld, removalConnection,
+                "DELETE FROM attachment_tag WHERE attachment_id = ? AND tag_id = ?",
+                attachment.getId(), removed.getId()));
+            if (!removalHeld.await(10, TimeUnit.SECONDS)) {
+                removal.get(0, TimeUnit.SECONDS);
+                throw new AssertionError("The in-flight removal never held its row");
+            }
+            Future<List<Tag>> replaced = executor.submit(() -> asCurrentUser(
+                () -> attachmentService.replaceTags(attachment.getId(), List.of(replacement.getId()))));
+            awaitWaitOn("attachment_tag", removalConnection.get(), replaced, "The attachment tag replacement");
+            long replacementConnection = waiterBlockedBy(removalConnection.get(), "attachment_tag");
+            Future<Boolean> addition = executor.submit(() -> asCurrentUser(() -> {
+                attachmentService.addTag(attachment.getId(), added.getId());
+                return true;
+            }));
+            awaitWaitOn("attachment", replacementConnection, addition, "The concurrent attachment tag addition");
+            commitRemoval.countDown();
+            removal.get(20, TimeUnit.SECONDS);
+            assertEquals(1, replaced.get(20, TimeUnit.SECONDS).size());
+            assertTrue(addition.get(20, TimeUnit.SECONDS));
+        } finally {
+            commitRemoval.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(Set.of(replacement.getId(), added.getId()),
+            committedTags("attachment_tag", "attachment_id", attachment.getId()));
+        verify(auditService).singleChange("tags", List.of("kept"), List.of("replacement"));
+    }
+
+    /**
+     * An attachment deleted while its replacement waited on the attachment row is refused under that
+     * lock with a not-found, before any write (#1980).
+     */
+    @Test
+    void anAttachmentDeletedWhileItsReplacementWaitedIsRefusedBeforeAnyWrite() throws Exception {
+        Tag kept = tag("kept");
+        Tag replacement = tag("replacement");
+        attach("attachment_tag", "attachment_id", attachment.getId(), kept.getId());
+        CountDownLatch deletionHeld = new CountDownLatch(1);
+        CountDownLatch commitDeletion = new CountDownLatch(1);
+        AtomicReference<Long> deletionConnection = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Throwable refused;
+        try {
+            Future<?> deletion = executor.submit(() -> heldUntil(commitDeletion, deletionHeld, deletionConnection,
+                "DELETE FROM attachment WHERE workspace_id = ? AND id = ?", workspace.getId(), attachment.getId()));
+            if (!deletionHeld.await(10, TimeUnit.SECONDS)) {
+                deletion.get(0, TimeUnit.SECONDS);
+                throw new AssertionError("The deletion never held the attachment row");
+            }
+            Future<List<Tag>> replaced = executor.submit(() -> asCurrentUser(
+                () -> attachmentService.replaceTags(attachment.getId(), List.of(replacement.getId()))));
+            awaitWaitOn("attachment", deletionConnection.get(), replaced, "The attachment tag replacement");
+            commitDeletion.countDown();
+            deletion.get(20, TimeUnit.SECONDS);
+            refused = assertThrows(ExecutionException.class, () -> replaced.get(20, TimeUnit.SECONDS)).getCause();
+        } finally {
+            commitDeletion.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertInstanceOf(ResourceNotFoundException.class, refused);
+        verify(auditService, never()).singleChange(eq("tags"), any(), any());
+    }
+
     private void replaceWhileAnAdditionWaits(
             Supplier<List<Tag>> replace,
             Supplier<Boolean> add,
@@ -454,12 +657,11 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         }
     }
 
-    private Throwable refusedAfterArchive(
+    private Throwable refusedAfterConcurrentChange(
             Supplier<List<Tag>> replace,
-            String recordTable,
-            int recordId,
+            Runnable concurrentChange,
             CountDownLatch reached,
-            CountDownLatch archivedMeanwhile) throws Exception {
+            CountDownLatch changedMeanwhile) throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<List<Tag>> replaced = executor.submit(() -> asCurrentUser(replace));
@@ -468,15 +670,13 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
                 throw new AssertionError("The replacement never reached its record lock");
             }
             try {
-                jdbcTemplate.update(
-                    "UPDATE " + recordTable + " SET archived_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?",
-                    workspace.getId(), recordId);
+                concurrentChange.run();
             } finally {
-                archivedMeanwhile.countDown();
+                changedMeanwhile.countDown();
             }
             return assertThrows(ExecutionException.class, () -> replaced.get(20, TimeUnit.SECONDS)).getCause();
         } finally {
-            archivedMeanwhile.countDown();
+            changedMeanwhile.countDown();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
@@ -514,6 +714,55 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
             Thread.sleep(25);
         }
         throw new AssertionError(description + " never waited on " + table);
+    }
+
+    /**
+     * Runs {@code statement} in a transaction on this thread, publishes its connection and that it holds
+     * the statement's locks, and commits only once {@code commit} is released.
+     */
+    private void heldUntil(
+            CountDownLatch commit,
+            CountDownLatch held,
+            AtomicReference<Long> connection,
+            String statement,
+            Object... arguments) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            connection.set(currentConnectionId());
+            assertEquals(1, jdbcTemplate.update(statement, arguments));
+            held.countDown();
+            try {
+                assertTrue(commit.await(30, TimeUnit.SECONDS));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        });
+    }
+
+    /** The connection of the one transaction waiting on {@code table} behind {@code blockingConnection}. */
+    private long waiterBlockedBy(long blockingConnection, String table) {
+        List<Long> waiters = jdbcTemplate.queryForList("""
+                SELECT DISTINCT requesting.PROCESSLIST_ID
+                FROM performance_schema.data_lock_waits waits
+                JOIN performance_schema.data_locks requested
+                  ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.threads requesting
+                  ON requesting.THREAD_ID = waits.REQUESTING_THREAD_ID
+                JOIN performance_schema.threads blocking
+                  ON blocking.THREAD_ID = waits.BLOCKING_THREAD_ID
+                WHERE requested.OBJECT_SCHEMA = DATABASE() AND requested.OBJECT_NAME = ?
+                  AND blocking.PROCESSLIST_ID = ?
+                """, Long.class, table, blockingConnection);
+        if (waiters.size() != 1) {
+            throw new AssertionError("Expected one waiter on " + table + ", found " + waiters);
+        }
+        return waiters.getFirst();
+    }
+
+    private void archive(String table, int id) {
+        jdbcTemplate.update(
+            "UPDATE " + table + " SET archived_at = UTC_TIMESTAMP() WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), id);
     }
 
     /** The MySQL connection id of the transaction bound to the calling thread. */
