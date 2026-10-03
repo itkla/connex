@@ -91,6 +91,7 @@ class EmailChangePrivilegedStepUpTest {
                 isNull(), anyString(), eq("privileged_mfa_enrollment_required"));
         verify(userMapper, never()).lockById(anyInt());
         verify(auditService, times(1)).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
 
@@ -106,6 +107,7 @@ class EmailChangePrivilegedStepUpTest {
 
         verify(auditService).recordFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
                 isNull(), anyString(), eq("recent_authentication_required"));
+        verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
         verify(userMapper, never()).lockById(anyInt());
         verifyNoTokenIssued();
     }
@@ -148,6 +150,7 @@ class EmailChangePrivilegedStepUpTest {
                 eq(30), eq(SESSION_EPOCH));
         order.verify(emailService).sendVerificationEmail(any(), eq(NEW_EMAIL), anyString());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
     }
 
     @ParameterizedTest
@@ -163,18 +166,19 @@ class EmailChangePrivilegedStepUpTest {
         verify(tokenMapper).insert(eq(USER_ID), eq(NEW_EMAIL), anyString(), eq("198.51.100.4"),
                 anyInt(), eq(SESSION_EPOCH));
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
     }
 
     /**
      * A promotion that commits while the request waits for the account lock is observed there and
-     * refused without an audit append, which would otherwise wait on this transaction's own lock.
-     * The mocked answers change between the two reads; against the database that holds only
-     * because the role lock clears the session cache, which
-     * {@code PrivilegedEmailChangeStepUpIntegrationTest} proves end to end.
+     * refused. Its audit is deferred until the transaction completes, because an immediate append
+     * would wait on this transaction's own exclusive lock (#1993). The mocked answers change between
+     * the two reads; against the database that holds only because the role lock clears the session
+     * cache, which {@code PrivilegedEmailChangeStepUpIntegrationTest} proves end to end.
      */
     @ParameterizedTest
     @ValueSource(strings = {"true", "false"})
-    void aPromotionObservedOnlyUnderTheLockIsRefusedWithoutAnAudit(String enforced) {
+    void aPromotionObservedOnlyUnderTheLockIsRefusedAndItsAuditDeferred(String enforced) {
         EmailChangeService service = service(enforced);
         when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false, true);
         when(webAuthnService.hasPasskey(USER_ID)).thenReturn(false);
@@ -182,11 +186,14 @@ class EmailChangePrivilegedStepUpTest {
         assertThrows(PasskeyEnrollmentRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        InOrder order = inOrder(userMapper, privilegedAccountService, webAuthnService);
+        InOrder order = inOrder(userMapper, privilegedAccountService, webAuthnService, auditService);
         order.verify(userMapper).lockById(USER_ID);
         order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
         order.verify(privilegedAccountService).isPrivileged(USER_ID);
         order.verify(webAuthnService).hasPasskey(USER_ID);
+        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), anyString(), eq("privileged_mfa_enrollment_required"));
+        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
@@ -194,7 +201,7 @@ class EmailChangePrivilegedStepUpTest {
     /** The same holds when the promoted account is enrolled but has not stepped up. */
     @ParameterizedTest
     @ValueSource(strings = {"true", "false"})
-    void aPromotedEnrolledAccountWithoutStepUpIsRefusedUnderTheLockWithoutAnAudit(String enforced) {
+    void aPromotedEnrolledAccountWithoutStepUpIsRefusedUnderTheLockAndItsAuditDeferred(String enforced) {
         EmailChangeService service = service(enforced);
         when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false, true);
         when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
@@ -202,7 +209,11 @@ class EmailChangePrivilegedStepUpTest {
         assertThrows(RecentAuthenticationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        verify(userMapper).lockById(USER_ID);
+        InOrder order = inOrder(userMapper, auditService);
+        order.verify(userMapper).lockById(USER_ID);
+        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), anyString(), eq("recent_authentication_required"));
+        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }

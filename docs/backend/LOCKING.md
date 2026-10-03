@@ -1204,8 +1204,8 @@ account root.
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
   against committed state. That statement is mapped with `flushCache="true"`: the request is one
   MyBatis session, so without the flush the re-check would return the privilege and passkey answers
-  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
-  below).
+  cached by the pre-lock evaluation. A refusal that appears only under the root is audited once the
+  transaction completes (see below).
 
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
@@ -1285,8 +1285,11 @@ would wait on the caller's own lock until the InnoDB timeout, lose the event, an
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
-re-check of the privileged gate throws without auditing, because any append there would block on
-the request's own exclusive lock.
+re-check of the privileged gate audits its refusal through `AuditService.deferFailure` instead: the
+entry, with its tenant scope, actor and request metadata, is built at the call and appended after the
+request's transaction completes, once its own exclusive lock is released (#1993). That append is
+best-effort with the bounds of the step-up deferral (#1986): `created_at` is the append time, and a
+row appended after its account was deleted keeps the actor only in `entity_id` and the labels.
 
 The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
 The corpus lookup runs before any lock, but the fail-open decision reads account privilege under

@@ -338,6 +338,38 @@ public class AuditService {
     }
 
     /**
+     * Records the same failure as {@link #recordFailure}, appended once the current transaction has
+     * completed.
+     *
+     * <p>For a refusal decided while this transaction holds a row the independent append locks, such
+     * as the actor's {@code app_user} row. Holding it exclusively, an immediate append would wait on
+     * this transaction's own lock until the InnoDB timeout; holding it shared, it would queue behind
+     * any writer already waiting on this transaction (#1986, #1993). The entry, including its tenant
+     * scope, actor and request metadata, is built at the call. Delivery is best-effort, as for the
+     * deferred step-up recorders. Without an active transaction synchronization the row is appended
+     * immediately.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param errorMessage sanitized error class or reason
+     */
+    public void deferFailure(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, String errorMessage) {
+        Object context = errorMessage == null ? null
+                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        try {
+            deferIndependent(buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary,
+                    null, context, false, null, null, true));
+        } catch (Exception e) {
+            log.error("Failed to record audit event action={} entityType={} entityId={}",
+                    action, entityType, entityId, e);
+        }
+    }
+
+    /**
      * Records a failed audit event with explicit workspace/org scope.
      * @param action action name
      * @param entityType audited entity type
