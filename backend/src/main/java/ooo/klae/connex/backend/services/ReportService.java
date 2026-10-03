@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -67,12 +68,14 @@ import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
@@ -188,6 +191,7 @@ public class ReportService {
     private final PrivilegedAccountService privilegedAccountService;
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
+    private final UserMapper userMapper;
     private final GoalMapper goalMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -409,22 +413,38 @@ public class ReportService {
      * report deletion and stays on its permission check alone, so the prompt appears only where the
      * cascade would destroy a gated object.
      *
-     * <p>The schedule is read after {@code lockDefinitions}, never before. That statement takes
-     * {@code FOR UPDATE} on every {@code report_definition} row in the workspace, so a concurrent
-     * {@code report_schedule} insert blocks on its own foreign-key check against the locked parent
-     * and cannot commit inside the window. Reading first would let a schedule created after the
+     * <p>The deciding check reads the schedule after {@code lockDefinitions}, never before. That
+     * statement takes {@code FOR UPDATE} on every {@code report_definition} row in the workspace, so a
+     * concurrent {@code report_schedule} insert blocks on its own foreign-key check against the locked
+     * parent and cannot commit inside the window. Reading first would let a schedule created after the
      * check ride the cascade out ungated.
+     *
+     * <p>Privilege is decided under locks too (#1897). An unlocked pre-check refuses, and audits, an
+     * account it already sees privileged. The method then takes the actor's account row shared, its
+     * locked workspace authorization, and its assigned custom-role rows shared, which also flushes
+     * the session cache, before {@code lockDefinitions}; at {@code READ_COMMITTED} the schedule and the
+     * privilege are then re-read against committed state, so a promotion, or a schedule, committed
+     * while the delete waited is observed. That refusal is audited like the pre-check's: the account
+     * root is shared, so the independent audit's shared lock on the account row does not wait on it.
      *
      * @param id the report to delete
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         int currentUserId = workspaceService.getCurrentUserId();
+        if (scheduleMapper.getByReport(workspaceId, id) != null
+                && privilegedAccountService.isPrivileged(actorId)) {
+            requireScheduleCascadeStepUp(actorId);
+        }
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Authenticated user is unavailable");
+        }
         boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
             workspaceId, currentUserId);
+        userMapper.lockAssignedCustomRoleRowsForShare(actorId);
         reportMapper.lockDefinitions(workspaceId);
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
