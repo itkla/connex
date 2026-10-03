@@ -32,11 +32,15 @@ public class DeliveryProviderSecretCipher {
     private final SecretStore secretStore;
 
     /**
-     * Whether the underlying secret store is available to encrypt and decrypt.
-     * @return true when the secret store can be used
+     * Checks the scoped secret row, supported algorithms, and its configured enabled key without
+     * decrypting the credential or writing a secret-use audit.
+     * @param workspaceId the workspace
+     * @param channel the delivery channel
+     * @param reference the stored secret reference
+     * @return whether the credential's metadata permits decryption
      */
-    public boolean isAvailable() {
-        return secretStore.isAvailable();
+    public boolean canDecryptCredential(int workspaceId, DeliveryChannel channel, String reference) {
+        return secretStore.canDecrypt(credentialPurpose(channel), workspaceId, reference);
     }
 
     /**
