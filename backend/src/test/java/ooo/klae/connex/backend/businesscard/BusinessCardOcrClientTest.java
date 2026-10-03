@@ -373,11 +373,39 @@ class BusinessCardOcrClientTest {
         assertFalse(client.isReadyCached());
     }
 
+    /**
+     * The reciprocal case: a probe's publication takes the same monitor, so one that arrives while an
+     * invalidation holds it waits, then sees the new generation and publishes nothing (#1987).
+     */
+    @Test
+    void aPublicationWaitsForAnInvalidationInProgressAndIsThenRefused() throws Exception {
+        BusinessCardOcrClient client = new BusinessCardOcrClient(RestClient.builder().build(),
+                new ObjectMapper(), properties(Duration.ofMinutes(1)), BASE, false);
+        Object monitor = Objects.requireNonNull(ReflectionTestUtils.getField(client, "readinessPublication"));
+        AtomicLong generation = assertInstanceOf(AtomicLong.class,
+                ReflectionTestUtils.getField(client, "readinessGeneration"));
+        long started = generation.get();
+        long expiresAt = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+        AtomicReference<Object> published = new AtomicReference<>();
+        Thread publication;
+        synchronized (monitor) {
+            publication = Thread.ofPlatform().start(() -> published.set(
+                    ReflectionTestUtils.invokeMethod(client, "publishReadiness", started, true, expiresAt)));
+            awaitBlocked(publication);
+            ReflectionTestUtils.invokeMethod(client, "markUnavailable");
+        }
+
+        publication.join(5_000);
+        assertFalse(publication.isAlive());
+        assertEquals(Boolean.FALSE, published.get());
+        assertFalse(client.isReadyCached());
+    }
+
     private static void awaitBlocked(Thread thread) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (thread.getState() != Thread.State.BLOCKED) {
             if (System.nanoTime() > deadline || !thread.isAlive()) {
-                throw new AssertionError("The invalidation never waited for the publication's monitor");
+                throw new AssertionError("The thread never waited for the readiness monitor");
             }
             Thread.sleep(5);
         }
