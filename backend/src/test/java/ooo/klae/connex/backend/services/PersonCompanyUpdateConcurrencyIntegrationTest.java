@@ -186,9 +186,11 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         attach("person_tag", "person_id", person.getId(), kept.getId());
         CountDownLatch lockHeld = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Long> replacementConnection = new AtomicReference<>();
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
         doAnswer(invocation -> {
             Person locked = realPersonMapper.getOwnedPersonByIdForUpdate(workspace.getId(), person.getId());
+            replacementConnection.set(currentConnectionId());
             lockHeld.countDown();
             assertTrue(release.await(30, TimeUnit.SECONDS));
             return locked;
@@ -197,7 +199,7 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         replaceWhileAnAdditionWaits(
             () -> personService.replaceTags(person.getId(), List.of(replacement.getId())),
             () -> personService.addTag(person.getId(), added.getId()),
-            "person", lockHeld, release);
+            "person", replacementConnection, lockHeld, release);
 
         assertEquals(Set.of(replacement.getId(), added.getId()),
             committedTags("person_tag", "person_id", person.getId()));
@@ -213,9 +215,11 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         attach("company_tag", "company_id", company.getId(), kept.getId());
         CountDownLatch lockHeld = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Long> replacementConnection = new AtomicReference<>();
         CompanyMapper realCompanyMapper = sqlSessionTemplate.getMapper(CompanyMapper.class);
         doAnswer(invocation -> {
             Company locked = realCompanyMapper.getOwnedCompanyByIdForUpdate(workspace.getId(), company.getId());
+            replacementConnection.set(currentConnectionId());
             lockHeld.countDown();
             assertTrue(release.await(30, TimeUnit.SECONDS));
             return locked;
@@ -224,7 +228,7 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
         replaceWhileAnAdditionWaits(
             () -> companyService.replaceTags(company.getId(), List.of(replacement.getId())),
             () -> companyService.addTag(company.getId(), added.getId()),
-            "company", lockHeld, release);
+            "company", replacementConnection, lockHeld, release);
 
         assertEquals(Set.of(replacement.getId(), added.getId()),
             committedTags("company_tag", "company_id", company.getId()));
@@ -387,6 +391,7 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
             Supplier<List<Tag>> replace,
             Supplier<Boolean> add,
             String recordTable,
+            AtomicReference<Long> replacementConnection,
             CountDownLatch lockHeld,
             CountDownLatch release) throws Exception {
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -397,7 +402,7 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
                 throw new AssertionError("The replacement never took its record lock");
             }
             Future<Boolean> addition = executor.submit(() -> asCurrentUser(add));
-            awaitWaitOn(recordTable, addition, "The concurrent tag addition");
+            awaitWaitOn(recordTable, replacementConnection.get(), addition, "The concurrent tag addition");
             release.countDown();
             assertEquals(1, replaced.get(20, TimeUnit.SECONDS).size());
             assertTrue(addition.get(20, TimeUnit.SECONDS));
@@ -416,10 +421,12 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
             int removedTagId) throws Exception {
         CountDownLatch removalHeld = new CountDownLatch(1);
         CountDownLatch commitRemoval = new CountDownLatch(1);
+        AtomicReference<Long> removalConnection = new AtomicReference<>();
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<?> removal = executor.submit(() -> new TransactionTemplate(transactionManager)
                 .executeWithoutResult(status -> {
+                    removalConnection.set(currentConnectionId());
                     assertEquals(1, jdbcTemplate.update(
                         "DELETE FROM " + associationTable + " WHERE " + recordColumn + " = ? AND tag_id = ?",
                         recordId, removedTagId));
@@ -436,7 +443,7 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
                 throw new AssertionError("The in-flight removal never held its row");
             }
             Future<List<Tag>> replaced = executor.submit(() -> asCurrentUser(replace));
-            awaitWaitOn(associationTable, replaced, "The tag replacement");
+            awaitWaitOn(associationTable, removalConnection.get(), replaced, "The tag replacement");
             commitRemoval.countDown();
             removal.get(20, TimeUnit.SECONDS);
             assertEquals(1, replaced.get(20, TimeUnit.SECONDS).size());
@@ -476,10 +483,11 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
     }
 
     /**
-     * Waits until a lock request on {@code table} in this schema is queued, and fails at once with the
-     * waiter's outcome if it finishes first.
+     * Waits until a lock request on {@code table} in this schema is queued behind the transaction on
+     * {@code blockingConnection}, and fails at once with the waiter's outcome if it finishes first.
      */
-    private void awaitWaitOn(String table, Future<?> waiter, String description) throws Exception {
+    private void awaitWaitOn(String table, long blockingConnection, Future<?> waiter, String description)
+            throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LOCK_WAIT_PROBE_SECONDS);
         while (System.nanoTime() < deadline) {
             if (waiter.isDone()) {
@@ -495,14 +503,26 @@ class PersonCompanyUpdateConcurrencyIntegrationTest {
                     FROM performance_schema.data_lock_waits waits
                     JOIN performance_schema.data_locks requested
                       ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.threads blocking
+                      ON blocking.THREAD_ID = waits.BLOCKING_THREAD_ID
                     WHERE requested.OBJECT_SCHEMA = DATABASE() AND requested.OBJECT_NAME = ?
-                    """, Integer.class, table);
+                      AND blocking.PROCESSLIST_ID = ?
+                    """, Integer.class, table, blockingConnection);
             if (waits != null && waits > 0) {
                 return;
             }
             Thread.sleep(25);
         }
         throw new AssertionError(description + " never waited on " + table);
+    }
+
+    /** The MySQL connection id of the transaction bound to the calling thread. */
+    private long currentConnectionId() {
+        Long connectionId = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
+        if (connectionId == null) {
+            throw new IllegalStateException("No MySQL connection id");
+        }
+        return connectionId;
     }
 
     private <T> T asCurrentUser(Supplier<T> change) {
