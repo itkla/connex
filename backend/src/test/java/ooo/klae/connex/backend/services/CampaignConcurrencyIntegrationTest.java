@@ -1227,16 +1227,25 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
         return waiter;
     }
 
+    /**
+     * The holder's InnoDB transaction id, read from {@code performance_schema.data_locks}, which is live.
+     * {@code information_schema.innodb_trx} is served from a buffer InnoDB refreshes at most every 0.1
+     * seconds, so on a pooled connection reused within that window it still reports the previous
+     * holder's committed transaction, and the probe then waits for a blocker that no longer exists
+     * (#1966). The holder has locked its rows by the time this runs.
+     */
     private long currentEngineTransactionId() {
-        Long transactionId = jdbcTemplate.queryForObject("""
-                SELECT trx_id
-                FROM information_schema.innodb_trx
-                WHERE trx_mysql_thread_id = CONNECTION_ID()
+        List<Long> transactionIds = jdbcTemplate.queryForList("""
+                SELECT DISTINCT l.ENGINE_TRANSACTION_ID
+                FROM performance_schema.data_locks l
+                JOIN performance_schema.threads t ON t.THREAD_ID = l.THREAD_ID
+                WHERE t.PROCESSLIST_ID = CONNECTION_ID()
                 """, Long.class);
-        if (transactionId == null) {
-            throw new IllegalStateException("Campaign concurrency holder has no InnoDB transaction id");
+        if (transactionIds.size() != 1) {
+            throw new IllegalStateException(
+                    "Campaign concurrency holder has no single InnoDB transaction id: " + transactionIds);
         }
-        return transactionId;
+        return transactionIds.getFirst();
     }
 
     private TransactionTemplate transaction() {
