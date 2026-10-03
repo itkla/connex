@@ -1245,7 +1245,12 @@ cycle; the refusal used to stall until the writer's lock wait timed out. The und
 therefore built at the call and appended after the transaction completes
 (`AuditService.deferExportStepUpRefusal` / `deferScheduleDeleteStepUpRefusal`, #1986). That removes
 the cycle but is best-effort: the append's own waits are not bounded, and a failure or a crash before
-it commits loses the row, as for the integrity-head deferral (#1879). The re-check catches a
+it commits loses the row, as for the integrity-head deferral (#1879). Like every chained row, it takes
+its `created_at` and `integrity_actor_id` at append time. It can therefore trail the refusal by the
+queued writer's own transaction, where the immediate append trailed it by that writer's whole lock
+wait. And if that writer is the account's own deletion (self-service only), the row keeps the actor in
+its signed `entity_id` and its labels but not in `actor_id`, as any append after the deletion does.
+The re-check catches a
 promotion, a newly committed schedule (G7), or a step-up that expired while the operation waited
 for its locks.
 

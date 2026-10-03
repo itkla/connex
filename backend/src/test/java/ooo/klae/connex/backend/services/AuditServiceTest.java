@@ -700,6 +700,64 @@ class AuditServiceTest {
     }
 
     /**
+     * An under-lock step-up refusal is built at the call and appended only once its transaction
+     * completes, with the call's actor and request rather than whatever is bound by then (#1986). It
+     * is the same row the immediate refusal writes, scoped explicitly to no workspace or organization.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void deferredStepUpRefusalKeepsTheCallTimeActorAndRequest(boolean scheduleDelete) {
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Scheduling Admin");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("User-Agent", "Probe/1.0");
+        request.getSession(true);
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            if (scheduleDelete) {
+                service.deferScheduleDeleteStepUpRefusal();
+            } else {
+                service.deferExportStepUpRefusal();
+            }
+            verify(auditIntegrityService, never()).appendIndependent(any(AuditLog.class));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(AuditService.EXPORT_STEP_UP_ACTION, row.getAction());
+        assertEquals("user", row.getEntityType());
+        assertEquals(42, row.getEntityId());
+        assertEquals(42, row.getActorId());
+        assertEquals("Scheduling Admin", row.getActorLabel());
+        assertEquals("Scheduling Admin", row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
+        assertEquals(scheduleDelete
+                ? AuditService.SCHEDULE_DELETE_STEP_UP_SUMMARY
+                : AuditService.EXPORT_STEP_UP_SUMMARY, row.getSummary());
+        assertTrue(row.getContext().contains(AuditService.EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON));
+        assertNull(row.getWorkspaceId());
+        assertNull(row.getOrgId());
+        assertEquals("203.0.113.9", row.getIpAddress());
+        assertEquals("Probe/1.0", row.getUserAgent());
+        assertNotNull(row.getSessionId());
+        assertNotNull(row.getRequestId());
+    }
+
+    /**
      * A {@code NESTED} append fails with {@link TransactionSystemException} only when its savepoint is
      * gone, as after the database rolled the whole transaction back on a deadlock: swallowing it would
      * let the caller commit only the work after the audit, so it reaches the caller (#1947).

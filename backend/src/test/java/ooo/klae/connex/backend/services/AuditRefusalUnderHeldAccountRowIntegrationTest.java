@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
@@ -47,7 +48,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest {
-    private static final int WRITER_LOCK_WAIT_SECONDS = 5;
+    private static final int WRITER_LOCK_WAIT_SECONDS = 10;
     private static final long WELL_INSIDE_WRITER_LOCK_WAIT_MS = 2_000;
 
     @Autowired private AuditService auditService;
@@ -57,15 +58,18 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
 
     /**
      * The gate holds the account row shared while a writer is queued exclusively behind it, as a role
-     * change or invite acceptance for the same account would be. The refusal must neither wait for
-     * that writer's lock-wait timeout nor make the writer fail, and its row must land once.
+     * change or invite acceptance for the same account would be. Recording the refusal must not block
+     * the gate behind that writer, the writer must then commit, and the refusal's row must land once.
+     * Only the recording call is timed: an immediate append blocks there until the writer's lock wait
+     * expires, while everything after the gate completes is checked with generous watchdogs.
      */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void aDeferredRefusalDoesNotQueueBehindAWriterWaitingOnTheHeldAccountRow(boolean scheduleDelete)
             throws Exception {
         int actorId = currentUser.getId();
-        AtomicLong refusedAt = new AtomicLong();
+        AtomicLong recordingMs = new AtomicLong();
+        AtomicLong writerConnection = new AtomicLong();
         AtomicReference<Future<?>> writer = new AtomicReference<>();
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
@@ -73,23 +77,24 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
                 assertNotNull(userMapper.lockByIdForShare(actorId));
                 long gateConnection = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
                 writer.set(executor.submit(() -> {
-                    updateAccountRow(actorId);
+                    updateAccountRow(actorId, writerConnection);
                     return null;
                 }));
-                awaitAccountRowWaitBehind(gateConnection, writer.get());
-                refusedAt.set(System.nanoTime());
+                awaitAccountRowWaitBehind(gateConnection, writerConnection, writer.get());
+                long started = System.nanoTime();
                 if (scheduleDelete) {
                     auditService.deferScheduleDeleteStepUpRefusal();
                 } else {
                     auditService.deferExportStepUpRefusal();
                 }
+                recordingMs.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
                 status.setRollbackOnly();
             });
-            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - refusedAt.get());
 
-            assertTrue(elapsedMs < WELL_INSIDE_WRITER_LOCK_WAIT_MS,
-                    "the refusal waited " + elapsedMs + " ms behind the writer queued on the account row");
-            writer.get().get(10, TimeUnit.SECONDS);
+            assertTrue(recordingMs.get() < WELL_INSIDE_WRITER_LOCK_WAIT_MS,
+                    "recording the refusal waited " + recordingMs.get()
+                            + " ms behind the writer queued on the account row");
+            writer.get().get(30, TimeUnit.SECONDS);
         } finally {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
@@ -149,7 +154,8 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
         assertEquals(actorId, ((Number) row.get("actor_id")).intValue());
         assertEquals("failure", row.get("outcome"));
         assertEquals(summary, row.get("summary"));
-        assertTrue(String.valueOf(row.get("context")).contains(AuditService.EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON));
+        assertTrue(String.valueOf(row.get("context"))
+                .contains(AuditService.EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON));
         assertNull(row.get("workspace_id"));
         assertNull(row.get("org_id"));
         assertEquals("system", row.get("chain_scope_type"));
@@ -169,11 +175,15 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
      * Takes the account row exclusively on its own connection and commits at once, as an account
      * mutation would, with a short lock wait so a stalled gate shows up as this writer timing out.
      */
-    private void updateAccountRow(int actorId) throws SQLException {
+    private void updateAccountRow(int actorId, AtomicLong connectionId) throws SQLException {
         try (Connection connection = dataSource.getConnection()) {
             boolean autoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try (Statement session = connection.createStatement()) {
+                try (ResultSet id = session.executeQuery("SELECT CONNECTION_ID()")) {
+                    assertTrue(id.next());
+                    connectionId.set(id.getLong(1));
+                }
                 session.execute("SET SESSION innodb_lock_wait_timeout = " + WRITER_LOCK_WAIT_SECONDS);
                 try (PreparedStatement update = connection.prepareStatement(
                         "UPDATE app_user SET timezone = timezone WHERE id = ?")) {
@@ -194,10 +204,11 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
     }
 
     /**
-     * Waits until the writer's request on {@code app_user} is queued behind the gate's connection, and
-     * fails at once with the writer's outcome if it finishes first.
+     * Waits until the writer's own request on {@code app_user} is queued behind the gate's connection,
+     * and fails at once with the writer's outcome if it finishes first.
      */
-    private void awaitAccountRowWaitBehind(long gateConnection, Future<?> waiter) {
+    private void awaitAccountRowWaitBehind(
+            long gateConnection, AtomicLong writerConnection, Future<?> waiter) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
         while (System.nanoTime() < deadline) {
             if (waiter.isDone()) {
@@ -212,16 +223,18 @@ class AuditRefusalUnderHeldAccountRowIntegrationTest extends AbstractServiceTest
                     throw new AssertionError("Interrupted while waiting for the writer", interrupted);
                 }
             }
-            Integer waits = jdbcTemplate.queryForObject("""
+            Integer waits = writerConnection.get() == 0 ? null : jdbcTemplate.queryForObject("""
                     SELECT COUNT(*)
                     FROM performance_schema.data_lock_waits waits
                     JOIN performance_schema.data_locks requested
                       ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
                     JOIN performance_schema.threads blocking
                       ON blocking.THREAD_ID = waits.BLOCKING_THREAD_ID
+                    JOIN performance_schema.threads requesting
+                      ON requesting.THREAD_ID = waits.REQUESTING_THREAD_ID
                     WHERE requested.OBJECT_SCHEMA = DATABASE() AND requested.OBJECT_NAME = 'app_user'
-                      AND blocking.PROCESSLIST_ID = ?
-                    """, Integer.class, gateConnection);
+                      AND blocking.PROCESSLIST_ID = ? AND requesting.PROCESSLIST_ID = ?
+                    """, Integer.class, gateConnection, writerConnection.get());
             if (waits != null && waits > 0) {
                 return;
             }
