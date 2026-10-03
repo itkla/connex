@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.webauthn;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.webauthn.api.Bytes;
@@ -220,6 +222,59 @@ class WebAuthnServiceTest {
                 org.mockito.ArgumentMatchers.eq("Admin"),
                 org.mockito.ArgumentMatchers.eq("Passkey registered"),
                 any());
+    }
+
+    /**
+     * A first-passkey confirmation required only under the account lock is refused there. The refusal
+     * is recorded with the controller's row but deferred until the transaction completes, because an
+     * immediate independent append would wait on this transaction's own account lock (#1995).
+     */
+    @Test
+    void finishRegistrationDefersTheAuditOfABootstrapConfirmationRefusedUnderTheLock() {
+        WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        PasskeyBootstrapConfirmationPolicy policy = mock(PasskeyBootstrapConfirmationPolicy.class);
+        AuditService auditService = mock(AuditService.class);
+        WebAuthnService service = new WebAuthnService(
+                relyingParty,
+                credentials,
+                mock(WebauthnUserEntityMapper.class),
+                mock(WebauthnCredentialMapper.class),
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                policy,
+                auditService);
+        User user = new User();
+        user.setId(7);
+        user.setDisplayName("Admin");
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userMapper.currentSessionEpoch(7)).thenReturn(3);
+        when(userMapper.getUserById(7)).thenReturn(user);
+        when(policy.requiresConfirmation(7)).thenReturn(true);
+
+        assertThrows(ForbiddenException.class, () -> service.finishRegistration(
+                7, 3, false, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+
+        InOrder order = inOrder(userMapper, policy, auditService);
+        order.verify(userMapper).lockById(7);
+        order.verify(userMapper).lockAssignedCustomRoleIds(7);
+        order.verify(policy).requiresConfirmation(7);
+        order.verify(auditService).deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION,
+                "user",
+                7,
+                null,
+                null,
+                "Admin",
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
+        verify(auditService, never()).recordStrictFailureIndependentScoped(
+                any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).recordFailureScoped(
+                any(), any(), any(), any(), any(), any(), any(), any());
+        verify(relyingParty, never()).registerCredential(any());
+        verify(credentials, never()).save(any());
     }
 
     @Test
