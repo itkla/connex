@@ -4,19 +4,24 @@
 The owner decided on 2026-09-19 that `frontend/`, `frontend/emails/`, and `landing/` refuse versions
 younger than one day, refuse versions without a registry publish time, and refuse trust downgrades,
 and that a release-age exclusion is admitted only for an exact version the owner approved, recorded
-beside the setting with the advisory, the approver, and the removal condition.
+beside the setting with the advisory, the approver, and the removal condition. An advisory with no
+patched release that cannot reach runtime code is admitted the same way: one canonical GHSA id per
+`auditConfig.ignoreGhsas` entry, with the approver and the removal condition directly above it.
 
 pnpm 11 writes uncommented `minimumReleaseAgeExclude` entries itself: its interactive "Add to
 minimumReleaseAgeExclude ... and proceed with the install?" prompt and `pnpm audit --fix` both append
-exact versions with no annotation, and the frozen-lockfile re-check then accepts them. This check runs
-in the `frontend-audit` job and fails the pull request when a policy setting is missing or changed,
-when a top-level setting outside the allowlist appears, or when an exclusion is not a single exact
-version with the required comment directly above it.
+exact versions with no annotation, and the frozen-lockfile re-check then accepts them. pnpm 11's
+`pnpm audit --ignore <id>` and `--ignore-unfixable` likewise write uncommented `auditConfig.ignoreGhsas`
+entries, and exit 0 without auditing. This check runs in the `frontend-audit` job and fails the pull
+request when a policy setting is missing or changed, when a top-level setting outside the allowlist
+appears, when an exclusion is not a single exact version with the required comment directly above it,
+or when an ignored advisory is not a single GHSA id with the required comment directly above it.
 
 The files are read line by line instead of through a YAML parser because the comments are the
 evidence being checked. The reader accepts a narrow subset of YAML: allowlisted plain top-level keys,
-one-line values, and block content indented under a key with nothing after its colon. Anything else,
-including a plain-scalar continuation line and a control or line-separator character, fails closed.
+one-line values, block content indented under a key with nothing after its colon, and, under
+`auditConfig`, only an `ignoreGhsas` block sequence. Anything else, including a plain-scalar
+continuation line and a control or line-separator character, fails closed.
 
 pnpm before 11.1.3 reads the same settings but skips the lockfile re-check on a frozen install, so
 every project must pin the reviewed pnpm through `packageManager` and must not name another version
@@ -30,7 +35,9 @@ adding another fails until this guard is changed in review. A lexical scan only 
 `--effective` adds a behavioural check: it asks pnpm itself what it resolves in each workspace
 (`pnpm config list --json` reports every explicitly configured setting after the pnpmfile hooks have
 run) and compares that with the policy, the pinned pnpm version, the registry and transport settings,
-and the exclusions the reader found.
+and the exclusions and ignored advisories the reader found. pnpm reports only keys that a configuration
+file sets, so a setting that a hook adds and no file declares, such as an `auditConfig` in a workspace
+that has none, is invisible here; the digest pin is what stops a hook from adding one.
 
 This is a tripwire against an accidental or overt weakening in a reviewed pull request. It is not a
 defence against a hostile committer, who can edit this guard in the same pull request.
@@ -68,8 +75,11 @@ REQUIRED_SETTINGS = {
 RELEASE_AGE_EXCLUSIONS = "minimumReleaseAgeExclude"
 TRUST_EXCLUSIONS = "trustPolicyExclude"
 EXCLUSION_LISTS = (RELEASE_AGE_EXCLUSIONS, TRUST_EXCLUSIONS)
+AUDIT_CONFIG = "auditConfig"
+IGNORED_ADVISORIES = "ignoreGhsas"
+AUDIT_IGNORES = f"{AUDIT_CONFIG}.{IGNORED_ADVISORIES}"
 UNGUARDED_SETTINGS = ("allowBuilds", "overrides")
-ALLOWED_SETTINGS = (*UNGUARDED_SETTINGS, *REQUIRED_SETTINGS, *EXCLUSION_LISTS)
+ALLOWED_SETTINGS = (*UNGUARDED_SETTINGS, *REQUIRED_SETTINGS, *EXCLUSION_LISTS, AUDIT_CONFIG)
 
 EFFECTIVE_SETTINGS: dict[str, object] = {
     "minimumReleaseAge": 1440,
@@ -103,7 +113,8 @@ PNPMFILE_MODULE_LOAD = re.compile(r"\b(?:require|import)\b")
 
 LINE_SPLITTING_CATEGORIES = frozenset(("Cc", "Zl", "Zp"))
 TOP_LEVEL_KEY = re.compile(r"^([A-Za-z][A-Za-z0-9]*):(?:[ \t]+(.*))?$")
-SEQUENCE_ENTRY = re.compile(r"^[ \t]+-[ \t]+(\S.*)$")
+NESTED_KEY = re.compile(r"^([ \t]+)([A-Za-z][A-Za-z0-9]*):(?:[ \t]+(.*))?$")
+SEQUENCE_ENTRY = re.compile(r"^([ \t]+)-[ \t]+(\S.*)$")
 TRAILING_COMMENT = re.compile(r"[ \t]+#.*$")
 EXACT_VERSION_ENTRY = re.compile(
     r"^(?:@[A-Za-z0-9._~-]+/)?[A-Za-z0-9._~-]+"
@@ -112,6 +123,7 @@ EXACT_VERSION_ENTRY = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 ADVISORY = re.compile(r"\b(?:GHSA(?:-[0-9a-z]{4}){3}|CVE-[0-9]{4}-[0-9]{4,})\b")
+GHSA_ENTRY = re.compile(r"^GHSA(?:-[0-9a-z]{4}){3}$")
 APPROVAL = re.compile(r"\bApproved:\s*[^\s,][^,]*,\s*[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 REMOVAL = re.compile(r"\bremove\b", re.IGNORECASE)
 PUBLISHER = re.compile(r"\bPublisher:[ \t]*[^\s.,;][^.,;]*")
@@ -120,12 +132,28 @@ PUBLISHED = re.compile(r"\bPublished:[ \t]*[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 
 
 class Exclusion(NamedTuple):
-    """One exclusion-list entry with the comment lines directly above it."""
+    """One exclusion-list or ignored-advisory entry with the comment lines directly above it."""
 
     setting: str
     line_number: int
     value: str
     annotation: str
+
+
+class AuditConfigBlock:
+    """The indentation the line reader has seen inside one top-level `auditConfig` block."""
+
+    def __init__(self) -> None:
+        self.key_indent: int | None = None
+        self.entry_indent: int | None = None
+
+    def admits(self, indent: int) -> bool:
+        """Whether an entry at this indentation belongs to the open `ignoreGhsas` sequence."""
+        if self.key_indent is None or indent < self.key_indent:
+            return False
+        if self.entry_indent is None:
+            self.entry_indent = indent
+        return indent == self.entry_indent
 
 
 class WorkspaceReading(NamedTuple):
@@ -171,7 +199,12 @@ def exclusion_violations(workspace: Path, exclusion: Exclusion) -> list[str]:
     location = f"{workspace}:{exclusion.line_number}"
     label = f"{exclusion.setting} entry {exclusion.value!r}"
     found: list[str] = []
-    if not EXACT_VERSION_ENTRY.match(exclusion.value):
+    if exclusion.setting == AUDIT_IGNORES:
+        if not GHSA_ENTRY.match(exclusion.value):
+            found.append(
+                f"{location}: {label} is not one GHSA id in pnpm's canonical `GHSA-xxxx-xxxx-xxxx` form"
+            )
+    elif not EXACT_VERSION_ENTRY.match(exclusion.value):
         found.append(
             f"{location}: {label} is not one exact `name@x.y.z` version "
             "(no bare name, wildcard, range, or `||` union)"
@@ -179,9 +212,9 @@ def exclusion_violations(workspace: Path, exclusion: Exclusion) -> list[str]:
     if not exclusion.annotation:
         found.append(f"{location}: {label} has no comment directly above it")
         return found
-    if exclusion.setting == RELEASE_AGE_EXCLUSIONS:
-        if not ADVISORY.search(exclusion.annotation):
-            found.append(f"{location}: {label} comment names no GHSA or CVE advisory")
+    if exclusion.setting == RELEASE_AGE_EXCLUSIONS and not ADVISORY.search(exclusion.annotation):
+        found.append(f"{location}: {label} comment names no GHSA or CVE advisory")
+    if exclusion.setting in (RELEASE_AGE_EXCLUSIONS, AUDIT_IGNORES):
         if not APPROVAL.search(exclusion.annotation):
             found.append(
                 f"{location}: {label} comment records no owner approval (`Approved: <name>, <YYYY-MM-DD>`)"
@@ -204,6 +237,7 @@ def read_workspace(workspace: Path, text: str) -> WorkspaceReading:
     exclusions: list[Exclusion] = []
     open_list: str | None = None
     inline_key: str | None = None
+    audit_config: AuditConfigBlock | None = None
     annotation: list[str] = []
 
     for line_number, raw_line in enumerate(text.split("\n"), 1):
@@ -226,6 +260,7 @@ def read_workspace(workspace: Path, text: str) -> WorkspaceReading:
         if line[0] not in " \t":
             open_list = None
             inline_key = None
+            audit_config = None
             annotation = []
             match = TOP_LEVEL_KEY.match(line)
             if match is None:
@@ -249,8 +284,43 @@ def read_workspace(workspace: Path, text: str) -> WorkspaceReading:
                         f"{workspace}:{line_number}: {key} must be a block sequence with one commented "
                         "entry per line"
                     )
+                elif key == AUDIT_CONFIG:
+                    found.append(
+                        f"{workspace}:{line_number}: {AUDIT_CONFIG} must be a block mapping holding only an "
+                        f"{IGNORED_ADVISORIES} block sequence"
+                    )
             elif key in EXCLUSION_LISTS:
                 open_list = key
+            elif key == AUDIT_CONFIG:
+                audit_config = AuditConfigBlock()
+            continue
+        if audit_config is not None:
+            nested = NESTED_KEY.match(line)
+            entry = SEQUENCE_ENTRY.match(line)
+            if nested is not None:
+                if audit_config.key_indent is None and nested.group(2) == IGNORED_ADVISORIES:
+                    audit_config.key_indent = len(nested.group(1))
+                    if setting_value(nested.group(3)):
+                        inline_key = AUDIT_IGNORES
+                        found.append(
+                            f"{workspace}:{line_number}: {AUDIT_IGNORES} must be a block sequence with one "
+                            "commented entry per line"
+                        )
+                    else:
+                        open_list = AUDIT_IGNORES
+                else:
+                    open_list = None
+                    found.append(
+                        f"{workspace}:{line_number}: {AUDIT_CONFIG} may hold only one {IGNORED_ADVISORIES} block "
+                        f"sequence; {stripped!r} needs a reviewed change to this guard"
+                    )
+            elif open_list == AUDIT_IGNORES and entry is not None and audit_config.admits(len(entry.group(1))):
+                exclusions.append(
+                    Exclusion(open_list, line_number, unquoted(setting_value(entry.group(2))), " ".join(annotation))
+                )
+            else:
+                found.append(f"{workspace}:{line_number}: unrecognised line in {AUDIT_CONFIG}: {stripped!r}")
+            annotation = []
             continue
         if open_list is not None:
             entry = SEQUENCE_ENTRY.match(line)
@@ -258,7 +328,7 @@ def read_workspace(workspace: Path, text: str) -> WorkspaceReading:
                 found.append(f"{workspace}:{line_number}: unrecognised line in {open_list}: {stripped!r}")
             else:
                 exclusions.append(
-                    Exclusion(open_list, line_number, unquoted(setting_value(entry.group(1))), " ".join(annotation))
+                    Exclusion(open_list, line_number, unquoted(setting_value(entry.group(2))), " ".join(annotation))
                 )
             annotation = []
             continue
@@ -456,6 +526,12 @@ def same_value(reported: object, expected: object) -> bool:
     return type(reported) is type(expected) and reported == expected
 
 
+def resolves_declared_ignores(reported: object, declared: list[str]) -> bool:
+    if not declared and reported in (None, {}, {IGNORED_ADVISORIES: []}, {IGNORED_ADVISORIES: None}):
+        return True
+    return reported == {IGNORED_ADVISORIES: declared}
+
+
 def reports_pinned_pnpm(user_agent: object) -> bool:
     return isinstance(user_agent, str) and (
         user_agent == PNPM_USER_AGENT or user_agent.startswith(f"{PNPM_USER_AGENT} ")
@@ -530,6 +606,13 @@ def effective_violations(
                     f"{workspace}: pnpm resolves {key} to {json.dumps(reported)}, but the annotated "
                     f"entries in the file are {json.dumps(declared)}"
                 )
+        declared_ignores = [exclusion.value for exclusion in reading.exclusions if exclusion.setting == AUDIT_IGNORES]
+        reported_audit = configuration.get(AUDIT_CONFIG)
+        if not resolves_declared_ignores(reported_audit, declared_ignores):
+            found.append(
+                f"{workspace}: pnpm resolves {AUDIT_CONFIG} to {json.dumps(reported_audit)}, but the annotated "
+                f"entries in the file are {json.dumps({IGNORED_ADVISORIES: declared_ignores})}"
+            )
     return found
 
 
