@@ -177,10 +177,16 @@ class ReportServiceTest {
 
         verify(auditService).recordScheduleDeleteStepUpRefused();
         verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).deferScheduleDeleteStepUpRefusal();
         verifyNoInteractions(userMapper, reportMapper);
         verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 
+    /**
+     * The same refusal found only under the locks is recorded through the deferred recorder: the
+     * actor's account row is held there, so an immediate independent append could queue behind a
+     * writer already waiting on it (#1986).
+     */
     @Test
     void refusingTheParentDeleteStepUpUnderLocksIsAuditedAsADeletion() {
         User actor = new User();
@@ -197,7 +203,7 @@ class ReportServiceTest {
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
 
         InOrder ordered = inOrder(scheduleMapper, privilegedAccountService, userMapper,
-                workspaceService, reportMapper, sessionSecurityService);
+                workspaceService, reportMapper, sessionSecurityService, auditService);
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
@@ -208,8 +214,10 @@ class ReportServiceTest {
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
-        verify(auditService).recordScheduleDeleteStepUpRefused();
+        ordered.verify(auditService).deferScheduleDeleteStepUpRefusal();
+        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
         verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).deferExportStepUpRefusal();
         verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 

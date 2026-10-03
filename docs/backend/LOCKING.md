@@ -1211,15 +1211,16 @@ account root.
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
   (`lockWorkspaceForShare`) → assigned custom-role rows `FOR SHARE`
   (`lockAssignedCustomRoleRowsForShare`, flushing the MyBatis session cache) → privilege/step-up
-  re-check with its refusal audited → existing schedule mutation and transactional success audit.
+  re-check with its refusal audited after completion → existing schedule mutation and transactional
+  success audit.
 - `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
   and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
   shared, active workspace shared, authorization membership exclusive) → assigned custom-role rows
   shared with cache flush (`lockAssignedCustomRoleRowsForShare`) → `lockDefinitions` (workspace
   report definitions exclusive) → `getDefinition` and not-found check → schedule/privilege
-  re-check and audited step-up → existing deletion policy, snapshot checks, cascade and
-  transactional success audit. The definition locks block schedule inserts through their parent
-  foreign-key check.
+  re-check and step-up, its refusal audited after completion → existing deletion policy, snapshot
+  checks, cascade and transactional success audit. The definition locks block schedule inserts
+  through their parent foreign-key check.
 
 These schedule/report account roots are **shared**, unlike email-change, passkey and
 password-reset credential flows. Report writers (scheduled delivery, report creation and manual
@@ -1235,13 +1236,18 @@ each other's. The account root is the only one of these locks that waits for a b
 promotion in another workspace: privilege is account-wide, and the role-row lock reaches memberships
 only through their custom roles (`PrivilegedGateConcurrencyIntegrationTest` pins both). The
 workspace root must precede custom-role locks to match `lockRoleMutation`. Both the unlocked
-pre-check and the under-lock re-check audit their refusals. The independent audit takes the account
-row `FOR SHARE` on its own connection. The operation's shared root doesn't block that, but InnoDB
-queues it behind an exclusive request already waiting on the root, such as a role change or an
-invite acceptance for the same account. InnoDB can't see that wait as a deadlock, because the
-operation waits for the audit in the application. So the refusal stalls until the queued writer's
-lock wait times out, and then completes (#1986). The re-check catches a promotion, a newly
-committed schedule (G7), or a step-up that expired while the operation waited for its locks.
+pre-check and the under-lock re-check audit their refusals, but only the pre-check appends
+immediately. The independent audit takes the account row `FOR SHARE` on its own connection, and
+InnoDB queues that request behind any exclusive request already waiting on the operation's shared
+root, such as a role change or an invite acceptance for the same account. That writer waits on the
+operation, and the operation would wait on the audit in the application, where InnoDB can't see the
+cycle; the refusal used to stall until the writer's lock wait timed out. The under-lock refusal is
+therefore built at the call and appended after the transaction completes
+(`AuditService.deferExportStepUpRefusal` / `deferScheduleDeleteStepUpRefusal`, #1986). That removes
+the cycle but is best-effort: the append's own waits are not bounded, and a failure or a crash before
+it commits loses the row, as for the integrity-head deferral (#1879). The re-check catches a
+promotion, a newly committed schedule (G7), or a step-up that expired while the operation waited
+for its locks.
 
 Residuals: two promotions are not serialized by these shared roots. `OrgMemberService.setMember`
 locks the grantee only `FOR SHARE`, and self-service workspace creation

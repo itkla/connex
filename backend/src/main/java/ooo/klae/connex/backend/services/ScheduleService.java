@@ -86,7 +86,7 @@ public class ScheduleService {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::recordExportStepUpRefused);
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
@@ -125,7 +125,7 @@ public class ScheduleService {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::recordExportStepUpRefused);
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
@@ -164,7 +164,7 @@ public class ScheduleService {
                 auditService::recordScheduleDeleteStepUpRefused);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAndRecheckScheduleStepUp(
-                currentUserId, workspaceId, auditService::recordScheduleDeleteStepUpRefused);
+                currentUserId, workspaceId, auditService::deferScheduleDeleteStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         if (scheduleMapper.deleteByReport(workspaceId, reportDefinitionId) == 0) {
@@ -366,12 +366,13 @@ public class ScheduleService {
      * which also flushes the session cache so the unlocked check's cached answer is not reused, and
      * applies the step-up again. A shared account root conflicts with every activation that can
      * promote the account, each of which locks it for update, without blocking report writers that
-     * audit as the same user; see LOCKING.md. Because the root is shared, the refusal is audited here
-     * too: the independent audit's own shared lock on the account row does not wait on this one.
+     * audit as the same user; see LOCKING.md. A refusal here must be recorded through a deferred
+     * recorder: an immediate independent audit re-takes the account row on another connection and
+     * would queue behind any writer already waiting on this transaction's shared lock (#1986).
      *
      * @param userId the account attempting the mutation
      * @param workspaceId the workspace the schedule belongs to
-     * @param recordRefusal writes the refusal appropriate to the attempted mutation
+     * @param recordRefusal defers the refusal appropriate to the attempted mutation until completion
      */
     private void lockAndRecheckScheduleStepUp(int userId, int workspaceId, Runnable recordRefusal) {
         if (userMapper.lockByIdForShare(userId) == null) {
