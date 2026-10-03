@@ -237,6 +237,9 @@ class SecretStoreTest {
         assertThrows(SecretUnavailableException.class,
                 () -> rewrapping.get(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
 
+        SecretStore rotated = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of(), true);
+        assertTrue(rotated.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+
         SecretStore readOnly = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of("new-v5"),
                 false);
         assertTrue(readOnly.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));

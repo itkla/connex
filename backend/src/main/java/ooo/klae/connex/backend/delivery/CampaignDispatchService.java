@@ -572,7 +572,7 @@ public class CampaignDispatchService {
 
     /**
      * Recovers replay-safe targets using metadata only, without decrypting or auditing secret use.
-     * Corrupt ciphertext, wrong key material, edited key ids, and lazy rewrap failures can escape
+     * Corrupt ciphertext, wrong key material, edited key ids, and a failed lazy-rewrap write can escape
      * description: the claim returns to pending rather than DEADLINE_AMBIGUOUS. Subsequent dispatch
      * ticks fail closed at decrypt with use_failed audits and FAILED job runs; nothing is sent.
      * Re-entering the credential advances the generation, so claimTriggered refuses the old target

@@ -102,7 +102,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
 
     /**
      * Describes the claim target under resolution's root-first locks without decrypting or auditing
-     * secret use. This checks secret metadata, not ciphertext integrity or lazy rewrap success.
+     * secret use. This checks secret metadata, not ciphertext integrity or whether a lazy rewrap's write succeeds.
      * Altered ciphertext, wrong configured key material, or an edited key id can pass these checks.
      * Recovery then requeues a replay-safe claim instead of marking it DEADLINE_AMBIGUOUS; each later
      * dispatch tick fails closed at decrypt, recording use_failed and a FAILED job run without sending.
