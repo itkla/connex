@@ -421,11 +421,11 @@ public class ReportService {
      *
      * <p>Privilege is decided under locks too (#1897). An unlocked pre-check refuses, and audits, an
      * account it already sees privileged. The method then takes the actor's account row shared, its
-     * locked workspace authorization, and its assigned custom roles shared, which also flushes the
-     * session cache, before {@code lockDefinitions}; at {@code READ_COMMITTED} the schedule and the
-     * privilege are then re-read against committed state. A promotion committed while the delete
-     * waited is therefore observed, and refused without a second audit; the pre-check audits every
-     * refusal it sees, as the other privileged re-checks in LOCKING.md do.
+     * locked workspace authorization, and its assigned custom-role rows shared, which also flushes
+     * the session cache, before {@code lockDefinitions}; at {@code READ_COMMITTED} the schedule and the
+     * privilege are then re-read against committed state, so a promotion, or a schedule, committed
+     * while the delete waited is observed. That refusal is audited like the pre-check's: the account
+     * root is shared, so the independent audit's shared lock on the account row does not wait on it.
      *
      * @param id the report to delete
      */
@@ -444,7 +444,7 @@ public class ReportService {
         }
         boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
             workspaceId, currentUserId);
-        userMapper.lockAssignedCustomRoleIds(actorId);
+        userMapper.lockAssignedCustomRoleRowsForShare(actorId);
         reportMapper.lockDefinitions(workspaceId);
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
@@ -452,7 +452,7 @@ public class ReportService {
         }
         if (scheduleMapper.getByReport(workspaceId, id) != null
                 && privilegedAccountService.isPrivileged(actorId)) {
-            requireScheduleCascadeStepUpUnderLock(actorId);
+            requireScheduleCascadeStepUp(actorId);
         }
         deletionPolicy.requireDeletable(definition.getCreatedBy(), builtInAdministrator);
         int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
@@ -836,17 +836,6 @@ public class ReportService {
             auditService.recordScheduleDeleteStepUpRefused();
             throw exception;
         }
-    }
-
-    /**
-     * Requires step-up for a scheduled cascade found by the locked re-check (#1897). It does not
-     * audit the refusal: the unlocked pre-check audits every refusal it sees, and this one only
-     * catches a promotion or schedule committed while the delete waited for its locks.
-     *
-     * @param actorId the account attempting the cascade
-     */
-    private void requireScheduleCascadeStepUpUnderLock(int actorId) {
-        sessionSecurityService.requireRecentAuthentication(actorId);
     }
 
     private void requireExportStepUp() {

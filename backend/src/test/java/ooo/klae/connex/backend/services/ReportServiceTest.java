@@ -182,7 +182,7 @@ class ReportServiceTest {
     }
 
     @Test
-    void refusingTheParentDeleteStepUpUnderLocksDoesNotAudit() {
+    void refusingTheParentDeleteStepUpUnderLocksIsAuditedAsADeletion() {
         User actor = new User();
         actor.setId(ACTOR_ID);
         when(authService.getCurrentUser()).thenReturn(actor);
@@ -202,13 +202,14 @@ class ReportServiceTest {
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
         ordered.verify(workspaceService).isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID);
-        ordered.verify(userMapper).lockAssignedCustomRoleIds(ACTOR_ID);
+        ordered.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
         ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
         ordered.verify(reportMapper).getDefinition(WORKSPACE_ID, REPORT_ID);
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
-        verifyNoInteractions(auditService);
+        verify(auditService).recordScheduleDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
         verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 

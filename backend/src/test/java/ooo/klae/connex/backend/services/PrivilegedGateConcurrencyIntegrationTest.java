@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
@@ -143,7 +145,7 @@ class PrivilegedGateConcurrencyIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"create", "update", "delete", "reportDelete"})
-    void committedPromotionAfterPreCheckIsRefusedWithoutAudit(String operation) throws Exception {
+    void committedPromotionAfterPreCheckIsRefusedAndAuditedUnderTheLock(String operation) throws Exception {
         ReportSchedule original = prepareSchedule(operation);
         CountDownLatch preCheckRead = new CountDownLatch(1);
         CountDownLatch promotionCommitted = new CountDownLatch(1);
@@ -176,9 +178,8 @@ class PrivilegedGateConcurrencyIntegrationTest {
         }
 
         verify(privilegedAccountService, times(2)).isPrivileged(user.getId());
-        verify(userMapper).lockAssignedCustomRoleIds(user.getId());
-        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
-        verify(auditService, never()).recordExportStepUpRefused();
+        verify(userMapper).lockAssignedCustomRoleRowsForShare(user.getId());
+        verifyRefusalAuditedOnce(operation);
         assertUnchanged(original);
     }
 
@@ -198,7 +199,7 @@ class PrivilegedGateConcurrencyIntegrationTest {
             verify(auditService, never()).recordExportStepUpRefused();
         }
         verify(userMapper, never()).lockByIdForShare(user.getId());
-        verify(userMapper, never()).lockAssignedCustomRoleIds(user.getId());
+        verify(userMapper, never()).lockAssignedCustomRoleRowsForShare(user.getId());
         assertUnchanged(original);
     }
 
@@ -256,9 +257,121 @@ class PrivilegedGateConcurrencyIntegrationTest {
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
 
-        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
-        verify(auditService, never()).recordExportStepUpRefused();
+        verifyRefusalAuditedOnce("delete");
         assertUnchanged(original);
+    }
+
+    /**
+     * A schedule committed while a privileged account's report deletion waits on the definition locks
+     * is observed under them. The cascade would now destroy a gated schedule, so the deletion needs a
+     * fresh step-up: it is refused, audited, and nothing is deleted. At REPEATABLE READ the deletion's
+     * snapshot predated the schedule, so the cascade removed it without any step-up.
+     */
+    @Test
+    void aScheduleCommittedWhileAPrivilegedReportDeletionWaitsIsObservedUnderTheLock() throws Exception {
+        promote();
+        CountDownLatch scheduleHeld = new CountDownLatch(1);
+        CountDownLatch commitSchedule = new CountDownLatch(1);
+        AtomicReference<Long> scheduleConnection = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> scheduling = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        scheduleConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        assertNotNull(prepareSchedule("delete"));
+                        scheduleHeld.countDown();
+                        try {
+                            assertTrue(commitSchedule.await(30, TimeUnit.SECONDS));
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(interrupted);
+                        }
+                    }));
+            if (!scheduleHeld.await(10, TimeUnit.SECONDS)) {
+                scheduling.get(0, TimeUnit.SECONDS);
+                throw new AssertionError("The schedule insert never held its parent definition");
+            }
+            Future<RecentAuthenticationRequiredException> deletion = executor.submit(() -> assertThrows(
+                    RecentAuthenticationRequiredException.class, () -> invoke("reportDelete")));
+            awaitBlockedBy(scheduleConnection.get(), deletion);
+            commitSchedule.countDown();
+            scheduling.get(20, TimeUnit.SECONDS);
+            deletion.get(20, TimeUnit.SECONDS);
+        } finally {
+            commitSchedule.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        verifyRefusalAuditedOnce("reportDelete");
+        assertNotNull(reportMapper.getDefinition(workspace.getId(), report.getId()));
+        assertNotNull(scheduleMapper.getByReport(workspace.getId(), report.getId()));
+    }
+
+    /**
+     * Two report deletions by the same account in two workspaces, each holding its own membership
+     * exclusively, must not deadlock. The re-check share-locks only the account's assigned custom-role
+     * rows, never its memberships, so neither deletion waits on the other's membership; share-locking
+     * every membership, as {@code lockAssignedCustomRoleIds} does, deadlocks them.
+     */
+    @Test
+    void sameAccountReportDeletionsInTwoWorkspacesDoNotDeadlock() throws Exception {
+        otherWorkspace = new Workspace();
+        otherWorkspace.setOrgId(organization.getId());
+        otherWorkspace.setName(workspace.getName() + " other");
+        otherWorkspace.setSlug(workspace.getSlug() + "-other");
+        workspaceMapper.insert(otherWorkspace);
+        workspaceMapper.addMember(otherWorkspace.getId(), user.getId(), "member");
+        assignCustomRole(workspace.getId());
+        assignCustomRole(otherWorkspace.getId());
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+        ReportDefinition otherReport = new ReportDefinition();
+        otherReport.setWorkspaceId(otherWorkspace.getId());
+        otherReport.setName("Gate race report");
+        otherReport.setCadence("weekly");
+        otherReport.setConfigJson("{}");
+        otherReport.setCreatedBy(user.getId());
+        reportMapper.insertDefinition(otherReport);
+        ThreadLocal<Integer> currentWorkspace = new ThreadLocal<>();
+        doAnswer(invocation -> currentWorkspace.get() == null ? workspace.getId() : currentWorkspace.get())
+                .when(workspaceService).getCurrentWorkspaceId();
+        CountDownLatch bothHoldMemberships = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            bothHoldMemberships.countDown();
+            assertTrue(bothHoldMemberships.await(10, TimeUnit.SECONDS));
+            return result;
+        }).when(workspaceService).isLockedBuiltInAdministrator(anyInt(), eq(user.getId()));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> here = executor.submit(() -> {
+                currentWorkspace.set(workspace.getId());
+                reportService.delete(report.getId());
+            });
+            Future<?> there = executor.submit(() -> {
+                currentWorkspace.set(otherWorkspace.getId());
+                reportService.delete(otherReport.getId());
+            });
+            here.get(30, TimeUnit.SECONDS);
+            there.get(30, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNull(reportMapper.getDefinition(workspace.getId(), report.getId()));
+        assertNull(reportMapper.getDefinition(otherWorkspace.getId(), otherReport.getId()));
+    }
+
+    private void assignCustomRole(int workspaceId) {
+        String roleName = "Gate race role " + workspaceId;
+        jdbcTemplate.update("INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)", workspaceId, roleName);
+        Integer roleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workspace_role WHERE workspace_id = ? AND name = ?", Integer.class, workspaceId, roleName);
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+                roleId, workspaceId, user.getId()));
     }
 
     /**
@@ -292,6 +405,17 @@ class PrivilegedGateConcurrencyIntegrationTest {
             Thread.sleep(25);
         }
         throw new AssertionError("The mutation never waited behind the promotion");
+    }
+
+    /** The refusal is audited exactly once, with the summary that matches what was attempted. */
+    private void verifyRefusalAuditedOnce(String operation) {
+        if ("create".equals(operation) || "update".equals(operation)) {
+            verify(auditService).recordExportStepUpRefused();
+            verify(auditService, never()).recordScheduleDeleteStepUpRefused();
+        } else {
+            verify(auditService).recordScheduleDeleteStepUpRefused();
+            verify(auditService, never()).recordExportStepUpRefused();
+        }
     }
 
     /** Uses the grantee account, workspace and membership order of built-in role mutation. */

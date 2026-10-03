@@ -1205,33 +1205,44 @@ account root.
 
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
-  (`lockWorkspaceForShare`) → assigned custom roles `FOR SHARE` (`lockAssignedCustomRoleIds`,
-  flushing the MyBatis session cache) → privilege/step-up re-check without refusal audit →
-  existing schedule mutation and transactional success audit.
+  (`lockWorkspaceForShare`) → assigned custom-role rows `FOR SHARE`
+  (`lockAssignedCustomRoleRowsForShare`, flushing the MyBatis session cache) → privilege/step-up
+  re-check with its refusal audited → existing schedule mutation and transactional success audit.
 - `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
   and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
-  shared, active workspace shared, authorization membership exclusive) → assigned custom roles
-  shared with cache flush → `lockDefinitions` (workspace report definitions exclusive) →
-  `getDefinition` and not-found check → schedule/privilege re-check and unaudited step-up →
-  existing deletion policy, snapshot checks, cascade and transactional success audit. The
-  definition locks block schedule inserts through their parent foreign-key check.
+  shared, active workspace shared, authorization membership exclusive) → assigned custom-role rows
+  shared with cache flush (`lockAssignedCustomRoleRowsForShare`) → `lockDefinitions` (workspace
+  report definitions exclusive) → `getDefinition` and not-found check → schedule/privilege
+  re-check and audited step-up → existing deletion policy, snapshot checks, cascade and
+  transactional success audit. The definition locks block schedule inserts through their parent
+  foreign-key check.
 
 These schedule/report account roots are **shared**, unlike email-change, passkey and
 password-reset credential flows. Report writers (scheduled delivery, report creation and manual
 snapshots) run as the report's user, lock report definitions or schedule rows, then audit, taking
 `app_user` shared. An exclusive account root here would deadlock against those writers. The shared
 root still conflicts with every invitee-timed activation, which locks the grantee's `app_user`
-`FOR UPDATE`; `lockAssignedCustomRoleIds` also conflicts with `lockRole`. The account root is the only
-one of these locks that waits for a built-in role promotion in another workspace: privilege is
-account-wide, and `lockAssignedCustomRoleIds` reaches memberships only through their custom roles, so
-it never reads a built-in membership row (`PrivilegedGateConcurrencyIntegrationTest` pins this). The
-workspace root must precede custom-role locks to match `lockRoleMutation`. The unlocked pre-check
-audits every refusal it sees; the under-lock re-check only catches a promotion committed while the
-mutation waited, and refuses without a second audit.
+`FOR UPDATE`; the custom-role row locks also conflict with `lockRole`. These gates use
+`lockAssignedCustomRoleRowsForShare` (`FOR SHARE OF` the role rows) rather than
+`lockAssignedCustomRoleIds`, which also share-locks every custom-role membership the account holds:
+with a shared account root, two of the account's own report deletions in different workspaces each
+hold their own membership exclusively (`isLockedBuiltInAdministrator`) and would then deadlock on
+each other's. The account root is the only one of these locks that waits for a built-in role
+promotion in another workspace: privilege is account-wide, and the role-row lock reaches memberships
+only through their custom roles (`PrivilegedGateConcurrencyIntegrationTest` pins both). The
+workspace root must precede custom-role locks to match `lockRoleMutation`. Both the unlocked
+pre-check and the under-lock re-check audit their refusals: with a shared account root, the
+independent audit's own shared lock on the account row does not wait on the operation's. The
+re-check catches a promotion, a newly committed schedule (G7), or a step-up that expired while the
+operation waited for its locks.
 
-Residual: `OrgMemberService.setMember` locks the grantee only `FOR SHARE`, so these shared roots do
-not serialize organization grants. The grantee cannot time those grants, and organization membership
-confers no workspace permission.
+Residuals: two promotions are not serialized by these shared roots. `OrgMemberService.setMember`
+locks the grantee only `FOR SHARE`, and self-service workspace creation
+(`WorkspaceService.createWorkspace`, #1982) holds the creator's account row only `FOR SHARE`. Both
+are harmless here: nothing that authorizes the gated writes reads `org_member` or a membership the
+write does not already hold (`permissionsFor`, `lockAndRequirePermissions`,
+`isLockedBuiltInAdministrator`, `DeletionPolicy`), so a write that escapes the re-check is one the
+account could have made without the step-up a moment earlier.
 
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:

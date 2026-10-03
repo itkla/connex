@@ -86,7 +86,7 @@ public class ScheduleService {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::recordExportStepUpRefused);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
@@ -125,7 +125,7 @@ public class ScheduleService {
         int currentUserId = authService.getCurrentUser().getId();
         requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::recordExportStepUpRefused);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
@@ -163,7 +163,8 @@ public class ScheduleService {
         requireScheduleStepUp(currentUserId,
                 auditService::recordScheduleDeleteStepUpRefused);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        lockAndRecheckScheduleStepUp(currentUserId, workspaceId);
+        lockAndRecheckScheduleStepUp(
+                currentUserId, workspaceId, auditService::recordScheduleDeleteStepUpRefused);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         if (scheduleMapper.deleteByReport(workspaceId, reportDefinitionId) == 0) {
@@ -361,27 +362,26 @@ public class ScheduleService {
 
     /**
      * Decides the privileged step-up again against committed state (#1897). It takes the actor's
-     * account row and the workspace row shared, then the actor's assigned custom roles shared, which
-     * also flushes the session cache so the unlocked check's cached answer is not reused, and re-reads
-     * privilege. A shared account root conflicts with every activation that can promote the account,
-     * each of which locks it for update, without blocking report writers that audit as the same user;
-     * see LOCKING.md. A refusal here is not audited: the unlocked check before it audits every refusal
-     * it sees, and this one only catches a promotion committed while the mutation waited.
+     * account row and the workspace row shared, then the actor's assigned custom-role rows shared,
+     * which also flushes the session cache so the unlocked check's cached answer is not reused, and
+     * applies the step-up again. A shared account root conflicts with every activation that can
+     * promote the account, each of which locks it for update, without blocking report writers that
+     * audit as the same user; see LOCKING.md. Because the root is shared, the refusal is audited here
+     * too: the independent audit's own shared lock on the account row does not wait on this one.
      *
      * @param userId the account attempting the mutation
      * @param workspaceId the workspace the schedule belongs to
+     * @param recordRefusal writes the refusal appropriate to the attempted mutation
      */
-    private void lockAndRecheckScheduleStepUp(int userId, int workspaceId) {
+    private void lockAndRecheckScheduleStepUp(int userId, int workspaceId, Runnable recordRefusal) {
         if (userMapper.lockByIdForShare(userId) == null) {
             throw new ForbiddenException("Authenticated user is unavailable");
         }
         if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
         }
-        userMapper.lockAssignedCustomRoleIds(userId);
-        if (privilegedAccountService.isPrivileged(userId)) {
-            sessionSecurityService.requireRecentAuthentication(userId);
-        }
+        userMapper.lockAssignedCustomRoleRowsForShare(userId);
+        requireScheduleStepUp(userId, recordRefusal);
     }
 
     private ValidatedSchedule validate(

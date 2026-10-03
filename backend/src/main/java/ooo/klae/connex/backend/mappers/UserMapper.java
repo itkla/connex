@@ -67,6 +67,7 @@ public interface UserMapper {
      * @return the locked role ids in ascending order
      */
     List<Integer> lockAssignedCustomRoleIds(int id);
+    List<Integer> lockAssignedCustomRoleRowsForShare(int id);
     boolean isAccountDeletionReserved(int id);
     /** IDs with live deletion reservations; callers supply a nonempty candidate set. */
     List<Integer> findAccountDeletionReservedIds(@Param("ids") List<Integer> ids);
