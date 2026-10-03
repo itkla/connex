@@ -533,13 +533,16 @@ public class PersonService {
      * {@code person.owner_changed} decision come from the contact row locked after the new owner's
      * membership, if any, not from the unlocked existence check, which opens this transaction's read
      * view before any lock is held. A contact archived or deleted since that check is refused under
-     * the lock, before anything is written (#1948).
+     * the lock, before anything is written (#1948). It runs at {@code READ_COMMITTED}, so the contact
+     * returned is a fresh read: when a concurrent change already set the same owner, this write
+     * leaves no newer row version, and a repeatable-read snapshot would show the owner from before
+     * that change (#1961).
      *
      * @param personId the contact in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign
      * @return the updated contact
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateOwner(int personId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
