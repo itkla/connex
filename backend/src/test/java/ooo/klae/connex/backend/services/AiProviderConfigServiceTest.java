@@ -88,7 +88,7 @@ class AiProviderConfigServiceTest {
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
         lenient().when(organizationMapper.lockByIdForShare(ORG_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrgForUpdate(ORG_ID)).thenAnswer(invocation -> stored);
-        lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
+        lenient().when(aiProviderSecretCipher.canDecryptCredential(anyInt(), anyString())).thenReturn(true);
         lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
         lenient().when(aiProviderRouter.adapterFor(anyString())).thenReturn(aiProvider);
         lenient().when(aiProvider.contextWindowTokens(any())).thenReturn(32_768);
@@ -478,12 +478,27 @@ class AiProviderConfigServiceTest {
         assertFalse(service.isReadyForOrg(ORG_ID));
 
         stored = readyConfig();
-        when(aiProviderSecretCipher.isAvailable()).thenReturn(false);
+        when(aiProviderSecretCipher.canDecryptCredential(ORG_ID, "secret:v1:88")).thenReturn(false);
         assertFalse(service.isReadyForOrg(ORG_ID));
 
         stored = readyConfig();
-        when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
+        when(aiProviderSecretCipher.canDecryptCredential(ORG_ID, "secret:v1:88")).thenReturn(true);
         assertTrue(service.isReadyForOrg(ORG_ID));
+        verify(aiProviderSecretCipher, never()).decryptCredential(anyInt(), anyString());
+    }
+
+    @Test
+    void readinessChecksAStoredCredentialsOwnKeyAndNeedsNoneForACredentialFreeProvider() {
+        when(aiProviderSecretCipher.canDecryptCredential(anyInt(), anyString())).thenReturn(false);
+        stored = readyOpenAiCompatibleConfig("https://provider.example.test/v1");
+        assertTrue(service.isReadyForOrg(ORG_ID));
+
+        stored.setCredentialRef("secret:v1:91");
+        assertFalse(service.isReadyForOrg(ORG_ID));
+
+        when(aiProviderSecretCipher.canDecryptCredential(ORG_ID, "secret:v1:91")).thenReturn(true);
+        assertTrue(service.isReadyForOrg(ORG_ID));
+        verify(aiProviderSecretCipher, never()).decryptCredential(anyInt(), anyString());
     }
 
     @Test

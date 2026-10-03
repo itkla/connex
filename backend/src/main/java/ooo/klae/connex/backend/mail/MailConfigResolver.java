@@ -92,7 +92,7 @@ public class MailConfigResolver {
     /**
      * Describes the selected transport without decrypting or auditing a password use. A selected
      * override with an unresolvable stored password is refused without instance fallback. Metadata
-     * checks cannot detect corrupt ciphertext, incorrect key material, or lazy rewrap failures.
+     * checks cannot detect corrupt ciphertext, incorrect key material, or a failed lazy-rewrap write.
      * @param workspaceId the workspace whose transport is described
      * @return the password-free identity, or null when no usable, resolvable transport is selected
      */
