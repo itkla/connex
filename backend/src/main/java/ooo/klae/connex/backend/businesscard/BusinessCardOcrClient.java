@@ -239,6 +239,14 @@ public class BusinessCardOcrClient {
         }
     }
 
+    /**
+     * Starts a sidecar readiness probe, or joins the one already in flight. A probe publishes its
+     * result before it releases the in-flight slot, so a caller that read readiness just before a
+     * probe completed can win the empty slot just after. A fresh ready result seen once this method
+     * owns the slot is therefore reused instead of sending a redundant request (#1834).
+     *
+     * @return the probe's eventual readiness, or {@code null} when probing is disabled or unconfigured
+     */
     private CompletableFuture<Boolean> refreshReadiness() {
         if (!readinessEnabled || !isConfigured()) {
             return null;
@@ -247,6 +255,11 @@ public class BusinessCardOcrClient {
         CompletableFuture<Boolean> current = readinessProbe.compareAndExchange(null, created);
         if (current != null) {
             return current;
+        }
+        if (cachedReady && System.nanoTime() < readinessExpiresAtNanos) {
+            readinessProbe.compareAndSet(created, null);
+            created.complete(true);
+            return created;
         }
         long generation = readinessGeneration.get();
         Thread.startVirtualThread(() -> {

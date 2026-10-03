@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.businesscard;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,11 +20,13 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -127,6 +132,45 @@ class BusinessCardOcrClientTest {
             releaseProbe.countDown();
             executor.shutdownNow();
         }
+        server.verify(Duration.ofSeconds(2));
+    }
+
+    /**
+     * A probe publishes a ready result before it releases its in-flight slot, so a scan-readiness
+     * check that read the state just before then can win the empty slot just after. That is the
+     * second {@code /ready} request that
+     * {@code scanReadinessAwaitsTheBoundedInitialProbeBeforeExternalFallback} occasionally saw on a
+     * busy runner (#1834). The window is reproduced directly: the first probe has completed and
+     * released the slot, and a caller then asks for a probe. It must reuse the fresh result instead
+     * of probing again.
+     */
+    @Test
+    void probeRequestedJustAfterAReadyResultReusesItInsteadOfProbingAgain() throws Exception {
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(request -> {
+                    try {
+                        if (!releaseProbe.await(5, TimeUnit.SECONDS)) {
+                            throw new IOException("Readiness probe test timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Readiness probe test was interrupted", exception);
+                    }
+                    return withSuccess("{\"ready\":true}", MediaType.APPLICATION_JSON)
+                            .createResponse(request);
+                });
+        BusinessCardOcrClient client = client(builder);
+        CompletableFuture<?> initialProbe = inFlightProbe(client);
+        releaseProbe.countDown();
+        assertEquals(Boolean.TRUE, initialProbe.get(5, TimeUnit.SECONDS));
+
+        CompletableFuture<?> requested = ReflectionTestUtils.invokeMethod(client, "refreshReadiness");
+
+        assertNotNull(requested);
+        assertEquals(Boolean.TRUE, requested.get(5, TimeUnit.SECONDS));
         server.verify(Duration.ofSeconds(2));
     }
 
@@ -288,6 +332,12 @@ class BusinessCardOcrClientTest {
         assertTrue(recoveryProbeStarted.await(5, TimeUnit.SECONDS));
         assertFalse(client.isReady());
         server.verify(Duration.ofSeconds(2));
+    }
+
+    private static CompletableFuture<?> inFlightProbe(BusinessCardOcrClient client) {
+        AtomicReference<?> slot = assertInstanceOf(AtomicReference.class,
+                ReflectionTestUtils.getField(client, "readinessProbe"));
+        return assertInstanceOf(CompletableFuture.class, slot.get());
     }
 
     private static BusinessCardOcrClient client(RestClient.Builder builder) {
