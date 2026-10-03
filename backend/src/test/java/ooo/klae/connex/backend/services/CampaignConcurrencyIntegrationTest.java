@@ -611,7 +611,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
                     SELECT waits.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx,
                            waits.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx,
                            requested.OBJECT_NAME, requested.INDEX_NAME, requested.LOCK_TYPE,
-                           requested.LOCK_MODE, requested.LOCK_DATA
+                           requested.LOCK_MODE
                     FROM performance_schema.data_lock_waits waits
                     JOIN performance_schema.data_locks requested
                       ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
@@ -619,9 +619,13 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
                     ORDER BY requesting_trx, requested.OBJECT_NAME, requested.INDEX_NAME
                     """);
             List<?> transactions = jdbcTemplate.queryForList("""
-                    SELECT trx_id, trx_state, trx_started, trx_mysql_thread_id, trx_rows_locked, trx_query
-                    FROM information_schema.innodb_trx
-                    ORDER BY trx_started
+                    SELECT DISTINCT trx.trx_id, trx.trx_state, trx.trx_started, trx.trx_mysql_thread_id,
+                           trx.trx_rows_locked, trx.trx_operation_state
+                    FROM information_schema.innodb_trx trx
+                    JOIN performance_schema.data_locks locks
+                      ON locks.ENGINE_TRANSACTION_ID = trx.trx_id
+                    WHERE locks.OBJECT_SCHEMA = DATABASE()
+                    ORDER BY trx.trx_started
                     """);
             return "performance_schema.data_lock_waits=" + waits
                     + System.lineSeparator() + "information_schema.innodb_trx=" + transactions;
