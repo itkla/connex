@@ -106,7 +106,7 @@ public class HealthService {
             if (isCurrent(current, System.nanoTime())) {
                 return compose(current);
             }
-            Snapshot probed = tenantWorkScope.unrouted(() -> new Snapshot(
+            Snapshot probed = tenantWorkScope.unroutedRead(() -> new Snapshot(
                     System.nanoTime(),
                     status(databaseReady()),
                     status(migrationsReady()),

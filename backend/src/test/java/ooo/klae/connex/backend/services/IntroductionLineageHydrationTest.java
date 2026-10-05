@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +26,7 @@ import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Verifies bounded control-plane label hydration for the tenant-local introduction feed. */
@@ -52,9 +52,9 @@ class IntroductionLineageHydrationTest {
 
     @BeforeEach
     void setUp() {
-        when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(0);
-            return work.get();
+        when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation -> {
+            ControlPlaneRead<?> read = invocation.getArgument(0);
+            return read.read();
         });
         service = new IntroductionService(
             introductionMapper,
@@ -98,7 +98,7 @@ class IntroductionLineageHydrationTest {
         assertEquals(4, page.total());
         assertEquals(java.util.Arrays.asList(null, "User Eight", "User Eight", null),
             page.items().stream().map(IntroductionDto::getIntroducerName).toList());
-        verify(tenantWorkScope).unrouted(any());
+        verify(tenantWorkScope).unroutedRead(any());
         verify(userMapper).getDisplayNamesByIds(List.of(7, 8));
     }
 
