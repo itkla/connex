@@ -1137,8 +1137,8 @@ every lambda that reaches it. Every `TenantWorkScope` entry funnels through that
 locations, mostly AI-feature and provider-connection persistence, whichever handler the flow started
 from.
 
-**The change.** `TenantWorkScope.unroutedRead(ControlPlaneRead<T>)` keeps `unrouted`'s routing
-semantics, but goes through its own functional interface and never through the shared `Supplier`.
+**The change.** `TenantWorkScope.unroutedRead` keeps `unrouted`'s routing semantics, but takes a
+`ControlPlaneRead`, its own functional interface, and never goes through the shared `Supplier`.
 The read-only control-plane sites that GET flows entered moved onto it:
 - the `OrganizationWorkspaceScope`, `DealCollaborator` and `ShareWorkspace` control-access helpers;
 - read helpers split out of `NotificationQuietHoursControlAccess` and `AiBudgetControlAccess`;
