@@ -247,6 +247,29 @@ public class OrgMemberService {
      * authority. The lock makes authorization, the last-owner check, and the
      * subsequent mutation one serialized step inside the surrounding transaction.
      */
+    /**
+     * Locks an organization owner's authority to attest an org member's passkeys for privileged
+     * MFA (#1534), in {@link #setMember}'s order: both accounts shared and ascending, the
+     * organization exclusive, the owner rows, then exactly the member's own row.
+     *
+     * @param orgId the organization
+     * @param grantorId the owner issuing, revoking or standing behind a redeemed grant
+     * @param granteeId the org member whose passkeys are attested
+     */
+    void lockAttestationAuthority(int orgId, int grantorId, int granteeId) {
+        requireOrgOwner(orgId, grantorId);
+        lockMembershipUserRoots(grantorId, granteeId);
+        if (organizationMapper.lockById(orgId) == null
+                || userMapper.isAccountDeletionReserved(grantorId)) {
+            throw new ForbiddenException("Requires the organization owner role");
+        }
+        lockCurrentOwnerIds(orgId, grantorId);
+        if (userMapper.isAccountDeletionReserved(granteeId)
+                || orgMemberMapper.lockExactRole(orgId, granteeId) == null) {
+            throw new ResourceNotFoundException("User is not a member of this organization");
+        }
+    }
+
     private List<Integer> lockCurrentOwnerIds(int orgId, int actorId) {
         List<Integer> ownerIds = orgMemberMapper.lockOwnerIds(orgId);
         if (!ownerIds.contains(actorId)) {

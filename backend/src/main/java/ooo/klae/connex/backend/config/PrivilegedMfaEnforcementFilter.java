@@ -52,7 +52,9 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/register",
             "/api/auth/webauthn/register/confirmation",
             "/api/auth/webauthn/register/confirmation/exchange",
-            "/api/auth/webauthn/recover");
+            "/api/auth/webauthn/recover",
+            "/api/auth/webauthn/attestation/options",
+            "/api/auth/webauthn/attestation");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
     private static final Set<String> LINK_FLOW_PATHS = Set.of(

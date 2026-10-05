@@ -29,6 +29,16 @@ public interface OrgMemberMapper {
     int addFoundingMember(@Param("orgId") int orgId, @Param("userId") int userId);
 
     /**
+     * Locks exactly one organization membership row, without touching the organization, which
+     * the caller must already have validated and locked (#1534).
+     *
+     * @param orgId the organization
+     * @param userId the member
+     * @return the member's org role, or null when the account holds no row
+     */
+    String lockExactRole(@Param("orgId") int orgId, @Param("userId") int userId);
+
+    /**
      * Adds a member or changes their role on behalf of another account, which ends any founder
      * attribution the member held (#1534).
      *

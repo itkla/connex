@@ -182,6 +182,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NativeConnectSessionMapper",
         MAPPERS + "PreferenceMapper",
         MAPPERS + "PrivilegedCredentialAttestationMapper",
+        MAPPERS + "PrivilegedMfaAttestationGrantMapper",
         MAPPERS + "PrivilegedMfaRecoveryRedemptionMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
         MAPPERS + "SecretValueMapper",

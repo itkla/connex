@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
@@ -49,6 +51,7 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 @RequiredArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
+    private final PrivilegedMfaAttestationService attestationService;
     private final InviteService inviteService;
     private final InviteLinkService inviteLinkService;
     private final AllowedDomainService allowedDomainService;
@@ -201,5 +204,22 @@ public class WorkspaceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable int id, @PathVariable int userId) {
         workspaceService.removeMember(id, authService.getCurrentUser().getId(), userId);
+    }
+
+    /**
+     * Issues a one-time code attesting a member's passkey for privileged MFA in this workspace's
+     * organization (#1534). The code is returned once and must reach the member out of band.
+     */
+    @PostMapping("/{id}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public MfaAttestationCodeDto issueMfaAttestation(@PathVariable int id, @PathVariable int userId) {
+        return attestationService.issueForWorkspace(id, authService.getCurrentUser().getId(), userId);
+    }
+
+    /** Revokes a member's open attestation code for this workspace's organization (#1534). */
+    @DeleteMapping("/{id}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeMfaAttestation(@PathVariable int id, @PathVariable int userId) {
+        attestationService.revokeForWorkspace(id, authService.getCurrentUser().getId(), userId);
     }
 }
