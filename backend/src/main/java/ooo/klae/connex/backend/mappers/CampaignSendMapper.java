@@ -75,17 +75,22 @@ public interface CampaignSendMapper {
 
     /**
      * Enumerates the pinned catalog's workspaces with dispatch or recovery work: queued or running
-     * sends, triggered work, and abandoned audience attempts whose reservation expired past the
-     * grace. A stale failed counter is not one of those reasons: the sweep refreshes the counters of
-     * the sends it marked in the same pass, and a counter a fault leaves stale is repaired when the
-     * operator resolves the reconciliation row the sweep created. The abandoned-attempt arm is
-     * driven by the dispatching delivery rows rather than by every audience send, so its cost follows
-     * the outstanding recovery work instead of the catalog's send history.
+     * sends, triggered work, abandoned audience attempts whose reservation expired past the grace,
+     * and audience attempts abandoned with no reservation (#1773). A stale failed counter is not one
+     * of those reasons: the sweeps refresh the counters of the sends they marked in the same pass, and
+     * a counter a fault leaves stale is repaired when the operator resolves the reconciliation row the
+     * sweep created, except after a definitive abandonment, which creates none. The abandoned-attempt
+     * arms are driven by the dispatching delivery rows rather than by every audience send, so their
+     * cost follows the outstanding recovery work instead of the catalog's send history.
      * @param triggeredSendEnabled whether pending triggered deliveries count as work
-     * @param audienceReservationGraceMicros how long past its reservation an audience attempt is abandoned
+     * @param audienceReservationGraceMicros how long past its reservation, or its expired lease, an
+     *     audience attempt is abandoned
+     * @param legacyIdleSeconds how long a lease-less audience attempt from an older version must have
+     *     been idle before it is abandoned
      * @return the workspace ids
      */
     List<Integer> workspaceIdsWithQueuedSends(
             @Param("triggeredSendEnabled") boolean triggeredSendEnabled,
-            @Param("audienceReservationGraceMicros") long audienceReservationGraceMicros);
+            @Param("audienceReservationGraceMicros") long audienceReservationGraceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds);
 }

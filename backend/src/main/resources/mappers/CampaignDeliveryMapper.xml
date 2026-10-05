@@ -135,10 +135,25 @@
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
   </select>
 
+  <!-- An audience claim takes a lease end time with no owner (#1773). Audience rows are never
+       replayed, so no other worker can hold the row and an owner would fence nothing; the end time
+       is the age anchor that lets a dead attempt be swept even before any frequency reservation. -->
   <update id="claim">
     UPDATE campaign_delivery
-    SET status = 'dispatching', attempt_count = attempt_count + 1
+    SET status = 'dispatching', attempt_count = attempt_count + 1,
+        dispatch_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
+  </update>
+
+  <!-- Renews an audience attempt's lease just before egress. Unlike the triggered renewal it does not
+       require the lease to be live: an audience row is never re-claimed, so an attempt whose lease ran
+       out during preparation may still proceed as long as no sweep has taken the row first. The row's
+       status decides that race; a swept row matches nothing here. -->
+  <update id="renewAudienceClaim">
+    UPDATE campaign_delivery
+    SET dispatch_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner IS NULL AND submitted_at IS NULL
   </update>
 
   <update id="claimTriggered">
@@ -256,7 +271,7 @@
     SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
         d.last_error_code = #{lastErrorCode},
         d.reconciliation_required_at = UTC_TIMESTAMP(6),
-        d.reconciliation_outcome = NULL
+        d.reconciliation_outcome = NULL, d.dispatch_lease_until = NULL
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
       AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
       AND d.frequency_reserved_at IS NOT NULL
@@ -264,7 +279,65 @@
       AND s.origin = 'audience'
   </update>
 
-  <!-- A slow live worker whose terminal write lost to the reservation sweep after the provider
+  <!-- An unreserved audience attempt is abandoned once its owner-less lease has been expired for the
+       grace, or, when an older version claimed it with no lease, once it has been idle far longer than
+       any attempt that version could still be running, measured on updated_at's own clock. -->
+  <sql id="abandonedUnreservedAudienceAttemptAge">
+    ((d.dispatch_lease_until IS NOT NULL
+        AND d.dispatch_lease_until &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL #{graceMicros} MICROSECOND))
+      OR (d.dispatch_lease_until IS NULL
+        AND d.updated_at &lt; DATE_SUB(CURRENT_TIMESTAMP, INTERVAL #{legacyIdleSeconds} SECOND)))
+  </sql>
+
+  <!-- Audience attempts abandoned with no frequency reservation (#1773): a person row that died
+       before reserving or after a pre-egress release, and a row with no person, which never reserves.
+       Send status is not filtered, as for the reservation sweep. -->
+  <select id="abandonedUnreservedAudienceAttemptsPage" resultType="CampaignDelivery">
+    SELECT d.id, d.send_id, d.person_id
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <!-- A person row with no reservation never reached the provider: reservation precedes egress and
+       is released only where egress provably did not happen, including a rejection the adapter proves
+       preceded egress. It fails without reconciliation and holds no frequency cap. -->
+  <update id="markAbandonedUnreservedAudienceAttemptFailed">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = NULL, d.dispatch_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL AND d.person_id IS NOT NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+  </update>
+
+  <!-- A row with no person skips reservation, so it may already have reached the provider. It is
+       held for reconciliation like an expired reservation, and never replayed. -->
+  <update id="markAbandonedUnreservedAudienceAttemptAmbiguous">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = #{lastErrorCode},
+        d.reconciliation_required_at = UTC_TIMESTAMP(6),
+        d.reconciliation_outcome = NULL, d.dispatch_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NULL AND d.person_id IS NULL
+      AND <include refid="abandonedUnreservedAudienceAttemptAge"/>
+      AND s.origin = 'audience'
+  </update>
+
+  <!-- A slow live worker whose terminal write lost to a sweep that held the row for reconciliation (an
+       expired reservation, or a person-less attempt that outlived its lease) after the provider
        accepted the message records only the provider correlation, so bounce and complaint webhooks
        still resolve to the row. Status, reconciliation state, and the reservation stay unchanged,
        including on a row an operator has already resolved: the decision it carries is evidence the
@@ -282,7 +355,11 @@
       AND s.origin = 'audience'
       AND ((d.status = 'failed' AND d.submitted_at IS NULL
           AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL
-          AND d.last_error = #{lastError} AND d.last_error_code = #{lastErrorCode})
+          AND d.last_error IN
+          <foreach item="lastError" collection="lastErrors" open="(" separator="," close=")">
+            #{lastError}
+          </foreach>
+          AND d.last_error_code = #{lastErrorCode})
         OR d.reconciliation_outcome IS NOT NULL)
   </update>
 
@@ -321,7 +398,8 @@
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
         provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
         reconciliation_required_at = NULL,
-        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6))
+        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6)),
+        dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -352,7 +430,7 @@
   <update id="markSkipped">
     UPDATE campaign_delivery
     SET status = 'skipped', skip_reason = #{skipReason}, last_error_code = NULL,
-        reconciliation_required_at = NULL
+        reconciliation_required_at = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -368,7 +446,7 @@
   <update id="markFailed">
     UPDATE campaign_delivery
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
-        last_error_code = #{lastErrorCode}
+        last_error_code = #{lastErrorCode}, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND reconciliation_required_at IS NULL
   </update>
@@ -388,7 +466,7 @@
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
         last_error_code = #{lastErrorCode},
         reconciliation_required_at = COALESCE(reconciliation_required_at, UTC_TIMESTAMP(6)),
-        reconciliation_outcome = NULL
+        reconciliation_outcome = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 

@@ -113,7 +113,29 @@ public interface CampaignDeliveryMapper {
 
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
-    int claim(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Claims one audience delivery under a lease end time with no owner (#1773).
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param leaseMicros the lease duration on the database clock
+     * @return one if this call claimed the pending row
+     */
+    int claim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseMicros") long leaseMicros);
+
+    /**
+     * Renews an audience attempt's lease before egress unless a sweep has already taken the row.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param leaseMicros the lease duration on the database clock
+     * @return one if the attempt still owns its row
+     */
+    int renewAudienceClaim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseMicros") long leaseMicros);
 
     /** Claims one triggered delivery under an owner-fenced database-clock lease. */
     int claimTriggered(
@@ -206,14 +228,15 @@ public interface CampaignDeliveryMapper {
             @Param("lastErrorCode") String lastErrorCode);
 
     /**
-     * Records the provider correlation of a submission whose terminal write lost to the audience
-     * reservation sweep, on the still-unresolved swept row that carries no provider id yet. It never
-     * changes the row's status, reconciliation requirement, or frequency reservation.
+     * Records the provider correlation of a submission whose terminal write lost to an audience sweep
+     * that held the row for reconciliation, on a swept row that carries no provider id yet, whether it
+     * still awaits reconciliation or an operator has resolved it. It never changes the row's status,
+     * reconciliation requirement, or frequency reservation.
      * @param workspaceId the owning workspace
      * @param id the delivery
      * @param providerId the provider that accepted the message
      * @param providerMessageId the provider's message id
-     * @param lastError the failure detail the sweep wrote
+     * @param lastErrors the failure details either audience sweep writes
      * @param lastErrorCode the reason code the sweep wrote
      * @return one if the swept row now carries the correlation
      */
@@ -222,6 +245,57 @@ public interface CampaignDeliveryMapper {
             @Param("id") int id,
             @Param("providerId") String providerId,
             @Param("providerMessageId") String providerMessageId,
+            @Param("lastErrors") List<String> lastErrors,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /**
+     * Returns one page of audience attempts abandoned with no frequency reservation: leased rows
+     * whose lease has been expired for the grace, and lease-less rows from an older version idle for
+     * longer than any attempt it could still run (#1773).
+     * @param workspaceId the owning workspace
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param limit the page size
+     * @return the abandoned attempts, with their send and person
+     */
+    List<CampaignDelivery> abandonedUnreservedAudienceAttemptsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
+            @Param("limit") int limit);
+
+    /**
+     * Fails one abandoned person row that never reached the provider, without reconciliation.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param lastError the failure detail
+     * @return one if this call settled the still-abandoned row
+     */
+    int markAbandonedUnreservedAudienceAttemptFailed(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
+            @Param("lastError") String lastError);
+
+    /**
+     * Holds one abandoned row with no person for reconciliation, since it may have reached the
+     * provider.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param graceMicros the grace beyond an expired lease
+     * @param legacyIdleSeconds how long a lease-less row must have been idle
+     * @param lastError the ambiguous failure detail
+     * @param lastErrorCode the ambiguous reason code
+     * @return one if this call settled the still-abandoned row
+     */
+    int markAbandonedUnreservedAudienceAttemptAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("graceMicros") long graceMicros,
+            @Param("legacyIdleSeconds") long legacyIdleSeconds,
             @Param("lastError") String lastError,
             @Param("lastErrorCode") String lastErrorCode);
 

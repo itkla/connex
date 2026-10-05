@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Recipient lists behind campaign engagement counters: filters, gating, and isolation. */
 class CampaignRecipientServiceTest extends AbstractServiceTest {
+    private static final long AUDIENCE_LEASE_MICROS = 48_000_000L;
 
     @Autowired private CampaignRecipientService recipientService;
     @Autowired private CampaignMapper campaignMapper;
@@ -100,7 +101,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign campaign = newCampaign();
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(),
                 delivery.getId(),
@@ -121,7 +122,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(
                 send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(), delivery.getId(),
                 "AMBIGUOUS: provider result unknown", "relay_error");
@@ -142,7 +143,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         Campaign campaign = newCampaign();
         CampaignSend send = newSend(campaign);
         CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
-        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId(), AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markAmbiguous(
                 workspace.getId(), delivery.getId(),
                 "AMBIGUOUS: provider result unknown", "relay_error");
@@ -356,7 +357,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignDelivery stored = campaignDeliveryMapper.getByTokenHash(
                 OneTimeTokenDigest.sha256(delivery.getUnsubscribeToken()));
         if (!"pending".equals(status)) {
-            campaignDeliveryMapper.claim(workspace.getId(), stored.getId());
+            campaignDeliveryMapper.claim(workspace.getId(), stored.getId(), AUDIENCE_LEASE_MICROS);
             if ("skipped".equals(status)) {
                 campaignDeliveryMapper.markSkipped(workspace.getId(), stored.getId(), skipReason);
             } else if ("failed".equals(status)) {

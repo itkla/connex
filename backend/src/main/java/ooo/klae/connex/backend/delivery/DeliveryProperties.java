@@ -122,6 +122,17 @@ public class DeliveryProperties {
         return providerCallLeaseDuration().minus(providerCallDeadline());
     }
 
+    /**
+     * Returns how long an audience attempt claimed by an older version, which wrote no lease, must have
+     * been idle before a recovery sweep treats it as abandoned (#1773). It is three times the maximum
+     * lease, far beyond any attempt such a version could still be running, so a rolling deployment
+     * never has a live attempt swept.
+     * @return the idle time after which a lease-less audience attempt is abandoned
+     */
+    public Duration legacyUnleasedAudienceIdle() {
+        return MAX_AUDIENCE_EXPORT_LEASE.multipliedBy(3);
+    }
+
     @PostConstruct
     void validateAudienceExportTransportBounds() {
         audienceExportLeaseDuration();

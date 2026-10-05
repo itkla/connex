@@ -575,7 +575,7 @@ class CampaignDispatchServiceTest {
         }
         verify(sendMapper, times(1)).refreshCounters(7, 11);
         verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), anyString());
-        verify(deliveryMapper, never()).claim(anyInt(), anyInt());
+        verify(deliveryMapper, never()).claim(anyInt(), anyInt(), anyLong());
     }
 
     @Test

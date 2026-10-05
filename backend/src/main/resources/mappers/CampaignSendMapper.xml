@@ -143,8 +143,11 @@
        delivery rows; no index that leads with workspace_id could be seeked here. A stale failed
        counter is deliberately not a discovery reason, because detecting one costs a dependent
        COUNT(*) over every audience send's failed deliveries, which again scales with delivery history
-       rather than with outstanding recovery work. UNION keeps the result one distinct set of
-       workspace ids. -->
+       rather than with outstanding recovery work. The third arm finds audience attempts abandoned
+       with no frequency reservation (#1773): its three leading columns are equalities on
+       idx_campaign_delivery_unleased_reservation (dispatching, no owner, no reservation), so it reads
+       only unreserved outstanding attempts, and their lease or idle time is a residual filter. UNION
+       keeps the result one distinct set of workspace ids. -->
   <select id="workspaceIdsWithQueuedSends" resultType="int">
     SELECT DISTINCT workspace_id FROM campaign_send
     WHERE status IN ('queued', 'running')
@@ -162,6 +165,21 @@
       AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6),
         INTERVAL #{audienceReservationGraceMicros} MICROSECOND)
       AND d.submitted_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM campaign_send s
+        WHERE s.workspace_id = d.workspace_id AND s.id = d.send_id
+          AND s.origin = 'audience')
+    UNION
+    SELECT d.workspace_id FROM campaign_delivery d
+    WHERE d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL
+      AND d.frequency_reserved_at IS NULL
+      AND d.submitted_at IS NULL
+      AND ((d.dispatch_lease_until IS NOT NULL
+          AND d.dispatch_lease_until &lt; DATE_SUB(UTC_TIMESTAMP(6),
+            INTERVAL #{audienceReservationGraceMicros} MICROSECOND))
+        OR (d.dispatch_lease_until IS NULL
+          AND d.updated_at &lt; DATE_SUB(CURRENT_TIMESTAMP, INTERVAL #{legacyIdleSeconds} SECOND)))
       AND EXISTS (
         SELECT 1 FROM campaign_send s
         WHERE s.workspace_id = d.workspace_id AND s.id = d.send_id
