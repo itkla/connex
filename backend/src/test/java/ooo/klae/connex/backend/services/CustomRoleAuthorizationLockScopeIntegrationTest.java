@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTest {
     private static final int SECOND_MEMBER_LOCK_WAIT_SECONDS = 5;
+    private static final int ROLE_SIZE = 8;
 
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleMapper roleMapper;
@@ -55,15 +56,18 @@ class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTes
      */
     @Test
     void membersWithDifferentCustomRolesAuthorizeWithoutWaitingOnEachOther() throws InterruptedException {
-        User first = customRoleMember(List.of(Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE));
-        User second = customRoleMember(List.of(Permission.CAMPAIGN_VIEW, Permission.DEAL_UPDATE));
+        List<Permission> grantable = List.copyOf(Permission.grantableSet());
+        List<Permission> firstGrants = grantable.subList(0, ROLE_SIZE);
+        List<Permission> secondGrants = grantable.subList(ROLE_SIZE, 2 * ROLE_SIZE);
+        User first = customRoleMember(firstGrants);
+        User second = customRoleMember(secondGrants);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-                assertEquals(EnumSet.of(Permission.CAMPAIGN_VIEW, Permission.CAMPAIGN_MANAGE),
+                assertEquals(EnumSet.copyOf(firstGrants),
                         workspaceService.lockedMemberPermissionsFor(workspace.getId(), first.getId()));
                 Future<Set<Permission>> other = executor.submit(() -> authorizeOnItsOwnConnection(second));
-                assertEquals(EnumSet.of(Permission.CAMPAIGN_VIEW, Permission.DEAL_UPDATE), await(other));
+                assertEquals(EnumSet.copyOf(secondGrants), await(other));
                 status.setRollbackOnly();
             });
         } finally {
