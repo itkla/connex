@@ -39,6 +39,17 @@
     ON DUPLICATE KEY UPDATE org_role = #{orgRole}
   </insert>
 
+  <insert id="addFoundingMember">
+    INSERT INTO org_member (org_id, user_id, org_role, founder)
+    VALUES (#{orgId}, #{userId}, 'owner', TRUE)
+  </insert>
+
+  <insert id="addMemberClearingFounder">
+    INSERT INTO org_member (org_id, user_id, org_role)
+    VALUES (#{orgId}, #{userId}, #{orgRole})
+    ON DUPLICATE KEY UPDATE org_role = #{orgRole}, founder = FALSE
+  </insert>
+
   <update id="updateRole">
     UPDATE org_member SET org_role = #{orgRole} WHERE org_id = #{orgId} AND user_id = #{userId}
   </update>

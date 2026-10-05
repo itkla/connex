@@ -10,7 +10,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.AuthenticatorAssertionResponse;
 import org.springframework.security.web.webauthn.api.AuthenticatorAttestationResponse;
-import org.springframework.security.web.webauthn.api.CredentialRecord;
 import org.springframework.security.web.webauthn.api.PublicKeyCredential;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
@@ -49,6 +48,9 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
+import ooo.klae.connex.backend.webauthn.RegisteredPasskey;
+import ooo.klae.connex.backend.webauthn.VerifiedPasskey;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -168,12 +170,15 @@ public class WebAuthnController {
             Integer expectedSessionEpoch = sessionSecurityService.sessionEpoch(req.getSession(false));
             boolean bootstrapConfirmationSatisfied =
                 bootstrapConfirmationService.isSatisfiedFor(user, req);
-            CredentialRecord record = webAuthnService.finishRegistration(
-                    user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied,
+            EnrollmentEvidence evidence = new EnrollmentEvidence(
+                    sessionSecurityService.sessionPrimaryId(req),
+                    sessionSecurityService.recentStepUpProof(req.getSession(false), user.getId()));
+            RegisteredPasskey registered = webAuthnService.finishRegistration(
+                    user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied, evidence,
                     options, credential, label);
-            sessionSecurityService.markStepUp(req, user.getId());
+            sessionSecurityService.markStepUp(req, user.getId(), registered.credentialRowId());
             sessionSecurityService.clearPasskeyBootstrapConfirmation(req);
-            return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
+            return Map.of("credentialId", registered.record().getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
         } catch (BadRequestException ex) {
@@ -224,10 +229,10 @@ public class WebAuthnController {
                     "Passkey login missing challenge", null);
             throw new BadCredentialsException("No passkey login in progress");
         }
-        User user;
+        VerifiedPasskey verified;
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
-            user = webAuthnService.finishLogin(options, assertion);
+            verified = webAuthnService.finishLogin(options, assertion);
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
         } catch (RuntimeException ex) {
@@ -238,6 +243,7 @@ public class WebAuthnController {
         } finally {
             requestOptions.save(req, res, null);
         }
+        User user = verified.user();
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             auditService.recordFailure("auth.login.passkey_sso_enforced", "user", user.getId(),
                     user.getDisplayName(), "Passkey login refused; SSO enforced", null);
@@ -253,7 +259,7 @@ public class WebAuthnController {
                 user.getDisplayName() + " logged in with passkey",
                 null);
         User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
-        sessionSecurityService.markStepUp(req, authenticatedUser.getId());
+        sessionSecurityService.markStepUp(req, authenticatedUser.getId(), verified.credentialRowId());
         return Map.of("message", "You are now logged in");
     }
 
@@ -281,9 +287,10 @@ public class WebAuthnController {
             throw new BadCredentialsException("No passkey step-up in progress");
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        VerifiedPasskey verified;
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
-            webAuthnService.finishStepUp(auth, options, assertion);
+            verified = webAuthnService.finishStepUp(auth, options, assertion);
         } catch (RequestBodyTooLargeException ex) {
             recordStepUpFailure(user, "request_too_large");
             throw ex;
@@ -302,7 +309,7 @@ public class WebAuthnController {
                 user.getDisplayName(),
                 "Passkey step-up completed",
                 null);
-        sessionSecurityService.markStepUp(req, user.getId());
+        sessionSecurityService.markStepUp(req, user.getId(), verified.credentialRowId());
         return Map.of("message", "Recent authentication refreshed");
     }
 

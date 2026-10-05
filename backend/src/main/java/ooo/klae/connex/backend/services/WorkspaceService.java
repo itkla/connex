@@ -412,11 +412,12 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
-        orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
+        int foundingPasskeys = orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         auditService.record("org.create", "organization", organization.getId(), organization.getName(),
                 "Organization created", Map.of("ownerUserId", ownerUserId));
         auditService.record("org.member.founding_owner", "organization", organization.getId(), organization.getName(),
-                "Founding organization owner granted", Map.of("userId", ownerUserId));
+                "Founding organization owner granted",
+                Map.of("userId", ownerUserId, "foundingPasskeys", foundingPasskeys));
         return organization.getId();
     }
 
