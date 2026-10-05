@@ -114,7 +114,7 @@ public interface CampaignDeliveryMapper {
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
     /**
-     * Claims one audience delivery under a lease end time with no owner (#1773).
+     * Claims one audience delivery under its own audience lease end time, with no owner (#1773).
      * @param workspaceId the owning workspace
      * @param id the delivery
      * @param leaseMicros the lease duration on the database clock

@@ -674,18 +674,20 @@ public class CampaignDispatchService {
 
     /**
      * Settles audience attempts abandoned with no frequency reservation (#1773), which the reservation
-     * sweep cannot age. A leased row is due once its owner-less lease has been expired for the grace,
-     * and a lease-less row claimed by an older version once it has been idle far longer than any
-     * attempt that version could still be running. A row with a person never reached the provider,
+     * sweep cannot age. A leased row is due once its audience lease has been expired for the grace,
+     * and a lease-less row claimed by an older version once it has been idle for longer than such an
+     * attempt is expected to run; a late person-row worker can no longer reserve or send after that,
+     * so the outcome below stays true either way. A row with a person never reached the provider,
      * because reservation precedes egress and is released only where egress provably did not happen,
      * so it fails without reconciliation and holds no frequency cap. A row with no person skips
      * reservation and may have reached the provider, so it is held for reconciliation like an expired
      * reservation. Neither is replayed. Each row is one auto-commit compare-and-set, so a late worker
      * loses its terminal write, and the sends this pass swept are settled afterwards as for the
      * reservation sweep, whose own settlement already ran the durable selector this pass. The bound
-     * that leaves: a definitive failure creates no reconciliation row, so if this pass dies between
-     * the compare-and-set and the counter refresh, an already completed send under-reports
-     * {@code failed_count} by that row.
+     * that leaves: a definitive failure creates no reconciliation row, so if this pass dies after its
+     * compare-and-sets and before the matching counter refresh, the completed send under-reports
+     * {@code failed_count} by every row the pass marked, and a death before an event append loses
+     * that row's event.
      */
     private void recoverAbandonedUnreservedAudienceAttempts(int workspaceId) {
         long graceMicros = audienceReservationGraceMicros();

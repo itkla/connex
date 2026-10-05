@@ -2789,14 +2789,14 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
 
     private void expireAudienceLease(int deliveryId, long secondsAgo) {
         assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
-                        + " SET dispatch_lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL ? SECOND)"
+                        + " SET audience_lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL ? SECOND)"
                         + " WHERE workspace_id = ? AND id = ?",
                 secondsAgo, workspace.getId(), deliveryId));
         sqlSession.clearCache();
     }
 
     private void claimedByAnOlderVersion(int deliveryId, long idleSeconds) {
-        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery SET dispatch_lease_until = NULL,"
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery SET audience_lease_until = NULL,"
                         + " updated_at = DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND)"
                         + " WHERE workspace_id = ? AND id = ?",
                 idleSeconds, workspace.getId(), deliveryId));
@@ -2810,7 +2810,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     private LocalDateTime audienceLeaseUntil(int deliveryId) {
-        return jdbcTemplate.queryForObject("SELECT dispatch_lease_until FROM campaign_delivery"
+        return jdbcTemplate.queryForObject("SELECT audience_lease_until FROM campaign_delivery"
                 + " WHERE workspace_id = ? AND id = ?", LocalDateTime.class, workspace.getId(), deliveryId);
     }
 

@@ -175,10 +175,10 @@
       AND d.dispatch_lease_owner IS NULL
       AND d.frequency_reserved_at IS NULL
       AND d.submitted_at IS NULL
-      AND ((d.dispatch_lease_until IS NOT NULL
-          AND d.dispatch_lease_until &lt; DATE_SUB(UTC_TIMESTAMP(6),
+      AND ((d.audience_lease_until IS NOT NULL
+          AND d.audience_lease_until &lt; DATE_SUB(UTC_TIMESTAMP(6),
             INTERVAL #{audienceReservationGraceMicros} MICROSECOND))
-        OR (d.dispatch_lease_until IS NULL
+        OR (d.audience_lease_until IS NULL
           AND d.updated_at &lt; DATE_SUB(CURRENT_TIMESTAMP, INTERVAL #{legacyIdleSeconds} SECOND)))
       AND EXISTS (
         SELECT 1 FROM campaign_send s
