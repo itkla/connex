@@ -1123,3 +1123,72 @@ approver Security Owner role
 `ShareWorkspaceControlAccess` gaining a mutating statement, a structural split of
 `TenantWorkScope.unrouted` that separates read and write suppliers, or a material update to the
 query.
+
+### `java/csrf-unprotected-request-type` — structural split of the `unrouted` merge (#1815)
+
+Re-evaluation of #67, #153, #186 and #189, triggered by the change their entries name: a structural
+split of `TenantWorkScope.unrouted` that separates read and write suppliers. The split shipped in PR
+[#2003](https://github.com/itkla/connex/pull/2003), tracked on
+[#1815](https://github.com/itkla/connex/issues/1815).
+
+**The mechanism.** CodeQL resolves the `work.get()` in `TenantWorkScope.runWithOverride` by merging
+every lambda that reaches it. Every `TenantWorkScope` entry funnels through that one `Supplier`, so a
+GET handler that only reads control-plane state "reached" unrelated writes. On `main`, 34 of the
+rule's 47 results ended at the same AI-budget write, `AiBudgetControlOperations:52`.
+
+**The change.** `TenantWorkScope.unroutedRead(ControlPlaneRead<T>)` keeps `unrouted`'s routing
+semantics, but goes through its own functional interface and never through the shared `Supplier`.
+The read-only control-plane sites that GET flows entered moved onto it:
+- the `OrganizationWorkspaceScope`, `DealCollaborator` and `ShareWorkspace` control-access helpers;
+- read helpers split out of `NotificationQuietHoursControlAccess` and `AiBudgetControlAccess`;
+- `AttachmentReadService`, `DataSubjectRequestService` (list, get, prepareDisclosure), `HealthService`,
+  `IntroductionService`, `NativeConnectService`, `ProviderConnectionService:76`,
+  `ProviderCapturePolicyService:766` and `UserService:97`.
+
+Every converted lambda was traced to its SQL, first by a classification pass and then by an
+independent review. The review found one shared-state mutation, the health probe's guard-status
+tracking, which moved out of the read before merge. `backend/AGENTS.md` records the rule.
+
+| Field | Value |
+| --- | --- |
+| Before | `main` `e9825428c`, analysis `1892160414`: 47 results for the rule (72 in total) |
+| After | `refs/pull/2003/merge` `222237959`, analysis `1892355483`: 22 results (47 in total) |
+
+**Results that no longer reproduce (25).** These are the sources of the dismissed alerts #67
+(`UserController:73`), #153 (`ReportController:126`), #186 (`DealController:854`) and #189
+(`ShareController:35`), plus:
+- `AiOrganizationBudgetController:27`;
+- `AttachmentController` (4);
+- `BusinessCardController:100`;
+- `DataSubjectRequestController:33` and `:49`;
+- `HealthController:39`;
+- `IntroductionController` (4);
+- `NativeConnectController:37`;
+- `NotificationController:65` and `:122`;
+- `PersonController:616` and `:647`;
+- `ProviderCaptureController:44` and `:68`;
+- `ProviderConnectionController:37`.
+
+The four dismissed alerts should close as fixed on `main`'s first analysis after the merge; they
+need no fresh disposition.
+
+**Results that remain (22), by class:**
+- **11 audit appends** at `AuditIntegrityService:120`. Exports, audit views, AI assistant reads and
+  the report narrative record an audit row on GET. These are genuine writes, unaffected by the split.
+- **3 genuine control-plane writes on GET flows**, which correctly stay on `unrouted`:
+  - `DataSubjectRequestController:61`, the disclosure audit at `DataSubjectRequestService:137`;
+  - `ProviderConnectionController:47`, where the OAuth callback consumes its state at
+    `ProviderConnectionService:334`;
+  - `TenantLifecycleController:67`, the export grant redemption at `TenantExportGrantService:61`.
+- **2 through `runAs` → `withWorkspacePlacement`:** `DeliveryUnsubscribeController:53` and
+  `DocumentAcceptanceController:65`, already dispositioned as #164 and #165. The routed entries were
+  not split here.
+- **2 through `inWorkspace`:** `TenantDiagnosticsController:32` and `:40`, via
+  `TenantDiagnosticsService:126`. Same merge, through the routed entry; a routed read entry would be
+  the next split.
+- **4 that never went through `unrouted`:**
+  - `RadarController:36` and `:47`, now represented by `RelationshipSignalWriteService:39`;
+  - `AiAssistantController:340` → `AiChatTurnPersistenceService:1124`;
+  - `WorkflowManualRunController:44` → `WorkflowManualRunService:292`.
+
+  Each keeps its existing disposition.
