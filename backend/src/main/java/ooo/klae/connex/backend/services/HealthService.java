@@ -106,11 +106,16 @@ public class HealthService {
             if (isCurrent(current, System.nanoTime())) {
                 return compose(current);
             }
-            Snapshot probed = tenantWorkScope.unroutedRead(() -> new Snapshot(
-                    System.nanoTime(),
-                    status(databaseReady()),
-                    status(migrationsReady()),
-                    auditGuardStatus()));
+            long probedAtNanos = System.nanoTime();
+            Probe probe = tenantWorkScope.unroutedRead(() -> new Probe(
+                    databaseReady(),
+                    migrationsReady(),
+                    auditAppendOnlyGuardInstalled()));
+            Snapshot probed = new Snapshot(
+                    probedAtNanos,
+                    status(probe.databaseReady()),
+                    status(probe.migrationsReady()),
+                    auditGuardStatus(probe.auditGuardInstalled()));
             snapshot = probed;
             return compose(probed);
         } finally {
@@ -159,8 +164,8 @@ public class HealthService {
         }
     }
 
-    private Status auditGuardStatus() {
-        Status current = status(auditAppendOnlyGuardInstalled());
+    private Status auditGuardStatus(boolean installed) {
+        Status current = status(installed);
         Status previous = lastAuditGuardStatus;
         lastAuditGuardStatus = current;
         if (current == previous) {
@@ -215,5 +220,8 @@ public class HealthService {
     }
 
     private record Snapshot(long probedAtNanos, Status db, Status migrations, Status auditGuard) {
+    }
+
+    private record Probe(boolean databaseReady, boolean migrationsReady, boolean auditGuardInstalled) {
     }
 }

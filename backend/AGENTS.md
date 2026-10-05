@@ -29,7 +29,7 @@ Primary layers:
 
 Before touching tenancy, routing, lifecycle, catalog/control planes, or organization-wide data access, read `../docs/MULTITENANCY_PLAN.md` and the relevant architecture tests.
 
-Control-plane work that changes no state goes through `TenantWorkScope.unroutedRead` (or a `*ControlAccess` read helper built on it), and only work that writes uses `unrouted`. CodeQL merges every lambda handed to the shared `Supplier` in `unrouted`, so a read routed through it inherits a `java/csrf-unprotected-request-type` path into unrelated writes (#1815). Never pass a lambda that writes, audits or nests another `TenantWorkScope` call to `unroutedRead`: that would hide a real write from the scan.
+Control-plane reads that a request can reach go through `TenantWorkScope.unroutedRead` (or a `*ControlAccess` read helper built on it); work that changes state uses `unrouted`. CodeQL merges every lambda handed to the shared `Supplier` in `unrouted`, so a read routed through it inherits a `java/csrf-unprotected-request-type` path into unrelated writes (#1815). Some pure reads still use `unrouted`, mostly in scheduled work and in request flows that write anyway; prefer `unroutedRead` when you touch one. Never pass `unroutedRead` a lambda that runs DML, appends an audit, mutates shared or static state, performs outbound I/O, publishes an event, or nests another `TenantWorkScope` call: that would hide a real effect from the scan.
 
 ### Unauthenticated ingest endpoints
 
