@@ -2680,6 +2680,41 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void aCounterRefreshThatFailsWhenTheLastDeliveryLandsLeavesTheSendForTheNextTick() {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        sendService.queueSend(send.campaignId(), send.id());
+        CampaignSendMapper realSendMapper = sqlSession.getMapper(CampaignSendMapper.class);
+        AtomicBoolean refreshFailed = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (refreshFailed.compareAndSet(false, true)) {
+                throw new IllegalStateException("Simulated counter refresh failure");
+            }
+            return realSendMapper.refreshCounters(workspace.getId(), send.id());
+        }).when(campaignSendMapper).refreshCounters(workspace.getId(), send.id());
+
+        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+
+        assertTrue(refreshFailed.get());
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        var unsettled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("running", unsettled.getStatus());
+        assertNull(unsettled.getCompletedAt());
+        assertTrue(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros(), legacyIdleSeconds())
+                .contains(workspace.getId()));
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals(1, submissions.size());
+    }
+
+    @Test
     void aPeerTickWhileAnAttemptIsInFlightNeverCompletesItsSend() {
         Person person = recipient();
         configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));

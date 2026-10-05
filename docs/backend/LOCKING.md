@@ -1020,13 +1020,17 @@ rows; the statement runs once per catalog with no workspace predicate, so no ind
 `workspace_id` could be seeked for it. Every statement stays correct without that index and only the
 scan returns, so `DeliveryRecoveryIndexArchTest` pins its leading columns against a later index
 consolidation. The same pass then settles every audience send that is still
-`running` with nothing `pending` or `dispatching`: it completes the send and refreshes the counters,
-without resolving a provider, so a connector disabled after the worker died cannot keep the send
-running. The completion is a single compare-and-set that proves the absence of `pending` and
+`running` with nothing `pending` or `dispatching`: it refreshes the counters, completes the send,
+and refreshes them again after a completion, without resolving a provider, so a connector disabled
+after the worker died cannot keep the send running. The first refresh precedes the completion so a
+refresh that fails, or a process that dies before completing, leaves the send `running` and found
+again. The completion is a single compare-and-set that proves the absence of `pending` and
 `dispatching` rows in the same statement that writes `completed`, so a live worker's terminal write
 cannot land between the proof and the completion; because no delivery can return to `pending` or
-`dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
-final state. A `dispatching`
+`dispatching` afterwards, the refresh that follows a completion reads every delivery in its final
+state. A death between the completion and that second refresh loses only terminal writes that landed
+after the first refresh, and each such write's own worker refreshes after it, so the counters stay
+stale only if that worker dies too. A `dispatching`
 row may belong to a live worker, possibly on another instance, so that send stays `running`. The
 dispatch loop settles through the same compare-and-set (#1773), so whichever settlement follows the
 last terminal write completes the send, and a running send with nothing `pending` is settled there
@@ -1050,9 +1054,9 @@ dependent subquery over every audience send's delivery history, which the schedu
 every tick, and putting the reconciliation `EXISTS` first does not bound it, because
 `reconciliation_required_at` is not in `idx_campaign_delivery_send_status` and the probe therefore
 reads the same failed rows from the clustered index. The bound that leaves: if a pass dies after a
-sweep's compare-and-set and before the matching counter refresh, including between settlement's
-completion and the refresh that follows it, the send can be left `completed` with `failed_count`
-missing every row that pass marked, up to one page. Resolving an ambiguous row's reconciliation
+sweep's compare-and-set and before the matching counter refresh of an already `completed` send,
+that send keeps a `failed_count` missing every row the pass marked, up to one page; a `running` send
+is refreshed before its completion, so it is found again instead. Resolving an ambiguous row's reconciliation
 refreshes the counters, but a definitive abandonment (below) creates no reconciliation row, so its
 under-report remains. A pass that dies between a compare-and-set and its event append also loses that
 row's `failed` event. The delivery rows themselves are terminal throughout, and the ambiguous ones stay

@@ -219,21 +219,26 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Completes a running audience send with no pending or dispatching delivery left, then refreshes
-     * the send's counters; the dispatch loop and the recovery sweeps settle the same way (#1773). One
-     * compare-and-set proves the absence of outstanding work and completes the send, so neither an
-     * attempt still in flight on another instance nor a late terminal write can land between the
-     * proof and the completion, and the refresh that follows a completion reads every delivery in its
-     * final state. Every dispatching audience attempt leaves that state by its own terminal write or
-     * by a lease- or reservation-anchored sweep, so no send stays running for good: whichever settle
-     * follows the last terminal write completes it, and a send left running by a worker that died
-     * after that write is found again by the durable selector. Settling needs no provider, so a send
-     * whose remaining work was recovered settles even while its provider is unusable. A triggered or
-     * already completed send only has its counters refreshed.
+     * Refreshes a send's counters and completes a running audience send with no pending or
+     * dispatching delivery left; the dispatch loop and the recovery sweeps settle the same way
+     * (#1773). The refresh comes first, so a refresh that fails, or a process that dies before the
+     * completion, leaves the send running and found again on a later pass. One compare-and-set then
+     * proves the absence of outstanding work and completes the send, so an attempt still in flight on
+     * another instance never sees its send completed under it. A call that completed the send refreshes
+     * again, reading every delivery in its final state, because a terminal write that landed between
+     * the first refresh and the completion would otherwise be missed. That second refresh is the one
+     * write a death can still lose: the counters then miss only such late terminal writes, each of
+     * which its own worker's settle refreshes after writing, so they stay stale only if that worker
+     * dies too. Every dispatching audience attempt leaves that state by its own terminal write or by a
+     * lease- or reservation-anchored sweep, so no send stays running for good. Settling needs no
+     * provider, so a send whose remaining work was recovered settles even while its provider is
+     * unusable. A triggered or already completed send only has its counters refreshed.
      */
     private void settle(int workspaceId, int sendId) {
-        campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId);
         campaignSendMapper.refreshCounters(workspaceId, sendId);
+        if (campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId) == 1) {
+            campaignSendMapper.refreshCounters(workspaceId, sendId);
+        }
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
