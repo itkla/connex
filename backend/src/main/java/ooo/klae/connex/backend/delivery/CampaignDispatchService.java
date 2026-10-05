@@ -118,7 +118,9 @@ public class CampaignDispatchService {
      * @param sendId send to dispatch
      * @return {@code false} when the send could not be dispatched because of a fault the operator
      *         should see — an unresolvable delivery provider or a missing message revision — and
-     *         {@code true} for both a successful dispatch and a legitimate no-op. Scheduler
+     *         {@code true} for both a successful dispatch and a legitimate no-op. A running audience
+     *         send with nothing left pending is settled without resolving its provider, so an
+     *         attempt still in flight on another instance never reports as a failure here. Scheduler
      *         diagnostics derive their run status from this, so a silently undeliverable send is
      *         never reported as a healthy sweep.
      */
@@ -173,6 +175,11 @@ public class CampaignDispatchService {
         if (triggered(send) && !triggeredSendGate.enabled()) {
             return true;
         }
+        if ("running".equals(send.getStatus()) && "audience".equals(send.getOrigin())
+                && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
+            settle(workspaceId, sendId);
+            return true;
+        }
         DeliveryChannel channel;
         ResolvedDeliveryProvider target;
         MessageDispatcher dispatcher;
@@ -212,38 +219,21 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Refreshes a send's counters and completes a running audience send with no pending delivery
-     * left.
+     * Completes a running audience send with no pending or dispatching delivery left, then refreshes
+     * the send's counters; the dispatch loop and the recovery sweeps settle the same way (#1773). One
+     * compare-and-set proves the absence of outstanding work and completes the send, so neither an
+     * attempt still in flight on another instance nor a late terminal write can land between the
+     * proof and the completion, and the refresh that follows a completion reads every delivery in its
+     * final state. Every dispatching audience attempt leaves that state by its own terminal write or
+     * by a lease- or reservation-anchored sweep, so no send stays running for good: whichever settle
+     * follows the last terminal write completes it, and a send left running by a worker that died
+     * after that write is found again by the durable selector. Settling needs no provider, so a send
+     * whose remaining work was recovered settles even while its provider is unusable. A triggered or
+     * already completed send only has its counters refreshed.
      */
     private void settle(int workspaceId, int sendId) {
-        campaignSendMapper.refreshCounters(workspaceId, sendId);
-        if (runningAudienceSend(workspaceId, sendId)
-                && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
-            campaignSendMapper.markCompleted(workspaceId, sendId);
-        }
-    }
-
-    /**
-     * Settles a send found by the recovery sweep: it completes a running audience send with no pending
-     * or dispatching delivery left, then refreshes that send's counters. One compare-and-set proves
-     * the absence of outstanding work and completes the send, so a live worker's terminal write cannot
-     * land between the proof and the completion, and the refresh that follows a completion reads every
-     * delivery in its final state. The sweep can run beside a live worker whose unleased attempt is
-     * still in flight: the send is not selected at all until that attempt is terminal, and the
-     * worker's own {@link #settle} completes the send after its terminal write. An attempt the worker
-     * abandons is marked and settled by a later sweep, whether or not it had reserved, and a send left
-     * running by a worker that died between its terminal write and its settlement is found again by
-     * the durable selector. Settling needs no provider, so a send whose remaining work was recovered
-     * settles even while its provider is unusable.
-     */
-    private void settleRecovered(int workspaceId, int sendId) {
         campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId);
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-    }
-
-    private boolean runningAudienceSend(int workspaceId, int sendId) {
-        CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
-        return send != null && "running".equals(send.getStatus()) && "audience".equals(send.getOrigin());
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
@@ -748,7 +738,7 @@ public class CampaignDispatchService {
             for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
                     workspaceId, triggeredSendGate.dispatchPageSize())) {
                 countersOwed.remove(sendId);
-                settleRecovered(workspaceId, sendId);
+                settle(workspaceId, sendId);
             }
         } finally {
             for (int sendId : countersOwed) {

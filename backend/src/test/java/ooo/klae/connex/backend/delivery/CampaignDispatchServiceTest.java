@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -717,10 +718,47 @@ class CampaignDispatchServiceTest {
         InOrder settlement = inOrder(sendMapper);
         settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
         settlement.verify(sendMapper).refreshCounters(7, 11);
-        verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
         verify(sendMapper, never()).getSend(7, 11);
         verify(deliveryMapper, never()).countPending(anyInt(), anyInt());
         verifyNoInteractions(providerConfigService);
+    }
+
+    @Test
+    void aRunningAudienceSendWithNothingPendingSettlesWithoutResolvingItsProvider() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(0);
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertTrue(service.processSend(7, 11));
+
+        InOrder settlement = inOrder(sendMapper);
+        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
+        settlement.verify(sendMapper).refreshCounters(7, 11);
+        verify(sendMapper, never()).assignProvider(anyInt(), anyInt(), anyString());
+        verify(deliveryMapper, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
+        verifyNoInteractions(providerConfigService);
+    }
+
+    @Test
+    void aSendWithPendingWorkStillReportsItsUnusableProvider() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(1);
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
+                .thenThrow(new DeliveryProviderException("Email provider is disabled"));
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertFalse(service.processSend(7, 11));
+
+        verify(sendMapper, never()).markSettledAudienceSendCompleted(anyInt(), anyInt());
+        verify(deliveryMapper, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
     }
 
     private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
@@ -779,12 +817,10 @@ class CampaignDispatchServiceTest {
         DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
         CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
         WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
-        CampaignSend send = triggeredSend();
-        send.setOrigin("audience");
-        send.setStatus("running");
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
         when(gate.dispatchPageSize()).thenReturn(200);
-        when(sendMapper.getSend(7, 11)).thenReturn(send);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(1);
         when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
         when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(
                 ResolvedDeliveryProvider.of("smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.none()));
@@ -827,6 +863,13 @@ class CampaignDispatchServiceTest {
         revision.setBodyHtml("<p>Body</p>");
         revision.setBodyText("Body");
         return revision;
+    }
+
+    private static CampaignSend runningAudienceSend() {
+        CampaignSend send = triggeredSend();
+        send.setOrigin("audience");
+        send.setStatus("running");
+        return send;
     }
 
     private static CampaignDelivery delivery() {

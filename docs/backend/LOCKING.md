@@ -1027,9 +1027,13 @@ running. The completion is a single compare-and-set that proves the absence of `
 cannot land between the proof and the completion; because no delivery can return to `pending` or
 `dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
 final state. A `dispatching`
-row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
-it after its terminal write, and an attempt it abandons, before or after reserving, is swept and
-settled by a later pass. That send is
+row may belong to a live worker, possibly on another instance, so that send stays `running`. The
+dispatch loop settles through the same compare-and-set (#1773), so whichever settlement follows the
+last terminal write completes the send, and a running send with nothing `pending` is settled there
+without resolving its provider, so waiting on another attempt is never reported as a failed run. An
+attempt its worker abandons, before or after reserving, is swept and settled by a later pass. Before
+#1773 the loop completed a send once nothing was `pending`, which could complete it under a peer's
+in-flight attempt. That send is
 selected by a durable predicate, not remembered from the sweep, because a marked row no longer
 matches the sweep: a settlement that fails is found again on a later pass, and scheduler discovery
 already returns a workspace that owns a `running` send. The predicate deliberately carries no

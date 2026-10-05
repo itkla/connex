@@ -38,8 +38,6 @@ public interface CampaignSendMapper {
             @Param("id") int id,
             @Param("providerId") String providerId);
 
-    int markCompleted(@Param("workspaceId") int workspaceId, @Param("id") int id);
-
     /**
      * Completes a running audience send only while the same statement proves that none of its
      * deliveries is pending or dispatching, so a live worker's terminal write cannot land between the
