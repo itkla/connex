@@ -934,8 +934,9 @@ class AiChatAgentLoopServiceTest {
 
     /**
      * A write whose name resolves to no single row when it is prepared is refused recoverably:
-     * no proposal is stored, the call is recorded as failed with the fixed reason, the model is
-     * answered with that reason, and the turn goes on to answer.
+     * no proposal is stored, the call is recorded as failed with the fixed reason and with the
+     * model's arguments wrapped so they can never read back as a proposal envelope (#1867), the
+     * model is answered with that reason, and the turn goes on to answer.
      */
     @Test
     void aWriteWhoseNameDoesNotResolveAtProposalIsRefusedWithoutAProposal() throws Exception {
@@ -962,8 +963,12 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
         verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).proposeTool(
-                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), any());
+                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), stored.capture());
+        assertEquals(
+                objectMapper.createObjectNode().set("refusedArguments", args),
+                objectMapper.readTree(stored.getValue()));
         verify(persistenceService).failTool(
                 eq(TURN), anyInt(), contains("unresolved_reference"));
         verify(writeToolService, never()).proposalResult(any(), any());

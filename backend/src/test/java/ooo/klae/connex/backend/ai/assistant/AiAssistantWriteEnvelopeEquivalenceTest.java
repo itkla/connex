@@ -1897,6 +1897,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         toolCall.setArgumentsJson(arguments);
         toolCall.setResultJson(result);
         toolCall.setIdempotencyKey("turn-" + TURN.turnId() + "-step-" + (id - 40));
+        toolCall.setServerProposal(true);
         toolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         toolCall.setUpdatedAt("2026-03-06 15:00:00.000000");
         toolCall.setExecutedAt("2026-03-06 15:00:00.000000");

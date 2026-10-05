@@ -603,6 +603,37 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * A refused call stores the model's own arguments, which a model can shape into a complete
+     * proposal envelope. A failed row the server did not propose is never a card and reads as 404,
+     * while a genuine failed proposal still shows and a pending row written before the flag existed
+     * keeps its card (#1867).
+     */
+    @Test
+    void aFailedRowTheServerDidNotProposeLeavesNoCardHoweverCompleteItsEnvelope() {
+        AiChatToolCall refused = toolCall(
+                36, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 20,
+                "{\"reason\":\"tool_not_loaded\"}");
+        refused.setServerProposal(false);
+        AiChatToolCall failedProposal = toolCall(
+                37, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 21,
+                "{\"reason\":\"forbidden\"}");
+        AiChatToolCall legacyPending = toolCall(
+                38, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 22, null);
+        legacyPending.setServerProposal(false);
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(refused, failedProposal, legacyPending));
+        stubVisibleDeal();
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(37, 38), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+        assertEquals("failed", result.getFirst().status());
+        when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, 36)).thenReturn(refused);
+        assertThrows(ResourceNotFoundException.class, () -> service.get(SESSION_ID, 36));
+    }
+
+    /**
      * A row whose stored tool matches its name but names no registered write — a read tool's, one
      * forged with a write tier, or a name the catalog no longer declares — is never a card, and a
      * direct read of it answers 404.
@@ -2745,6 +2776,7 @@ class AiAssistantToolCallReadServiceTest {
                 + "},\"request\":" + request + "}");
         toolCall.setResultJson(resultJson);
         toolCall.setIdempotencyKey("turn-" + turnId + "-step-1");
+        toolCall.setServerProposal(true);
         toolCall.setCreatedAt("2026-08-12 11:59:00.000000");
         toolCall.setUpdatedAt("2026-08-12 12:00:00.000000");
         toolCall.setExecutedAt("2026-08-12 12:00:00.000000");

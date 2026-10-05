@@ -302,6 +302,9 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(thoughtSignature, replayedTool.getThoughtSignature());
         assertEquals(toolCall.getId(), lockedTool.getId());
         assertEquals(thoughtSignature, lockedTool.getThoughtSignature());
+        assertFalse(storedTool.isServerProposal());
+        assertFalse(replayedTool.isServerProposal());
+        assertFalse(lockedTool.isServerProposal());
         AiChatToolCall secondToolCall = new AiChatToolCall();
         secondToolCall.setWorkspaceId(workspace.getId());
         secondToolCall.setMessageId(userMessage.getId());
@@ -309,10 +312,17 @@ class AiChatMapperTest extends AbstractMapperTest {
         secondToolCall.setStatus("executed");
         secondToolCall.setArgumentsJson("{\"handle\":\"r2\"}");
         secondToolCall.setIdempotencyKey("turn-" + turn.getId() + "-step-2");
+        secondToolCall.setServerProposal(true);
         chatMapper.insertToolCall(secondToolCall);
         assertNull(chatMapper.getToolCallById(
                 workspace.getId(), userMessage.getId(), secondToolCall.getId())
                 .getThoughtSignature());
+        assertTrue(chatMapper.getToolCallById(
+                workspace.getId(), userMessage.getId(), secondToolCall.getId())
+                .isServerProposal());
+        assertTrue(chatMapper.getToolCallBySession(
+                workspace.getId(), session.getId(), secondToolCall.getId())
+                .isServerProposal());
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
