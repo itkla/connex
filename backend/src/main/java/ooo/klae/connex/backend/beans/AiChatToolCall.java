@@ -20,6 +20,7 @@ public class AiChatToolCall {
     private Integer executedByUserId;
     private String executedAt;
     private String idempotencyKey;
+    private boolean serverProposal;
     private String createdAt;
     private String updatedAt;
 }

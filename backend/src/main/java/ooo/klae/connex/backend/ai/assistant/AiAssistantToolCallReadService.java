@@ -316,7 +316,8 @@ public class AiAssistantToolCallReadService {
     }
 
     private StoredToolCall readStored(AiChatToolCall toolCall) {
-        if (toolCall.getArgumentsJson() == null) {
+        if (toolCall.getArgumentsJson() == null
+                || ("failed".equals(toolCall.getStatus()) && !toolCall.isServerProposal())) {
             return null;
         }
         try {
