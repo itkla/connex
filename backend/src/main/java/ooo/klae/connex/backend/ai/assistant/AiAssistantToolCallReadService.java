@@ -316,8 +316,7 @@ public class AiAssistantToolCallReadService {
     }
 
     private StoredToolCall readStored(AiChatToolCall toolCall) {
-        if (toolCall.getArgumentsJson() == null
-                || ("failed".equals(toolCall.getStatus()) && !toolCall.isServerProposal())) {
+        if (toolCall.getArgumentsJson() == null || !hasTrustedEnvelope(toolCall)) {
             return null;
         }
         try {
@@ -353,6 +352,17 @@ public class AiAssistantToolCallReadService {
         } catch (JacksonException | IllegalArgumentException | AiAssistantLoopException exception) {
             return null;
         }
+    }
+
+    /**
+     * Whether a row's envelope can be shown as the proposal the server wrote (#1867). A refused
+     * call stores what the model sent, and a model can shape that into a complete envelope, so a
+     * row still pending or failed is trusted only when the server proposed it. Executed and
+     * rejected rows were acted on and stay as history.
+     */
+    private static boolean hasTrustedEnvelope(AiChatToolCall toolCall) {
+        return toolCall.isServerProposal()
+                || !("proposed".equals(toolCall.getStatus()) || "failed".equals(toolCall.getStatus()));
     }
 
     private Map<RecordKey, RecordSnapshot> visibleTargets(

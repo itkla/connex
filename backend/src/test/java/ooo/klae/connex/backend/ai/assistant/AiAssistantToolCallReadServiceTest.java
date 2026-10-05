@@ -604,33 +604,45 @@ class AiAssistantToolCallReadServiceTest {
 
     /**
      * A refused call stores the model's own arguments, which a model can shape into a complete
-     * proposal envelope. A failed row the server did not propose is never a card and reads as 404,
-     * while a genuine failed proposal still shows and a pending row written before the flag existed
-     * keeps its card (#1867).
+     * proposal envelope, and an interrupted run can strand one as pending. A pending or failed row
+     * the server did not propose is never a card and reads as 404, however complete its envelope.
+     * A genuine failed proposal still shows, and an executed row stays as history (#1867).
      */
     @Test
-    void aFailedRowTheServerDidNotProposeLeavesNoCardHoweverCompleteItsEnvelope() {
+    void aPendingOrFailedRowTheServerDidNotProposeLeavesNoCardHoweverCompleteItsEnvelope() {
         AiChatToolCall refused = toolCall(
                 36, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 20,
                 "{\"reason\":\"tool_not_loaded\"}");
         refused.setServerProposal(false);
+        AiChatToolCall stranded = toolCall(
+                38, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 22, null);
+        stranded.setServerProposal(false);
         AiChatToolCall failedProposal = toolCall(
                 37, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 21,
                 "{\"reason\":\"forbidden\"}");
-        AiChatToolCall legacyPending = toolCall(
-                38, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 22, null);
-        legacyPending.setServerProposal(false);
+        AiChatToolCall history = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        history.setServerProposal(false);
         when(chatMapper.listToolCallsBySession(
                 WORKSPACE_ID, SESSION_ID, false, 100))
-                .thenReturn(List.of(refused, failedProposal, legacyPending));
+                .thenReturn(List.of(history, refused, failedProposal, stranded));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
         stubVisibleDeal();
 
         List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
 
-        assertEquals(List.of(37, 38), result.stream().map(AiAssistantToolCallReadDto::id).toList());
-        assertEquals("failed", result.getFirst().status());
-        when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, 36)).thenReturn(refused);
-        assertThrows(ResourceNotFoundException.class, () -> service.get(SESSION_ID, 36));
+        assertEquals(List.of(29, 37), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+        assertEquals("failed", result.getLast().status());
+        for (AiChatToolCall untrusted : List.of(refused, stranded)) {
+            when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, untrusted.getId()))
+                    .thenReturn(untrusted);
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> service.get(SESSION_ID, untrusted.getId()),
+                    untrusted.getStatus());
+        }
     }
 
     /**

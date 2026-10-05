@@ -323,6 +323,22 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertTrue(chatMapper.getToolCallBySession(
                 workspace.getId(), session.getId(), secondToolCall.getId())
                 .isServerProposal());
+        assertTrue(chatMapper.getToolCallByIdempotencyKey(
+                workspace.getId(), secondToolCall.getIdempotencyKey()).isServerProposal());
+        assertTrue(chatMapper.getToolCallBySessionForUpdate(
+                workspace.getId(), session.getId(), secondToolCall.getId()).isServerProposal());
+        assertTrue(chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), false, 10).stream()
+                .filter(listed -> listed.getId() == secondToolCall.getId())
+                .findFirst()
+                .orElseThrow()
+                .isServerProposal());
+        assertTrue(chatMapper.listToolCallsByTurn(
+                        workspace.getId(), session.getId(), "turn-" + turn.getId() + "-step-", 10).stream()
+                .filter(listed -> listed.getId() == secondToolCall.getId())
+                .findFirst()
+                .orElseThrow()
+                .isServerProposal());
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
