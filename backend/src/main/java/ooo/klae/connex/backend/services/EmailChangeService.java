@@ -291,12 +291,14 @@ public class EmailChangeService {
      *
      * <p>The programmatic, non-browser entry point: it self-claims the exchange rather than
      * carrying a browser-bound flow grant, so the HTTP surface uses
-     * {@link #confirmChangeByHash(String)} instead.
+     * {@link #confirmChangeByHash(String)} instead. Call it through
+     * {@link EmailChangeConfirmationService#confirm(String)}, which also clears the revoked
+     * invitations' notifications once this transaction commits.
      * @param rawToken the unhashed token from the verification link
-     * @return the pending invitations the change revoked, empty when there were none
+     * @return the account and the pending invitations the change revoked
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public List<RevokedInvitationDto> confirmChange(String rawToken) {
+    public EmailChangeConfirmation confirmChange(String rawToken) {
         String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
         return confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
@@ -305,11 +307,13 @@ public class EmailChangeService {
      * Applies an email change only while its issuance generation matches the locked account,
      * revoking pending grants addressed to the previous email. READ COMMITTED makes pending-grant
      * discovery current after waiting for the account lock, including grants committed while queued.
+     * The revoked invitations' notifications are tenant data and are cleared after commit by
+     * {@link RevokedGrantNotificationCleanup} (#1708).
      * @param tokenHash the purpose-bound browser-flow source digest
-     * @return the pending invitations the change revoked, empty when there were none
+     * @return the account and the pending invitations the change revoked
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public List<RevokedInvitationDto> confirmChangeByHash(String tokenHash) {
+    public EmailChangeConfirmation confirmChangeByHash(String tokenHash) {
         EmailChangeToken token = tokenHash == null ? null
                 : emailChangeTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
@@ -342,7 +346,7 @@ public class EmailChangeService {
 
         auditService.record("user.email_change_completed", "user", user.getId(), user.getDisplayName(),
                 "Completed a verified email change", null);
-        return revoked;
+        return new EmailChangeConfirmation(user.getId(), revoked);
     }
 
     /**
@@ -351,12 +355,13 @@ public class EmailChangeService {
      *
      * <p>Runs under the already-held account root: workspace roots are locked in ascending id, then
      * the recipient's globally ordered membership set, matching the member-removal contract in
-     * {@code docs/backend/LOCKING.md} so notification cleanup cannot invert membership lock order.
-     * Each revoked grant gets the same recipient-scoped notification cleanup and scoped audit event
-     * as a declined invitation, so no orphaned "invited you" row or unattributed deletion is left.
-     * The pending row is deleted first and the cleanup runs only when that delete claimed the row,
-     * so a grant a concurrent decline already removed leaves no partial deletion behind and the
-     * notification state version is bumped exactly when this sweep deleted something.
+     * {@code docs/backend/LOCKING.md}. Each revoked grant gets the same scoped audit event as a
+     * declined invitation. Every statement here is control-plane, so the revocation commits
+     * atomically with the email change; the grant's notifications are tenant data in the
+     * workspace's own catalog and are cleared after commit by
+     * {@link RevokedGrantNotificationCleanup} (#1708). A grant a concurrent decline already removed
+     * is skipped, and the notification state version is bumped exactly when this sweep revoked
+     * something.
      * @param userId the account whose address just changed
      * @return the revoked grants in ascending workspace id
      */
@@ -375,8 +380,6 @@ public class EmailChangeService {
             if (workspaceMapper.removePendingMember(workspaceId, userId) == 0) {
                 continue;
             }
-            notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(workspaceId, userId);
-            notificationMapper.deleteAllForRecipient(workspaceId, userId);
             revoked.add(grant);
             auditService.recordScoped(
                 "workspace.member.decline", "workspace", workspaceId, workspaceId, grant.getOrgId(),
