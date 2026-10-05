@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -16,11 +17,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -31,13 +35,14 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
- * Checks against a real database that locked authorization takes only the caller's own custom-role
- * rows (#1578). The permission read selects the role's rows by equality; a range on
- * {@code permission} let MySQL run it as a full primary-key scan of {@code workspace_role_permission}
- * on a small table, so one member's authorization waited on every other custom role's locked rows.
- * Whether a run reaches that plan depends on the shared table's size, so this case guards the
- * behaviour while {@code WorkflowPrincipalMapperXmlTest} pins the statement shape and the custom-role
- * cases of {@code AttachmentUploadSecurityIntegrationTest} reproduce the old wait end to end. Each case
+ * Checks against a real database that one member's locked authorization does not wait on another
+ * custom role's rows, under both isolation levels and in either lock order (#1578). The permission
+ * read selects the role's rows by equality; a range on {@code permission} let MySQL run it as a
+ * full primary-key scan of {@code workspace_role_permission} on a small table, so one member's
+ * authorization waited on every other custom role's locked rows. Whether a run reaches that plan
+ * depends on the shared table's size, so this case guards the behaviour while
+ * {@code WorkflowPrincipalMapperXmlTest} pins the statement shape and the custom-role cases of
+ * {@code AttachmentUploadSecurityIntegrationTest} reproduce the old wait end to end. Each case
  * commits its members and roles and deletes them afterwards.
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -55,22 +60,31 @@ class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTes
 
     /**
      * While one member's locked authorization is still open, a member with a different custom role
-     * authorizes inside a short lock wait instead of queueing behind the first member's role rows.
+     * authorizes inside a short lock wait instead of queueing behind the first member's role rows. The
+     * holder takes either the lower or the higher role id, so the other member's lookup either starts
+     * or ends next to the held rows.
      */
-    @Test
-    void membersWithDifferentCustomRolesAuthorizeWithoutWaitingOnEachOther() throws InterruptedException {
+    @ParameterizedTest
+    @CsvSource({"READ_COMMITTED,false", "READ_COMMITTED,true", "REPEATABLE_READ,false", "REPEATABLE_READ,true"})
+    void membersWithDifferentCustomRolesAuthorizeWithoutWaitingOnEachOther(
+            Isolation isolation, boolean holderHasTheHigherRole) throws InterruptedException {
         List<Permission> grantable = List.copyOf(Permission.grantableSet());
-        List<Permission> firstGrants = grantable.subList(0, ROLE_SIZE);
-        List<Permission> secondGrants = grantable.subList(ROLE_SIZE, 2 * ROLE_SIZE);
-        User first = customRoleMember(firstGrants);
-        User second = customRoleMember(secondGrants);
+        List<Permission> lowerGrants = grantable.subList(0, ROLE_SIZE);
+        List<Permission> higherGrants = grantable.subList(ROLE_SIZE, 2 * ROLE_SIZE);
+        User lower = customRoleMember(lowerGrants);
+        User higher = customRoleMember(higherGrants);
+        User holder = holderHasTheHigherRole ? higher : lower;
+        User other = holderHasTheHigherRole ? lower : higher;
+        Set<Permission> holderGrants = EnumSet.copyOf(holderHasTheHigherRole ? higherGrants : lowerGrants);
+        Set<Permission> otherGrants = EnumSet.copyOf(holderHasTheHigherRole ? lowerGrants : higherGrants);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-                assertEquals(EnumSet.copyOf(firstGrants),
-                        workspaceService.lockedMemberPermissionsFor(workspace.getId(), first.getId()));
-                Future<Set<Permission>> other = executor.submit(() -> authorizeOnItsOwnConnection(second));
-                assertEquals(EnumSet.copyOf(secondGrants), await(other));
+            transaction(isolation).executeWithoutResult(status -> {
+                assertEquals(holderGrants,
+                        workspaceService.lockedMemberPermissionsFor(workspace.getId(), holder.getId()));
+                Future<Set<Permission>> authorization =
+                        executor.submit(() -> authorizeOnItsOwnConnection(other, isolation));
+                assertEquals(otherGrants, await(authorization));
                 status.setRollbackOnly();
             });
         } finally {
@@ -80,12 +94,13 @@ class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTes
     }
 
     /** A permission no custom role may grant confers nothing even when its row is stored on the role. */
-    @Test
-    void anInertPermissionStoredOnACustomRoleConfersNothing() {
+    @ParameterizedTest
+    @EnumSource(value = Permission.class, names = {"SSO_MANAGE", "WORKSPACE_DELETE"})
+    void anInertPermissionStoredOnACustomRoleConfersNothing(Permission inert) {
         User member = customRoleMember(List.of(Permission.CAMPAIGN_VIEW));
         assertEquals(1, jdbcTemplate.update(
                 "INSERT INTO workspace_role_permission (workspace_role_id, permission) VALUES (?, ?)",
-                committedRoles.getLast(), Permission.SSO_MANAGE.name()));
+                committedRoles.getLast(), inert.name()));
 
         Set<Permission> permissions = new TransactionTemplate(transactionManager).execute(status ->
                 workspaceService.lockedMemberPermissionsFor(workspace.getId(), member.getId()));
@@ -121,21 +136,29 @@ class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTes
         return member;
     }
 
-    private Set<Permission> authorizeOnItsOwnConnection(User member) {
+    private Set<Permission> authorizeOnItsOwnConnection(User member, Isolation isolation) {
         authenticateAs(member, workspace.getId());
         try {
-            return new TransactionTemplate(transactionManager).execute(status -> {
+            return transaction(isolation).execute(status -> {
+                long previousLockWait = Objects.requireNonNull(jdbcTemplate.queryForObject(
+                        "SELECT @@SESSION.innodb_lock_wait_timeout", Long.class));
                 jdbcTemplate.execute(
                         "SET SESSION innodb_lock_wait_timeout = " + SECOND_MEMBER_LOCK_WAIT_SECONDS);
                 try {
                     return workspaceService.lockedMemberPermissionsFor(workspace.getId(), member.getId());
                 } finally {
-                    jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = DEFAULT");
+                    jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = " + previousLockWait);
                 }
             });
         } finally {
             clearAuthentication();
         }
+    }
+
+    private TransactionTemplate transaction(Isolation isolation) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setIsolationLevel(isolation.value());
+        return template;
     }
 
     private static Set<Permission> await(Future<Set<Permission>> authorization) {

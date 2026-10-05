@@ -18,9 +18,9 @@ public interface RoleMapper {
     WorkspaceRole findRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /**
-     * Locks and returns every permission row of one custom role, inert ones included, reading no other
-     * role's rows (#1578). Callers lock the role with {@link #lockRole} first and drop the permissions
-     * {@code Permission.isGrantable} rejects.
+     * Locks and returns every permission row of one custom role, inert ones included, by an equality on
+     * the role that MySQL runs as a lookup of that role's rows alone (#1578). Callers lock the role with
+     * {@link #lockRole} first and drop the permissions {@code Permission.isGrantable} rejects.
      * @param workspaceId the owning workspace
      * @param roleId the custom role
      * @return the role's permission names in ascending order

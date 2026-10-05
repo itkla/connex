@@ -13,6 +13,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -126,8 +128,9 @@ class WorkflowPrincipalLockServiceTest {
             () -> principals.requirePermissions(Set.of(Permission.TASK_CREATE)));
     }
 
-    @Test
-    void anInertPermissionStoredOnTheActorsRoleConfersNothing() {
+    @ParameterizedTest
+    @EnumSource(value = Permission.class, names = {"SSO_MANAGE", "WORKSPACE_DELETE"})
+    void anInertPermissionStoredOnTheActorsRoleConfersNothing(Permission inert) {
         WorkflowPrincipalLockService service = service();
         when(userMapper.lockById(7)).thenReturn(7);
         when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
@@ -135,7 +138,7 @@ class WorkflowPrincipalLockServiceTest {
             .thenReturn(membership(5, 7, "member", 11, "active"));
         when(roleMapper.lockRole(5, 11)).thenReturn(11);
         when(roleMapper.lockPermissions(5, 11)).thenReturn(
-            List.of(Permission.RULE_MANAGE.name(), Permission.SSO_MANAGE.name()));
+            List.of(Permission.RULE_MANAGE.name(), inert.name()));
 
         WorkflowPrincipalLockService.LockedPrincipals principals =
             service.lockUserMutation(5, 7, Set.of(7), Set.of(), true);
@@ -143,7 +146,7 @@ class WorkflowPrincipalLockServiceTest {
         principals.requirePermissions(Set.of(Permission.RULE_MANAGE));
         assertThrows(
             ForbiddenException.class,
-            () -> principals.requirePermissions(Set.of(Permission.SSO_MANAGE)));
+            () -> principals.requirePermissions(Set.of(inert)));
     }
 
     @Test

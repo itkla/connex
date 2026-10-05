@@ -317,7 +317,7 @@ src/main/java/ooo/klae/connex/backend/mappers/InviteLinkMapper.java	b959958f0b30
 src/main/java/ooo/klae/connex/backend/mappers/MailConfigMapper.java	37696c6c7267a893db7d8006c3ac9199675be4abdade0ed312db0ecdd45eb2fb
 src/main/java/ooo/klae/connex/backend/mappers/NativeConnectSessionMapper.java	00dccb87a070df2ce3db5b08ef42868a76de578f8b977a2d7029576a55199200
 src/main/java/ooo/klae/connex/backend/mappers/OrgMemberMapper.java	5e211104752370365b0f44350bfcb040d0296e8d4cb84e873db1b10a9197c5ae
-src/main/java/ooo/klae/connex/backend/mappers/RoleMapper.java	4e7e0da1d5a6ccf08752d190d401047e477220c3ddfc6cd12b7bce3752126cfb
+src/main/java/ooo/klae/connex/backend/mappers/RoleMapper.java	3ac6cbccebf4bc95777b5817edde4bd2db1638bb8267fbffc8397f5636f0c611
 src/main/java/ooo/klae/connex/backend/mappers/SecretValueMapper.java	4e80a28259fe8bf05fa0f8fad8da2db2d5714ff673b031a6a42c6d512419f0ed
 src/main/java/ooo/klae/connex/backend/mappers/SpringSessionMapper.java	54fd10fbf9f09572c3ee93be404ad3f92027715658ce5fea1254fc718299c543
 src/main/java/ooo/klae/connex/backend/mappers/SsoConnectionMapper.java	69b016f21ad79eb361eecbdae51921a25afab34649206cd2ebab6851949c9002
