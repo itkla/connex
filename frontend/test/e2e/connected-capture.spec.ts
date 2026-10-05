@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import type {
     CaptureOverview,
@@ -127,6 +127,29 @@ function overviewResponse(provider: ProviderCaptureOverview): CaptureOverview {
     return { providers: [provider] };
 }
 
+/**
+ * Reads whether this instance switches Google capture on, the same server state the settings page
+ * renders the capture card from. The spec branches on it rather than on whether the card has painted
+ * yet, because the panel requests the capture overview in either case (#1797).
+ */
+async function googleCaptureEnabled(page: Page): Promise<boolean> {
+    const response = await page.request.get('/api/capabilities');
+    expect(response.status()).toBe(200);
+    const capabilities: unknown = await response.json();
+    if (
+        typeof capabilities !== 'object'
+        || capabilities === null
+        || !('connectedCapture' in capabilities)
+        || typeof capabilities.connectedCapture !== 'object'
+        || capabilities.connectedCapture === null
+        || !('google' in capabilities.connectedCapture)
+        || typeof capabilities.connectedCapture.google !== 'boolean'
+    ) {
+        throw new Error('Invalid capabilities response');
+    }
+    return capabilities.connectedCapture.google;
+}
+
 for (const locale of ['en', 'ja'] as const) {
     test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page }) => {
         let captureRequests = 0;
@@ -206,19 +229,24 @@ for (const locale of ['en', 'ja'] as const) {
         });
 
         await useLocale(page, locale);
+        const captureEnabled = await googleCaptureEnabled(page);
+        const overviewLoaded = page.waitForResponse((response) =>
+            new URL(response.url()).pathname === '/api/account/connections/capture');
         await page.goto('/account/connections');
+        await overviewLoaded;
 
         const configure = page.getByRole('button', {
             name: message(locale, 'account', 'AccountCaptureProvider.configure'),
         });
-        if (!await configure.isVisible()) {
-            expect(captureRequests).toBe(0);
+        if (!captureEnabled) {
+            await expect(configure).toHaveCount(0);
             await expect(page.getByText(
                 message(locale, 'account', 'AccountCaptureProvider.title'),
             )).toHaveCount(0);
             return;
         }
 
+        await expect(configure).toBeVisible();
         expect(captureRequests).toBeGreaterThan(0);
         await configure.click();
         await expect(page.getByRole('heading', {
