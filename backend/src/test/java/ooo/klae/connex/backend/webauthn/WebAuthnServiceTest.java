@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.webauthn;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.any;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.webauthn.api.Bytes;
@@ -275,6 +277,46 @@ class WebAuthnServiceTest {
                 any(), any(), any(), any(), any(), any(), any(), any());
         verify(relyingParty, never()).registerCredential(any());
         verify(credentials, never()).save(any());
+    }
+
+    /**
+     * A failed read of the refused account's label leaves the audit label empty; it never turns the
+     * refusal into a different error for the caller.
+     */
+    @Test
+    void finishRegistrationKeepsTheBootstrapRefusalWhenTheAuditLabelCannotBeRead() {
+        UserMapper userMapper = mock(UserMapper.class);
+        PasskeyBootstrapConfirmationPolicy policy = mock(PasskeyBootstrapConfirmationPolicy.class);
+        AuditService auditService = mock(AuditService.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class),
+                mock(UserCredentialRepository.class),
+                mock(WebauthnUserEntityMapper.class),
+                mock(WebauthnCredentialMapper.class),
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                policy,
+                auditService);
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userMapper.currentSessionEpoch(7)).thenReturn(3);
+        when(userMapper.getUserById(7)).thenThrow(new DataRetrievalFailureException("unavailable"));
+        when(policy.requiresConfirmation(7)).thenReturn(true);
+
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                () -> service.finishRegistration(
+                        7, 3, false, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+
+        assertEquals("Confirm the emailed enrollment link before adding the first passkey",
+                refusal.getMessage());
+        verify(auditService).deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION,
+                "user",
+                7,
+                null,
+                null,
+                null,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
     }
 
     @Test

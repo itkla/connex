@@ -873,9 +873,12 @@ class AuditServiceTest {
         verify(auditIntegrityService).appendIndependent(appended.capture());
         AuditLog row = appended.getValue();
         assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, row.getAction());
+        assertEquals("user", row.getEntityType());
         assertEquals(7, row.getEntityId());
         assertEquals(7, row.getActorId());
+        assertEquals("Admin", row.getActorLabel());
         assertEquals("Admin", row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
         assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY, row.getSummary());
         assertTrue(row.getContext().contains(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
         assertNull(row.getWorkspaceId());
