@@ -71,6 +71,8 @@ import tools.jackson.databind.ObjectMapper;
 @UnenrolledPrivilegedFixture
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TeamIsolationIntegrationTest {
+    private static final int SIMULATED_STEP_UP_PASSKEY_ROW_ID = 0;
+
     private static final String PASSWORD = "Team-Test-Pw1!";
 
     @Autowired private WebApplicationContext context;
@@ -363,7 +365,7 @@ class TeamIsolationIntegrationTest {
         MockHttpServletRequest stepUpRequest =
             new MockHttpServletRequest(context.getServletContext());
         stepUpRequest.setSession(actorSession);
-        sessionSecurityService.markStepUp(stepUpRequest, actor.getId());
+        sessionSecurityService.markStepUp(stepUpRequest, actor.getId(), SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         mockMvc.perform(delete(
                 "/api/workspaces/{id}/members/{userId}",

@@ -59,11 +59,18 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
+import ooo.klae.connex.backend.session.StepUpProof;
+import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
+import ooo.klae.connex.backend.webauthn.RegisteredPasskey;
+import ooo.klae.connex.backend.webauthn.VerifiedPasskey;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.core.type.TypeReference;
 
 class WebAuthnControllerTest {
+    private static final EnrollmentEvidence NO_EVIDENCE = new EnrollmentEvidence(null, null);
+    private static final int NEW_PASSKEY_ROW_ID = 55;
+    private static final int SIGNING_PASSKEY_ROW_ID = 41;
     private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
     private final AuthService authService = mock(AuthService.class);
     private final WebAuthnJsonMapper json = new TooLargeMapper();
@@ -209,7 +216,7 @@ class WebAuthnControllerTest {
             () -> controller.registerVerify("work key", "{}", request, response));
 
         verify(webAuthnService, never()).finishRegistration(
-            anyInt(), any(), anyBoolean(), any(), any(), any());
+            anyInt(), any(), anyBoolean(), any(), any(), any(), any());
     }
 
     @Test
@@ -230,14 +237,52 @@ class WebAuthnControllerTest {
                 .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
                 .thenReturn(credential);
         when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
-        when(webAuthnService.finishRegistration(7, 6, false, options, credential, "work key"))
-                .thenReturn(record);
+        when(webAuthnService.finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key"))
+                .thenReturn(new RegisteredPasskey(record, NEW_PASSKEY_ROW_ID));
         when(record.getCredentialId()).thenReturn(Bytes.random());
 
         registrationController.registerVerify("work key", "{}", request, response);
 
         verify(sessionSecurityService).sessionEpoch(request.getSession(false));
-        verify(webAuthnService).finishRegistration(7, 6, false, options, credential, "work key");
+        verify(webAuthnService).finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key");
+    }
+
+    /**
+     * The controller hands registration the session's stable row identity and the passkey behind
+     * its fresh step-up, then stamps the session with the passkey it just registered (#1534).
+     */
+    @Test
+    void registerVerifyPassesTheSessionsProvenanceEvidenceAndStampsTheNewPasskey() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        CredentialRecord record = mock(CredentialRecord.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        StepUpProof proof = new StepUpProof(SIGNING_PASSKEY_ROW_ID, 1_000L);
+        EnrollmentEvidence evidence = new EnrollmentEvidence("primary-a", proof);
+        when(creationOptions.load(request)).thenReturn(options);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
+                .thenReturn(credential);
+        when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
+        when(sessionSecurityService.sessionPrimaryId(request)).thenReturn("primary-a");
+        when(sessionSecurityService.recentStepUpProof(request.getSession(false), 7)).thenReturn(proof);
+        when(webAuthnService.finishRegistration(7, 6, false, evidence, options, credential, "work key"))
+                .thenReturn(new RegisteredPasskey(record, NEW_PASSKEY_ROW_ID));
+        when(record.getCredentialId()).thenReturn(Bytes.random());
+
+        registrationController.registerVerify("work key", "{}", request, response);
+
+        InOrder order = inOrder(webAuthnService, sessionSecurityService);
+        order.verify(webAuthnService)
+                .finishRegistration(7, 6, false, evidence, options, credential, "work key");
+        order.verify(sessionSecurityService).markStepUp(request, 7, NEW_PASSKEY_ROW_ID);
     }
 
     @Test
@@ -355,7 +400,7 @@ class WebAuthnControllerTest {
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenReturn(assertion);
-        when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
+        when(webAuthnService.finishLogin(options, assertion)).thenReturn(new VerifiedPasskey(user, SIGNING_PASSKEY_ROW_ID));
         when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(true);
 
         assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
@@ -375,7 +420,7 @@ class WebAuthnControllerTest {
         assertThrows(BadCredentialsException.class,
             () -> controller.stepUpVerify("{}", request, response));
 
-        verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt(), anyInt());
         verify(auditService).recordStrictFailureIndependentScoped(
                 eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
                 eq("Failed passkey step-up attempt"), eq("missing_challenge"));
@@ -416,6 +461,8 @@ class WebAuthnControllerTest {
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenReturn(assertion);
         when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.finishStepUp(any(), eq(options), eq(assertion)))
+            .thenReturn(new VerifiedPasskey(user, SIGNING_PASSKEY_ROW_ID));
 
         Map<String, String> result = stepUpController.stepUpVerify("{}", request, response);
 
@@ -424,7 +471,7 @@ class WebAuthnControllerTest {
         grantOrder.verify(auditService).recordStrictIndependentScoped(
                 eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
                 eq("Passkey step-up completed"), isNull());
-        grantOrder.verify(sessionSecurityService).markStepUp(request, 7);
+        grantOrder.verify(sessionSecurityService).markStepUp(request, 7, SIGNING_PASSKEY_ROW_ID);
         assertEquals("Recent authentication refreshed", result.get("message"));
     }
 
@@ -508,7 +555,7 @@ class WebAuthnControllerTest {
         assertThrows(IllegalStateException.class,
                 () -> stepUpController.stepUpVerify("{}", request, response));
 
-        verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt(), anyInt());
     }
 
     @Test
@@ -544,7 +591,7 @@ class WebAuthnControllerTest {
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenReturn(assertion);
-        when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
+        when(webAuthnService.finishLogin(options, assertion)).thenReturn(new VerifiedPasskey(user, SIGNING_PASSKEY_ROW_ID));
         when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(false);
         when(authService.establishAuthenticatedSession(user, request, response)).thenReturn(user);
 
@@ -555,7 +602,7 @@ class WebAuthnControllerTest {
                 eq("auth.login.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
                 eq("User 7 logged in with passkey"), isNull());
         grantOrder.verify(authService).establishAuthenticatedSession(user, request, response);
-        grantOrder.verify(sessionSecurityService).markStepUp(request, 7);
+        grantOrder.verify(sessionSecurityService).markStepUp(request, 7, SIGNING_PASSKEY_ROW_ID);
     }
 
     @Test
@@ -572,7 +619,7 @@ class WebAuthnControllerTest {
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
                 .thenReturn(assertion);
-        when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
+        when(webAuthnService.finishLogin(options, assertion)).thenReturn(new VerifiedPasskey(user, SIGNING_PASSKEY_ROW_ID));
         when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(false);
         when(authService.establishAuthenticatedSession(user, request, response)).thenReturn(user);
         doThrow(new IllegalStateException("audit unavailable"))
@@ -584,7 +631,7 @@ class WebAuthnControllerTest {
                 () -> loginController.authenticateVerify("{}", request, response));
 
         verify(authService, never()).establishAuthenticatedSession(any(), any(), any());
-        verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt(), anyInt());
     }
 
     @Test
@@ -651,7 +698,7 @@ class WebAuthnControllerTest {
             () -> controller.registerVerify("work key", "{}", request, response));
 
         verify(webAuthnService, never()).finishRegistration(
-            anyInt(), any(), anyBoolean(), any(), any(), any());
+            anyInt(), any(), anyBoolean(), any(), any(), any(), any());
         verifyBootstrapRefusalAuditedStrictlyOnce(user);
     }
 
@@ -679,14 +726,14 @@ class WebAuthnControllerTest {
                 .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
                 .thenReturn(credential);
         when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
-        when(webAuthnService.finishRegistration(7, 6, false, options, credential, "work key"))
+        when(webAuthnService.finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key"))
                 .thenThrow(new ForbiddenException(
                         "Confirm the emailed enrollment link before adding the first passkey"));
 
         assertThrows(ForbiddenException.class,
             () -> registrationController.registerVerify("work key", "{}", request, response));
 
-        verify(webAuthnService).finishRegistration(7, 6, false, options, credential, "work key");
+        verify(webAuthnService).finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key");
         verify(auditService, never()).recordStrictFailureIndependentScoped(
             any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailureScoped(
@@ -714,13 +761,13 @@ class WebAuthnControllerTest {
                 .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
                 .thenReturn(credential);
         when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
-        when(webAuthnService.finishRegistration(7, 6, true, options, credential, "work key"))
-                .thenReturn(record);
+        when(webAuthnService.finishRegistration(7, 6, true, NO_EVIDENCE, options, credential, "work key"))
+                .thenReturn(new RegisteredPasskey(record, NEW_PASSKEY_ROW_ID));
         when(record.getCredentialId()).thenReturn(Bytes.random());
 
         registrationController.registerVerify("work key", "{}", request, response);
 
-        verify(webAuthnService).finishRegistration(7, 6, true, options, credential, "work key");
+        verify(webAuthnService).finishRegistration(7, 6, true, NO_EVIDENCE, options, credential, "work key");
         verify(sessionSecurityService).clearPasskeyBootstrapConfirmation(request);
     }
 
