@@ -464,6 +464,31 @@ class CampaignDispatchServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void anAudienceAttemptWhoseRenewalFindsItsRowSweptNeverReservesOrEgresses(boolean personless) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDelivery attempt = delivery();
+        if (personless) {
+            attempt.setPersonId(null);
+        }
+        CampaignDispatchService service = audienceDispatch(deliveryMapper, dispatcher, admission, attempt);
+        when(deliveryMapper.renewAudienceClaim(eq(7), eq(13), anyLong())).thenReturn(0);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper).claim(eq(7), eq(13), anyLong());
+        verify(deliveryMapper).renewAudienceClaim(eq(7), eq(13), anyLong());
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        verifyNoInteractions(dispatcher);
+        verify(deliveryMapper, never()).markDispatched(anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).markFailed(anyInt(), anyInt(), anyString(), any());
+        verify(deliveryMapper, never()).markSkipped(anyInt(), anyInt(), anyString());
+        verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), any());
+    }
+
+    @ParameterizedTest
     @CsvSource({"recovered, false", "recovered, true", "legacy, false", "legacy, true",
             "detail, false", "detail, true", "marker, false", "marker, true"})
     void refusedClaimsPreserveEarlierSubmissionUncertainty(String historyKind, boolean refusedAtAdmission) {
@@ -575,7 +600,7 @@ class CampaignDispatchServiceTest {
         }
         verify(sendMapper, times(1)).refreshCounters(7, 11);
         verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), anyString());
-        verify(deliveryMapper, never()).claim(anyInt(), anyInt());
+        verify(deliveryMapper, never()).claim(anyInt(), anyInt(), anyLong());
     }
 
     @Test
@@ -740,6 +765,37 @@ class CampaignDispatchServiceTest {
         return new CampaignDispatchService(
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+    }
+
+    private static CampaignDispatchService audienceDispatch(
+            CampaignDeliveryMapper deliveryMapper,
+            MessageDispatcher dispatcher,
+            CampaignFrequencyAdmissionService admission,
+            CampaignDelivery attempt) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        CampaignSend send = triggeredSend();
+        send.setOrigin("audience");
+        send.setStatus("running");
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.getSend(7, 11)).thenReturn(send);
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(
+                ResolvedDeliveryProvider.of("smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.none()));
+        when(providerRouter.dispatcherFor("smtp")).thenReturn(dispatcher);
+        when(deliveryMapper.pendingDeliveryIdsPage(7, 11, 200)).thenReturn(List.of(13));
+        when(deliveryMapper.claim(eq(7), eq(13), anyLong())).thenReturn(1);
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+        when(deliveryMapper.getDelivery(7, 13)).thenReturn(attempt);
+        return new CampaignDispatchService(
+                sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
+                providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
     }
 

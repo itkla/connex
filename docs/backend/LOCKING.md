@@ -986,9 +986,16 @@ complete a replacement claim. SMTP is consequently a best-effort campaign transp
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
-Audience delivery dispatch claims with a bare `pending` → `dispatching` compare-and-set and stores
-no lease owner, lease expiry, or attempt-target fingerprint. Its only persisted age anchor is the
-frequency reservation, which the worker writes as database time plus the hard provider deadline in
+Audience delivery dispatch claims with a `pending` → `dispatching` compare-and-set that also writes
+the attempt's own lease end time, `audience_lease_until` (#1773), and stores no lease owner or
+attempt-target fingerprint. The `dispatch_lease_*` columns stay a triggered claim's, so
+`dispatch_lease_owner IS NULL` still identifies an audience row to every statement, including the
+previous release's, which never reads the new column. An audience row is never returned to `pending`,
+so no other worker can hold it and an owner would fence nothing; the worker renews the end time once
+just before egress, by a compare-and-set that does not require the lease to be live, because the only
+actor that can take the row is a recovery sweep and the row's status decides that race. The lease end
+time ages an attempt that never reserved; for one that did, the anchor is the frequency reservation,
+which the worker writes as database time plus the hard provider deadline in
 `CampaignFrequencyAdmissionService`'s short workspace → delivery transaction before egress, after
 capturing that deadline. A worker that dies between reservation and its terminal write therefore
 leaves a `dispatching` row whose reservation would cap the contact/channel for the whole frequency
@@ -1021,8 +1028,8 @@ cannot land between the proof and the completion; because no delivery can return
 `dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
 final state. A `dispatching`
 row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
-it after its terminal write, an attempt it abandons after reserving is swept and settled by a later
-pass, and one abandoned before reserving is left to the dispatch loop's own settlement. That send is
+it after its terminal write, and an attempt it abandons, before or after reserving, is swept and
+settled by a later pass. That send is
 selected by a durable predicate, not remembered from the sweep, because a marked row no longer
 matches the sweep: a settlement that fails is found again on a later pass, and scheduler discovery
 already returns a workspace that owns a `running` send. The predicate deliberately carries no
@@ -1038,11 +1045,14 @@ counter-disagreement selector: comparing `failed_count` with a `COUNT(*)` of fai
 dependent subquery over every audience send's delivery history, which the scheduler would pay on
 every tick, and putting the reconciliation `EXISTS` first does not bound it, because
 `reconciliation_required_at` is not in `idx_campaign_delivery_send_status` and the probe therefore
-reads the same failed rows from the clustered index. The bound that leaves: if a pass dies between
-the sweep's compare-and-set and its counter refresh, an already completed send under-reports
-`failed_count` until an operator resolves the reconciliation row the sweep created, which refreshes
-the counters itself. The delivery row is terminal and reconcilable throughout, so nothing is lost
-except the send-level counter. Settlement takes the same single-row auto-commit writes on
+reads the same failed rows from the clustered index. The bound that leaves: if a pass dies after a
+sweep's compare-and-set and before the matching counter refresh, including between settlement's
+completion and the refresh that follows it, the send can be left `completed` with `failed_count`
+missing every row that pass marked, up to one page. Resolving an ambiguous row's reconciliation
+refreshes the counters, but a definitive abandonment (below) creates no reconciliation row, so its
+under-report remains. A pass that dies between a compare-and-set and its event append also loses that
+row's `failed` event. The delivery rows themselves are terminal throughout, and the ambiguous ones stay
+reconcilable. Settlement takes the same single-row auto-commit writes on
 `campaign_send` the dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
 sweep loses its `status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then
 attaches its provider id and message id to that swept row through a second single-row
@@ -1069,8 +1079,32 @@ reconciliation with no message id — a worker that never returns, a replay that
 return refused because a newer attempt held the claim, a terminal write or late attach that could
 not be persisted, and a receipt that names no message id from either attempt —
 so their webhooks still match no row and operators check the provider by hand for every triggered
-item (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows
-without a person (which are never reserved), have no age anchor and are not swept.
+item (`docs/DELIVERABILITY.md` §3.1).
+
+Audience attempts abandoned with no frequency reservation are swept by their lease (#1773): a person
+row whose worker died before reserving, or after releasing its reservation before egress, and a row
+with no person, which never reserves. A row is due once its `audience_lease_until` has been expired for
+the same safety-margin grace. A row an older version claimed carries no lease and is due once it has
+been idle, by its own `updated_at` clock, for three times the maximum lease. That is a heuristic rather
+than proof the older worker is gone, because older code bounds the provider call but not the
+preparation before it. What holds regardless: a person row's late worker can no longer reserve, since
+reservation requires `dispatching`, so it cannot send and the definitive outcome below stays true; the
+cost is a delivery that fails instead of going out late. A person-less row's late older worker may
+still reach the provider; the row is held for reconciliation either way, but that worker's
+late-correlation statement matches only the reservation sweep's marker, so its provider id is not
+attached and a bounce cannot resolve to the row. Both need an older worker stalled past that idle time
+while a newer version runs beside it, which a restart deploy of the single backend never allows. A person
+row with no reservation never reached the provider — reservation precedes egress and is released only
+where egress provably did not happen, including a rejection the adapter proves preceded egress — so it
+becomes a definitive `failed` row with no
+reconciliation and no frequency cap. A row with no person may have reached the provider, so it becomes
+an ambiguous `failed` row requiring reconciliation, like an expired reservation, and a late worker's
+provider correlation still attaches to it. Neither is replayed. The statements have the reservation
+sweep's shape and lock footprint — one auto-commit compare-and-set per row on the delivery joined to its
+send for `origin` — and the owning sends are settled the same way. Scheduler discovery gains a matching
+row-driven arm, which reads `idx_campaign_delivery_unleased_reservation` with `status`,
+`dispatch_lease_owner` and `frequency_reserved_at` as equalities, so it reads only unreserved
+outstanding attempts.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
