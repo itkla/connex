@@ -130,7 +130,8 @@ function overviewResponse(provider: ProviderCaptureOverview): CaptureOverview {
 /**
  * Reads whether this instance switches Google capture on, the same server state the settings page
  * renders the capture card from. The spec branches on it rather than on whether the card has painted
- * yet, because the panel requests the capture overview in either case (#1797).
+ * yet, because the panel requests the capture overview in either case (#1797). The CI stack runs
+ * with capture off, so only that branch runs there.
  */
 async function googleCaptureEnabled(page: Page): Promise<boolean> {
     const response = await page.request.get('/api/capabilities');
@@ -246,8 +247,11 @@ for (const locale of ['en', 'ja'] as const) {
             return;
         }
 
-        await expect(configure).toBeVisible();
         expect(captureRequests).toBeGreaterThan(0);
+        await page.getByRole('button', {
+            name: message(locale, 'account', 'AccountConnections.manage'),
+        }).click();
+        await expect(configure).toBeVisible();
         await configure.click();
         await expect(page.getByRole('heading', {
             name: message(locale, 'account', 'AccountCapturePolicy.title'),
