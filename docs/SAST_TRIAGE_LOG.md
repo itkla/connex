@@ -1132,9 +1132,10 @@ split of `TenantWorkScope.unrouted` that separates read and write suppliers. The
 [#1815](https://github.com/itkla/connex/issues/1815).
 
 **The mechanism.** CodeQL resolves the `work.get()` in `TenantWorkScope.runWithOverride` by merging
-every lambda that reaches it. Every `TenantWorkScope` entry funnels through that one `Supplier`, so a
-GET handler that only reads control-plane state "reached" unrelated writes. On `main`, 34 of the
-rule's 47 results ended at the same AI-budget write, `AiBudgetControlOperations:52`.
+every lambda that reaches it. Every `TenantWorkScope` entry funnels through that one `Supplier`. On
+`main`, 34 of the rule's 47 results therefore carried the identical merged sink set: 100 reported
+locations, mostly AI-feature and provider-connection persistence, whichever handler the flow started
+from.
 
 **The change.** `TenantWorkScope.unroutedRead(ControlPlaneRead<T>)` keeps `unrouted`'s routing
 semantics, but goes through its own functional interface and never through the shared `Supplier`.
@@ -1147,16 +1148,19 @@ The read-only control-plane sites that GET flows entered moved onto it:
 
 Every converted lambda was traced to its SQL, first by a classification pass and then by an
 independent review. The review found one shared-state mutation, the health probe's guard-status
-tracking, which moved out of the read before merge. `backend/AGENTS.md` records the rule.
+tracking, which moved out of the read before merge. It also listed pure reads left on `unrouted`
+inside the OAuth callback and the export grant redemption. Both flows genuinely write, so converting
+those reads would not change their results. `backend/AGENTS.md` records the rule.
 
 | Field | Value |
 | --- | --- |
 | Before | `main` `e9825428c`, analysis `1892160414`: 47 results for the rule (72 in total) |
 | After | `refs/pull/2003/merge` `222237959`, analysis `1892355483`: 22 results (47 in total) |
+| No result appears only after | 0 |
 
-**Results that no longer reproduce (25).** These are the sources of the dismissed alerts #67
-(`UserController:73`), #153 (`ReportController:126`), #186 (`DealController:854`) and #189
-(`ShareController:35`), plus:
+**Results that no longer reproduce (25).** They include the four whose entries named this split as a
+re-evaluation trigger: #67 (`UserController:73`), #153 (`ReportController:126`), #186
+(`DealController:854`) and #189 (`ShareController:35`). The other 21 are:
 - `AiOrganizationBudgetController:27`;
 - `AttachmentController` (4);
 - `BusinessCardController:100`;
@@ -1169,26 +1173,42 @@ tracking, which moved out of the read before merge. `backend/AGENTS.md` records 
 - `ProviderCaptureController:44` and `:68`;
 - `ProviderConnectionController:37`.
 
-The four dismissed alerts should close as fixed on `main`'s first analysis after the merge; they
-need no fresh disposition.
+Their alerts need no fresh disposition, because the results behind them no longer exist.
 
-**Results that remain (22), by class:**
-- **11 audit appends** at `AuditIntegrityService:120`. Exports, audit views, AI assistant reads and
-  the report narrative record an audit row on GET. These are genuine writes, unaffected by the split.
-- **3 genuine control-plane writes on GET flows**, which correctly stay on `unrouted`:
-  - `DataSubjectRequestController:61`, the disclosure audit at `DataSubjectRequestService:137`;
-  - `ProviderConnectionController:47`, where the OAuth callback consumes its state at
-    `ProviderConnectionService:334`;
-  - `TenantLifecycleController:67`, the export grant redemption at `TenantExportGrantService:61`.
-- **2 through `runAs` → `withWorkspacePlacement`:** `DeliveryUnsubscribeController:53` and
-  `DocumentAcceptanceController:65`, already dispositioned as #164 and #165. The routed entries were
-  not split here.
-- **2 through `inWorkspace`:** `TenantDiagnosticsController:32` and `:40`, via
-  `TenantDiagnosticsService:126`. Same merge, through the routed entry; a routed read entry would be
-  the next split.
-- **4 that never went through `unrouted`:**
-  - `RadarController:36` and `:47`, now represented by `RelationshipSignalWriteService:39`;
-  - `AiAssistantController:340` → `AiChatTurnPersistenceService:1124`;
-  - `WorkflowManualRunController:44` → `WorkflowManualRunService:292`.
+**Results that remain (22).** Every one already has a dismissed alert.
+- **11 audit appends**, each with a 3-location sink set in `AuditIntegrityService`:
+  - `AiAssistantController:136`, `:274`, `:367` and `:395`;
+  - `AuditController:49`;
+  - `ExportController:55`, `:83`, `:102` and `:111`;
+  - `OrgAuditController:46`;
+  - `ReportController:180`.
 
-  Each keeps its existing disposition.
+  These are dismissed `won't fix` as audited reads (#32, #35, #157, #158, #167–#173) and are
+  unaffected by the split.
+- **7 still carrying the merged sink set**, because they still enter the shared `Supplier`:
+  - **Through `unrouted`, around a genuine write:**
+    - `ProviderConnectionController:47` (#58/#134, `won't fix`): the OAuth callback stores
+      credentials and consumes its state.
+    - `TenantLifecycleController:67` (#66/#147, `won't fix`): the export grant redemption.
+    - `DataSubjectRequestController:61` (#41/#120): see the record defect below.
+  - **Through `runAs` → `withWorkspacePlacement`:** `DeliveryUnsubscribeController:53` (#164) and
+    `DocumentAcceptanceController:65` (#165), false positives per
+    [#1599](https://github.com/itkla/connex/issues/1599).
+  - **Through `inWorkspace`:** `TenantDiagnosticsController:32` (#65/#146) and `:40` (#64/#145),
+    false positives that assemble read-only metadata. A routed read entry would be the next split.
+- **`RadarController:36` and `:47`** (#57/#140 and #56/#139, false positive). On `main` they carried
+  the merged set. Their sink set now narrows to 7 locations in `RelationshipSignalWriteService`: the
+  detector-family bootstrap their recorded rationale already analyses. Disposition unchanged.
+- **`AiAssistantController:340`** (#33, `won't fix`) and **`WorkflowManualRunController:44`**
+  (#68/#148, `won't fix`). Their sink sets are their own writes and are unchanged.
+
+**Record defect found by this re-evaluation: #120 and its predecessor #41.** Their dismissal comment
+says the disclosure audit "is written by the separate recording path, not this GET". It is not.
+`DataSubjectRequestService.disclosure` writes the strict `appi.subject_request.disclosure` audit
+itself, through `unrouted` at `:137`, after assembling the disclosure. It has done so since
+`34f8dbd6e` (2026-07-22, #810), so the comment was wrong when written; the call sat at `:133` on the
+dismissal-day `main` (`b7b552a39`). The GET therefore genuinely writes one access-audit row,
+fail-closed. That is the audited-read class dispositioned `won't fix` above, not a false positive.
+
+Re-disposition follows the procedure in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) and is tracked on
+[#2004](https://github.com/itkla/connex/issues/2004).
