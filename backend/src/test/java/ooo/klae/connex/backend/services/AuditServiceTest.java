@@ -844,6 +844,63 @@ class AuditServiceTest {
     }
 
     /**
+     * The explicit-scope twin defers the same way and keeps its explicit scope: a null workspace and
+     * organization stay null even though the request's tenant context resolves both (#1995).
+     */
+    @Test
+    void deferredScopedFailureKeepsItsExplicitScopeAndTheCallTimeActor() {
+        User actor = new User();
+        actor.setId(7);
+        actor.setDisplayName("Admin");
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deferFailureScoped(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, "user", 7,
+                    null, null, "Admin", AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                    AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
+            verify(auditIntegrityService, never()).appendIndependent(any(AuditLog.class));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, row.getAction());
+        assertEquals("user", row.getEntityType());
+        assertEquals(7, row.getEntityId());
+        assertEquals(7, row.getActorId());
+        assertEquals("Admin", row.getActorLabel());
+        assertEquals("Admin", row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
+        assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY, row.getSummary());
+        assertTrue(row.getContext().contains(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
+        assertNull(row.getWorkspaceId());
+        assertNull(row.getOrgId());
+    }
+
+    /** Without a transaction the scoped twin appends at once, and a failed append never escapes. */
+    @Test
+    void deferredScopedFailureWithoutATransactionAppendsAtOnceAndNeverThrows() {
+        assertFalse(TransactionSynchronizationManager.isSynchronizationActive());
+        doThrow(new IllegalStateException("audit store unavailable"))
+                .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, "user", 7, null, null, "Admin",
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
+
+        verify(auditIntegrityService).appendIndependent(any(AuditLog.class));
+    }
+
+    /**
      * A {@code NESTED} append fails with {@link TransactionSystemException} only when its savepoint is
      * gone, as after the database rolled the whole transaction back on a deadlock: swallowing it would
      * let the caller commit only the work after the audit, so it reaches the caller (#1947).

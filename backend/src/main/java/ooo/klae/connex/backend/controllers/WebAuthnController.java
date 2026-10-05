@@ -432,14 +432,14 @@ public class WebAuthnController {
             return;
         }
         auditService.recordStrictFailureIndependentScoped(
-                "auth.passkey.bootstrap_confirmation.required",
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION,
                 "user",
                 user.getId(),
                 null,
                 null,
                 user.getDisplayName(),
-                "First-passkey enrollment refused pending emailed confirmation",
-                "bootstrap_confirmation_required");
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
         throw new ForbiddenException(
                 "Confirm the emailed enrollment link before adding the first passkey");
     }
