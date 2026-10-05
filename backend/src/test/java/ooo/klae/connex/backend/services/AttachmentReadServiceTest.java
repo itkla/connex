@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +27,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Verifies attachment labels are hydrated only from tenant-derived user ids. */
@@ -74,7 +74,7 @@ class AttachmentReadServiceTest {
         assertEquals("User Nine", second.getEntityLabel());
         assertEquals("User Seven", third.getUploadedBy().getDisplayName());
         assertNull(third.getEntityLabel());
-        verify(tenantWorkScope, times(2)).unrouted(any());
+        verify(tenantWorkScope, times(2)).unroutedRead(any());
     }
 
     @Test
@@ -102,7 +102,7 @@ class AttachmentReadServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.getAll(5, 7));
 
-        verify(tenantWorkScope, never()).unrouted(any());
+        verify(tenantWorkScope, never()).unroutedRead(any());
         verify(userMapper, never()).getDisplayNamesByIds(any());
     }
 
@@ -131,7 +131,7 @@ class AttachmentReadServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.getAll(5, 7));
 
-        verify(tenantWorkScope, never()).unrouted(any());
+        verify(tenantWorkScope, never()).unroutedRead(any());
         verify(userMapper, never()).getDisplayNamesByIds(any());
     }
 
@@ -149,7 +149,7 @@ class AttachmentReadServiceTest {
         assertEquals("Current User", currentUploader.getUploadedBy().getDisplayName());
         assertEquals("Current User", currentTarget.getUploadedBy().getDisplayName());
         assertEquals("Current User", currentTarget.getEntityLabel());
-        verify(tenantWorkScope, never()).unrouted(any());
+        verify(tenantWorkScope, never()).unroutedRead(any());
     }
 
     @Test
@@ -170,7 +170,7 @@ class AttachmentReadServiceTest {
         assertThrows(IllegalStateException.class,
             () -> service.getActiveWorkspaceMemberLabel(5, 9));
 
-        verify(tenantWorkScope, never()).unrouted(any());
+        verify(tenantWorkScope, never()).unroutedRead(any());
         verify(userMapper, never())
             .getActiveWorkspaceMemberDisplayNamesByIds(5, List.of(9));
     }
@@ -186,14 +186,14 @@ class AttachmentReadServiceTest {
         assertSame(attachment, hydrated);
         assertEquals("Uploader Seven", attachment.getUploadedBy().getDisplayName());
         assertEquals("Member Nine", attachment.getEntityLabel());
-        verify(tenantWorkScope, never()).unrouted(any());
+        verify(tenantWorkScope, never()).unroutedRead(any());
         verify(userMapper, never()).getDisplayNamesByIds(any());
     }
 
     private void allowUnroutedWork() {
-        when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(0);
-            return work.get();
+        when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation -> {
+            ControlPlaneRead<?> read = invocation.getArgument(0);
+            return read.read();
         });
     }
 

@@ -88,6 +88,25 @@ public class TenantWorkScope {
     }
 
     /**
+     * Runs a control-plane read on the default catalog exactly as {@link #unrouted} does, but
+     * through its own functional interface (#1815). The read never passes through the
+     * {@code Supplier} that mutating control-plane work shares, so a read-only request cannot appear
+     * to reach those writes. Use it only for work that changes no state.
+     *
+     * @param <T> the read's result type
+     * @param read the control-plane read
+     * @return the read's result
+     */
+    public <T> T unroutedRead(ControlPlaneRead<T> read) {
+        Optional<String> previous = beginOverride(Optional.empty());
+        try {
+            return read.read();
+        } finally {
+            tenantContext.swapCatalogOverride(previous);
+        }
+    }
+
+    /**
      * Resolves the workspace's org placement (fail-closed, on the default
      * catalog) and pins the resulting catalog for the duration of {@code work}.
      * Installs no identity scope — mappers keep receiving their explicit
@@ -221,6 +240,15 @@ public class TenantWorkScope {
     }
 
     private <T> T runWithOverride(Optional<String> override, Supplier<T> work) {
+        Optional<String> previous = beginOverride(override);
+        try {
+            return work.get();
+        } finally {
+            tenantContext.swapCatalogOverride(previous);
+        }
+    }
+
+    private Optional<String> beginOverride(Optional<String> override) {
         if (TransactionSynchronizationManager.isActualTransactionActive()
                 && !Objects.equals(override.orElse(null), tenantContext.getCatalog())) {
             throw new IllegalStateException(
@@ -228,12 +256,7 @@ public class TenantWorkScope {
                     + "connection keeps its original catalog, so the new pin would silently not apply. "
                     + "Re-pinning the same catalog (e.g. runAs within an already-routed span) is allowed");
         }
-        Optional<String> previous = tenantContext.swapCatalogOverride(override);
-        try {
-            return work.get();
-        } finally {
-            tenantContext.swapCatalogOverride(previous);
-        }
+        return tenantContext.swapCatalogOverride(override);
     }
 
     private WorkspaceRoute resolveRouteForWorkspace(int workspaceId) {
