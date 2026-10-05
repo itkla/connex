@@ -31,11 +31,14 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
- * Proves against a real database that locked authorization takes only the caller's own custom-role
+ * Checks against a real database that locked authorization takes only the caller's own custom-role
  * rows (#1578). The permission read selects the role's rows by equality; a range on
  * {@code permission} let MySQL run it as a full primary-key scan of {@code workspace_role_permission}
  * on a small table, so one member's authorization waited on every other custom role's locked rows.
- * Each case commits its members and roles and deletes them afterwards.
+ * Whether a run reaches that plan depends on the shared table's size, so this case guards the
+ * behaviour while {@code WorkflowPrincipalMapperXmlTest} pins the statement shape and the custom-role
+ * cases of {@code AttachmentUploadSecurityIntegrationTest} reproduce the old wait end to end. Each case
+ * commits its members and roles and deletes them afterwards.
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CustomRoleAuthorizationLockScopeIntegrationTest extends AbstractServiceTest {

@@ -516,16 +516,20 @@ class AttachmentUploadSecurityIntegrationTest {
     }
 
     /**
-     * Uses built-in member authority for the uploader so its retained custom-role permission locks
-     * cannot serialize the sharing actor's unshare request behind the quota blocker. MySQL can scan
-     * both permission rows in this small fixture even though the roles belong to different workspaces.
-     * Custom-role permission revocation is exercised by the separate authorization drills.
+     * Runs with built-in member authority and with the uploader's custom role. The custom-role cases
+     * guard #1746: the uploader retains its role's permission locks while it waits on the quota
+     * blocker, and the sharing actor's own permission read used to scan every custom role's rows in a
+     * small table, so the unshare queued behind the upload and failed on a lock wait. The permission
+     * read now locks only the reading member's role rows (#1578).
      */
     @ParameterizedTest
-    @CsvSource({"upload,company", "upload-image,company", "upload,person", "upload-image,person"})
-    void unshareDuringQuotaAdmissionDeniesUploadAndLeavesNoReadableObject(String route, String type)
-            throws Exception {
-        assertEquals(1, workspaces.updateMemberRole(workspace.getId(), actor.getId(), "member"));
+    @CsvSource({"upload,company,false", "upload-image,company,false", "upload,person,false",
+        "upload-image,person,false", "upload,company,true", "upload-image,person,true"})
+    void unshareDuringQuotaAdmissionDeniesUploadAndLeavesNoReadableObject(
+            String route, String type, boolean customRoleUploader) throws Exception {
+        if (!customRoleUploader) {
+            assertEquals(1, workspaces.updateMemberRole(workspace.getId(), actor.getId(), "member"));
+        }
         int recordId = sharedTarget(type);
         MockHttpSession sharingSession = login(target);
         sqlSessions.getMapper(ObjectStorageQuotaMapper.class).ensureQuota(workspace.getId());
