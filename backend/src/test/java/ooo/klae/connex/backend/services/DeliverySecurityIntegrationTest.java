@@ -1553,10 +1553,8 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         }).when(campaignSendMapper).markSettledAudienceSendCompleted(workspace.getId(), send.id());
 
         if (completionFailsOnce) {
-            assertEquals(2, dispatchService.processWorkspace(workspace.getId()));
-            var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
-            assertEquals("running", stillRunning.getStatus());
-            assertEquals(0, stillRunning.getFailedCount());
+            assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+            assertEquals("completed", campaignSendMapper.getSend(workspace.getId(), send.id()).getStatus());
         }
         assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
 
@@ -1608,7 +1606,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
             assertEquals("running", stillRunning.getStatus());
             assertNull(stillRunning.getCompletedAt());
             assertEquals(1, stillRunning.getFailedCount());
-            assertEquals(1, failedWork);
+            assertEquals(0, failedWork);
             assertFalse(campaignSendMapper.audienceSendsAwaitingRecoverySettlement(workspace.getId(), 10)
                     .contains(send.id()));
             CampaignDelivery untouched = deliveryMapper.getDelivery(workspace.getId(), inFlightId);
@@ -1811,6 +1809,9 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         doAnswer(invocation -> {
             int refreshed = realSendMapper.refreshCounters(workspace.getId(), send.id());
             if (terminalWriteLanded.compareAndSet(false, true)) {
+                var stillRunning = realSendMapper.getSend(workspace.getId(), send.id());
+                assertEquals("running", stillRunning.getStatus());
+                assertNull(stillRunning.getCompletedAt());
                 completeInFlightAttempt(inFlightId, "late-message");
             }
             return refreshed;
@@ -1819,11 +1820,8 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         int sweptPass = dispatchService.processWorkspace(workspace.getId());
 
         assertTrue(terminalWriteLanded.get());
-        var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
-        assertEquals("running", stillRunning.getStatus());
-        assertNull(stillRunning.getCompletedAt());
         assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), inFlightId).getStatus());
-        assertEquals(1, sweptPass);
+        assertEquals(0, sweptPass);
 
         assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
 
@@ -2248,7 +2246,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         expireReservation(abandonedId, reservationGraceSeconds() + 60);
         disableEmailProvider();
 
-        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
 
         CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), abandonedId);
         assertEquals("failed", swept.getStatus());
@@ -2679,6 +2677,65 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros(), legacyIdleSeconds())
                 .contains(workspace.getId()));
         assertEquals(0, submissions.size());
+    }
+
+    @Test
+    void aCounterRefreshThatFailsWhenTheLastDeliveryLandsLeavesTheSendForTheNextTick() {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        sendService.queueSend(send.campaignId(), send.id());
+        CampaignSendMapper realSendMapper = sqlSession.getMapper(CampaignSendMapper.class);
+        AtomicBoolean refreshFailed = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (refreshFailed.compareAndSet(false, true)) {
+                throw new IllegalStateException("Simulated counter refresh failure");
+            }
+            return realSendMapper.refreshCounters(workspace.getId(), send.id());
+        }).when(campaignSendMapper).refreshCounters(workspace.getId(), send.id());
+
+        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+
+        assertTrue(refreshFailed.get());
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        var unsettled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("running", unsettled.getStatus());
+        assertNull(unsettled.getCompletedAt());
+        assertTrue(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros(), legacyIdleSeconds())
+                .contains(workspace.getId()));
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals(1, submissions.size());
+    }
+
+    @Test
+    void aPeerTickWhileAnAttemptIsInFlightNeverCompletesItsSend() {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        submissionObserver = () -> {
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            var peerView = campaignSendMapper.getSend(workspace.getId(), send.id());
+            assertEquals("running", peerView.getStatus());
+            assertNull(peerView.getCompletedAt());
+            assertEquals("dispatching", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        };
+
+        dispatch(send);
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        assertEquals(1, submissions.size());
     }
 
     private Person peerOf(Person recipient) {

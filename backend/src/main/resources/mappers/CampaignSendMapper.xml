@@ -59,12 +59,6 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'queued'
   </update>
 
-  <update id="markCompleted">
-    UPDATE campaign_send
-    SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'running'
-  </update>
-
   <!-- One statement proves that nothing is left pending or dispatching and completes the send, so a
        live worker's terminal write cannot land between the proof and the completion. The counter
        refresh that follows a completion therefore reads every delivery in its final state: no row
