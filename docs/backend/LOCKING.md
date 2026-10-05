@@ -8,6 +8,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 
 - Discover keys without locks when the contract says to do so; sort deterministic key sets in Java before acquiring exact locks.
 - `ORDER BY ... FOR UPDATE` is not a substitute for an explicitly ordered series of exact lock acquisitions when a contract requires deterministic ordering.
+- **A locking read selects its rows by equality on an index prefix, not by a range or `NOT IN` on a later key column (#1578).** MySQL may run such a multi-range read as a full index scan on a small table. A locking full scan must lock, and wait on, every row it reads before discarding it, including other roles' and other workspaces' rows. `RoleMapper.lockPermissions` therefore reads a custom role's `workspace_role_permission` rows by `workspace_role_id` alone, and its callers drop inert permissions in Java. Members with different custom roles then never wait on each other during locked authorization; members who share a role still serialize on its row.
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.

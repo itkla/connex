@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,6 +21,11 @@ import org.junit.jupiter.api.Test;
  * row when {@code INSERT ... ON DUPLICATE KEY UPDATE} hits the primary key and holds it to commit,
  * so the statement both creates the row on first use and serialises later authors. Pinning a
  * trailing {@code SELECT ... FOR UPDATE} instead would name a statement that never contends.
+ *
+ * <p>The permission read selects the role's rows by equality alone (#1578): a predicate on
+ * {@code permission}, such as the inert-permission exclusion it once carried, lets MySQL run the
+ * locking read as a full primary-key scan on a small table and wait on every other custom role's
+ * rows. The callers drop inert permissions instead.
  */
 class WorkflowPrincipalMapperXmlTest {
 
@@ -75,7 +81,8 @@ class WorkflowPrincipalMapperXmlTest {
             Map.of("workspaceId", 5, "roleId", 11));
         assertTrue(permissions.contains("wr.workspace_id = ?"));
         assertTrue(permissions.contains("wrp.workspace_role_id = ?"));
-        assertTrue(permissions.contains("wrp.permission NOT IN"));
+        assertFalse(permissions.substring(permissions.indexOf("WHERE"), permissions.indexOf("ORDER BY"))
+            .contains("permission"));
         assertTrue(permissions.contains("ORDER BY wrp.permission"));
         assertTrue(permissions.endsWith("FOR UPDATE"));
     }

@@ -127,6 +127,26 @@ class WorkflowPrincipalLockServiceTest {
     }
 
     @Test
+    void anInertPermissionStoredOnTheActorsRoleConfersNothing() {
+        WorkflowPrincipalLockService service = service();
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.lockAuthorizationMembership(5, 7))
+            .thenReturn(membership(5, 7, "member", 11, "active"));
+        when(roleMapper.lockRole(5, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(5, 11)).thenReturn(
+            List.of(Permission.RULE_MANAGE.name(), Permission.SSO_MANAGE.name()));
+
+        WorkflowPrincipalLockService.LockedPrincipals principals =
+            service.lockUserMutation(5, 7, Set.of(7), Set.of(), true);
+
+        principals.requirePermissions(Set.of(Permission.RULE_MANAGE));
+        assertThrows(
+            ForbiddenException.class,
+            () -> principals.requirePermissions(Set.of(Permission.SSO_MANAGE)));
+    }
+
+    @Test
     void pendingActorMembershipFailsBeforeRoleAuthorization() {
         WorkflowPrincipalLockService service = service();
         when(userMapper.lockById(7)).thenReturn(7);
