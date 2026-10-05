@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
@@ -135,6 +136,11 @@ public class WebAuthnService {
             throw new ForbiddenException("Authenticated session is no longer current");
         }
         userMapper.lockAssignedCustomRoleIds(expectedUserId);
+        SessionEpochRestampGrant restampGrant = userMapper.epochRestampGrant(expectedUserId);
+        if (restampGrant != null && evidence.sessionPrimaryId() == null) {
+            throw new ConflictException(
+                    "The session changed while the passkey was being registered; try again");
+        }
         if (!hasPasskey(expectedUserId)
                 && !bootstrapConfirmationSatisfied
                 && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {
@@ -151,7 +157,6 @@ public class WebAuthnService {
         }
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
-        SessionEpochRestampGrant restampGrant = userMapper.epochRestampGrant(expectedUserId);
         userMapper.clearEpochRestampGrant(expectedUserId);
         WebauthnCredentialRow registered = credentialMapper.findByCredentialId(record.getCredentialId().getBytes());
         if (registered == null || registered.getId() == null) {
@@ -173,7 +178,10 @@ public class WebAuthnService {
      * source wins over an inherited row for the same organization. A passkey inherits coverage only
      * from the credential behind a step-up that is still fresh and still the account's. It gets
      * break-glass assurance only when this session is the one the operator recovery granted the
-     * restamp to, at the epoch that recovery committed.
+     * restamp to, at the epoch that recovery committed. {@link #finishRegistration} refuses, before
+     * registering anything, an enrollment that cannot name its session while such a grant is
+     * outstanding, so a rotated session id retries instead of spending the grant without the
+     * assurance.
      */
     private void recordProvenance(
             int userId,

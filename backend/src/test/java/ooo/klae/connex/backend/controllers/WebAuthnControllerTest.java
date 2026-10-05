@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.services.AuditService;
@@ -283,6 +284,33 @@ class WebAuthnControllerTest {
         order.verify(webAuthnService)
                 .finishRegistration(7, 6, false, evidence, options, credential, "work key");
         order.verify(sessionSecurityService).markStepUp(request, 7, NEW_PASSKEY_ROW_ID);
+    }
+
+    /** A refusal the client may retry keeps its 409 rather than becoming a generic failure. */
+    @Test
+    void registerVerifyKeepsARetryableConflict() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        when(creationOptions.load(request)).thenReturn(options);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
+                .thenReturn(credential);
+        when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
+        when(webAuthnService.finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key"))
+                .thenThrow(new ConflictException("The session changed while the passkey was being registered; try again"));
+
+        assertThrows(ConflictException.class,
+            () -> registrationController.registerVerify("work key", "{}", request, response));
+
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt(), anyInt());
     }
 
     @Test

@@ -12,8 +12,10 @@ public interface PrivilegedCredentialAttestationMapper {
     /**
      * Covers a newly registered passkey in every active organization its account founded and
      * still owns. Callers hold the account's {@code app_user} row exclusively, which founding also
-     * locks. An organization being torn down gets no new coverage, so the insert never waits on, or
-     * fails against, its deletion.
+     * locks. An organization already marked as tearing down gets no new coverage. That check is a
+     * non-locking read, so a teardown committing its fence just after it can still meet the insert:
+     * the row then goes with the organization's cascade, or, if the final deletion commits first, the
+     * foreign-key check fails and the whole registration rolls back as a retryable failure.
      *
      * @param credentialRowId the new passkey's {@code webauthn_credential.id}
      * @param userId the passkey's account

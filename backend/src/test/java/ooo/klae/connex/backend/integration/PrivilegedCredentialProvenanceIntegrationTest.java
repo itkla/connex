@@ -53,6 +53,7 @@ import com.webauthn4j.test.client.ClientPlatform;
 
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
@@ -188,6 +189,24 @@ class PrivilegedCredentialProvenanceIntegrationTest {
         assertNotNull(assuredAt(recovered.rowId()));
     }
 
+    /**
+     * A recovery grant survives an enrollment that cannot name its session, so the recovery
+     * session's retry still earns the assurance (#1534).
+     */
+    @Test
+    void anEnrollmentThatCannotNameItsSessionLeavesTheRecoveryGrantForTheRetry() {
+        User recovering = newUser();
+        int epoch = userMapper.currentSessionEpoch(recovering.getId());
+        userMapper.grantEpochRestamp(recovering.getId(), "recovery-session", epoch);
+
+        assertThrows(ConflictException.class, () -> register(recovering, NO_EVIDENCE));
+
+        assertNotNull(userMapper.epochRestampGrant(recovering.getId()));
+        assertEquals(0, passkeyCount(recovering));
+        SoftwarePasskey recovered = register(recovering, new EnrollmentEvidence("recovery-session", null));
+        assertEquals("BREAK_GLASS", assurance(recovered.rowId()));
+    }
+
     @Test
     void foundingFlagsTheFounderAndCoversTheirPasskeysInThatOrganizationOnly() {
         User founder = newUser();
@@ -314,7 +333,8 @@ class PrivilegedCredentialProvenanceIntegrationTest {
     /**
      * Founding holds the owner's account row shared while it commits the founder flag. A
      * registration of the same account waits for that row, then reads the committed flag and
-     * covers its new passkey in the new organization.
+     * covers its new passkey in the new organization. Each side takes the locks production takes,
+     * in the order {@code WorkspaceProvisioningLockOrderTest} and {@code WebAuthnServiceTest} pin.
      */
     @Test
     void aRegistrationWaitingOnFoundingStillTakesTheFounderCoverage() throws Exception {
@@ -363,7 +383,7 @@ class PrivilegedCredentialProvenanceIntegrationTest {
     /**
      * A registration holds the account row exclusively while it commits a new passkey. Founding by
      * the same account waits for that row, then covers the committed passkey in the new
-     * organization.
+     * organization. As above, each side follows the production lock order the unit tests pin.
      */
     @Test
     void foundingWaitingOnARegistrationStillCoversTheNewPasskey() throws Exception {
@@ -560,6 +580,14 @@ class PrivilegedCredentialProvenanceIntegrationTest {
         row.setCreatedAt(Instant.now());
         credentialMapper.insert(row);
         return row.getId();
+    }
+
+    private int passkeyCount(User user) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM webauthn_credential c"
+                + " JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id WHERE e.user_id = ?",
+            Integer.class, user.getId());
+        return count == null ? 0 : count;
     }
 
     private boolean isFounder(int organizationId, int userId) {

@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 import ooo.klae.connex.backend.session.StepUpProof;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.User;
 
@@ -301,19 +302,31 @@ class WebAuthnServiceTest {
                 racing.options(), racing.credential(), "Work key");
         verify(racing.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
 
-        RegistrationFixture unstored = successfulRegistration();
-        when(unstored.userMapper().epochRestampGrant(7))
-                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
-        unstored.service().finishRegistration(7, 3, true, NO_EVIDENCE,
-                unstored.options(), unstored.credential(), "Work key");
-        verify(unstored.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
-
         RegistrationFixture staleEpoch = successfulRegistration();
         when(staleEpoch.userMapper().epochRestampGrant(7))
                 .thenReturn(new SessionEpochRestampGrant("session-a", 2));
         staleEpoch.service().finishRegistration(7, 3, true, new EnrollmentEvidence("session-a", null),
                 staleEpoch.options(), staleEpoch.credential(), "Work key");
         verify(staleEpoch.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
+    }
+
+    /**
+     * An enrollment that cannot name its session while a recovery grant is outstanding is refused
+     * before anything is registered, so the grant survives for the retry instead of being spent
+     * without the assurance it carries (#1534).
+     */
+    @Test
+    void finishRegistrationRefusesAnUnnamedSessionWhileARecoveryGrantIsOutstanding() {
+        RegistrationFixture fixture = successfulRegistration();
+        when(fixture.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
+
+        assertThrows(ConflictException.class, () -> fixture.service().finishRegistration(
+                7, 3, true, NO_EVIDENCE, fixture.options(), fixture.credential(), "Work key"));
+
+        verify(fixture.relyingParty(), never()).registerCredential(any());
+        verify(fixture.userMapper(), never()).clearEpochRestampGrant(7);
+        verify(fixture.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
     }
 
     /** Break-glass assurance takes precedence over assurance the step-up passkey would pass on. */

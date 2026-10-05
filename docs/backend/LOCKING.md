@@ -1267,10 +1267,19 @@ account root.
   - org role changes and removal (`lockMembershipUserRoots`);
   - passkey deletion and recovery.
 
-  Coverage rows are children of `organization`, so each insert's foreign-key check takes the
-  organization row shared. Only active organizations get new coverage. A registration therefore
-  does not wait on, or fail against, the final deletion of an organization already marked as tearing
-  down. A deletion that starts after the insert waits for the registration, then cascades its rows.
+  Organization teardown is the exception. It removes `org_member` and coverage rows through the
+  organization's cascade, holding its actor and the organization rather than this account. Coverage
+  rows are children of `organization`, so each insert's foreign-key check takes the organization
+  row shared. Only organizations still active at the registration's read get new coverage, which
+  keeps registration out of a teardown whose fence committed first. A teardown that commits its
+  fence after that read still meets the insert:
+  - coverage written for an organization being torn down goes with its cascade;
+  - an insert that reaches a final deletion still in flight waits for it;
+  - if that deletion commits first, the foreign-key check fails and the whole registration rolls
+    back as a retryable failure.
+
+  This is accepted rather than locking candidate organizations inside every registration: the
+  outcome is benign and rare, and the lock would couple passkey enrollment to the tenant lifecycle.
 - Founding an organization (`OrgMemberService.addFoundingOwner`, under `createWorkspace`'s owner row
   `FOR SHARE`) inserts the owner row flagged as founder. It then covers the owner's existing passkeys
   with an `INSERT … SELECT`, which at the default isolation is a locking read. A passkey that a

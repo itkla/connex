@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
@@ -186,6 +187,8 @@ public class WebAuthnController {
         } catch (ForbiddenException ex) {
             throw ex;
         } catch (BadCredentialsException ex) {
+            throw ex;
+        } catch (ConflictException ex) {
             throw ex;
         } catch (RuntimeException ex) {
             throw new BadRequestException("Passkey registration failed");
