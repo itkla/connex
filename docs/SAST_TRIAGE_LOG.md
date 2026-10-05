@@ -1217,7 +1217,9 @@ above, not a false positive.
 - An independent read-only context reproduced the evidence on `e175aa331`. It also found that the
   path is gated on an organization admin or owner with a fresh WebAuthn step-up
   (`requireMutationAccess`).
-- #120 and #41 were reopened and re-dismissed as `won't fix`, with expiry 2027-04-05 and re-review
-  2027-03-05. On reopen, #120 recomputed to `fixed` before being dismissed: its `src/…` path
-  lineage is no longer reported, and #41 carries the live result.
+- #41, which carries the live result, was reopened and re-dismissed as `won't fix`, with expiry
+  2027-04-05 and re-review 2027-03-05.
+- #120 is left `fixed`. On reopen it recomputed to `fixed`, because its `src/…` path lineage is no
+  longer reported, so it has no live finding to suppress. That matches the 2026-09-01 handling of
+  stale records above. It was briefly re-dismissed in error and then reopened back to `fixed`.
 - Moving disclosure assembly to `POST` remains open as an alternative for the Security Owner.
