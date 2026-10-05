@@ -737,9 +737,10 @@ public class CampaignDispatchService {
      * owes only its counters, and those are refreshed from this pass's own sweep result rather than
      * from a counter-disagreement scan, which would cost a dependent {@code COUNT(*)} over every
      * audience send's failed deliveries on every tick. The bound that leaves: if this pass dies
-     * between the compare-and-set and the refresh, an already completed send under-reports
-     * {@code failed_count} until an operator resolves the reconciliation row the sweep created,
-     * which refreshes the counters itself.
+     * between a compare-and-set and the refresh, an already completed send under-reports
+     * {@code failed_count} by every row the pass marked. Resolving an ambiguous row's reconciliation
+     * refreshes the counters, but a definitive abandonment creates no reconciliation row, so its
+     * under-report is permanent.
      */
     private void settleAudienceRecovery(int workspaceId, Set<Integer> sweptSends) {
         Set<Integer> countersOwed = new TreeSet<>(sweptSends);

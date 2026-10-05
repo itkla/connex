@@ -250,8 +250,8 @@ public interface CampaignDeliveryMapper {
 
     /**
      * Returns one page of audience attempts abandoned with no frequency reservation: leased rows
-     * whose lease has been expired for the grace, and lease-less rows from an older version idle for
-     * longer than any attempt it could still run (#1773).
+     * whose lease has been expired for the grace, and lease-less rows from an older version idle past
+     * the legacy threshold, which is an expected bound rather than a guaranteed one (#1773).
      * @param workspaceId the owning workspace
      * @param graceMicros the grace beyond an expired lease
      * @param legacyIdleSeconds how long a lease-less row must have been idle
