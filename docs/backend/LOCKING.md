@@ -1256,6 +1256,28 @@ account root.
   recorded with the same row through `AuditService.deferFailureScoped` and appended once the
   transaction completes, because an immediate independent append would wait on the request's own
   exclusive lock (#1995). It is best-effort, with the bounds of the step-up deferral (#1986).
+- Under the same locks, after `registerCredential`, `finishRegistration` records the new passkey's
+  provenance (#1534). It reads the recovery restamp grant before clearing it, then writes founder
+  coverage, then either inherited coverage and assurance (for a fresh step-up by a passkey the
+  account still holds) or break-glass assurance (for the recovery session itself). Every row it
+  writes belongs to the new credential. Its reads of `org_member`, the source passkey's coverage and
+  the grant are non-locking at `READ COMMITTED`. They are still current, because every writer of
+  that state takes this account's root first:
+  - founding (`createWorkspace`, owner row `FOR SHARE`);
+  - org role changes and removal (`lockMembershipUserRoots`);
+  - passkey deletion and recovery.
+
+  Coverage rows are children of `organization`, so each insert's foreign-key check takes the
+  organization row shared. Only active organizations get new coverage. A registration therefore
+  does not wait on, or fail against, the final deletion of an organization already marked as tearing
+  down. A deletion that starts after the insert waits for the registration, then cascades its rows.
+- Founding an organization (`OrgMemberService.addFoundingOwner`, under `createWorkspace`'s owner row
+  `FOR SHARE`) inserts the owner row flagged as founder. It then covers the owner's existing passkeys
+  with an `INSERT … SELECT`, which at the default isolation is a locking read. A passkey that a
+  registration committed while founding waited on the account row is therefore covered. In the
+  other order, the registration waits on the shared account row, then reads the committed founder
+  flag. `PrivilegedCredentialProvenanceIntegrationTest` drives both commit orders against real lock
+  waits.
 
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`

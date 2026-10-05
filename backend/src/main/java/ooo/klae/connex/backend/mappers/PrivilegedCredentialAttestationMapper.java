@@ -10,8 +10,10 @@ import org.apache.ibatis.annotations.Param;
 public interface PrivilegedCredentialAttestationMapper {
 
     /**
-     * Covers a newly registered passkey in every organization its account founded and still owns.
-     * Callers hold the account's {@code app_user} row exclusively, which founding also locks.
+     * Covers a newly registered passkey in every active organization its account founded and
+     * still owns. Callers hold the account's {@code app_user} row exclusively, which founding also
+     * locks. An organization being torn down gets no new coverage, so the insert never waits on, or
+     * fails against, its deletion.
      *
      * @param credentialRowId the new passkey's {@code webauthn_credential.id}
      * @param userId the passkey's account
@@ -22,9 +24,9 @@ public interface PrivilegedCredentialAttestationMapper {
             @Param("userId") int userId);
 
     /**
-     * Copies a source passkey's coverage to a new passkey of the same account, as inherited rows.
-     * Callers hold the account's {@code app_user} row exclusively and have checked that the source
-     * belongs to that account.
+     * Copies a source passkey's coverage in active organizations to a new passkey of the same
+     * account, as inherited rows. Callers hold the account's {@code app_user} row exclusively and
+     * have checked that the source belongs to that account.
      *
      * @param credentialRowId the new passkey's {@code webauthn_credential.id}
      * @param sourceCredentialRowId the passkey whose step-up authorized the enrollment
