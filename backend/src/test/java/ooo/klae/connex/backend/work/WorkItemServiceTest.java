@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.work;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
@@ -171,16 +172,20 @@ class WorkItemServiceTest {
     @Test
     void sourceAndUrgencyFiltersReachOnlySelectedProvider() {
         CapturingProvider task = available(WorkItemSource.task, List.of(), 0, true);
+        CapturingProvider notification = failing(
+            WorkItemSource.notification, new AssertionErrorException());
+        CapturingProvider approval = failing(
+            WorkItemSource.document_approval, new AssertionErrorException());
         WorkItemService service = service(
-            task,
-            failing(WorkItemSource.notification, new AssertionErrorException()),
-            failing(WorkItemSource.document_approval, new AssertionErrorException()));
+            task, notification, approval);
 
         service.getPage(List.of("task"), List.of("critical", "high"), 1, 10);
 
         assertEquals(List.of(WorkItemUrgency.critical, WorkItemUrgency.high),
             task.query.urgencies().stream().sorted().toList());
         assertEquals(10, task.query.candidateLimit());
+        assertNull(notification.query);
+        assertNull(approval.query);
     }
 
     private WorkItemService service(WorkItemProvider... providers) {

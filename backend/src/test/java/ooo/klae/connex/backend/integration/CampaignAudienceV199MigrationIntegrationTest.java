@@ -1,16 +1,23 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.UUID;
 
+import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSession;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.AfterAll;
@@ -19,19 +26,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.CampaignAudienceExport;
 import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
+import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CampaignAudienceV199MigrationIntegrationTest {
 
-    private static final String SCRATCH_CATALOG =
-            "connex_campaign_v199_it_" + UUID.randomUUID().toString().replace("-", "");
-
-    private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
     private static String password;
-    private static boolean created;
+    private static MySqlScratchCatalog scratchCatalog;
 
     @BeforeAll
     static void createV198EquivalentCatalogWithCampaignAudienceRows() throws SQLException {
@@ -42,13 +47,10 @@ class CampaignAudienceV199MigrationIntegrationTest {
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(username != null && password != null,
                 "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping V199 migration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
-        scratchUrl = withCatalog(configuredUrl, SCRATCH_CATALOG);
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + SCRATCH_CATALOG
-                    + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
-            created = true;
+        try {
+            scratchCatalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_campaign_v199_it_", "utf8mb4", "utf8mb4_0900_ai_ci");
+            scratchUrl = scratchCatalog.url();
         } catch (SQLException exception) {
             assumeTrue(false, "Cannot create V199 migration scratch catalog: " + exception.getMessage());
         }
@@ -130,20 +132,20 @@ class CampaignAudienceV199MigrationIntegrationTest {
 
     @AfterAll
     static void dropScratchCatalog() throws SQLException {
-        if (!created) {
-            return;
-        }
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + SCRATCH_CATALOG + "`");
+        if (scratchCatalog != null) {
+            scratchCatalog.close();
         }
     }
 
     @Test
-    void v199BackfillsLegacyRowsAndEnforcesTheNewAudienceContract() throws SQLException {
+    void v199BackfillsLegacyRowsAndEnforcesTheNewAudienceContract() throws Exception {
         Flyway flyway = migrateTo("199");
+        SqlSessionFactory sessionFactory = sqlSessionFactory();
 
-        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+        try (Connection connection = connection();
+                Statement statement = connection.createStatement();
+                SqlSession session = sessionFactory.openSession(connection)) {
+            assertEquals(scratchCatalog.name(), session.getConnection().getCatalog());
             assertEquals("email:marketing", stringScalar(statement, """
                 SELECT CONCAT(channel, ':', purpose)
                 FROM campaign_audience WHERE id = 65201
@@ -269,39 +271,25 @@ class CampaignAudienceV199MigrationIntegrationTest {
                     AND status IN ('draft', 'running', 'completed')
                 )
                 """;
-            String currentBackendDuplicateFence = """
-                SELECT EXISTS (
-                  SELECT 1
-                  FROM campaign_audience_export
-                  WHERE workspace_id = 65201
-                    AND campaign_id = 65201
-                    AND snapshot_id = 65203
-                    AND connector = 'http_list'
-                    AND (
-                      reconciliation_required_at IS NOT NULL
-                      OR status IN ('draft', 'running', 'completed')
-                    )
-                )
-                """;
             assertFenceClassification(
-                    statement, 1, "leased running without outcome",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "leased running without outcome",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE)
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 1, "expired leased running without outcome",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "expired leased running without outcome",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET lease_until = NULL
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 1, "legacy null-lease running without outcome",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "legacy null-lease running without outcome",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET status = 'running', pushed_count = 0, failed_count = 0,
@@ -313,8 +301,8 @@ class CampaignAudienceV199MigrationIntegrationTest {
                   AND reconciliation_required_at IS NULL
                 """));
             assertFenceClassification(
-                    statement, 1, "flagged running with ambiguous outcome",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "flagged running with ambiguous outcome",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET status = 'draft', lease_until = NULL, reconciliation_required_at = NULL,
@@ -322,24 +310,24 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 1, "draft without outcome",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "draft without outcome",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET status = 'completed', outcome_classification = 'confirmed_delivery'
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 1, "completed with confirmed delivery",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "completed with confirmed delivery",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET outcome_classification = 'operator_delivered'
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 1, "completed with operator delivery",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 1, "completed with operator delivery",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET status = 'failed', pushed_count = 0, failed_count = 1,
@@ -347,40 +335,40 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 0, "failed with operator non-delivery",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 0, "failed with operator non-delivery",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET outcome_classification = 'confirmed_no_delivery'
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 0, "failed with confirmed non-delivery",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 0, "failed with confirmed non-delivery",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET outcome_classification = 'definite_no_side_effect'
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 0, "failed with definite no side effect",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 0, "failed with definite no side effect",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET outcome_classification = 'no_eligible_members'
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 0, "failed with no eligible members",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 0, "failed with no eligible members",
+                    originMainDuplicateFence);
             assertEquals(1, statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET pushed_count = 1, failed_count = 0
                 WHERE workspace_id = 65201 AND id = 65207
                 """));
             assertFenceClassification(
-                    statement, 0, "failed with accepted-member history",
-                    originMainDuplicateFence, currentBackendDuplicateFence);
+                    statement, session, 0, "failed with accepted-member history",
+                    originMainDuplicateFence);
             assertThrows(SQLException.class, () -> statement.executeUpdate("""
                 UPDATE campaign_audience_export
                 SET outcome_classification = 'ambiguous'
@@ -543,14 +531,28 @@ class CampaignAudienceV199MigrationIntegrationTest {
 
     private static void assertFenceClassification(
             Statement statement,
+            SqlSession session,
             long expected,
             String state,
-            String originMainDuplicateFence,
-            String currentBackendDuplicateFence) throws SQLException {
+            String originMainDuplicateFence) throws SQLException {
         String oracle = "outcome_classification is ignored by the origin/main and current "
                 + "duplicate fences, so both must agree for state: " + state;
         assertEquals(expected, scalar(statement, originMainDuplicateFence), oracle);
-        assertEquals(expected, scalar(statement, currentBackendDuplicateFence), oracle);
+        session.clearCache();
+        assertEquals(expected == 1, session.getMapper(CampaignAudienceExportMapper.class)
+                .existsActiveForSnapshotConnector(65201, 65201, 65203, "http_list"), oracle);
+    }
+
+    private static SqlSessionFactory sqlSessionFactory() throws IOException {
+        Configuration configuration = new Configuration();
+        configuration.getTypeAliasRegistry().registerAlias("CampaignAudienceExport", CampaignAudienceExport.class);
+        String resource = "mappers/CampaignAudienceExportMapper.xml";
+        try (InputStream input = CampaignAudienceV199MigrationIntegrationTest.class
+                .getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input, "Missing mapper resource " + resource);
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+        return new SqlSessionFactoryBuilder().build(configuration);
     }
 
     private static String stringScalar(Statement statement, String sql) throws SQLException {
@@ -560,11 +562,4 @@ class CampaignAudienceV199MigrationIntegrationTest {
         }
     }
 
-    private static String withCatalog(String configuredUrl, String catalog) {
-        int queryIndex = configuredUrl.indexOf('?');
-        String query = queryIndex >= 0 ? configuredUrl.substring(queryIndex) : "";
-        String base = queryIndex >= 0 ? configuredUrl.substring(0, queryIndex) : configuredUrl;
-        int slashIndex = base.lastIndexOf('/');
-        return base.substring(0, slashIndex + 1) + catalog + query;
-    }
 }

@@ -1,16 +1,23 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.text.Normalizer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
-import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
 final class AiChatStreamingProgress {
     private static final int BATCH_CHARACTERS = 256;
+    private static final Pattern TASK_HANDLE_SUFFIX = Pattern.compile(
+            "t(?:[1-9][0-9]*)?\\z");
+    private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
@@ -24,6 +31,7 @@ final class AiChatStreamingProgress {
     private long lastCheckNanos = System.nanoTime();
     private boolean excluded;
     private boolean streamTruncated;
+    private boolean taskHandle;
 
     /**
      * Creates the streaming batcher for one turn.
@@ -68,7 +76,7 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        if (excluded || streamTruncated) {
+        if (excluded || streamTruncated || taskHandle) {
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -79,6 +87,15 @@ final class AiChatStreamingProgress {
             return;
         }
         pending.append(decoded);
+        String accumulated = durable.toString() + pending;
+        String settled = accumulated.substring(0, stablePrefixLength(accumulated));
+        if (AiAssistantStepGuard.containsTaskHandle(settled)) {
+            persistenceService.resetPartialContent(turn, durable.length());
+            durable.setLength(0);
+            pending.setLength(0);
+            taskHandle = true;
+            return;
+        }
         if (SpecialCareTextScreen.screen(durable.toString() + pending).excluded()) {
             excluded = true;
             pending.setLength(0);
@@ -87,6 +104,106 @@ final class AiChatStreamingProgress {
         if (pending.length() >= BATCH_CHARACTERS) {
             flush();
         }
+    }
+
+    /**
+     * Holds only suffixes whose raw or canonical task-handle status can still change. A final
+     * label close awaits lookahead; a closed label followed by anything but an opening parenthesis
+     * is settled. Source boundaries are checked again because withholding a link can expose a
+     * preceding task prefix. Only finish may release such a suffix without further lookahead.
+     */
+    private int stablePrefixLength(String text) {
+        int boundary = text.length();
+        boolean retainContext = true;
+        while (boundary > durable.length()) {
+            String prefix = text.substring(0, boundary);
+            String prepared = MaskingEngine.prepareConversationalText(prefix);
+            int preparedBoundary = unresolvedLinkStart(prepared);
+            preparedBoundary = taskHandleSuffixStart(prepared.substring(0, preparedBoundary), retainContext);
+            int nextBoundary = taskHandleSuffixStart(prefix, retainContext);
+            if (preparedBoundary < prepared.length()) {
+                nextBoundary = Math.min(nextBoundary,
+                        sourceBoundary(prefix, prepared.substring(0, preparedBoundary),
+                                prepared.codePointAt(preparedBoundary)));
+            }
+            if (nextBoundary == boundary) {
+                return boundary;
+            }
+            boundary = nextBoundary;
+            retainContext = false;
+        }
+        return durable.length();
+    }
+
+    /** Maps a prepared boundary back before any source link enclosing the withheld suffix. */
+    private int sourceBoundary(String text, String stablePrepared, int withheldCodePoint) {
+        int[] candidates = new int[text.length()];
+        int count = 0;
+        Matcher graphemes = SOURCE_GRAPHEME.matcher(text);
+        while (graphemes.find()) {
+            String unit = Normalizer.normalize(graphemes.group(), Normalizer.Form.NFKC);
+            if (graphemes.start() >= durable.length()
+                    && (unit.indexOf('[') >= 0 || unit.indexOf(withheldCodePoint) >= 0)) {
+                candidates[count++] = graphemes.start();
+            }
+        }
+        while (count > 0) {
+            int offset = candidates[--count];
+            String prefix = MaskingEngine.prepareConversationalText(text.substring(0, offset));
+            if (stablePrepared.startsWith(prefix) && unresolvedLinkStart(prefix) == prefix.length()) {
+                return offset;
+            }
+        }
+        return durable.length();
+    }
+
+    /** Retains one word character as left context for a handle that could start the next batch. */
+    private static int taskHandleSuffixStart(String text, boolean retainContext) {
+        int boundary = text.length();
+        Matcher suffix = TASK_HANDLE_SUFFIX.matcher(text);
+        if (!suffix.find()) {
+            if (retainContext && boundary > 0) {
+                int last = text.codePointBefore(boundary);
+                if (isHandleWordCharacter(last) || last == '{' || last == '}') {
+                    boundary -= Character.charCount(last);
+                }
+            }
+            suffix = TASK_HANDLE_SUFFIX.matcher(text.substring(0, boundary));
+            if (!suffix.find()) {
+                return boundary;
+            }
+        }
+        boundary = suffix.start();
+        if (boundary > 0 && isHandleWordCharacter(text.codePointBefore(boundary))) {
+            if (!retainContext) {
+                return text.length();
+            }
+            boundary = text.offsetByCodePoints(boundary, -1);
+        }
+        return boundary;
+    }
+
+    private static boolean isHandleWordCharacter(int codePoint) {
+        int type = Character.getType(codePoint);
+        return Character.isLetter(codePoint) || type == Character.DECIMAL_DIGIT_NUMBER
+                || type == Character.LETTER_NUMBER || type == Character.OTHER_NUMBER || codePoint == '_';
+    }
+
+    private static int unresolvedLinkStart(String text) {
+        int labelStart = -1;
+        for (int offset = 0; offset < text.length(); offset++) {
+            char value = text.charAt(offset);
+            if (value == '[' && labelStart < 0) {
+                labelStart = offset;
+            } else if (value == ']' && labelStart >= 0) {
+                if (offset + 1 == text.length()
+                        || text.charAt(offset + 1) == '(' && text.indexOf(')', offset + 2) < 0) {
+                    return labelStart;
+                }
+                labelStart = -1;
+            }
+        }
+        return labelStart < 0 ? text.length() : labelStart;
     }
 
     private void checkpoint() {
@@ -103,14 +220,24 @@ final class AiChatStreamingProgress {
     }
 
     private void flush() {
+        flush(false);
+    }
+
+    private void flush(boolean terminal) {
         if (pending.isEmpty()) {
             return;
         }
-        String batch = pending.toString();
+        int length = terminal ? pending.length()
+                : stablePrefixLength(durable.toString() + pending) - durable.length();
+        if (length == 0) {
+            persistenceService.requireRunning(turn);
+            return;
+        }
+        String batch = pending.substring(0, length);
         int nextOffset = persistenceService.appendPartialBatch(
                 turn, durable.length(), batch);
         durable.append(batch);
-        pending.setLength(0);
+        pending.delete(0, length);
         if (durable.length() != nextOffset) {
             throw new IllegalStateException("Assistant stream offset diverged");
         }
@@ -132,6 +259,7 @@ final class AiChatStreamingProgress {
         pending.setLength(0);
         excluded = false;
         streamTruncated = false;
+        taskHandle = false;
         lastCheckNanos = System.nanoTime();
     }
 
@@ -194,7 +322,8 @@ final class AiChatStreamingProgress {
             String comparable = demasking
                     ? Demasker.demask(projected, maskingContext).text()
                     : projected;
-            if (!comparable.equals(expectedText)) {
+            if (taskHandle || AiAssistantStepGuard.containsTaskHandle(expectedText)
+                    || !comparable.equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
             if (excluded || SpecialCareTextScreen.screen(expectedText).excluded()) {
@@ -204,7 +333,7 @@ final class AiChatStreamingProgress {
             if (!streamTruncated && !(durable.toString() + pending).equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
-            flush();
+            flush(!streamTruncated);
             return expectedText;
         }
 

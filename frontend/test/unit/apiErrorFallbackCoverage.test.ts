@@ -92,11 +92,24 @@ function declaredFallbacks(): { literal: Fallback[]; indirect: string[] } {
     return { literal: found, indirect: [...indirect].sort() };
 }
 
+const catalogCache = new Map<string, unknown>();
+
+function catalogSource(locale: string, filename: string): unknown {
+    const file = join(MESSAGES_ROOT, locale, filename);
+    if (!catalogCache.has(file)) {
+        const parsed: unknown = JSON.parse(readFileSync(file, "utf8"), (_key, value: unknown) => (
+            typeof value === "object" && value !== null ? Object.freeze(value) : value
+        ));
+        catalogCache.set(file, parsed);
+    }
+    return catalogCache.get(file);
+}
+
 /** Which catalog file holds each top-level message namespace. Namespaces are unique across files. */
 function namespaceIndex(): Map<string, string> {
     const index = new Map<string, string>();
     for (const name of readdirSync(join(MESSAGES_ROOT, "en"))) {
-        const parsed: unknown = JSON.parse(readFileSync(join(MESSAGES_ROOT, "en", name), "utf8"));
+        const parsed = catalogSource("en", name);
         if (typeof parsed !== "object" || parsed === null) continue;
         for (const namespace of Object.keys(parsed)) index.set(namespace, name);
     }
@@ -104,8 +117,7 @@ function namespaceIndex(): Map<string, string> {
 }
 
 function resolve(locale: string, catalog: string, path: string): string | null {
-    const parsed: unknown = JSON.parse(readFileSync(join(MESSAGES_ROOT, locale, catalog), "utf8"));
-    let current: unknown = parsed;
+    let current = catalogSource(locale, catalog);
     for (const segment of path.split(".")) {
         if (typeof current !== "object" || current === null || Array.isArray(current)) return null;
         if (!(segment in current)) return null;

@@ -6,14 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
-import org.springframework.test.context.TestPropertySource;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -24,18 +18,10 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
  * issued and emailed, redeeming it marks the account verified and is single-use, and no token is
  * issued for an already-verified account or an invalid redemption.
  */
-@TestPropertySource(properties = "connex.registration-verification.enabled=true")
-@Import(RegistrationVerificationServiceTest.CapturingConfig.class)
-class RegistrationVerificationServiceTest extends AbstractServiceTest {
+class RegistrationVerificationServiceTest extends AbstractRegistrationVerificationTest {
 
     @Autowired private RegistrationVerificationService service;
     @Autowired private AuthService authService;
-    @Autowired private CapturingEmail email;
-
-    @BeforeEach
-    void resetCapture() {
-        email.reset();
-    }
 
     @Test
     void issueThenConfirm_marksAccountVerified() {
@@ -83,30 +69,5 @@ class RegistrationVerificationServiceTest extends AbstractServiceTest {
         assertFalse(userMapper.getUserById(user.getId()).isEmailVerified(),
             "self-serve accounts start unverified when verification is enabled");
         assertNotNull(email.lastToken, "registration issues a verification link");
-    }
-
-    @TestConfiguration
-    static class CapturingConfig {
-        @Bean
-        @Primary
-        CapturingEmail capturingRegistrationVerificationEmailService() {
-            return new CapturingEmail();
-        }
-    }
-
-    static class CapturingEmail implements RegistrationVerificationEmailService {
-        volatile String lastToken;
-        volatile User lastUser;
-
-        @Override
-        public void sendVerificationEmail(User user, String rawToken) {
-            this.lastUser = user;
-            this.lastToken = rawToken;
-        }
-
-        void reset() {
-            lastToken = null;
-            lastUser = null;
-        }
     }
 }

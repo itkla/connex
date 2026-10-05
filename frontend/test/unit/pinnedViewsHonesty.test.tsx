@@ -1,91 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, useEffect } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PinnedViewsProvider } from '@/app/hooks/usePinnedViews';
+import { PinnedViewsProvider, usePinnedViews } from '@/app/hooks/usePinnedViews';
+import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 
-type RuntimeState = readonly unknown[] | {
-    workspaceId: number | null;
-    pins: readonly unknown[];
-    status: string;
-};
-
-type StateUpdate = RuntimeState | ((current: RuntimeState) => RuntimeState);
-type Effect = () => void | (() => void);
-
-type HookRuntime = {
-    stateSlots: RuntimeState[];
-    refSlots: { current: number }[];
-    effects: Effect[];
-    stateCursor: number;
-    refCursor: number;
-    beginRender: () => void;
-    reset: () => void;
-    useState: (initializer: RuntimeState | (() => RuntimeState)) => [
-        RuntimeState,
-        (update: StateUpdate) => void,
-    ];
-    useRef: (initialValue: number) => { current: number };
-    useEffect: (effect: Effect) => void;
-};
-
-const { hookRuntime, activeWorkspace, getSavedViewPins } = vi.hoisted(() => {
-    const runtime: HookRuntime = {
-        stateSlots: [],
-        refSlots: [],
-        effects: [],
-        stateCursor: 0,
-        refCursor: 0,
-        beginRender() {
-            runtime.stateCursor = 0;
-            runtime.refCursor = 0;
-            runtime.effects = [];
-        },
-        reset() {
-            runtime.stateSlots = [];
-            runtime.refSlots = [];
-            runtime.beginRender();
-        },
-        useState(initializer) {
-            const index = runtime.stateCursor++;
-            if (runtime.stateSlots[index] === undefined) {
-                runtime.stateSlots[index] = typeof initializer === 'function'
-                    ? initializer()
-                    : initializer;
-            }
-            return [
-                runtime.stateSlots[index],
-                (update) => {
-                    const current = runtime.stateSlots[index];
-                    runtime.stateSlots[index] = typeof update === 'function'
-                        ? update(current)
-                        : update;
-                },
-            ];
-        },
-        useRef(initialValue) {
-            const index = runtime.refCursor++;
-            runtime.refSlots[index] ??= { current: initialValue };
-            return runtime.refSlots[index];
-        },
-        useEffect(effect) {
-            runtime.effects.push(effect);
-        },
-    };
-
-    return {
-        hookRuntime: runtime,
-        activeWorkspace: { current: 7 },
-        getSavedViewPins: vi.fn<() => Promise<unknown[]>>(),
-    };
-});
-
-vi.mock('react', () => ({
-    createContext: () => ({ Provider: 'PinnedViewsContextProvider' }),
-    useCallback: (callback: () => unknown) => callback,
-    useContext: () => null,
-    useEffect: hookRuntime.useEffect,
-    useMemo: (factory: () => unknown) => factory(),
-    useRef: hookRuntime.useRef,
-    useState: hookRuntime.useState,
+const { activeWorkspace, getSavedViewPins } = vi.hoisted(() => ({
+    activeWorkspace: { current: 7 },
+    getSavedViewPins: vi.fn<() => Promise<unknown[]>>(),
 }));
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
@@ -100,62 +21,39 @@ vi.mock('@/app/lib/saved-view-events', () => ({
     subscribeToSavedViewMutations: () => () => undefined,
 }));
 
-type PinnedViewsSnapshot = {
-    pins: readonly unknown[];
-    status: 'loading' | 'ready' | 'unavailable';
-    reload: () => Promise<void>;
-};
+type PinnedViewsSnapshot = ReturnType<typeof usePinnedViews>;
 
-function snapshotFrom(rendered: unknown): PinnedViewsSnapshot {
-    if (typeof rendered !== 'object' || rendered === null || !('props' in rendered)) {
-        throw new Error('PinnedViewsProvider did not return a provider element');
-    }
-    const props = rendered.props;
-    if (typeof props !== 'object' || props === null || !('value' in props)) {
-        throw new Error('PinnedViewsProvider did not expose a context value');
-    }
-    const value = props.value;
-    if (
-        typeof value !== 'object'
-        || value === null
-        || !('pins' in value)
-        || !Array.isArray(value.pins)
-        || !('status' in value)
-        || (value.status !== 'loading' && value.status !== 'ready' && value.status !== 'unavailable')
-        || !('reload' in value)
-        || typeof value.reload !== 'function'
-    ) {
-        throw new Error('PinnedViewsProvider exposed an invalid context value');
-    }
-    const reload = value.reload;
+function PinnedViewsProbe({ onValue }: { onValue: (value: PinnedViewsSnapshot) => void }) {
+    const value = usePinnedViews();
+    useEffect(() => {
+        onValue(value);
+    });
+    return null;
+}
+
+const mountedRoots: Array<{ unmount: () => void }> = [];
+
+async function mountProvider() {
+    const { createRoot } = await import('react-dom/client');
+    const installed = installInteractiveDocument();
+    const root = createRoot(installed.container);
+    mountedRoots.push(root);
+    let latest: PinnedViewsSnapshot | null = null;
+    const tree = () => (
+        <PinnedViewsProvider>
+            <PinnedViewsProbe onValue={(value) => { latest = value; }} />
+        </PinnedViewsProvider>
+    );
+    await act(async () => root.render(tree()));
     return {
-        pins: value.pins,
-        status: value.status,
-        reload: async () => {
-            const result: unknown = reload();
-            if (!(result instanceof Promise)) {
-                throw new Error('PinnedViewsProvider reload did not return a promise');
-            }
-            await result;
+        current(): PinnedViewsSnapshot {
+            if (latest === null) throw new Error('PinnedViewsProvider did not expose a context value');
+            return latest;
+        },
+        async rerender(): Promise<void> {
+            await act(async () => root.render(tree()));
         },
     };
-}
-
-function renderProvider(): PinnedViewsSnapshot {
-    hookRuntime.beginRender();
-    return snapshotFrom(PinnedViewsProvider({ children: null }));
-}
-
-function startLoadEffect(): void | (() => void) {
-    const effect = hookRuntime.effects[0];
-    if (!effect) throw new Error('PinnedViewsProvider did not register its load effect');
-    return effect();
-}
-
-async function flushPromises(): Promise<void> {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
 }
 
 function deferred<T>(): {
@@ -180,30 +78,35 @@ function pin(id: number, workspaceId: number): { id: number; workspaceId: number
 }
 
 beforeEach(() => {
-    hookRuntime.reset();
     activeWorkspace.current = 7;
     getSavedViewPins.mockReset();
 });
 
+afterEach(async () => {
+    for (const root of mountedRoots.splice(0)) await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+});
+
 describe('pinned-view load honesty', () => {
     it('surfaces a failed load and lets retry replace it with a ready result', async () => {
-        getSavedViewPins.mockRejectedValueOnce(new Error('backend unavailable'));
+        const failedRead = deferred<unknown[]>();
+        getSavedViewPins.mockReturnValueOnce(failedRead.promise.then(() => {
+            throw new Error('backend unavailable');
+        }));
 
-        let snapshot = renderProvider();
-        expect(snapshot.status).toBe('loading');
-        startLoadEffect();
-        await flushPromises();
+        const mounted = await mountProvider();
+        expect(mounted.current().status).toBe('loading');
+        expect(getSavedViewPins).toHaveBeenCalledTimes(1);
 
-        snapshot = renderProvider();
-        expect(snapshot.status).toBe('unavailable');
-        expect(snapshot.pins).toEqual([]);
+        await act(async () => failedRead.resolve([]));
+        expect(mounted.current().status).toBe('unavailable');
+        expect(mounted.current().pins).toEqual([]);
 
         getSavedViewPins.mockResolvedValueOnce([pin(12, 7)]);
-        await snapshot.reload();
+        await act(async () => mounted.current().reload());
 
-        snapshot = renderProvider();
-        expect(snapshot.status).toBe('ready');
-        expect(snapshot.pins).toEqual([pin(12, 7)]);
+        expect(mounted.current().status).toBe('ready');
+        expect(mounted.current().pins).toEqual([pin(12, 7)]);
     });
 
     it('ignores a late response from the previous workspace', async () => {
@@ -213,26 +116,42 @@ describe('pinned-view load honesty', () => {
             .mockReturnValueOnce(previousWorkspace.promise)
             .mockReturnValueOnce(activeWorkspaceRead.promise);
 
-        renderProvider();
-        const cancelPreviousLoad = startLoadEffect();
+        const mounted = await mountProvider();
+        expect(getSavedViewPins).toHaveBeenCalledTimes(1);
 
         activeWorkspace.current = 8;
-        cancelPreviousLoad?.();
-        let snapshot = renderProvider();
-        expect(snapshot.status).toBe('loading');
-        expect(snapshot.pins).toEqual([]);
-        startLoadEffect();
+        await mounted.rerender();
+        expect(getSavedViewPins, 'a workspace switch must start its own read without being asked').toHaveBeenCalledTimes(2);
+        expect(mounted.current().status).toBe('loading');
+        expect(mounted.current().pins).toEqual([]);
 
-        previousWorkspace.resolve([pin(21, 7)]);
-        await flushPromises();
-        snapshot = renderProvider();
-        expect(snapshot.status).toBe('loading');
-        expect(snapshot.pins).toEqual([]);
+        await act(async () => previousWorkspace.resolve([pin(21, 7)]));
+        expect(mounted.current().status).toBe('loading');
+        expect(mounted.current().pins).toEqual([]);
 
-        activeWorkspaceRead.resolve([pin(22, 8)]);
-        await flushPromises();
-        snapshot = renderProvider();
-        expect(snapshot.status).toBe('ready');
-        expect(snapshot.pins).toEqual([pin(22, 8)]);
+        await act(async () => activeWorkspaceRead.resolve([pin(22, 8)]));
+        expect(mounted.current().status).toBe('ready');
+        expect(mounted.current().pins).toEqual([pin(22, 8)]);
+    });
+
+    it('keeps the current workspace ready when the previous workspace answers last', async () => {
+        const previousWorkspace = deferred<unknown[]>();
+        const activeWorkspaceRead = deferred<unknown[]>();
+        getSavedViewPins
+            .mockReturnValueOnce(previousWorkspace.promise)
+            .mockReturnValueOnce(activeWorkspaceRead.promise);
+
+        const mounted = await mountProvider();
+        activeWorkspace.current = 8;
+        await mounted.rerender();
+        expect(getSavedViewPins, 'a workspace switch must start its own read without being asked').toHaveBeenCalledTimes(2);
+
+        await act(async () => activeWorkspaceRead.resolve([pin(22, 8)]));
+        expect(mounted.current().status).toBe('ready');
+        expect(mounted.current().pins).toEqual([pin(22, 8)]);
+
+        await act(async () => previousWorkspace.resolve([pin(21, 7)]));
+        expect(mounted.current().status).toBe('ready');
+        expect(mounted.current().pins).toEqual([pin(22, 8)]);
     });
 });

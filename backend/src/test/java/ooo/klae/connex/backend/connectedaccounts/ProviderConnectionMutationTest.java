@@ -30,6 +30,7 @@ class ProviderConnectionMutationTest {
         connection.setProviderAccountId("account-31");
         connection.setStatus("connected");
         connection.setCredentialGeneration(4);
+        connection.setCaptureReconcileAfterWorkspaceId(73);
         when(mapper.getByUserAndProviderForUpdate(9, "google"))
             .thenReturn(connection);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);

@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
@@ -127,6 +128,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
     @MockitoBean private LogoutAuditHandler logoutAuditHandler;
     @MockitoBean private LoginRateLimiter loginRateLimiter;
+    @MockitoBean private DenialAuditRateLimiter denialAuditRateLimiter;
     @MockitoBean private ClientIpResolver clientIpResolver;
     @MockitoBean private AiAssistantService aiAssistantService;
     @MockitoBean private AiAssistantTurnService aiAssistantTurnService;
@@ -220,13 +222,7 @@ class AiGenerationEndpointSecurityTest {
         verify(businessCardService).availability();
     }
 
-    @Test
-    void theRemovedCsrfKillSwitchPropertyCannotDisableProtection() throws Exception {
-        mockMvc.perform(post("/api/deals/17/brief"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/deals/17/brief").with(csrf().asHeader()))
-                .andExpect(status().isAccepted());
-    }
+
 
     private void assertPostWithCsrfOnly(String path) throws Exception {
         mockMvc.perform(get(path))

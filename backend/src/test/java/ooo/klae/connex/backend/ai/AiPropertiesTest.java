@@ -25,6 +25,10 @@ import org.springframework.mock.env.MockEnvironment;
 
 class AiPropertiesTest {
 
+    /** One exact endpoint an operator could have probed and declared against. */
+    private static final String DECLARED_ENDPOINT =
+            "https://generativelanguage.googleapis.com/v1beta/openai";
+
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
                     ConfigurationPropertiesAutoConfiguration.class,
@@ -242,5 +246,70 @@ class AiPropertiesTest {
                             context.getStartupFailure(),
                             "Expected startup failure for output-token limit " + invalid));
         }
+    }
+
+    @Test
+    void parallelReadCallsBindsFromTheEndpointScopedOverride() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("connex.ai.model-overrides[0].provider", "openai_compatible")
+                .withProperty("connex.ai.model-overrides[0].model-id", "gemini-2.5-pro")
+                .withProperty("connex.ai.model-overrides[0].endpoint", DECLARED_ENDPOINT)
+                .withProperty("connex.ai.model-overrides[0].parallel-read-calls", "4");
+
+        AiProperties properties = Binder.get(environment)
+                .bind("connex.ai", Bindable.of(AiProperties.class))
+                .orElseThrow(() -> new IllegalStateException("AI properties did not bind"));
+
+        AiProperties.ModelOverride override = properties.getModelOverrides().getFirst();
+        assertEquals(4, override.getParallelReadCalls());
+        assertEquals(4, override.parallelReadCallsFor(
+                "openai_compatible", "gemini-2.5-pro", DECLARED_ENDPOINT));
+    }
+
+    /**
+     * A deployment-wide declaration stays inert, because it names no probed endpoint.
+     *
+     * <p>The same model id served by two gateways answers this question differently, so an override
+     * without {@code endpoint} would enable batching for a gateway nobody probed — the exact
+     * mistake the endpoint scoping exists to prevent for streaming and thought summaries.
+     */
+    @Test
+    void parallelReadCallsWithoutAnEndpointDeclaresNothing() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("connex.ai.model-overrides[0].provider", "openai_compatible")
+                .withProperty("connex.ai.model-overrides[0].model-id", "gemini-2.5-pro")
+                .withProperty("connex.ai.model-overrides[0].parallel-read-calls", "4");
+
+        AiProperties properties = Binder.get(environment)
+                .bind("connex.ai", Bindable.of(AiProperties.class))
+                .orElseThrow(() -> new IllegalStateException("AI properties did not bind"));
+
+        assertNull(properties.getModelOverrides().getFirst().parallelReadCallsFor(
+                "openai_compatible", "gemini-2.5-pro", DECLARED_ENDPOINT));
+    }
+
+    @Test
+    void parallelReadCallsOutsideTheDeclaredCeilingFailsAtStartup() {
+        for (String valid : List.of("1", "4")) {
+            contextRunner
+                    .withPropertyValues(parallelReadCallsOverride(valid))
+                    .run(context -> assertNull(context.getStartupFailure()));
+        }
+        for (String invalid : List.of("0", "-1", "5")) {
+            contextRunner
+                    .withPropertyValues(parallelReadCallsOverride(invalid))
+                    .run(context -> assertNotNull(
+                            context.getStartupFailure(),
+                            "Expected startup failure for parallel-read-calls " + invalid));
+        }
+    }
+
+    private static String[] parallelReadCallsOverride(String declared) {
+        return new String[] {
+                "connex.ai.model-overrides[0].provider=openai_compatible",
+                "connex.ai.model-overrides[0].model-id=gemini-2.5-pro",
+                "connex.ai.model-overrides[0].endpoint=" + DECLARED_ENDPOINT,
+                "connex.ai.model-overrides[0].parallel-read-calls=" + declared
+        };
     }
 }

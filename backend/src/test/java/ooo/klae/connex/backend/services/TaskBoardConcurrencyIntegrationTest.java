@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -19,7 +18,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -206,7 +204,7 @@ class TaskBoardConcurrencyIntegrationTest {
             Future<Task> second = executor.submit(secondOperation);
             assertTrue(secondLockEntered.await(10, TimeUnit.SECONDS));
             assertFalse(secondLockAcquired.await(1, TimeUnit.SECONDS));
-            assertThrows(TimeoutException.class, () -> second.get(1, TimeUnit.SECONDS));
+            assertFalse(second.isDone());
             releaseFirst.countDown();
             first.get(20, TimeUnit.SECONDS);
             second.get(20, TimeUnit.SECONDS);

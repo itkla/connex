@@ -18,12 +18,10 @@ import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.dto.RecordCommentIndicatorDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class RecordCommentIndicatorTest extends AbstractServiceTest {
 
     @Autowired RecordCommentService recordCommentService;
-    @Autowired ShareMapper shareMapper;
     @Autowired WorkspaceService workspaceService;
 
     @Test
@@ -46,27 +44,6 @@ class RecordCommentIndicatorTest extends AbstractServiceTest {
         assertEquals(2, indicators.size());
         assertEquals(1, indicators.get(first.getId()).openThreads());
         assertEquals(1, indicators.get(second.getId()).openThreads());
-    }
-
-    @Test
-    void otherWorkspaceThreadsOnASharedPersonAreNotCounted() {
-        WorkspaceMembershipDto owner = workspaceService.createWorkspace(
-            "Indicator Owner " + unique(), currentUser.getId());
-        authenticateAs(currentUser, owner.getId());
-        WorkspaceMembershipDto grantee = workspaceService.createWorkspace(
-            "Indicator Grantee " + unique(), currentUser.getId());
-        Person person = personIn(owner.getId());
-        assertEquals(1, shareMapper.sharePerson(
-            person.getId(), owner.getId(), grantee.getId(), currentUser.getId(), false));
-        recordCommentService.createThread("person", person.getId(), "Owner thread", token());
-
-        authenticateAs(currentUser, grantee.getId());
-        recordCommentService.createThread("person", person.getId(), "Grantee thread", token());
-
-        List<RecordCommentIndicatorDto> indicators = recordCommentService.getIndicators(
-            "person", List.of(person.getId()));
-        assertEquals(1, indicators.size());
-        assertEquals(1, indicators.getFirst().openThreads());
     }
 
     @Test

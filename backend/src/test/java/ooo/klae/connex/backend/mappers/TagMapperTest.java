@@ -14,20 +14,13 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class TagMapperTest extends AbstractMapperTest {
 
-    /**
-     * Inserts a new tag and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Tag tag = newTag();
-        assertNotEquals(0, tag.getId());
-    }
 
     /**
      * Gets a tag by ID and checks if the returned tag is not null.
@@ -35,6 +28,7 @@ class TagMapperTest extends AbstractMapperTest {
     @Test
     void getTagById_returnsInsertedRow() {
         Tag tag = newTag();
+        assertNotEquals(0, tag.getId());
 
         Tag found = tagMapper.getTagById(workspace.getId(), tag.getId());
 
@@ -150,6 +144,48 @@ class TagMapperTest extends AbstractMapperTest {
         Workspace other = newWorkspace();
         assertTrue(tagMapper.getTagsByDealId(other.getId(), deal.getId()).isEmpty(),
             "tags linked in another workspace must not hydrate here");
+    }
+
+    /**
+     * Reads every association of a batch of records of one kind in one statement, and nothing of
+     * another kind, another record or another workspace.
+     */
+    @Test
+    void getTagsForRecords_batchesTheAssociationsOfOneKindInThisWorkspace() {
+        Tag first = newTag();
+        Tag second = newTag();
+        Company company = newCompany();
+        Person tagged = newPerson(company);
+        Person alsoTagged = newPerson(company);
+        Person untouched = newPerson(company);
+        personMapper.addTag(workspace.getId(), tagged.getId(), first.getId());
+        personMapper.addTag(workspace.getId(), tagged.getId(), second.getId());
+        personMapper.addTag(workspace.getId(), alsoTagged.getId(), second.getId());
+        personMapper.addTag(workspace.getId(), untouched.getId(), first.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), first.getId());
+
+        List<RecordTag> tags = tagMapper.getTagsForRecords(
+            workspace.getId(), "person", List.of(tagged.getId(), alsoTagged.getId()));
+
+        assertEquals(3, tags.size());
+        assertEquals(List.of(tagged.getId(), tagged.getId(), alsoTagged.getId()),
+            tags.stream().map(RecordTag::recordId).toList(),
+            "the rows are ordered by record, and person ids ascend in insertion order");
+        assertTrue(tags.contains(new RecordTag(tagged.getId(), first.getId(), first.getName())));
+        assertTrue(tags.contains(new RecordTag(tagged.getId(), second.getId(), second.getName())));
+        assertTrue(tags.contains(new RecordTag(alsoTagged.getId(), second.getId(), second.getName())));
+        assertEquals(
+            List.of(new RecordTag(company.getId(), first.getId(), first.getName())),
+            tagMapper.getTagsForRecords(workspace.getId(), "company", List.of(company.getId())));
+        assertTrue(tagMapper.getTagsForRecords(
+            workspace.getId(), "deal", List.of(tagged.getId(), company.getId())).isEmpty());
+        assertTrue(tagMapper.getTagsForRecords(
+            workspace.getId(), "task", List.of(tagged.getId())).isEmpty());
+
+        Workspace other = newWorkspace();
+        assertTrue(tagMapper.getTagsForRecords(
+                other.getId(), "person", List.of(tagged.getId(), alsoTagged.getId())).isEmpty(),
+            "associations of another workspace's records must not hydrate here");
     }
 
     /**

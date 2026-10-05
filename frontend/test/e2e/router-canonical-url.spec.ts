@@ -1,53 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+import { refreshThroughRouter } from "./support/router-refresh";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-/**
- * Next publishes its app-router instance for debugging. Reaching it lets a test perform the refresh
- * that sits behind an app-shell error boundary's "Try again": it supplies no URL, so `HistoryUpdater`
- * re-publishes whatever canonical URL the router still holds over the address bar.
- */
-declare global {
-    interface Window {
-        next?: { router?: { refresh: () => void } };
-    }
-}
-
 /** A public app-router page with no one-time-link entry hook, so nothing else rewrites the URL. */
 const PROBE_PAGE = "/privacy";
-
-/**
- * Marks the current history entry through the *native* method, refreshes through the router, and
- * waits for the commit that drops the mark.
- *
- * A refresh commits with `preserveCustomHistoryState` off, so the mark disappearing is the signal
- * that `HistoryUpdater` has written the router's canonical URL back over the address bar — the
- * assertions that follow therefore cannot pass by running ahead of it. The mark carries `__NA`, so
- * Next's patched `replaceState` hands it straight to the native method and it cannot repair the
- * canonical URL on its way in.
- */
-async function refreshThroughRouter(page: Page) {
-    await page.evaluate(() => {
-        const state: unknown = window.history.state;
-        const marked = state !== null && typeof state === "object"
-            ? { ...state, refreshProbe: true }
-            : { refreshProbe: true };
-        window.history.replaceState(marked, "", window.location.href);
-    });
-    expect(await page.evaluate(() => {
-        const state: unknown = window.history.state;
-        return state !== null && typeof state === "object" && "__NA" in state && "refreshProbe" in state;
-    })).toBe(true);
-
-    await page.evaluate(() => {
-        window.next?.router?.refresh();
-    });
-
-    await page.waitForFunction(() => {
-        const state: unknown = window.history.state;
-        return state === null || typeof state !== "object" || !("refreshProbe" in state);
-    });
-}
 
 /**
  * Pins the Next 16 behaviour `writeOwnedParamsToUrl` depends on (#1781).

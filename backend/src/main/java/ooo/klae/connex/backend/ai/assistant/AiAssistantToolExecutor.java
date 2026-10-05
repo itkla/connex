@@ -61,6 +61,7 @@ public class AiAssistantToolExecutor {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AiAssistantToolCatalog toolCatalog;
+    private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final SearchService searchService;
     private final PersonService personService;
     private final CompanyService companyService;
@@ -144,7 +145,7 @@ public class AiAssistantToolExecutor {
         requireHandleKind(name, args, resources);
     }
 
-    private static void requireHandleKind(
+    private void requireHandleKind(
             String name, JsonNode args, AiChatResourceRegistry resources) {
         JsonNode handles = args.get("handles");
         if (handles != null && handles.isArray()) {
@@ -156,14 +157,28 @@ public class AiAssistantToolExecutor {
         if (handle == null || handle.isNull()) {
             return;
         }
-        Set<String> acceptedKinds = switch (name) {
+        resources.resolve(handle.asString(), handleKinds(name));
+    }
+
+    /**
+     * The record kinds one tool's {@code handle} argument may name, refused as a recoverable
+     * argument error before any proposal is stored.
+     *
+     * <p>A write tool's kinds are its own {@link AiAssistantWriteTool#acceptedTargetKinds()}, read
+     * from the registry, so this check and the write path resolve a handle against one declaration.
+     * A read tool names its kinds here.
+     *
+     * @param name declared tool key
+     * @return the accepted record kinds, every record kind by default
+     */
+    private Set<String> handleKinds(String name) {
+        return switch (name) {
             case "get_deal_brief" -> Set.of("deal");
             case "find_schedule_conflicts" -> Set.of("person");
-            case "create_activity", "create_task", "create_note" -> Set.of("person", "deal");
-            case "change_deal_stage" -> Set.of("deal");
-            default -> RECORD_KINDS;
+            default -> writeToolRegistry.find(name)
+                    .map(AiAssistantWriteTool::acceptedTargetKinds)
+                    .orElse(RECORD_KINDS);
         };
-        resources.resolve(handle.asString(), acceptedKinds);
     }
 
     /** Resolves authorized page context into handles without placing tenant-local ids in prompt data. */
@@ -277,6 +292,11 @@ public class AiAssistantToolExecutor {
      * anchored to the plan it just published.
      */
     private AiAssistantToolResult setTodos(JsonNode args) {
+        for (JsonNode item : args.path("items")) {
+            if (item.isString() && AiAssistantStepGuard.containsTaskHandle(item.asString())) {
+                throw AiAssistantLoopException.refusedArguments("todo_contains_handle");
+            }
+        }
         List<AiChatTodo> todos = AiChatTodo.from(args.get("items"), args.get("statuses"));
         if (todos.isEmpty()) {
             throw AiAssistantLoopException.refusedArguments("empty_plan");
@@ -405,7 +425,7 @@ public class AiAssistantToolExecutor {
         };
         List<Map<String, Object>> data = tasks.stream()
                 .limit(limit)
-                .map(AiAssistantToolExecutor::taskData)
+                .map(task -> taskData(task, resources, workspaceService.getCurrentUserId()))
                 .toList();
         return result(Map.of("handle", requiredText(args, "handle"), "tasks", data), List.of());
     }
@@ -703,8 +723,12 @@ public class AiAssistantToolExecutor {
         return data;
     }
 
-    private static Map<String, Object> taskData(Task task) {
+    private static Map<String, Object> taskData(
+            Task task, AiChatResourceRegistry resources, int actorId) {
         Map<String, Object> data = new LinkedHashMap<>();
+        data.put("handle", resources.registerTask(task.getId()));
+        data.put("assignedToMe", task.getAssignedTo() != null
+                && task.getAssignedTo().getId() == actorId);
         putIfPresent(data, "description", task.getDescription());
         putIfPresent(data, "status", task.getStatus());
         data.put("completed", task.isCompleted());

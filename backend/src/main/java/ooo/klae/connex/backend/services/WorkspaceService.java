@@ -332,8 +332,11 @@ public class WorkspaceService {
 
     /**
      * Creates a workspace owned by the given user. Used by registration (when
-     * self-service creation is enabled) and the create endpoint.
+     * self-service creation is enabled) and the create endpoint. The whole provisioning,
+     * including any new organization and its founding owner, is one transaction (#1982):
+     * a failure part-way leaves nothing behind.
      */
+    @Transactional
     public WorkspaceMembershipDto createWorkspace(String name, int ownerUserId) {
         if (!selfServiceCreationAllowed) {
             throw new ForbiddenException("Workspace creation is disabled on this instance");
@@ -344,13 +347,20 @@ public class WorkspaceService {
     /**
      * Creates the first owner's workspace during instance bootstrap, bypassing the
      * self-service-creation flag (the bootstrap actor is the trusted operator, not a
-     * self-service user). Only {@code BootstrapRunner} should call this.
+     * self-service user). Only {@code BootstrapRunner} should call this. Like
+     * {@link #createWorkspace}, it provisions in one transaction.
      */
+    @Transactional
     WorkspaceMembershipDto createWorkspaceForBootstrap(String name, int ownerUserId) {
         return provisionWorkspace(name, ownerUserId);
     }
 
-    @Transactional
+    /**
+     * Provisions the workspace, and a new organization when the owner has no administrative
+     * active one. It is only ever called on {@code this}, so it carries no transaction of its own
+     * and relies on its callers': the owner's account row stays shared-locked from before the
+     * organization is resolved through the membership insert and the audits.
+     */
     WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
         if (userMapper.lockByIdForShare(ownerUserId) == null) {
             throw new ResourceNotFoundException("User not found: " + ownerUserId);
@@ -624,6 +634,30 @@ public class WorkspaceService {
                     }
                 }
             }
+        }
+
+        /**
+         * The locked effective permissions of a user whose authorization was resolved here.
+         *
+         * <p>Callers that learn which permission they need only after taking a further lock assert
+         * it against this set instead of issuing a second read, which would be answered by the
+         * MyBatis first-level cache and could invert the membership → record lock order. A user
+         * registered with an empty required set is refused rather than reported as holding nothing:
+         * their custom-role permission rows are deliberately left unlocked in that case, so an empty
+         * answer there would be indistinguishable from a genuine absence of grants.
+         *
+         * @param userId the member whose locked authority is being read
+         * @return the effective permissions read from rows this transaction still holds
+         * @throws IllegalArgumentException when no permission was required for that user
+         */
+        public Set<Permission> effectiveFor(int userId) {
+            Set<Permission> required = requiredByUser.get(userId);
+            Set<Permission> effective = effectiveByUser.get(userId);
+            if (required == null || required.isEmpty() || effective == null) {
+                throw new IllegalArgumentException(
+                    "Locked permissions were not resolved for user " + userId);
+            }
+            return effective;
         }
 
         private static Map<Integer, Set<Permission>> immutablePermissionMap(

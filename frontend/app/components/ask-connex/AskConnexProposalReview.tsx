@@ -6,15 +6,18 @@ import {
     NoSymbolIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import {
-    askConnexFailureMessage,
     AskConnexChangeNotice,
     AskConnexChangeRow,
+    askConnexFailureMessage,
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import {
     askConnexProposalAppliable,
+    askConnexToolChanges,
+    askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
     type AskConnexProposalGroup,
@@ -170,7 +173,9 @@ export default function AskConnexProposalReview({
                 {group.cards.map((card) => {
                     const targetHref = askConnexToolTargetHref(card.target);
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
+                    const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card);
+                    const changes = askConnexToolChanges(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
                     return (
@@ -204,6 +209,8 @@ export default function AskConnexProposalReview({
                                         >
                                             <span className="truncate">{card.target.label}</span>
                                         </Link>
+                                    ) : card.target.kind === 'workspace' && card.target.label !== null ? (
+                                        <span className="break-words text-xs text-muted-foreground">{card.target.label}</span>
                                     ) : (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                                             <NoSymbolIcon aria-hidden className="size-3.5 shrink-0" />
@@ -211,15 +218,23 @@ export default function AskConnexProposalReview({
                                         </span>
                                     )}
                                 </div>
-                                {card.change !== null ? (
-                                    <>
-                                        <AskConnexChangeRow change={card.change} labels={cardLabels} />
-                                        <AskConnexChangeNotice
-                                            state={card.change.state}
+                                {changes.map((change) => (
+                                    <Fragment key={change.field}>
+                                        <AskConnexChangeRow
+                                            toolName={card.toolName}
+                                            change={change}
+                                            removal={removal}
                                             labels={cardLabels}
                                         />
-                                    </>
-                                ) : null}
+                                        <AskConnexChangeNotice
+                                            field={change.field}
+                                            state={change.state}
+                                            currentValue={change.currentValue}
+                                            removal={removal}
+                                            labels={cardLabels}
+                                        />
+                                    </Fragment>
+                                ))}
                                 {card.failure !== null ? (
                                     <div
                                         role="alert"

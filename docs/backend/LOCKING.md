@@ -11,7 +11,18 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
-- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits (quiet-hours evaluation) keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request.
+- **A database rollback poisons its transaction (#1947).** MySQL answers some failures by rolling back the whole transaction, savepoints included, and then lets the next statement open a new implicit transaction on the same connection: a deadlock (1213), a full lock table (1206), and a lock-wait timeout (1205) on a server running with `innodb_rollback_on_timeout`.
+  - `RolledBackTransactionGuard` receives every failure the MyBatis `SqlSessionTemplate` and the JdbcTemplate translator translate. When one of these arrives inside a Spring transaction, the guard makes that transaction fail its commit with the same exception the failure would have produced unswallowed, however it was handled in between: a deadlock or lock-wait timeout as the retryable lock failure, a full lock table as uncategorized.
+  - So code that catches a deadlock and carries on cannot commit the work it did afterwards. Retry in a new transaction, never the same one.
+  - Inside a caller's transaction, `AuditService` rethrows the `TransactionSystemException` from a `NESTED` append whose savepoint is gone, rather than recording it as an audit failure. Both workflow engines retry it, because the retry policy walks the deadlock it carries as its application exception.
+  - Outside the guard, a swallowed rollback can still commit partial work:
+    - Spring Session's JDBC repository;
+    - `SeederBatchWriter`'s own `SqlSessionTemplate`;
+    - `DataSubjectDisclosureReadTransaction`'s raw session;
+    - cursor iteration in `TenantExportSnapshotTransaction`;
+    - a failure swallowed inside another synchronization's `beforeCommit` or `beforeCompletion`, which registers too late for the commit it occurs in.
+  - A lock failure that also crossed a participating `@Transactional` proxy has already marked the transaction rollback-only. Its commit therefore rolls back before any callback runs and fails with a cause-less `UnexpectedRollbackException`. Nothing is lost, but both engines classify that as permanent.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 ## Workflow lifecycle and account offboarding
@@ -47,8 +58,38 @@ Version/rule key discovery is non-locking and Java-sorted before individual exac
 The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes, and taking it
 exclusively there is a defect. Every audited transaction in the workspace takes that same row
 `FOR SHARE` at its end (`AuditIntegrityService.lockForeignKeyParents`), and membership-first record
-mutations — person owner change, deal, company, task, saved views, AI chat turn persistence — lock
-the `workspace_member` row before reaching the root in that trailing audit. An exclusive root at
+mutations — person owner change, deal, deal-collaborator replacement, company, task, saved views, AI
+chat turn persistence — lock the `workspace_member` row before reaching the root in that trailing
+audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
+in ascending user-id order, then the deal row `FOR UPDATE`, then reads the deal's `deal_collaborator`
+rows `FOR UPDATE` and replaces them, before its trailing audit — the order `DealService.updateOwner`
+uses — so a member offboarded concurrently is never written back as a collaborator (#1793). The owner
+changes (`DealService`, `PersonService` and `CompanyService.updateOwner`) lock the new owner's membership,
+then read the record row `FOR UPDATE`, and take the audited old owner and the `owner_changed` decision
+from that row rather than from their unlocked existence check (#1948). Each read takes exactly the
+`PRIMARY` record lock its `UPDATE` already took, so the lock set is unchanged. For a deal that needs
+`getDealByPrimaryKeyForUpdate` rather than `getDealByIdForUpdate`, which would also lock
+`uq_deal_workspace_id`. A composite-foreign-key child insert, such as an approval request, holds that
+entry shared and then takes the workspace audit head or the workflow gate. A legacy delivery's
+`assign_owner` reaches the owner change holding the gate, and the audit head too once an earlier
+action has audited. Either one would close a deadlock if the owner change locked that entry. The
+other single-column deal updates, `reschedule` and `updateRiskExcluded`, read the deal through the
+same primary-key lock for the same reason (#1958). The contact and company tag replacements
+(`PersonService` and `CompanyService.replaceTags`) and the contact evaluation opt-out
+(`PersonService.updateEvaluationExclusions`) also read the record row `FOR UPDATE` first, refuse an
+archived row under it, and audit from what they read after it, at `READ_COMMITTED` (#1968). The deal
+and attachment tag replacements do the same (#1980): the deal through `getDealByPrimaryKeyForUpdate`,
+whose `PRIMARY`-only lock is the record a `deal_tag` foreign-key check takes, refusing a deleted deal;
+the attachment through `getMetadataByIdForUpdate`, re-checking its type and note-target visibility
+under that lock. A tag replacement then reads the record's `person_tag`, `company_tag`, `deal_tag` or
+`attachment_tag` rows `FOR UPDATE OF` the association table, driven from its primary-key prefix,
+before clearing them. A concurrent `addTag` blocks on the
+record row at its foreign-key check, and a concurrent `removeTag`, which takes no record lock, blocks
+on the association row, so the audited previous tags are exactly the rows the replacement deletes. A
+tag deletion that cascades into a record while a replacement re-adds the same tag can still deadlock,
+as it could before (the replacement holds the association row and waits on the tag row for its
+insert's foreign-key check); InnoDB rolls one back with a retryable error. The collaborator path is in the #1582 class
+below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
 class). Mutual exclusion for the trigger-capacity count comes from step 3b instead, which is scoped
@@ -307,6 +348,13 @@ service-level cleanup.
   exists on `main` through the same transactions' trailing audits; credential cleanup only makes
   the last two explicit, and none of them is introduced or worsened here.
 - Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
+- Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
+  - The replacement reads the collaborator rows `FOR UPDATE` through the primary key twice: before the clear, and again after the clear and any insert. That makes the audited and returned lists current reads rather than the snapshot that its unlocked existence check opened before any lock was held (#1942).
+  - The first read takes the deal's clustered-row locks, and the gap lock on the next primary-key record, one statement before the clear. Its locks are a subset of the clear's, so it adds no wait-for edge. It does lengthen three existing deadlock windows:
+    - **A member dropped while being offboarded.** Offboarding's `removeCollaboratorFromWorkspace` and `removeCollaboratorAnywhere` lock a member's secondary-index entry before its clustered row. The replacement locks the clustered rows first, and reaches the secondary entries only in the clear.
+    - **Account erasure.** Erasure deletes the user's collaborator rows, with their `idx_deal_collaborator_user_only` gaps, before it clears deal ownership. That is the reverse of the replacement's deal row, then collaborator rows. The cycle needs the replacement's insert to wait on erasure's user-index gap, and it predates #1942.
+    - **Replacements sharing a gap.** The gap before the next primary-key record is shared. For a deal with no collaborators it spans every collaborator-less deal up to the next row, so two deals receiving their first collaborators at once can deadlock on their inserts. In a pooled catalog the gap can end at another workspace's first row or at the supremum, so the other side can be a different tenant's replacement. That costs availability; it leaks nothing.
+  - InnoDB rolls back the lighter transaction, usually but not always the replacement. No handler maps either side to a conflict, so the losing request gets a 500 and must be retried.
 
 ## Lifecycle, APPI requests, and organization SSO
 
@@ -359,6 +407,11 @@ Task creation/full update lock the requested active membership first. Mutations 
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
 
+Assistant completion retains the board through `TaskService.lockBoardForUpdate()` before taking
+its exact task through `TaskService.lockTaskForUpdate(int)`; assistant rescheduling takes only
+that exact row. `getTaskByIdForUpdate` flushes the MyBatis first-level cache, so a target gate
+following contention cannot reuse a pre-lock snapshot.
+
 Task-history imports retain their authorization and duplicate-decision roots first, then acquire
 that same board root before locking resolved people in ascending id order. Assistant task creation
 also acquires the board before its processable-record target and restriction fence. These callers
@@ -387,6 +440,241 @@ Ordinary turn/join/leave/sharing/presence-authorizing mutations:
 Invitation/participant-removal paths lock caller/target active memberships ascending by user id before the session root; never acquire another membership after the session root.
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
+
+### Assistant write tools
+
+Task targets declare `TASK_ROW` and `TARGET_FINGERPRINT` together. Completion declares the
+`task_board_lock` root as well: authority → session → tool call → board root → exact task.
+Rescheduling declares no board: authority → session → tool call → exact task. The task service
+retains its canonical completion hierarchy and assignee-only rule when the delegate re-enters.
+The framework's owner-scope gate reads the task and reauthorizes its linked person and deal
+through their scoped domain getters after the task lock, before the delegate writes.
+
+Task proposal freshness compares `targetVersion`, the SHA-256 from
+`TaskService.assistantStateVersion`, with the locked canonical row. It includes id, description,
+completed, status, due date, assignee, person and deal; it excludes position and updatedAt.
+Completing a sibling can compact positions without invalidating the proposal, but reassignment
+invalidates it. Card snapshots use the same hash before reference hydration redacts display text.
+Canonical snapshot reads flush cached hydrated rows, and an idempotent proposal replay retains
+its original stored fingerprint without taking a new baseline.
+
+Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
+`READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one
+`AiAssistantWriteTool` bean, and every catalog write tool has exactly one —
+`AiAssistantWriteToolRegistry` refuses to start otherwise — so the order below is the only path a
+write takes: the framework keeps no per-tool arm and no fallback lock. The tool
+declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
+tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
+`AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
+dependencies to an explicit allowlist of domain services and helpers — no mapper, no
+`WorkspaceService`, no member or permission source — and lexically by refusing locking-method,
+permission-read and lifecycle-mutator names in tool source; a new dependency is a reviewed edit to
+that allowlist. Before any lock, an approval resolves the principals the write will name
+(`AiAssistantWriteTool.principals`, against the member directory the framework hands it — today
+only `assign_owner`'s owner), and those same objects reach the write: `Execution` carries no member
+lookup, so `assign_owner` writes exactly the owner id locked at step 1. A confirm-tier proposal
+also pins, when it is prepared in the turn, what its principals and its value resolved to: the
+`principals` ids and the `resolution` field and id are stored as additive siblings of the stored
+arguments, and a name that resolves to no single row is refused before any proposal is stored. A
+step that reaches the write again after its proposal was stored under the step's key resolves
+nothing: the loop first reads that stored row, without a lock, and the call carries its pins
+verbatim, so a rename or an offboarding in between cannot turn the replay into a reused-key or
+unresolved refusal, and only what the model asked for is compared with the stored row. The
+approval compares its own pre-lock resolution with the pins — the principals before step 1, on the
+proposal read unlocked, so a drifted member's authorization rows are never locked and its own 403
+never answers first, and again once step 3 has read the locked proposal; the value just before
+step 5, before any board or target lock — and refuses any difference with `Assistant proposal
+target changed`, so a rename or an offboarding between the proposal and the approval can never hand
+a record to a member, move a deal to a stage, or remove a tag, that the card did not name — a tag
+deleted and re-created under the reviewed name is another row, and `remove_tag` refuses it. The comparison reads
+no row and takes no lock. The resolved row itself is never locked either: a rename of the reviewed
+tag that commits after the approval resolved it still removes exactly the reviewed association,
+because the pin compares ids, and `remove_tag` names the tag in its stored outcome as it reads after
+the record lock, as the record service's audit row does, never by the name it was resolved under.
+The card resolves the stored name exactly as the approval does and names only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
+the card and refused at approval with the same 404 as before pinning, rather than labelled by its
+id.
+
+The pins protect only the proposals that carry them, on a build that reads them:
+
+- A proposal stored before pinning carries neither sibling and is approved exactly as before.
+  Pending proposals never expire, so a confirm-tier proposal still pending from before this change
+  keeps resolving its names at approval — the #1865 drift stays possible for that row until it is
+  decided.
+- A build from before the pins reads only the stored `tool`, `tier`, `restrictionEpoch`, `target`
+  and `request` and ignores both siblings, so after a rollback to it a pinned proposal renders,
+  approves and rejects by name exactly as an unpinned one, without the pin's protection. That is
+  not safe equivalence: a rollback past this change must first reject (or have the member
+  re-propose) every pending proposal whose stored arguments carry `principals` —
+  `status = 'proposed'` and `JSON_CONTAINS_PATH(arguments_json, 'one', '$.principals')` on
+  `ai_chat_tool_call` — before approvals are served by the older build. Failing closed on rollback
+  instead would need a pin-aware reader shipped before this writer.
+- The staging deployment's automatic rollback does not run that rejection. When
+  `post_deploy_smoke` fails after the target backend and frontend are live, `deployment_exit` calls
+  `rollback_release`, which restarts the previous backend and frontend without reading
+  `ai_chat_tool_call`, and the interrupted-deployment recovery in `recover_transaction` can fall
+  back to the same `rollback_release`. A pinned proposal created while the target release served
+  survives that rollback, and the older build approves it by name without its pin — how every
+  confirm-tier proposal was approved before #1865, so the protection lapses for those rows rather
+  than a new exposure opening. Gating the automatic rollback is a separate Tier 3 deployment change
+  tracked in #1871; until it lands, run the rejection above by hand after any automatic rollback
+  past this change.
+
+The framework acquires its locks in exactly this order:
+
+1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
+   covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals
+   (today only `assign_owner`'s owner), each named principal, who carries no requirement. That call takes the user roots `FOR SHARE` ascending by user id, then the
+   active workspace root `FOR SHARE`, then the memberships `FOR UPDATE` ascending by user id, then the
+   custom-role row and its `workspace_role_permission` rows `FOR UPDATE` ascending by role id. Roles
+   are locked only for users with a non-empty requirement, so the actor's custom role is locked and
+   the owner's never is. An owner whose account deletion is reserved is refused here with `User N is
+   not a member of this workspace` even while its membership row is still active.
+2. Exact `(workspace_id,id)` `ai_chat_session` root `FOR UPDATE`.
+3. Exact `ai_chat_tool_call` row `FOR UPDATE`.
+4. Immediate tier only: exact `ai_chat_turn` row `FOR UPDATE`. The real order is session → tool call
+   → turn, not session → turn → tool call.
+5. Immediate execution and approval only: the `task_board_lock` workspace root, when the tool
+   declares it (task creation). The value the write moves its target to — a deal's new stage — is
+   resolved by non-locking reads just before this step, because the stage-change lock needs it.
+6. For `DUPLICATE_DECISION_RECORD_UPDATE` (only person/company edits),
+   `DuplicateDecisionLockService.lockCurrentOrganization()` re-enters the step-1 roots, then retains
+   the organization `FOR SHARE` and `organization_duplicate_decision_lock` mutex. Only then take
+   the target record row. `PersonService.update` and `CompanyService.updateCompany` re-enter the
+   mutex; taking the target first would invert the interactive-edit hierarchy below. No path takes
+   this mutex and then an `ai_chat_*` row. The reciprocal interactive-person-edit/field-approval
+   integration test pauses the editor after acquiring the mutex, observes the other actor's
+   approval waiting on that mutex, and proves the editor commits while approval refuses stale.
+7. Immediate execution and approval only: the target record row — a person `FOR SHARE` when the
+   tool only links to it (task creation on a person), otherwise the person, company or deal
+   `FOR UPDATE`, or the ordered stage-change rows toward the resolved stage for a deal stage move.
+   An `assign_owner` write's `updateOwner` then re-acquires the owner's membership, if it names
+   one, and this row, all already held.
+   `TargetLock.NONE` skips this step entirely: `create_person` and `create_deal` use the company
+   only as a visible anchor. Workspace-targeted `create_company` and `create_report` also skip
+   a target lock. Company creation uses the same guided hierarchy; report creation retains the
+   delegate's workspace report-definition locks after the assistant locks and the framework's
+   REPORT_CREATE/REPORT_READ assertion. Guided record creation re-enters the authority roots, then takes the
+   organization duplicate mutex, identity groups and template set/reference hierarchy in the
+   existing guided-create order. No path takes that mutex before an `ai_chat_*` row.
+
+Prepare-time duplicate checks are advisory reads with no mutex and no proof issuance. They hold
+no domain lock across a model call. Person preparation includes the selected template's effective
+email/phone defaults only in transient preflight state. Company preparation likewise checks its
+effective website and template phone default from the same selected preset snapshot. Approval's duplicate recheck under the mutex is authoritative,
+and the pinned template version/set revision is validated by guided creation both preliminarily
+and under the template hierarchy. A new candidate or changed template refuses without a create.
+Deal creation submits the proposal's pinned pipeline id and carries its exact reviewed stage name
+through server-only augmentation. After locking the stage, canonical creation compares that name
+and refuses drift before insertion; stage-to-pipeline validation retains the pinned pipeline under
+the existing stage-before-pipeline hierarchy. No new lock or lock-order edge is introduced.
+
+After step 7 the framework, still in this order and taking no further lock of its own: retains the
+restriction-epoch read fence to completion; for confirm-tier tools compares their declared freshness
+(`AiAssistantProposalFreshness` timestamps or the task semantic fingerprint). `Freshness.NONE`
+requires `TargetLock.NONE`, no writable anchor fields, and either a duplicate probe or an exclusive
+workspace target. Workspace requests carry no handle; the server fills the workspace id and
+refuses mismatches on replay and approval, then checks active membership before the delegate.
+Record creates instead rely
+on the canonical duplicate recheck and pinned template contract. The framework then re-asserts the tool's permissions from the step-1 snapshot; runs the
+owner-scope target gate through the member-scoped person, company or deal getter, which refuses a
+target the actor cannot see before the tool runs; calls the tool's `apply`; compares the identifier
+the write returned with the one resolved before the lock, recording any divergence as a
+`verification` sibling of the stored outcome (`create_person` compares company id and `create_deal`
+compares the pinned stage id on the delegate's returned record; for the existing immediate creates
+that comparison is structural:
+`TaskService.create`, `ActivityService.create` and `NoteService.create` return the very bean the tool
+built, so its link cannot diverge from the target while that holds, and nothing is re-read from
+the database; it is structural for `add_tag` too, whose record services' `addTag` reports only
+whether it created the association, so the tool declares `ReadBack.structural`, comparing the tag
+id it resolved with itself and verifying nothing, for `remove_tag`, whose `removeTag` reports
+only whether it removed the association and compares the pinned tag id with itself, and for
+`set_response_due`, whose `LeadResponseSlaService.startFirstResponseClock` reports only whether it
+started a clock and compares the contact id with itself;
+`assign_owner` compares the owner id on the record `updateOwner` returns with the principal
+locked at step 1, `null` on both sides for a removal; `draft_document` compares the pinned template
+id with `templateId` on the generated document DTO); and writes the tool-call status fail-closed. The one
+read a tool is handed beyond its own domain services is the framework's non-locking schedule read,
+`Execution.scheduleConflicts`, which the framework binds to the row's own person target (a tool
+names only the window, and the read refuses any other target kind), and which the activity tool
+makes inside `apply` for a meeting on a person, after the owner-scope gate and before it writes, so
+the new meeting is never its own conflict.
+
+The owner-scope gate is a read of committed state, not a replay of the value-resolution read. The
+stage tool reads its deal through the same scoped getter before step 7 to resolve the stage, and
+inside one transaction MyBatis answers an identical select from its first-level cache. Every target
+lock statement the framework takes at step 7 — `getVisiblePersonByIdForShare`,
+`getVisiblePersonByIdForUpdate`, `getOwnedCompanyByIdForUpdate` and `getDealByIdForUpdate` —
+therefore declares `flushCache="true"`, so the gate's getter goes to the database after the lock.
+`AiAssistantWriteTargetGateCacheIntegrationTest` pins this against MySQL for each of them. Do not
+remove the flag, and give any new target lock statement the same flag.
+
+Rejection takes no lock after step 3. Undo takes none of its own after step 3; the domain `deleteIf`
+it calls takes what that service documents — for a task the board root and then the exact task rows
+(see Tasks above), for a note or an activity the exact row `FOR UPDATE`. Domain services on this
+path may re-acquire a membership step 1 already holds (`lockAndRequireMember` for the actor in
+`TaskService.lockBoardForCreation`, for the owner in `updateOwner`); that re-acquisition adds no
+edge. `set_response_due`'s `startFirstResponseClock` likewise re-reads its contact `FOR UPDATE`, the
+very person row step 7 already holds, and then updates that contact's open `person_lifecycle_pass`
+row — person before pass, the order the workflow engine's `set_response_due` action takes through
+the same method.
+
+`DealDocumentService.generate`, used by `draft_document`, reacquires the same actor user,
+workspace, membership, custom-role permission rows and deal row already held at steps 1 and 6;
+its snapshot revalidation and document insertion introduce no new authorization or deal lock edge.
+The template is resolved without a lock and pinned by id, not by content version: template edits
+that retain that identity use the template's content as read by generation.
+
+**The authority is the step-1 snapshot, and its rows stay locked until commit.** The tool's own
+permissions become known only after step 3 has read the durable proposal, so the service asserts
+them in memory against the snapshot through `LockedPermissionSnapshot.effectiveFor(actorId)`. It
+asserts them the same way again after the record lock; that second assertion reads the same
+immutable snapshot and cannot fail once the first has passed, so it is a structural check, not the
+protection. The protection is the held rows: a revocation that arrives mid-decision — a `DELETE` of a
+role permission, a role change, a membership removal — waits until the decision commits, and one
+committed before step 1 is seen by it. `AiAssistantWriteToolConcurrencyIntegrationTest` pins this
+for immediate execution, approval and undo by observing the revocation waiting in
+`performance_schema.data_lock_waits`.
+
+Rules that keep this sound:
+
+- **No permission read before step 1 in the same transaction.** An unlocked `permissionsFor` read
+  populates the MyBatis first-level cache, and every later identical read in that transaction —
+  including a domain service's own `@RequirePermission` check — is then answered with the pre-lock
+  result. `preliminaryPrincipals` resolves which principal rows to lock and deliberately takes no
+  permission read. An `AiAssistantWriteTool.principals` implementation is handed only the request
+  and a member directory — a plain `WorkspaceService.getMembers` read — and may not reach anything
+  else: `AiAssistantWriteToolRegistryTest` proves, for every declared tool, that principal
+  resolution touches none of its injected dependencies, so it cannot call a domain getter whose
+  `@RequirePermission` check would be the pre-lock read. A caller without `AI_USE` therefore meets its own-proposal refusals first (an
+  unknown tool call, an unparseable proposal, an owner that no longer resolves) and the locked 403
+  after them.
+- **After step 1, no new authorization lock edge; permission checks stay in the domain layer.** The service's
+  own assertions read the snapshot. The domain services it calls still run their `@RequirePermission`
+  and `requirePermission` checks, which issue non-locking `permissionsFor` reads after step 1 and
+  after the record lock — `TaskService.lockBoardForCreation` and `TaskService.create`,
+  `ActivityService.create`, `NoteService.create`, the `addTag`, `removeTag` and `updateOwner` methods,
+  `DealService.changeStage`, `LeadResponseSlaService.startFirstResponseClock`, and every `deleteIf`
+  undo uses. Those reads add no lock edge, and while
+  the snapshot's rows stay locked they cannot see a different membership, role or permission answer.
+  The document-generation snapshot reacquires only locks step 1 already retains, as above.
+  Do not turn another check into a new locking read, and do not route an assistant write through a
+  domain method that has no permission check on the assumption that the snapshot makes it redundant.
+- **Organization lifecycle is not in the snapshot.** `lockAndRequirePermissions` checks the
+  workspace's lifecycle, not the organization's. An organization entering teardown is refused by the
+  unlocked entry gate (`WorkspaceService.isMember`, which joins `organization.lifecycle_state`) and,
+  for built-in roles, by the domain layer's `permissionsFor` read; one that enters teardown between
+  the entry gate and step 1 is not refused by the snapshot. No write path may rely on the snapshot
+  alone to prove the organization is active.
+
+**Contention.** Per decision the service holds, until commit, the actor's `app_user` row (S), the
+workspace row (S) and the actor's membership (X) — plus the owner's on `assign_owner` — and, for a
+custom-role actor, that role's `workspace_role` row and every one of its `workspace_role_permission`
+rows (X). Assistant decisions by different members who share one custom role therefore serialize on
+that role row, and they also queue behind every other `lockAndRequirePermissions*` or
+`lockedPermissionsFor` caller for that role (note update and delete, document approvals, chat
+attachment uploads and the rest). Built-in-role members still serialize only per user. Memberships
+are always locked before any role, each ascending, so two such callers cannot form a cycle.
 
 ### AI run leases
 
@@ -469,15 +757,25 @@ unchanged. Any other change requires re-entry, so a settings delegate cannot red
 password to a new endpoint. Port comparison uses the resolved effective port, so a client that echoes
 the instance default for a stored `NULL` port is not treated as an endpoint change.
 
-Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — locks the
-authenticated actor's `app_user` root `FOR SHARE` when a `User` principal is present, then the workspace
-root `FOR SHARE`. It holds these roots across the configuration and secret reads so the endpoint and
-password come from one generation. `SecretStore.get` reacquires those same roots in that order;
+Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — and readiness —
+`canSendForWorkspace` and `readinessForWorkspace` — lock the authenticated actor's `app_user` root
+`FOR SHARE` when a `User` principal is present, then the workspace root `FOR SHARE`. Readiness never
+decrypts: it only checks, with a non-locking primary-key read after those roots, that a selected
+override's stored password still resolves. Resolution holds these roots across the configuration and
+secret reads so the endpoint and password come from one generation. `SecretStore.get` reacquires those same roots in that order;
 acquiring the actor root first avoids an inversion with a queued exclusive user lock. Background
 resolution without an actor takes only the workspace root. Callers already holding roots must follow
 the same actor-before-workspace order. Resolution performs no provider I/O; the SMTP connection is
 made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
 disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
+
+`DeliveryProviderConfigService.describeClaimTarget` takes the same actor/workspace roots and then
+`delivery_provider_config FOR SHARE` as resolution. `MailConfigResolver.describeForWorkspace`
+uses the same root-first selection as SMTP resolution (managed instance settings need no workspace
+lookup). Both descriptions are non-sendable and perform no decrypt or secret-use audit. Metadata
+checks cannot detect ciphertext or key-material corruption or lazy rewrap failures. These locks do
+not by themselves make recovery's replay decision correct: dispatch rechecks the claimed target
+before egress.
 
 ## Campaign mutations
 
@@ -906,8 +1204,70 @@ account root.
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
   against committed state. That statement is mapped with `flushCache="true"`: the request is one
   MyBatis session, so without the flush the re-check would return the privilege and passkey answers
-  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
-  below).
+  cached by the pre-lock evaluation. A refusal that appears only under the root is audited once the
+  transaction completes (see below).
+- `WebAuthnService.finishRegistration` takes the account root exclusively (`lockById`), checks the
+  `session_epoch`, locks the assigned custom roles `FOR SHARE`, and then evaluates the first-passkey
+  confirmation fence (#1506) against committed state. `WebAuthnController` audits that refusal
+  strictly at both ceremony phases, before any lock. A refusal that appears only under the root is
+  recorded with the same row through `AuditService.deferFailureScoped` and appended once the
+  transaction completes, because an immediate independent append would wait on the request's own
+  exclusive lock (#1995). It is best-effort, with the bounds of the step-up deferral (#1986).
+
+- `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
+  step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
+  (`lockWorkspaceForShare`) → assigned custom-role rows `FOR SHARE`
+  (`lockAssignedCustomRoleRowsForShare`, flushing the MyBatis session cache) → privilege/step-up
+  re-check with its refusal audited after completion → existing schedule mutation and transactional
+  success audit.
+- `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
+  and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
+  shared, active workspace shared, authorization membership exclusive) → assigned custom-role rows
+  shared with cache flush (`lockAssignedCustomRoleRowsForShare`) → `lockDefinitions` (workspace
+  report definitions exclusive) → `getDefinition` and not-found check → schedule/privilege
+  re-check and step-up, its refusal audited after completion → existing deletion policy, snapshot
+  checks, cascade and transactional success audit. The definition locks block schedule inserts
+  through their parent foreign-key check.
+
+These schedule/report account roots are **shared**, unlike email-change, passkey and
+password-reset credential flows. Report writers (scheduled delivery, report creation and manual
+snapshots) run as the report's user, lock report definitions or schedule rows, then audit, taking
+`app_user` shared. An exclusive account root here would deadlock against those writers. The shared
+root still conflicts with every invitee-timed activation, which locks the grantee's `app_user`
+`FOR UPDATE`; the custom-role row locks also conflict with `lockRole`. These gates use
+`lockAssignedCustomRoleRowsForShare` (`FOR SHARE OF` the role rows) rather than
+`lockAssignedCustomRoleIds`, which also share-locks every custom-role membership the account holds:
+with a shared account root, two of the account's own report deletions in different workspaces each
+hold their own membership exclusively (`isLockedBuiltInAdministrator`) and would then deadlock on
+each other's. The account root is the only one of these locks that waits for a built-in role
+promotion in another workspace: privilege is account-wide, and the role-row lock reaches memberships
+only through their custom roles (`PrivilegedGateConcurrencyIntegrationTest` pins both). The
+workspace root must precede custom-role locks to match `lockRoleMutation`. Both the unlocked
+pre-check and the under-lock re-check audit their refusals, but only the pre-check appends
+immediately. The independent audit takes the account row `FOR SHARE` on its own connection, and
+InnoDB queues that request behind any exclusive request already waiting on the operation's shared
+root, such as a role change or an invite acceptance for the same account. That writer waits on the
+operation, and the operation would wait on the audit in the application, where InnoDB can't see the
+cycle; the refusal used to stall until the writer's lock wait timed out. The under-lock refusal is
+therefore built at the call and appended after the transaction completes
+(`AuditService.deferExportStepUpRefusal` / `deferScheduleDeleteStepUpRefusal`, #1986). That removes
+the cycle but is best-effort: the append's own waits are not bounded, and a failure or a crash before
+it commits loses the row, as for the integrity-head deferral (#1879). Like every chained row, it takes
+its `created_at` and `integrity_actor_id` at append time. It can therefore trail the refusal by the
+queued writer's own transaction, where the immediate append trailed it by that writer's whole lock
+wait. And if that writer is the account's own deletion (self-service only), the row keeps the actor in
+its signed `entity_id` and its labels but not in `actor_id`, as any append after the deletion does.
+The re-check catches a
+promotion, a newly committed schedule (G7), or a step-up that expired while the operation waited
+for its locks.
+
+Residuals: two promotions are not serialized by these shared roots. `OrgMemberService.setMember`
+locks the grantee only `FOR SHARE`, and self-service workspace creation
+(`WorkspaceService.createWorkspace`, #1982) holds the creator's account row only `FOR SHARE`. Both
+are harmless here: nothing that authorizes the gated writes reads `org_member` or a membership the
+write does not already hold (`permissionsFor`, `lockAndRequirePermissions`,
+`isLockedBuiltInAdministrator`, `DeletionPolicy`), so a write that escapes the re-check is one the
+account could have made without the step-up a moment earlier.
 
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:
@@ -932,8 +1292,11 @@ would wait on the caller's own lock until the InnoDB timeout, lose the event, an
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
-re-check of the privileged gate throws without auditing, because any append there would block on
-the request's own exclusive lock.
+re-check of the privileged gate audits its refusal through `AuditService.deferFailure` instead: the
+entry, with its tenant scope, actor and request metadata, is built at the call and appended after the
+request's transaction completes, once its own exclusive lock is released (#1993). That append is
+best-effort with the bounds of the step-up deferral (#1986): `created_at` is the append time, and a
+row appended after its account was deleted keeps the actor only in `entity_id` and its actor label.
 
 The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
 The corpus lookup runs before any lock, but the fail-open decision reads account privilege under

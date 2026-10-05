@@ -76,6 +76,9 @@ import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowServiceTest {
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final String DEFINITION_JSON = buildDefinitionJson();
+    private static final String CANVAS_JSON = buildCanvasJson();
 
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
@@ -1588,8 +1591,8 @@ class WorkflowServiceTest {
         request.setName("Workflow");
         request.setRecordType("deal");
         request.setExecutionMode(executionMode);
-        request.setDefinition(JsonMapper.builder().build().readTree(definitionJson()));
-        request.setCanvas(JsonMapper.builder().build().readTree(canvasJson()));
+        request.setDefinition(JSON.readTree(definitionJson()));
+        request.setCanvas(JSON.readTree(canvasJson()));
         return request;
     }
 
@@ -1600,8 +1603,8 @@ class WorkflowServiceTest {
         request.setName(name);
         request.setRecordType("deal");
         request.setExecutionMode(executionMode);
-        request.setDefinition(JsonMapper.builder().build().readTree(definitionJson()));
-        request.setCanvas(JsonMapper.builder().build().readTree(canvasJson()));
+        request.setDefinition(JSON.readTree(definitionJson()));
+        request.setCanvas(JSON.readTree(canvasJson()));
         return request;
     }
 
@@ -1688,15 +1691,20 @@ class WorkflowServiceTest {
             canonicalizer.parseDefinition(published.definitionJson()),
             canonicalizer.parseCanvas(published.canvasJson()));
         Rule rule = graphConverter.project(converted);
-        WorkflowVersion version = version(rule, versionId, versionNumber, 101);
-        version.setDefinitionJson(published.definitionJson());
-        version.setCanvasJson(published.canvasJson());
-        version.setDefinitionHash(published.definitionHash());
+        WorkflowVersion version = version(rule, versionId, versionNumber, 101, published);
         return new PublishedPair(workflow, version, rule);
     }
 
     private WorkflowVersion version(
             Rule rule, long id, int versionNumber, int workflowId) {
+        CanonicalDraft draft = canonicalizer.canonicalizeDraftJson(
+            rule.getName(), rule.getDescription(), rule.getRecordType(), rule.getExecutionMode(),
+            definitionJson(), canvasJson());
+        return version(rule, id, versionNumber, workflowId, draft);
+    }
+
+    private WorkflowVersion version(
+            Rule rule, long id, int versionNumber, int workflowId, CanonicalDraft draft) {
         WorkflowVersion version = new WorkflowVersion();
         version.setId(id);
         version.setWorkspaceId(7);
@@ -1713,17 +1721,17 @@ class WorkflowServiceTest {
         version.setRunAsUserId(rule.getRunAsUserId());
         version.setCreatedById(rule.getCreatedById());
         version.setPublishedById(41);
-        version.setDefinitionJson(canonicalizer.canonicalizeDraftJson(
-            rule.getName(), rule.getDescription(), rule.getRecordType(), rule.getExecutionMode(),
-            definitionJson(), canvasJson()).definitionJson());
-        version.setCanvasJson(canvasJson());
-        version.setDefinitionHash(canonicalizer.canonicalizeDraftJson(
-            rule.getName(), rule.getDescription(), rule.getRecordType(), rule.getExecutionMode(),
-            definitionJson(), canvasJson()).definitionHash());
+        version.setDefinitionJson(draft.definitionJson());
+        version.setCanvasJson(draft.canvasJson());
+        version.setDefinitionHash(draft.definitionHash());
         return version;
     }
 
-    private String definitionJson() {
+    private static String definitionJson() {
+        return DEFINITION_JSON;
+    }
+
+    private static String buildDefinitionJson() {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("entity_change");
         trigger.setEvents(List.of("deal.won"));
@@ -1745,13 +1753,17 @@ class WorkflowServiceTest {
                     "edgeB", "notifyOwner", "complete",
                     ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT)));
         try {
-            return JsonMapper.builder().build().writeValueAsString(definition);
+            return JSON.writeValueAsString(definition);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
     }
 
     private static String canvasJson() {
+        return CANVAS_JSON;
+    }
+
+    private static String buildCanvasJson() {
         WorkflowCanvas canvas = new WorkflowCanvas(
             Map.of(
                 "eventSource", new WorkflowCanvas.Position(BigDecimal.ZERO, BigDecimal.ZERO),
@@ -1759,7 +1771,7 @@ class WorkflowServiceTest {
                 "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {
-            return JsonMapper.builder().build().writeValueAsString(canvas);
+            return JSON.writeValueAsString(canvas);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
@@ -1772,7 +1784,7 @@ class WorkflowServiceTest {
                 "complete", new WorkflowCanvas.Position(BigDecimal.valueOf(600), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {
-            return JsonMapper.builder().build().writeValueAsString(canvas);
+            return JSON.writeValueAsString(canvas);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
@@ -1822,7 +1834,7 @@ class WorkflowServiceTest {
                     "no-end", "noAction", "end",
                     ooo.klae.connex.backend.dto.WorkflowEdge.Outcome.NEXT)));
         try {
-            return JsonMapper.builder().build().writeValueAsString(definition);
+            return JSON.writeValueAsString(definition);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
@@ -1840,7 +1852,7 @@ class WorkflowServiceTest {
                 "end", new WorkflowCanvas.Position(BigDecimal.valueOf(720), BigDecimal.ZERO)),
             new WorkflowCanvas.Viewport(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE));
         try {
-            return JsonMapper.builder().build().writeValueAsString(canvas);
+            return JSON.writeValueAsString(canvas);
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }

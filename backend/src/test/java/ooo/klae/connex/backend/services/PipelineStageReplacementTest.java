@@ -6,14 +6,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 
 /**
  * Covers replacing a pipeline's stage set in one transaction: the edits that per-stage writes cannot
@@ -22,6 +28,36 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 class PipelineStageReplacementTest extends AbstractServiceTest {
 
     @Autowired PipelineService pipelineService;
+    @Autowired OrganizationMapper organizationMapper;
+    @Autowired RoleMapper roleMapper;
+
+    @Override
+    @BeforeEach
+    protected void setUpWorkspaceAndAuthentication() {
+        clearRequestContext();
+        Organization organization = new Organization();
+        organization.setName("Pipeline replacement " + unique());
+        organization.setSlug("pipeline-replacement-" + unique());
+        organizationMapper.insert(organization);
+        workspace = newWorkspace(organization.getId());
+        currentUser = newUser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Pipeline manager " + unique());
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("PIPELINE_MANAGE"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), currentUser.getId(), role.getId());
+        authenticateAs(currentUser, workspace.getId());
+    }
+
+    private Workspace newWorkspace(int orgId) {
+        Workspace created = new Workspace();
+        created.setOrgId(orgId);
+        created.setName("Pipeline workspace " + unique());
+        created.setSlug("pipeline-workspace-" + unique());
+        workspaceMapper.insert(created);
+        return created;
+    }
 
     /** The ids the editor would have loaded: every stage currently on the pipeline. */
     private List<Integer> allStageIds(int pipelineId) {
@@ -272,5 +308,24 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
     void refusesAPipelineOutsideTheWorkspace() {
         assertThrows(ResourceNotFoundException.class,
             () -> pipelineService.replaceStages(-1, List.of(), List.of()));
+
+        Workspace other = newWorkspace(workspace.getOrgId());
+        Pipeline foreignPipeline = new Pipeline();
+        foreignPipeline.setWorkspaceId(other.getId());
+        foreignPipeline.setName("Foreign pipeline " + unique());
+        pipelineMapper.insertPipeline(foreignPipeline);
+        Stage foreignStage = new Stage();
+        foreignStage.setWorkspaceId(other.getId());
+        foreignStage.setPipeline(foreignPipeline);
+        foreignStage.setName("Foreign stage " + unique());
+        foreignStage.setPosition(0);
+        pipelineMapper.insertStage(foreignStage);
+        List<Stage> before = pipelineMapper.getStagesByPipelineId(other.getId(), foreignPipeline.getId());
+        assertEquals(List.of(foreignStage.getId()), before.stream().map(Stage::getId).toList());
+
+        assertThrows(ResourceNotFoundException.class, () -> pipelineService.replaceStages(
+            foreignPipeline.getId(), List.of(foreignStage.getId()), List.of()));
+
+        assertEquals(before, pipelineMapper.getStagesByPipelineId(other.getId(), foreignPipeline.getId()));
     }
 }

@@ -195,8 +195,7 @@ class MailDiagnosticsServiceTest {
         assertEquals("failed", result.transport().outcome());
         assertEquals("smtp_transport_failed", result.transport().errorCode());
         assertFalse(result.toString().contains("credential-sentinel"));
-        verify(auditService, never()).record(
-                eq("workspace.mail_config.test"), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     @Test

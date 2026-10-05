@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.EmploymentService;
+import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
 import ooo.klae.connex.backend.services.PersonQualificationService;
@@ -66,6 +67,7 @@ class WarmthBrowserRequestBindingTest {
     @Mock private ContactMarketingService contactMarketingService;
     @Mock private BulkOperationService bulkOperationService;
     @Mock private CompanyService companyService;
+    @Mock private ExportService exportService;
     @Mock private WorkspaceService workspaceService;
     @Mock private MemberScopeResolver memberScopeResolver;
     @Mock private ErrorReporter errorReporter;
@@ -73,6 +75,7 @@ class WarmthBrowserRequestBindingTest {
 
     private MockMvc persons;
     private MockMvc companies;
+    private MockMvc exports;
 
     @BeforeEach
     void setUp() {
@@ -82,6 +85,10 @@ class WarmthBrowserRequestBindingTest {
         when(memberScopeResolver.resolve(any(), any(), eq(7))).thenReturn(MemberScope.allTeam());
         GlobalExceptionHandler exceptionHandler =
             new GlobalExceptionHandler(errorReporter, tenantContext);
+        exports = MockMvcBuilders.standaloneSetup(new ExportController(
+                exportService, memberScopeResolver, warmthFilterResolver, workspaceService))
+            .setControllerAdvice(exceptionHandler)
+            .build();
         persons = MockMvcBuilders.standaloneSetup(new PersonController(
                 personService, personLifecycleService, personQualificationService, employmentService,
                 connectionService, contactMarketingService, bulkOperationService, workspaceService, memberScopeResolver,
@@ -225,6 +232,25 @@ class WarmthBrowserRequestBindingTest {
             eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null), eq(false),
             eq(null), eq(false), eq(false), captor.capture());
         assertBands(captor.getValue(), Set.of(), false, 60);
+
+        when(exportService.exportPersons(any(), any(), any(), anyBoolean(), any(), any(),
+            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any())).thenReturn("contacts");
+        when(exportService.exportCompanies(any(), any(), anyBoolean(), any(), any(), any()))
+            .thenReturn("companies");
+        exports.perform(get("/api/exports/persons").param("goesColdWithinDays", "60"))
+            .andExpect(status().isOk());
+        exports.perform(get("/api/exports/companies").param("goesColdWithinDays", "60"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<WarmthFilter> contactExport = ArgumentCaptor.forClass(WarmthFilter.class);
+        verify(exportService).exportPersons(
+            eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null),
+            eq(false), eq(null), eq(false), contactExport.capture());
+        assertBands(contactExport.getValue(), Set.of(), false, 60);
+        ArgumentCaptor<WarmthFilter> companyExport = ArgumentCaptor.forClass(WarmthFilter.class);
+        verify(exportService).exportCompanies(
+            eq(null), eq(null), eq(false), eq(null), any(), companyExport.capture());
+        assertBands(companyExport.getValue(), Set.of(), false, 60);
     }
 
     @Test

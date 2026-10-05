@@ -8,17 +8,20 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +29,7 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -49,13 +53,13 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRe
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiNativeToolCompletion;
-import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
-import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
@@ -127,6 +131,7 @@ class AiChatAgentLoopServiceTest {
     private Clock clock;
     private AiSkillRouter skillRouter;
     private AiSkillPlanRunner skillPlanRunner;
+    private AiAssistantPromptAssembler promptAssembler;
     private AiChatAgentLoopService service;
 
     @BeforeEach
@@ -137,6 +142,8 @@ class AiChatAgentLoopServiceTest {
         aiProperties = new AiProperties();
         toolExecutor = mock(AiAssistantToolExecutor.class);
         writeToolService = mock(AiAssistantWriteToolService.class);
+        when(writeToolService.guardRawIdentifiers(any(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         memoryService = mock(AiChatMemoryService.class);
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
@@ -162,7 +169,7 @@ class AiChatAgentLoopServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         var catalog = new AiAssistantToolCatalog();
-        var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        promptAssembler = spy(new AiAssistantPromptAssembler(objectMapper, catalog));
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,
@@ -219,6 +226,7 @@ class AiChatAgentLoopServiceTest {
         when(clock.instant()).thenReturn(NOW);
     }
 
+    /** A closing attempt that still calls a tool preserves the original no-progress reason. */
     @Test
     void repeatedIdenticalToolCallsUseTheCacheThenStopForNoProgress() throws Exception {
         AiAssistantStep toolStep = new AiAssistantStep(
@@ -337,7 +345,8 @@ class AiChatAgentLoopServiceTest {
         AiAssistantToolResult loadResult = new AiAssistantToolsetLoader(
                         new AiAssistantToolCatalog())
                 .load(objectMapper.readTree("{\"toolset\":\"write_content\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE),
+                        java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE))
                 .result();
         int bothResultsBytes = sizingAssembler.assemble(
                         List.of(),
@@ -833,28 +842,6 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
-     * The closing step is offered once, and a turn that still cannot answer settles on the reason
-     * it originally met rather than on a new one invented by the retry.
-     */
-    @Test
-    void aClosingStepThatStillCallsAToolSettlesOnTheOriginalReason() throws Exception {
-        AiAssistantStep toolStep = toolStep(
-                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
-        when(invocationService.completeStructuredRepairable(
-                any(AiInvocation.class), eq(AiAssistantStep.class),
-                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
-                eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(toolStep));
-
-        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
-
-        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("no_progress", result.reason());
-        verify(persistenceService, never()).resolve(
-                eq(TURN), any(), any(), anyInt(), anyInt());
-    }
-
-    /**
      * An argument refusal is handed back to the model as a correctable error result instead of
      * ending the turn. This replays staging turn 87 — a warmth filter proposed for a deal cohort —
      * as recovery: the refused call fails durably, the corrected retry executes, and the turn
@@ -918,7 +905,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(toolStep(
+                .thenReturn(parsed(loadStep("analytics")), parsed(toolStep(
                         "aggregate_metric", "{\"metric\":\"pipeline_velocity\"}")),
                         parsed(toolStep(
                                 "aggregate_metric", "{\"metric\":\"deal_momentum\"}")),
@@ -931,6 +918,57 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService).resolve(
                 eq(TURN), eq("I could not compute that metric."), any(), anyInt(), anyInt());
+        verify(toolExecutor, times(2)).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, times(2)).failTool(
+                eq(TURN), anyInt(), contains("unknown_metric"));
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(4)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(List.of(
+                "ask_connex_step", "ask_connex_step", "ask_connex_step", "ask_connex_closing_step"),
+                schemas.getAllValues().stream().map(AiResponseSchema::name).toList());
+    }
+
+    /**
+     * A write whose name resolves to no single row when it is prepared is refused recoverably:
+     * no proposal is stored, the call is recorded as failed with the fixed reason, the model is
+     * answered with that reason, and the turn goes on to answer.
+     */
+    @Test
+    void aWriteWhoseNameDoesNotResolveAtProposalIsRefusedWithoutAProposal() throws Exception {
+        JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("I could not find that member.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(
+                        parsed(loadStep("write_pipeline")),
+                        parsed(new AiAssistantStep(
+                                new AiAssistantStep.Tool("assign_owner", args), null)),
+                        parsed(finalStep));
+        when(writeToolService.prepare(
+                eq("assign_owner"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                .thenThrow(AiAssistantLoopException.refusedArguments("unresolved_reference"));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService).proposeTool(
+                eq(TURN), anyInt(), anyInt(), eq("assign_owner"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), anyInt(), contains("unresolved_reference"));
+        verify(writeToolService, never()).proposalResult(any(), any());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("I could not find that member."), any(), anyInt(), anyInt());
     }
 
     /**
@@ -1193,6 +1231,116 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                 eq(directAdmission), any(Runnable.class));
+    }
+
+    /** An undeclared endpoint's turn keeps sending the single-call bound it always has. */
+    @Test
+    void anUndeclaredEndpointsTurnStillBoundsEveryStepToOneCall() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Nothing needs attention.", List.of())));
+
+        service.run(TURN);
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, requests.getValue().maxParallelCalls());
+    }
+
+    /**
+     * A batch carrying an invented placeholder fails the turn exactly as one call carrying it does.
+     *
+     * <p>The cardinality refusal is repairable and the demask rule is not. Checking cardinality
+     * first would launder a response that invented a placeholder into a repair merely because it
+     * carried a sibling call, and executing the sibling would act on a decision the server cannot
+     * trust; the turn must end as malformed output after one provider call, with no repair request
+     * and nothing executed, even though the endpoint declared the batch.
+     */
+    @Test
+    void aBatchCarryingADemaskWarningFailsTheTurnWithoutARepair() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeToolBatch(
+                        List.of(
+                                new AiToolCall(
+                                        "call_1", "search_records",
+                                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"),
+                                new AiToolCall(
+                                        "call_2", "search_records",
+                                        "{\"query\":\"{{P99}}\",\"kinds\":[\"person\"]}")),
+                        1));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(invocationService, times(1)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class));
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), any(), any());
+    }
+
+    /**
+     * An over-delivered batch that invented a placeholder ends the turn after one provider call.
+     *
+     * <p>An undeclared endpoint's turn bounds every request to one call, so a batch it sends
+     * anyway never reaches the loop as a batch: the parse boundary refuses it for its size, after
+     * demasking it, and carries the warning count on the refusal. The loop must settle that refusal
+     * as malformed output with no repair — the outcome one call inventing the placeholder gets —
+     * rather than read the refusal's cardinality rule and ask the model again.
+     */
+    @Test
+    void anOverBoundRefusalCarryingADemaskWarningFailsTheTurnWithoutARepair() {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(new AiNativeToolCompletion.Malformed<>(
+                        3, 5, "tool_calls", Optional.empty(), "native_multiple_calls", 1));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(1)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, requests.getValue().maxParallelCalls());
+        assertNull(requests.getValue().repairMessage());
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), anyString(), anyString(), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), any(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
     }
 
     @Test
@@ -1770,6 +1918,10 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
     }
 
+    /**
+     * A trailing word character stays pending as task-handle boundary context. The other 299
+     * characters must stream before the malformed attempt resets and repair starts at offset zero.
+     */
     @Test
     void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero() {
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
@@ -1828,13 +1980,17 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService).resetPartialContent(streamedTurn, 300);
+        verify(persistenceService).resetPartialContent(streamedTurn, 299);
         ArgumentCaptor<Integer> offsets = ArgumentCaptor.forClass(Integer.class);
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
         verify(persistenceService, times(2)).appendPartialBatch(
                 eq(streamedTurn), offsets.capture(), batches.capture());
         assertEquals(List.of(0, 0), offsets.getAllValues());
-        assertEquals(List.of("x".repeat(300), "Repaired answer"), batches.getAllValues());
+        assertEquals(List.of("x".repeat(299), "Repaired answer"), batches.getAllValues());
+        InOrder order = inOrder(persistenceService);
+        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
+        order.verify(persistenceService).resetPartialContent(streamedTurn, 299);
+        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "Repaired answer");
         verify(persistenceService).resolve(
                 eq(streamedTurn), eq("Repaired answer"), any(), eq(5), eq(8));
     }
@@ -2129,8 +2285,141 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        verify(persistenceService, atMost(8)).proposeTool(
-                eq(TURN), anyInt(), anyInt(), eq("set_todos"), any());
+        assertEquals("no_progress", result.reason());
+        assertEquals(11, step.get(), "Eight plans, two refused excess plans, then the closing step");
+        verify(toolExecutor, times(8)).execute(
+                eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, times(8)).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(persistenceService, times(2)).failTool(eq(TURN), anyInt(), contains("plan_updates_exhausted"));
+    }
+
+    /**
+     * A plan published past the turn's allowance is refused, not fatal: the model reads the refusal
+     * in its next prompt and the turn goes on to its answer, whether the excess call came alone or
+     * in a batch (#1913).
+     */
+    @Test
+    void anExcessPlanPublicationIsReplayedAsARecoverableRefusal() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AtomicInteger step = new AtomicInteger();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    int current = step.incrementAndGet();
+                    if (current <= 9) {
+                        return parsed(toolStep("set_todos",
+                                "{\"items\":[\"Step " + current + "\"],\"statuses\":[\"active\"]}"));
+                    }
+                    return parsed(new AiAssistantStep(
+                            null, new AiAssistantStep.FinalAnswer("The plan is ready.", List.of())));
+                });
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor, times(8)).execute(
+                eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).failTool(eq(TURN), anyInt(), contains("plan_updates_exhausted"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(10)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String retryPrompt = invocations.getAllValues().getLast().prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(retryPrompt.contains("\"error\":\"plan_updates_exhausted\""));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The plan is ready."), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * On the native-tools protocol the refused excess plan stays paired with its recorded provider
+     * call, so the next request carries no unanswered call and the turn goes on to its answer.
+     */
+    @Test
+    void aNativeExcessPlanPublicationPairsItsRefusalWithTheRecordedCall() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AtomicInteger step = new AtomicInteger();
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    int current = step.incrementAndGet();
+                    if (current <= 9) {
+                        return nativeTool("call_" + current, "set_todos",
+                                "{\"items\":[\"Step " + current + "\"],\"statuses\":[\"active\"]}");
+                    }
+                    return nativeFinal(new AiAssistantStep.FinalAnswer("The plan is ready.", List.of()));
+                });
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor, times(8)).execute(
+                eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).failTool(eq(TURN), anyInt(), contains("plan_updates_exhausted"));
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(10)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiNativeToolRequest answerRequest = requests.getAllValues().getLast();
+        assertTrue(answerRequest.exchanges().getLast().maskedResult()
+                .contains("\"error\":\"plan_updates_exhausted\""));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("The plan is ready."), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void aFreshPlanPreservesTheExistingNoProgressCount() throws Exception {
+        AiAssistantStep read = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep plan = toolStep(
+                "set_todos", "{\"items\":[\"Review results\"],\"statuses\":[\"active\"]}");
+        AiAssistantStep answer = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Here is what I found.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(read), parsed(read), parsed(plan), parsed(read), parsed(answer));
+        when(toolExecutor.execute(eq("set_todos"), any(), any(), eq(true), any()))
+                .thenReturn(new AiAssistantToolResult(
+                        Map.of("todos", List.of(new AiChatTodo("Review results", "active"))), List.of()));
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor).execute(eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        verify(toolExecutor).execute(eq("set_todos"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Here is what I found."), any(), anyInt(), anyInt());
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(5)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(List.of(
+                "ask_connex_step", "ask_connex_step", "ask_connex_step", "ask_connex_step",
+                "ask_connex_closing_step"),
+                schemas.getAllValues().stream().map(AiResponseSchema::name).toList());
     }
 
     /**
@@ -2522,6 +2811,8 @@ class AiChatAgentLoopServiceTest {
         assertFalse(normalized.contains("\n"));
         assertEquals(80, normalized.codePointCount(0, normalized.length()));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Open r7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("Complete t7"));
+        assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("x".repeat(77) + " t1alpha"));
         assertNull(AiChatAgentLoopService.normalizeGeneratedTitle("System prompt review"));
     }
 
@@ -2723,6 +3014,54 @@ class AiChatAgentLoopServiceTest {
                 TURN, "failed", "tool_result_budget_exhausted");
     }
 
+    /**
+     * A repeated read answered from the cache is admitted to the tool-result budget like a fresh one,
+     * and running out of room there hands a call that came alone to the closing step instead of
+     * failing its turn, exactly as a fresh result over the budget does (#1955). The refusal is raised
+     * at the cached result's admission, so the loop's handling of it, not the assembler's byte
+     * arithmetic that the assembler's own tests own, is what is pinned.
+     */
+    @Test
+    void aSoleCachedResultOverTheToolResultBudgetClosesTheTurnInsteadOfFailingIt() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenReturn(
+                new AiAssistantToolResult(Map.of("records", List.of()), List.of()));
+        doThrow(new AiAssistantLoopException(
+                        "tool_result_budget_exhausted", "tool_result_budget_exhausted"))
+                .when(promptAssembler).requireAdditionalToolResultCapacity(
+                        argThat(turns -> turns.size() == 1), any(), any(), any());
+        AiAssistantStep read = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(read))
+                .thenReturn(parsed(read))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("From what I gathered.", List.of()))));
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor).execute(eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, never()).proposeTool(eq(TURN), eq(2), anyInt(), any(), any());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        ArgumentCaptor<AiResponseSchema> schemas = ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals("ask_connex_closing_step", schemas.getAllValues().getLast().name());
+        String closingPrompt = invocations.getAllValues().getLast().prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertEquals(1, closingPrompt.split("\"type\":\"tool_result\"", -1).length - 1,
+                "the closing request must replay the admitted read, not the abandoned cache hit");
+        verify(persistenceService).resolve(
+                eq(TURN), eq("From what I gathered."), any(), anyInt(), anyInt());
+    }
+
     @Test
     void revokedAiUseAndChangedRestrictionsRemainDistinctFromProviderFailure() {
         when(invocationService.completeStructuredRepairable(
@@ -2820,6 +3159,7 @@ class AiChatAgentLoopServiceTest {
         var catalog = new AiAssistantToolCatalog();
         AiAssistantToolExecutor realExecutor = new AiAssistantToolExecutor(
                 catalog,
+                new AiAssistantWriteToolRegistry(catalog, AiAssistantDeclaredWriteTools.tools()),
                 mock(ooo.klae.connex.backend.services.SearchService.class),
                 mock(ooo.klae.connex.backend.services.PersonService.class),
                 mock(ooo.klae.connex.backend.services.CompanyService.class),
@@ -2875,32 +3215,6 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), anyInt(), eq("executed"), any());
     }
 
-    @Test
-    void historyCharacterBudgetKeepsWholeNewestMessagesAndOmitsOldestBoundary() {
-        AiChatMessage oldest = message(1, "a".repeat(60_000));
-        AiChatMessage recent = message(2, "b".repeat(20_000));
-        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(16_000));
-
-        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
-                null, List.of(oldest, recent, initiating), initiating, 64_000);
-
-        assertEquals(2, bounded.size());
-        assertEquals(recent.getContent(), bounded.get(0).getContent());
-        assertEquals(initiating.getContent(), bounded.get(1).getContent());
-    }
-
-    @Test
-    void oversizedNewestUserMessageRemainsIntactWhileAllOlderContentIsTrimmed() {
-        AiChatMessage oldest = message(1, "a".repeat(10_000));
-        AiChatMessage initiating = message(TURN.userMessageId(), "c".repeat(80_000));
-
-        List<AiChatMessage> bounded = AiChatMemoryService.boundedHistory(
-                null, List.of(oldest, initiating), initiating, 64_000);
-
-        assertEquals(1, bounded.size());
-        assertEquals(initiating.getContent(), bounded.getFirst().getContent());
-    }
-
     private void assertTerminal(String reason) {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
@@ -2911,6 +3225,40 @@ class AiChatAgentLoopServiceTest {
         return new AiAssistantStep(
                 new AiAssistantStep.Tool(name, objectMapper.readTree(arguments)),
                 null);
+    }
+
+    /**
+     * Builds the loop with the test's collaborators but a substitute toolset loader, so a test can
+     * observe or replace what the {@code find_tools} load step receives.
+     */
+    private AiChatAgentLoopService serviceWith(AiAssistantToolsetLoader toolsetLoader) {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        return new AiChatAgentLoopService(
+                invocationService,
+                invocationAdmissionService,
+                aiProperties,
+                new AiAssistantStepGuard(catalog),
+                catalog,
+                new AiAssistantStepSchema(objectMapper, catalog),
+                toolExecutor,
+                toolsetLoader,
+                writeToolService,
+                new AiAssistantPromptAssembler(objectMapper, catalog),
+                skillRouter,
+                skillPlanRunner,
+                memoryService,
+                attachmentContextService,
+                persistenceService,
+                runLeaseHeartbeat,
+                runLeaseService,
+                progressService,
+                citationProjector,
+                restrictionEpoch,
+                workspaceService,
+                objectMapper,
+                realtimeDispatcher,
+                governanceService,
+                clock);
     }
 
     /**
@@ -2932,13 +3280,35 @@ class AiChatAgentLoopServiceTest {
     }
 
     private void useNativeMemory(AiAssistantPromptBudget budget) {
+        useNativeMemory(budget, 1);
+    }
+
+    private void useNativeMemory(AiAssistantPromptBudget budget, int parallelToolCalls) {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
                         budget,
                         0,
                         0,
-                        true));
+                        true,
+                        parallelToolCalls));
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeToolBatch(
+            List<AiToolCall> calls, int demaskWarnings) throws JacksonException {
+        List<JsonNode> arguments = new ArrayList<>(calls.size());
+        for (AiToolCall call : calls) {
+            arguments.add(objectMapper.readTree(call.arguments()));
+        }
+        return new AiNativeToolCompletion.Tool<>(
+                calls,
+                arguments,
+                demaskWarnings,
+                3,
+                5,
+                "tool_calls",
+                Optional.empty(),
+                Optional.empty());
     }
 
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeTool(
@@ -3569,12 +3939,27 @@ class AiChatAgentLoopServiceTest {
      * Write authority is decided before the loaded set is consulted, so loading a toolset can
      * never launder a tool past the declaration its routed skill was admitted under.
      *
+     * <p>Since #1808 the offer refuses a READ skill the write family outright, so a real turn
+     * never reaches this configuration. The loader here deliberately ignores the offer, standing
+     * in for a regression of the offer or seed rule, so the family is really loaded and
+     * {@code requireSkillAuthority} is proven to be the backstop that still holds.
+     *
      * <p>The companion case — an unloaded write tool outside authority auditing under the same
      * reason rather than tool_not_loaded — is
      * {@link #aReadAuthoritySkillCannotReachAWriteToolAfterItsPlanHasRun()}.
      */
     @Test
     void loadingAWriteToolsetGrantsNoAuthorityARoutedSkillNeverDeclared() throws Exception {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        service = serviceWith(new AiAssistantToolsetLoader(catalog) {
+            @Override
+            public Load load(
+                    JsonNode args,
+                    Set<AiAssistantToolCatalog.Toolset> loadedToolsets,
+                    Set<AiAssistantToolCatalog.Toolset> offeredToolsets) {
+                return super.load(args, loadedToolsets, AiAssistantToolCatalog.ALL);
+            }
+        });
         routedDigest();
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
@@ -3589,9 +3974,109 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("tool_outside_skill_authority", result.reason());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
         verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
         verify(persistenceService, never()).proposeTool(
                 eq(TURN), anyInt(), anyInt(), eq("change_deal_stage"), any());
+    }
+
+    /**
+     * A read-only routed skill is offered only the read families, so the directory never invites
+     * a write load and a load the model asks for anyway is refused recoverably: the turn keeps its
+     * step budget and still answers, where holding the family would have ended it at the first
+     * write with {@code tool_outside_skill_authority} and no answer.
+     */
+    @Test
+    void aReadOnlyRoutedSkillIsOfferedNoWriteToolsetAndStillAnswersAfterAskingForOne()
+            throws Exception {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I can summarize the activity, but not move deals.",
+                                List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_unavailable_for_skill"));
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        for (AiInvocation invocation : invocations.getAllValues()) {
+            String systemPrompt = invocation.prompt().getSystemPrompt();
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                boolean readFamily = AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty();
+                assertEquals(
+                        readFamily,
+                        systemPrompt.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                        () -> "a READ skill's directory lists exactly the read families: "
+                                + toolset.key());
+            }
+            assertFalse(systemPrompt.contains("change_deal_stage"),
+                    "a refused load must not widen the vocabulary it was refused for");
+        }
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"toolset_unavailable_for_skill\""));
+    }
+
+    /**
+     * A generic turn keeps the full offer: every loadable family is listed and loadable, and its
+     * system prompt is byte-for-byte the fixed prompt the envelope budget is measured from.
+     */
+    @Test
+    void aGenericTurnIsStillOfferedEveryLoadableToolset() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertTrue(firstSystemPrompt.contains(
+                    toolset.key() + " - " + toolset.summary() + " - available"),
+                    () -> "a generic turn is offered every loadable family: " + toolset.key());
+        }
+        assertEquals(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .fixedPrompt(AiAssistantToolCatalog.CORE)
+                        .getSystemPrompt(),
+                firstSystemPrompt,
+                "a generic turn's envelope is unchanged by the offer");
     }
 
     /**
@@ -4237,6 +4722,61 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * The offer follows the skill the turn actually runs under, not the one the router picked. A
+     * routed plan that did not execute leaves no active skill, so the turn is generic for the
+     * authority gate and must be generic for the offer too: every family listed and loadable,
+     * write families included, and the prompt byte-for-byte the generic one.
+     */
+    @Test
+    void aRoutedPlanThatDidNotExecuteKeepsTheFullOffer() throws Exception {
+        AiSkillCatalog.SkillSpec digest =
+                new AiSkillCatalog().find("activity_digest_v1").orElseThrow();
+        assertEquals(AiSkillCatalog.Authority.READ, digest.authority(),
+                "a READ skill is the one whose routed offer would drop the write families");
+        when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new AiSkillRouter.Routing(
+                        digest, AiSkillRouter.MATCHED, null, false));
+        when(skillPlanRunner.run(eq(TURN), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new AiSkillPlanRunner.Execution(false, Map.of(), 0, false));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService, never()).applySkill(eq(TURN), any(), any());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertTrue(firstSystemPrompt.contains(
+                    toolset.key() + " - " + toolset.summary() + " - available"),
+                    () -> "an unexecuted routed plan keeps the generic offer: " + toolset.key());
+        }
+        assertEquals(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .fixedPrompt(AiAssistantToolCatalog.CORE)
+                        .getSystemPrompt(),
+                firstSystemPrompt,
+                "an unexecuted routed plan's envelope is the generic one");
+    }
+
+    /**
      * The seeded half of the reconstruction contract: the durable skill attribution plus the
      * declaration it names rebuilds exactly the vocabulary the turn's provider call carried, with
      * no find_tools row and therefore no migration needed to record it.
@@ -4367,4 +4907,73 @@ class AiChatAgentLoopServiceTest {
         message.setContent(content);
         return message;
     }
+    @Test
+    void narrationWithTaskHandlesIsDropped() throws Exception {
+        String droppedNarration = "Let me complete t1.";
+        String cleanNarration = "Let me check the open pipeline.";
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        droppedNarration))
+                .thenReturn(narratingTool(
+                        "call_2", "search_records",
+                        "{\"query\":\"open pipeline\",\"kinds\":[\"deal\"]}",
+                        cleanNarration))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
+        assertEquals("narration", frames.getValue().kind());
+        assertEquals(cleanNarration, frames.getValue().text());
+        assertEquals(2, frames.getValue().seq());
+        List<AiChatStepFrameDto> allFrames = mockingDetails(realtimeDispatcher).getInvocations().stream()
+                .flatMap(invocation -> java.util.Arrays.stream(invocation.getArguments()))
+                .filter(AiChatStepFrameDto.class::isInstance)
+                .map(AiChatStepFrameDto.class::cast)
+                .toList();
+        assertTrue(allFrames.stream().noneMatch(
+                frame -> frame.text() != null && frame.text().contains("t1")));
+        assertEquals(List.of(frames.getValue()), allFrames.stream()
+                .filter(frame -> "narration".equals(frame.kind()))
+                .toList());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Two deals need attention."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("narration").size());
+        assertEquals(cleanNarration, stored.path("narration").path(0).path("text").asString());
+        assertEquals(2, stored.path("narration").path(0).path("seq").asInt());
+        assertFalse(metadata.getValue().contains("t1"));
+    }
+
+    @Test
+    void aDemaskedTaskHandleInFinalTextNeverReachesPersistence() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Task t1 is ready.", List.of())));
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
 }

@@ -1,30 +1,25 @@
 package ooo.klae.connex.backend.architecture;
 
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.collectSql;
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.resolve;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
 import org.junit.jupiter.api.Test;
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
 
 import ooo.klae.connex.backend.tenant.FigureReconciliationRegistry;
 import ooo.klae.connex.backend.tenant.FigureReconciliationRegistry.ArchivePosture;
@@ -48,11 +43,6 @@ class FigureReconciliationArchTest {
 
     private static final int MIN_RATIONALE_LENGTH = 40;
     private static final String SPACE = " ";
-    private static final String INCLUDE_MARK = String.valueOf((char) 1);
-    private static final Pattern INCLUDE_REF = Pattern.compile(
-        Pattern.quote(INCLUDE_MARK) + "([^" + Pattern.quote(INCLUDE_MARK) + "]*)"
-            + Pattern.quote(INCLUDE_MARK));
-    private static final Pattern DOCTYPE = Pattern.compile("(?s)<!DOCTYPE.*?>");
     private static final Pattern PERSON_READ = Pattern.compile(
         "(?:FROM|JOIN)\\s+[`\"]?person[`\"]?(?:\\s|$)", Pattern.CASE_INSENSITIVE);
     private static final Pattern PERSON_RESTRICTION = Pattern.compile(
@@ -663,33 +653,10 @@ class FigureReconciliationArchTest {
      * returning the SQL. Only text and CDATA nodes contribute evidence, so comments are dropped.
      */
     private MapperXml parse(String xml) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        builder.setEntityResolver((publicId, systemId) ->
-            new InputSource(new ByteArrayInputStream(new byte[0])));
-        String withoutDoctype = DOCTYPE.matcher(xml).replaceFirst("");
-        Document document = builder.parse(
-            new InputSource(new ByteArrayInputStream(withoutDoctype.getBytes(StandardCharsets.UTF_8))));
-
-        Map<String, String> fragments = new LinkedHashMap<>();
-        Map<String, Element> fragmentElements = new LinkedHashMap<>();
-        List<Element> statementElements = new ArrayList<>();
-        NodeList children = document.getDocumentElement().getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() != Node.ELEMENT_NODE) {
-                continue;
-            }
-            Element element = (Element) node;
-            if ("sql".equals(element.getTagName())) {
-                fragments.put(element.getAttribute("id"), collectSql(element));
-                fragmentElements.put(element.getAttribute("id"), element);
-            } else if (Set.of("select", "insert", "update", "delete")
-                    .contains(element.getTagName())) {
-                statementElements.add(element);
-            }
-        }
+        ArchitectureMapperXml.Parsed parsed = ArchitectureMapperXml.parse(xml);
+        Map<String, String> fragments = parsed.fragments();
+        List<Element> statementElements = parsed.statements();
+        Map<String, Element> fragmentElements = parsed.fragmentElements();
 
         List<Statement> statements = new ArrayList<>();
         StringBuilder whole = new StringBuilder();
@@ -702,41 +669,7 @@ class FigureReconciliationArchTest {
             whole.append(sql).append('\n');
         }
         return new MapperXml(
-            document.getDocumentElement().getAttribute("namespace"), statements, whole.toString());
-    }
-
-    private String collectSql(Element element) {
-        StringBuilder sql = new StringBuilder();
-        NodeList children = element.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
-                sql.append(node.getNodeValue());
-            } else if (node.getNodeType() == Node.ELEMENT_NODE) {
-                Element child = (Element) node;
-                if ("include".equals(child.getTagName())) {
-                    sql.append(INCLUDE_MARK).append(child.getAttribute("refid")).append(INCLUDE_MARK);
-                } else {
-                    sql.append(' ').append(collectSql(child)).append(' ');
-                }
-            }
-        }
-        return sql.toString();
-    }
-
-    private String resolve(String sql, Map<String, String> fragments, int depth) {
-        if (depth > 16 || !sql.contains(INCLUDE_MARK)) {
-            return sql;
-        }
-        Matcher matcher = INCLUDE_REF.matcher(sql);
-        StringBuilder resolved = new StringBuilder();
-        while (matcher.find()) {
-            String body = fragments.getOrDefault(matcher.group(1), "");
-            matcher.appendReplacement(
-                resolved, Matcher.quoteReplacement(SPACE + resolve(body, fragments, depth + 1) + SPACE));
-        }
-        matcher.appendTail(resolved);
-        return resolved.toString();
+            parsed.namespace(), statements, whole.toString());
     }
 
     private void collectConditionals(

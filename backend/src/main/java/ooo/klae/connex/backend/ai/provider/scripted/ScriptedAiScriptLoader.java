@@ -67,7 +67,9 @@ public class ScriptedAiScriptLoader {
     private static final Set<String> STEP_FIELDS = Set.of(
             "afterToolCalls", "closing", "onRepair", "protocol", "emit");
     private static final Set<String> EMISSION_FIELDS = Set.of(
-            "kind", "toolName", "arguments", "text", "failureKind", "reasoning", "deltas");
+            "kind", "toolName", "arguments", "calls", "text", "failureKind", "reasoning",
+            "deltas");
+    private static final Set<String> CALL_FIELDS = Set.of("toolName", "arguments");
 
     private final Map<String, ScriptedAiScript> bySelector;
 
@@ -226,6 +228,7 @@ public class ScriptedAiScriptLoader {
         }
         requireMaskingSafeSelector(script.selector(), file);
         requireDeclaredDegradation(script, file);
+        requireNativeProtocolForParallelCalls(script, file);
         return script;
     }
 
@@ -300,10 +303,78 @@ public class ScriptedAiScriptLoader {
                 kind,
                 optionalText(node, "toolName"),
                 arguments,
+                parseCalls(node.get("calls"), kind, file, objectMapper),
                 optionalText(node, "text"),
                 failureKind,
                 optionalText(node, "reasoning"),
                 deltas);
+    }
+
+    /**
+     * Parses the calls a plural emission declares, refusing every shape a single call is refused.
+     *
+     * <p>The loader is the only place a fixture fault is loud. A plural emission that slipped
+     * through with one call, or with arguments that are not a JSON object, would produce a green
+     * golden documenting behaviour it never exercised — the exact class of silent fixture error
+     * every other rule here exists to catch. The cardinality itself is enforced by the emission
+     * record; this refuses the field on any other kind and validates each entry's own shape.
+     *
+     * @param node the declared {@code calls} array, or null
+     * @param kind the emission kind the calls were declared under
+     * @param file the fixture they came from
+     * @param objectMapper shared JSON mapper
+     * @return the declared calls, empty for every other kind
+     */
+    private static List<ScriptedAiStep.ScriptedCall> parseCalls(
+            JsonNode node, ScriptedAiStep.Kind kind, Path file, ObjectMapper objectMapper) {
+        if (node == null || node.isNull()) {
+            if (kind == ScriptedAiStep.Kind.TOOL_CALLS) {
+                throw invalid(file, "a tool_calls emission must declare calls");
+            }
+            return List.of();
+        }
+        if (kind != ScriptedAiStep.Kind.TOOL_CALLS) {
+            throw invalid(file, "calls belong only to a tool_calls emission");
+        }
+        if (!node.isArray()) {
+            throw invalid(file, "calls must be an array");
+        }
+        List<ScriptedAiStep.ScriptedCall> calls = new ArrayList<>(node.size());
+        for (JsonNode call : node) {
+            requireObject(call, file);
+            requireKnownFields(call, CALL_FIELDS, file);
+            String arguments = optionalText(call, "arguments");
+            requireJsonObjectArguments(arguments, file, objectMapper);
+            try {
+                calls.add(new ScriptedAiStep.ScriptedCall(
+                        optionalText(call, "toolName"), arguments));
+            } catch (IllegalArgumentException exception) {
+                throw invalid(file, exception.getMessage());
+            }
+        }
+        return List.copyOf(calls);
+    }
+
+    /**
+     * Refuses a plural emission the scripted provider could not render.
+     *
+     * <p>The JSON step envelope is structurally single-call — one {@code tool} object, no array
+     * form — so a plural emission declared under any protocol but {@code native} would either be
+     * silently reduced to one call or fail at runtime with a provider error nobody can read back
+     * to the fixture that caused it.
+     *
+     * @param script the parsed script
+     * @param file the fixture it came from
+     */
+    private static void requireNativeProtocolForParallelCalls(
+            ScriptedAiScript script, Path file) {
+        for (ScriptedAiStep step : script.steps()) {
+            if (step.emit().kind() == ScriptedAiStep.Kind.TOOL_CALLS
+                    && step.protocol() != ScriptedAiStep.Protocol.NATIVE) {
+                throw invalid(file, "a tool_calls emission requires the native protocol, because "
+                        + "the JSON step envelope carries exactly one call");
+            }
+        }
     }
 
     /**

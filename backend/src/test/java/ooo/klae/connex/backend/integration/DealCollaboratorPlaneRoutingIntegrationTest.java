@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
@@ -48,9 +50,10 @@ import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Proves collaborator relationships and collaborator profiles are read from separate catalogs, and
- * that a transactional replacement hydrates control profiles without changing the tenant
- * transaction's catalog.
+ * Proves collaborator relationships and collaborator profiles are read from separate catalogs, that a
+ * transactional replacement hydrates control profiles without changing the tenant transaction's
+ * catalog, and that the collaborator write is tenant-only while the membership lock it relies on is
+ * held in the control catalog on the same transaction (#1793).
  */
 class DealCollaboratorPlaneRoutingIntegrationTest {
     private static final int DEAL_ID = 501;
@@ -70,6 +73,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
     private static DataSourceTransactionManager transactionManager;
     private static TenantContext tenantContext;
     private static DealMapper dealMapper;
+    private static WorkspaceMapper workspaceMapper;
     private static DealCollaboratorControlAccess controlAccess;
     private static int orgId;
     private static int workspaceId;
@@ -97,6 +101,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
             scratchCatalogCreated = true;
             statement.execute("CREATE TABLE " + scratchCatalog + ".deal_collaborator LIKE "
                 + defaultCatalog + ".deal_collaborator");
+            statement.execute("CREATE TABLE " + scratchCatalog + ".deal LIKE " + defaultCatalog + ".deal");
             insertFixtures(connection);
         }
 
@@ -115,6 +120,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
         transactionManager = new DataSourceTransactionManager(routing);
         SqlSessionTemplate sqlSessionTemplate = new SqlSessionTemplate(sqlSessionFactory(routing));
         dealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        workspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
         TenantWorkScope tenantWorkScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         controlAccess = new DealCollaboratorControlAccess(
@@ -199,7 +205,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 Connection tenantConnection = DataSourceUtils.getConnection(routing);
                 assertEquals(scratchCatalog, catalogOf(tenantConnection));
                 assertEquals(1, dealMapper.removeCollaborator(workspaceId, DEAL_ID, zuluId));
-                List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, DEAL_ID);
+                List<Integer> after = dealMapper.getCollaboratorIdsForUpdate(workspaceId, DEAL_ID);
                 assertEquals(List.of(alphaId, pendingId, MISSING_USER_ID), after);
 
                 List<UserDto> hydrated = controlAccess.getProfiles(workspaceId, after);
@@ -208,7 +214,7 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 assertEquals(scratchCatalog, tenantContext.getCatalog());
                 assertSame(tenantConnection, DataSourceUtils.getConnection(routing));
                 assertEquals(scratchCatalog, catalogOf(tenantConnection));
-                assertEquals(after, dealMapper.getCollaboratorIds(workspaceId, DEAL_ID));
+                assertEquals(after, dealMapper.getCollaboratorIdsForUpdate(workspaceId, DEAL_ID));
                 status.setRollbackOnly();
                 return hydrated;
             });
@@ -220,6 +226,51 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
             tenantContext.clear();
         }
         assertEquals(defaultCatalog, currentCatalog());
+    }
+
+    /**
+     * The collaborator insert runs in the routed tenant catalog, which holds no {@code workspace_member}
+     * table, so it can no longer join the control plane; on main it failed here. The membership lock it
+     * now relies on is taken through the control-catalog scope on the tenant transaction's own
+     * connection, and another connection cannot take that row until the transaction ends.
+     */
+    @Test
+    void collaboratorWriteIsTenantOnlyWhileTheMembershipLockIsHeldInTheControlCatalog() throws SQLException {
+        tenantContext.set(workspaceId, orgId, alphaId, "member", scratchCatalog);
+        try {
+            new TransactionTemplate(transactionManager).execute(status -> {
+                Connection tenantConnection = DataSourceUtils.getConnection(routing);
+                assertNotNull(workspaceMapper.lockActiveMembership(workspaceId, zuluId));
+                assertEquals(scratchCatalog, catalogOf(tenantConnection));
+                assertEquals(4, dealMapper.clearCollaborators(workspaceId, DEAL_ID));
+
+                assertEquals(1, dealMapper.insertCollaborators(workspaceId, DEAL_ID, List.of(zuluId)));
+                assertEquals(0, dealMapper.insertCollaborators(workspaceId + 1, DEAL_ID, List.of(alphaId)));
+
+                assertEquals(List.of(zuluId), dealMapper.getCollaboratorIds(workspaceId, DEAL_ID));
+                assertMembershipRowIsLockedAgainstAnotherConnection(zuluId);
+                status.setRollbackOnly();
+                return null;
+            });
+        } finally {
+            tenantContext.clear();
+        }
+        assertEquals(4, scratchCollaboratorCount());
+        assertEquals(defaultCatalog, currentCatalog());
+    }
+
+    private static void assertMembershipRowIsLockedAgainstAnotherConnection(int userId) {
+        try (Connection other = DriverManager.getConnection(url, username, password);
+                Statement statement = other.createStatement()) {
+            other.setAutoCommit(false);
+            SQLException refused = assertThrows(SQLException.class, () -> statement.executeQuery(
+                "SELECT user_id FROM " + defaultCatalog + ".workspace_member WHERE workspace_id = "
+                    + workspaceId + " AND user_id = " + userId + " FOR UPDATE NOWAIT"));
+            assertEquals(3572, refused.getErrorCode());
+            other.rollback();
+        } catch (SQLException exception) {
+            throw new IllegalStateException("Could not probe the membership lock", exception);
+        }
     }
 
     private static void insertFixtures(Connection connection) throws SQLException {
@@ -237,6 +288,9 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 + workspaceId + ", " + alphaId + ", 'member', 'active'), ("
                 + workspaceId + ", " + zuluId + ", 'member', 'active'), ("
                 + workspaceId + ", " + pendingId + ", 'member', 'pending')");
+            statement.executeUpdate("INSERT INTO " + scratchCatalog
+                + ".deal (id, workspace_id, name, pipeline_id, stage_id) VALUES ("
+                + DEAL_ID + ", " + workspaceId + ", 'Deal Collaborator Plane Deal', 1, 1)");
             statement.executeUpdate("INSERT INTO " + scratchCatalog
                 + ".deal_collaborator (workspace_id, deal_id, user_id) VALUES ("
                 + workspaceId + ", " + DEAL_ID + ", " + alphaId + "), ("
@@ -298,8 +352,10 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
             "deal-collaborator-plane-routing", new SpringManagedTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        configuration.addInterceptor(new ControlCatalogRoutingInterceptor(tenantContext, true));
         for (String resource : List.of(
-                "mappers/PersonMapper.xml", "mappers/DealMapper.xml", "mappers/UserMapper.xml")) {
+                "mappers/PersonMapper.xml", "mappers/DealMapper.xml", "mappers/UserMapper.xml",
+                "mappers/WorkspaceMapper.xml")) {
             try (InputStream input = DealCollaboratorPlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {

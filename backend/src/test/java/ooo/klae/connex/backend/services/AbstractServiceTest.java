@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -182,16 +183,7 @@ public abstract class AbstractServiceTest {
     }
 
     protected User newUser() {
-        String s = unique();
-        User user = new User();
-        user.setUsername("user_" + s);
-        user.setDisplayName("User " + s);
-        user.setEmail(s + "@example.com");
-        user.setPasswordHash("hash_" + s);
-        user.setTimezone("UTC");
-        userMapper.insert(user);
-        workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
-        return user;
+        return TestEntityFixtures.newUser(userMapper, workspaceMapper, workspace);
     }
 
     protected User newPendingMember() {
@@ -223,56 +215,23 @@ public abstract class AbstractServiceTest {
     }
 
     protected Company newCompany() {
-        String s = unique();
-        Company company = new Company();
-        company.setName("Company " + s);
-        company.setWebsite("https://" + s + ".example.com");
-        company.setIndustry("Tech");
-        company.setPhone("+81-90-1234-5678");
-        company.setAddress("1-1-1 Shinjuku, Tokyo, Japan");
-        company.setWorkspaceId(workspace.getId());
-        companyMapper.insert(company);
-        return company;
+        return TestEntityFixtures.newCompany(companyMapper, workspace);
     }
 
     protected Pipeline newPipeline() {
-        Pipeline pipeline = new Pipeline();
-        pipeline.setName("Pipeline " + unique());
-        pipeline.setWorkspaceId(workspace.getId());
-        pipelineMapper.insertPipeline(pipeline);
-        return pipeline;
+        return TestEntityFixtures.newPipeline(pipelineMapper, workspace);
     }
 
     protected Stage newStage(Pipeline pipeline, int position) {
-        Stage stage = new Stage();
-        stage.setName("Stage " + unique());
-        stage.setPipeline(pipeline);
-        stage.setPosition(position);
-        stage.setWorkspaceId(workspace.getId());
-        pipelineMapper.insertStage(stage);
-        return stage;
+        return TestEntityFixtures.newStage(pipelineMapper, workspace, pipeline, position);
     }
 
     protected Tag newTag() {
-        Tag tag = new Tag();
-        tag.setName("tag_" + unique());
-        tag.setColor("#abcdef");
-        tag.setWorkspaceId(workspace.getId());
-        tagMapper.insert(tag);
-        return tag;
+        return TestEntityFixtures.newTag(tagMapper, workspace);
     }
 
     protected Person newPerson(Company company) {
-        String s = unique();
-        Person person = new Person();
-        person.setName("Person " + s);
-        person.setEmail(s + ".person@example.com");
-        person.setPhone("+81-90-2345-6789");
-        person.setTitle("Engineer");
-        person.setCompany(company);
-        person.setWorkspaceId(workspace.getId());
-        personMapper.insert(person);
-        return person;
+        return TestEntityFixtures.newPerson(personMapper, workspace, company);
     }
 
     protected Deal newDeal(Pipeline pipeline, Stage stage, Company company) {

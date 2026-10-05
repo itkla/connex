@@ -31,7 +31,7 @@ class AiSseEventReaderTest {
         AtomicInteger activity = new AtomicInteger();
 
         AiSseEventReader.read(
-                new OneByteInputStream(stream.getBytes(StandardCharsets.UTF_8)),
+                new OneByteInputStream(stream.getBytes(StandardCharsets.UTF_8), activity),
                 ignored -> {}, activity::incrementAndGet);
 
         assertEquals(stream.length(), activity.get());
@@ -39,14 +39,17 @@ class AiSseEventReaderTest {
 
     private static final class OneByteInputStream extends InputStream {
         private final byte[] content;
+        private final AtomicInteger activity;
         private int offset;
 
-        private OneByteInputStream(byte[] content) {
+        private OneByteInputStream(byte[] content, AtomicInteger activity) {
             this.content = content;
+            this.activity = activity;
         }
 
         @Override
         public int read() {
+            assertEquals(offset, activity.get(), "Each successful transport read must report activity before the next read");
             return offset < content.length ? content[offset++] & 0xff : -1;
         }
 

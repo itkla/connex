@@ -75,18 +75,26 @@ describe('bounded AI generation polling', () => {
             now += milliseconds;
         });
 
+        const error = new TypeError('network');
+        const poll = vi.fn().mockRejectedValue(error);
+        const shouldRetryError = vi.fn((error: unknown) => error instanceof TypeError);
+
         await expect(resolveAiGeneration(
-            { ...running('accepted'), pollWindowMs: 1_000 },
-            vi.fn().mockRejectedValue(new TypeError('network')),
+            { ...running('accepted'), retryAfterMs: 250, pollWindowMs: 1_000 },
+            poll,
             {
                 now: () => now,
                 sleep,
-                shouldRetryError: () => true,
+                shouldRetryError,
             },
         )).rejects.toMatchObject({
             status: 'timed_out',
             reason: 'poll_window_expired',
         });
+
+        expect(poll.mock.calls).toEqual([[handle], [handle], [handle]]);
+        expect(shouldRetryError.mock.calls).toEqual([[error], [error], [error]]);
+        expect(sleep).toHaveBeenCalledTimes(4);
     });
 
     it('polls normally when the workstation clock is far ahead of the server', async () => {

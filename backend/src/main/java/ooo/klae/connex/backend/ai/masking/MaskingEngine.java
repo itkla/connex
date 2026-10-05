@@ -89,6 +89,18 @@ public final class MaskingEngine {
     }
 
     /**
+     * Prepares prose exactly as conversation replay does before sensitive-span replacement,
+     * preserving case and removing link syntax so output guards can check newly joined text.
+     *
+     * @param text original prose
+     * @return canonical display text with link syntax removed
+     */
+    public static String prepareConversationalText(String text) {
+        ScreenText input = screenText(text);
+        return replaceSpans(input.original(), List.of(), input.linkSyntax());
+    }
+
+    /**
      * Masks conversational text — the member's own words and prior answers replayed as history —
      * while leaving common words intact when a record shares their name.
      *
@@ -572,6 +584,17 @@ public final class MaskingEngine {
 
     private static String canonicalToken(String tokenBody) {
         return "{{" + tokenBody + "}}";
+    }
+
+    /** Recognizes issued placeholders in raw text, including compatibility-width delimiters. */
+    public static boolean containsIssuedPlaceholder(String text, MaskingContext context) {
+        Matcher matcher = PLACEHOLDER.matcher(Normalizer.normalize(text, Normalizer.Form.NFKC));
+        while (matcher.find()) {
+            if (context.originalValueForToken(canonicalToken(matcher.group(1))) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean sensitiveValueCrossesIssuedPlaceholder(

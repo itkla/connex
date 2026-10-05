@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,6 +44,7 @@ import javax.imageio.ImageIO;
 import jakarta.servlet.Filter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -88,6 +90,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.storage.AttachmentScanWorker;
 import ooo.klae.connex.backend.storage.ObjectStorage;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -131,7 +134,6 @@ class AttachmentUploadSecurityIntegrationTest {
     @Autowired private AttachmentScanWorker worker;
     @Autowired private TenantWorkScope workScope;
     @Autowired private TenantContext tenantContext;
-    @Autowired private PasswordEncoder passwords;
     @Autowired private ObjectMapper json;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -149,6 +151,13 @@ class AttachmentUploadSecurityIntegrationTest {
     private Company company;
     private WorkspaceRole role;
     private String storedKey;
+
+    private static String encodedFixturePassword;
+
+    @BeforeAll
+    static void encodeFixturePassword(@Autowired PasswordEncoder encoder) {
+        encodedFixturePassword = encoder.encode(PASSWORD);
+    }
 
     @BeforeEach
     void setUp() throws Exception {
@@ -202,7 +211,8 @@ class AttachmentUploadSecurityIntegrationTest {
         }
         for (User user : new User[] {actor, target}) {
             if (user != null) {
-                jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", user.getUsername());
+                jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?",
+                    new AccountSessionIndex(user.getId()).getName());
                 jdbc.update("DELETE FROM app_user WHERE id = ?", user.getId());
             }
         }
@@ -701,7 +711,8 @@ class AttachmentUploadSecurityIntegrationTest {
             shared.setName("Shared upload target " + unique());
             companies.insert(shared);
             assertEquals(1, shares.shareCompany(
-                shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false));
+                shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false,
+                    orgWorkspaceIdsJson(workspaces, sourceWorkspace.getId())));
             return shared.getId();
         }
         Person shared = new Person();
@@ -709,7 +720,8 @@ class AttachmentUploadSecurityIntegrationTest {
         shared.setName("Shared upload target " + unique());
         people.insert(shared);
         assertEquals(1, shares.sharePerson(
-            shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false));
+            shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false,
+                orgWorkspaceIdsJson(workspaces, sourceWorkspace.getId())));
         return shared.getId();
     }
 
@@ -781,6 +793,7 @@ class AttachmentUploadSecurityIntegrationTest {
             assertStreamedBodySucceeded(response);
             MvcResult completed = mvc.perform(asyncDispatch(response)).andReturn();
             assertEquals(200, completed.getResponse().getStatus(), failureDetail(completed));
+            assertDownloadHeadersAreSingleValued(completed);
             try (var stored = storage.get(storedKey)) {
                 assertNotNull(stored);
                 assertArrayEquals(stored.inputStream().readAllBytes(), completed.getResponse().getContentAsByteArray());
@@ -798,6 +811,28 @@ class AttachmentUploadSecurityIntegrationTest {
     private static void assertStreamedBodySucceeded(MvcResult response) {
         Object outcome = response.getAsyncResult(RACE_MILLIS);
         assertNull(outcome, () -> "Streamed body failed after the response committed: " + outcome);
+    }
+
+    /**
+     * A streamed download is where the security headers used to be written twice — once by the
+     * request thread unwinding {@code HeaderWriterFilter} and once by the async worker committing the
+     * response — so this is the response shape that proves the eager single write (#1761). The
+     * download also sets {@code Content-Security-Policy}, {@code X-Content-Type-Options} and
+     * {@code Cache-Control} itself, so a duplicate here would mean the chain and the controller both
+     * emitted one, and the sandbox value must survive rather than be replaced by the app-wide policy.
+     */
+    private static void assertDownloadHeadersAreSingleValued(MvcResult completed) {
+        var downloaded = completed.getResponse();
+        for (String name : List.of("Content-Security-Policy", "X-Content-Type-Options",
+                "Cache-Control", "Referrer-Policy", "X-Frame-Options")) {
+            assertEquals(1, downloaded.getHeaders(name).size(),
+                () -> name + " appeared " + downloaded.getHeaders(name).size()
+                    + " times on a streamed download: " + downloaded.getHeaders(name));
+        }
+        assertEquals("default-src 'none'; sandbox; frame-ancestors 'none'; base-uri 'none'",
+            downloaded.getHeader("Content-Security-Policy"),
+            "the download must keep its own sandbox policy");
+        assertEquals("no-store", downloaded.getHeader("Cache-Control"));
     }
 
     private void sweepThreeTimes() {
@@ -886,7 +921,7 @@ class AttachmentUploadSecurityIntegrationTest {
         user.setDisplayName("Upload security member");
         user.setEmail(unique() + "@example.com");
         user.setTimezone("UTC");
-        user.setPasswordHash(passwords.encode(PASSWORD));
+        user.setPasswordHash(encodedFixturePassword);
         users.insert(user);
         workspaces.addMember(workspace.getId(), user.getId(), "member");
         return user;

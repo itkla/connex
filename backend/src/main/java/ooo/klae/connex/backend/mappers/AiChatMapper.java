@@ -435,10 +435,6 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("id") int id);
 
-    List<AiChatToolCall> listPendingToolCallsBySession(
-        @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
-
     List<AiChatToolCall> listToolCallsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

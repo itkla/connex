@@ -8,23 +8,22 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
@@ -45,7 +44,7 @@ import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
-@Import(WorkflowLegacyDedupeUpgradeIntegrationTest.FixedDedupeConfiguration.class)
+@Import(WorkflowFixedDedupeTestConfiguration.class)
 class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
 
     @Autowired private RuleService ruleService;
@@ -89,6 +88,35 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     void enableCanonicalRuntime() {
         when(runtimeProperties.enabled()).thenReturn(true);
         when(runtimeProperties.maxTriggerFanout()).thenReturn(128);
+    }
+
+    /**
+     * Reclaims the isolated canonical fixtures. Clearing ownership with the active version satisfies
+     * the canonical-version check before breaking the workflow/version foreign-key cycle.
+     */
+    @AfterEach
+    void cleanCommittedCanonicalFixtures() {
+        if (TestTransaction.isActive() || workspace == null) {
+            return;
+        }
+        int workspaceId = workspace.getId();
+        jdbcTemplate.update(
+            "UPDATE workflow SET enabled = FALSE, runtime_owner = 'legacy', active_version_id = NULL "
+                + "WHERE workspace_id = ?",
+            workspaceId);
+        for (String table : List.of(
+                "workflow_intervention", "workflow_invocation_record", "workflow_invocation",
+                "workflow_recipe_origin", "workflow_step_attempt", "workflow_step_run",
+                "workflow_run", "workflow_trigger_outbox", "workflow_runtime_workspace",
+                "rule_execution", "job_run", "workflow_version", "workflow", "rule",
+                "workflow_trigger_admission", "company", "tag")) {
+            jdbcTemplate.update("DELETE FROM " + table + " WHERE workspace_id = ?", workspaceId);
+        }
+        workspaceMapper.removeMember(workspaceId, currentUser.getId());
+        jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+        userMapper.delete(currentUser.getId());
+        jdbcTemplate.update("DELETE FROM organization WHERE id = ?", workspace.getOrgId());
     }
 
     @ParameterizedTest
@@ -144,6 +172,7 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void canonicalOwnedScheduleDoesNotRepeatAPreUpgradeBucketEffect() {
         Company company = newCompany();
         RuleDto rule = scheduleRule(newTag().getId());
@@ -151,10 +180,12 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         seedLegacyExecution(rule.getId(), company.getId(), company.getId() + ":20260803");
         clearInvocations(actionExecutor);
 
-        workflowRuntimeService.dispatch(
+        WorkflowDispatchResult result = workflowRuntimeService.dispatch(
             new WorkflowTriggerDispatch.ScheduleTick(
                 workspace.getId(), "daily", "20260803"));
 
+        assertEquals(new WorkflowDispatchResult(1, 0, 1, 0), result,
+            "canonical dispatch must recognize the historical effect without rejecting the claim");
         assertSingleHistoricalEffect(rule.getId());
         verifyNoInteractions(actionExecutor);
     }
@@ -178,6 +209,7 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void canonicalOwnedThrottleDoesNotRepeatAPreUpgradeWindowEffect() {
         Company company = newCompany();
         RuleDto rule = throttledRule(newTag().getId());
@@ -190,8 +222,11 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
             company.getId() + ":company.updated:t60:" + window);
         clearInvocations(actionExecutor);
 
-        workflowRuntimeService.dispatch(entityDispatch(company.getId(), occurredAt));
+        WorkflowDispatchResult result = workflowRuntimeService.dispatch(
+            entityDispatch(company.getId(), occurredAt));
 
+        assertEquals(new WorkflowDispatchResult(1, 0, 1, 0), result,
+            "canonical dispatch must recognize the historical effect without rejecting the claim");
         assertSingleHistoricalEffect(rule.getId());
         verifyNoInteractions(actionExecutor);
     }
@@ -289,16 +324,5 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
                 Integer.class,
                 workspace.getId(),
                 workflow.getId()));
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class FixedDedupeConfiguration {
-
-        @Bean
-        @Primary
-        WorkflowDedupeKey transitionWorkflowDedupeKey() {
-            return new WorkflowDedupeKey(Clock.fixed(
-                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC));
-        }
     }
 }

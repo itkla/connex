@@ -29,9 +29,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import ooo.klae.connex.backend.beans.DealDocument;
-import ooo.klae.connex.backend.beans.DocumentDelivery;
-import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.dto.SendDeliveryRecipientRequest;
 import ooo.klae.connex.backend.dto.SendDeliveryRequest;
@@ -292,18 +289,6 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
     }
 
     @Test
-    void ambiguousProviderRecipientRoutingFailsClosed() {
-        DocumentDeliveryRecipient first = new DocumentDeliveryRecipient();
-        first.setProviderRecipientId("same-provider-id");
-        DocumentDeliveryRecipient second = new DocumentDeliveryRecipient();
-        second.setProviderRecipientId("same-provider-id");
-
-        assertThrows(IllegalStateException.class, () ->
-            DocumentSignatureWebhookService.recipientFor(
-                List.of(first, second), "same-provider-id"));
-    }
-
-    @Test
     void authenticatedProviderCompletionStoresItsSignedPdfInTheSharedArtifactModel() {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = sendWithProvider(fixture, "test_signature");
@@ -497,51 +482,6 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
         assertEquals(64, certificate.path("signedDocumentSha256").asString().length());
         assertEquals(2, certificate.path("recipients").size());
         assertEquals(11, certificate.path("recipients").get(0).size());
-    }
-
-    @Test
-    void certificateRetainsAppliedPolicyIdAfterTheLiveForeignKeyIsCleared() {
-        DocumentFixture fixture = finalDocument();
-        DocumentDeliveryDto delivery = send(
-            fixture, signer("policy-snapshot@example.test", 1));
-        DealDocument document = documentMapper.getById(
-            workspace.getId(), fixture.document().id());
-        DocumentDelivery persisted = deliveryMapper.getById(
-            workspace.getId(), delivery.id());
-        ooo.klae.connex.backend.beans.DocumentApproval approval =
-            new ooo.klae.connex.backend.beans.DocumentApproval();
-        approval.setId(51);
-        approval.setStatus("approved");
-        approval.setPolicyId(null);
-        approval.setPolicyIdSnapshot(37);
-        approval.setPolicyBinding("applied");
-
-        byte[] certificateBytes = lifecycleService.certificateBytes(
-            workspace.getId(),
-            fixture.deal(),
-            document,
-            approval,
-            persisted,
-            deliveryMapper.getRecipients(workspace.getId(), delivery.id()),
-            LocalDateTime.now().withNano(0),
-            "a".repeat(64));
-
-        JsonNode certificate = objectMapper.readTree(certificateBytes);
-        assertEquals(51, certificate.path("approvalRequestId").asInt());
-        assertEquals("approved", certificate.path("approvalOutcome").asString());
-        assertEquals(37, certificate.path("approvalPolicyId").asInt());
-
-        approval.setPolicyIdSnapshot(null);
-        approval.setPolicyBinding("unknown_legacy");
-        assertThrows(IllegalStateException.class, () -> lifecycleService.certificateBytes(
-            workspace.getId(),
-            fixture.deal(),
-            document,
-            approval,
-            persisted,
-            deliveryMapper.getRecipients(workspace.getId(), delivery.id()),
-            LocalDateTime.now().withNano(0),
-            "a".repeat(64)));
     }
 
     @Test

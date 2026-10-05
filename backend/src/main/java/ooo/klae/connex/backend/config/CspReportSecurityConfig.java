@@ -123,6 +123,7 @@ public class CspReportSecurityConfig {
             .sessionCreationPolicy(SessionCreationPolicy.STATELESS));
         http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
         http.headers(headers -> headers
+            .withObjectPostProcessor(new EagerSecurityHeaderWriter())
             .httpStrictTransportSecurity(hsts -> hsts
                 .includeSubDomains(true)
                 .maxAgeInSeconds(31536000)

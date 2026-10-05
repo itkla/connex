@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,6 +29,20 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /** Verifies the report mapper XML and every dynamic aggregate branch can be resolved. */
 class ReportMapperXmlTest {
+
+    @Test
+    void createdDefinitionLivenessIsTenantScopedBoundedAndEmptySafe() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        var statement = configuration.getMappedStatement(ReportMapper.class.getName() + ".getDefinitionIdsIn");
+        var bound = statement.getBoundSql(Map.of("workspaceId", 7, "ids", java.util.List.of(11, 12)));
+        assertTrue(bound.getSql().contains("workspace_id = ?"));
+        assertTrue(bound.getSql().contains("id IN"));
+        assertEquals(1 + java.util.List.of(11, 12).size(), bound.getParameterMappings().size());
+        assertTrue(statement.getBoundSql(Map.of("workspaceId", 7, "ids", java.util.List.of()))
+                .getSql().contains("AND 1 = 0"));
+        assertTrue(ooo.klae.connex.backend.tenant.TenantScopeInterceptor.SCOPED_NAMESPACES
+                .contains(ReportMapper.class.getName()));
+    }
 
     @Test
     void networkReportSourceQueriesAreBoundedBeforeMaterialization() throws Exception {

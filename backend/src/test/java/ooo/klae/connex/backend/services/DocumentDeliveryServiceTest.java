@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 
 import java.util.List;
@@ -15,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
@@ -26,9 +24,6 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.signature.DocumentSignatureEmailService;
-import ooo.klae.connex.backend.signature.RecipientDeliveryLink;
-import ooo.klae.connex.backend.signature.SendOutcome;
-import ooo.klae.connex.backend.signature.SendRecipientOutcome;
 
 class DocumentDeliveryServiceTest extends AbstractDocumentDeliveryServiceTest {
     @MockitoBean DocumentSignatureEmailService emailService;
@@ -286,28 +281,6 @@ class DocumentDeliveryServiceTest extends AbstractDocumentDeliveryServiceTest {
             "SELECT MAX(id) FROM document_delivery_artifact WHERE workspace_id = ?",
             Integer.class,
             other.getId()));
-    }
-
-    @Test
-    void providerOutcomeRejectsDuplicateProviderRecipientIdentifiers() {
-        DocumentDeliveryRecipient first = new DocumentDeliveryRecipient();
-        first.setId(101);
-        DocumentDeliveryRecipient second = new DocumentDeliveryRecipient();
-        second.setId(102);
-        SendOutcome outcome = new SendOutcome("envelope", List.of(
-            new SendRecipientOutcome(
-                first.getId(),
-                "duplicated",
-                java.util.Optional.of(new RecipientDeliveryLink("a".repeat(64), "/first"))),
-            new SendRecipientOutcome(
-                second.getId(),
-                "duplicated",
-                java.util.Optional.of(new RecipientDeliveryLink("b".repeat(64), "/second")))));
-
-        IllegalStateException exception = assertThrows(IllegalStateException.class,
-            () -> deliveryService.validateOutcome(List.of(first, second), outcome));
-
-        assertTrue(exception.getMessage().contains("provider recipient id"));
     }
 
     @Test

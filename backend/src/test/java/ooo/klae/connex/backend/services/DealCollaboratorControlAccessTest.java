@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.support.TestTransactionManager;
+import ooo.klae.connex.backend.support.TestTransactionManager.TestTransaction;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -18,9 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.AbstractPlatformTransactionManager;
-import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -186,71 +186,4 @@ class DealCollaboratorControlAccessTest {
         return row;
     }
 
-    private static final class TestTransactionManager extends AbstractPlatformTransactionManager {
-        private final ThreadLocal<TestTransaction> current = new ThreadLocal<>();
-        private int beginCount;
-        private int suspendCount;
-
-        private TestTransaction currentTransaction() {
-            return current.get();
-        }
-
-        private int beginCount() {
-            return beginCount;
-        }
-
-        private int suspendCount() {
-            return suspendCount;
-        }
-
-        @Override
-        protected Object doGetTransaction() {
-            TestTransaction transaction = current.get();
-            return transaction == null ? new TestTransaction() : transaction;
-        }
-
-        @Override
-        protected boolean isExistingTransaction(Object transaction) {
-            return ((TestTransaction) transaction).active;
-        }
-
-        @Override
-        protected void doBegin(Object transaction, TransactionDefinition definition) {
-            TestTransaction active = (TestTransaction) transaction;
-            active.active = true;
-            beginCount++;
-            current.set(active);
-        }
-
-        @Override
-        protected Object doSuspend(Object transaction) {
-            suspendCount++;
-            current.remove();
-            return transaction;
-        }
-
-        @Override
-        protected void doResume(Object transaction, Object suspendedResources) {
-            current.set((TestTransaction) suspendedResources);
-        }
-
-        @Override
-        protected void doCommit(DefaultTransactionStatus status) {
-        }
-
-        @Override
-        protected void doRollback(DefaultTransactionStatus status) {
-        }
-
-        @Override
-        protected void doCleanupAfterCompletion(Object transaction) {
-            TestTransaction completed = (TestTransaction) transaction;
-            completed.active = false;
-            current.remove();
-        }
-    }
-
-    private static final class TestTransaction {
-        private boolean active;
-    }
 }

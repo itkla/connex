@@ -8,7 +8,6 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -18,10 +17,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -52,7 +48,7 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-@Import(WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest.FixedDedupeConfiguration.class)
+@Import(WorkflowFixedDedupeTestConfiguration.class)
 @TestPropertySource(properties = {
     "connex.workflows.runtime.enabled=true",
     "connex.workflows.runtime.scheduling-enabled=false",
@@ -470,17 +466,6 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
     private void drain(TableLifecycle declaration) {
         while (tenantTeardownTransaction.deleteBatch(
                 workspace.getId(), declaration, 100) > 0) {
-        }
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class FixedDedupeConfiguration {
-
-        @Bean
-        @Primary
-        WorkflowDedupeKey legacyGateWorkflowDedupeKey() {
-            return new WorkflowDedupeKey(Clock.fixed(
-                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC));
         }
     }
 }

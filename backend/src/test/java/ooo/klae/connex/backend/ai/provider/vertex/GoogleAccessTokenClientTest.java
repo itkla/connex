@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hc.core5.http.ContentType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -68,20 +69,25 @@ class GoogleAccessTokenClientTest {
     private static final String PEM_HEADER = "-----BEGIN PRIVATE KEY-----";
     private static final String PEM_FOOTER = "-----END PRIVATE KEY-----";
 
+    private static KeyPair keyPair;
+    private static String privateKeyPem;
+
     private ObjectMapper objectMapper;
-    private KeyPair keyPair;
-    private String privateKeyPem;
     private MutableClock clock;
     private RestClient.Builder restClientBuilder;
     private MockRestServiceServer server;
 
-    @BeforeEach
-    void setUp() throws Exception {
-        objectMapper = new ObjectMapper();
+    @BeforeAll
+    static void createSigningKey() throws Exception {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         keyPair = generator.generateKeyPair();
         privateKeyPem = pem(keyPair);
+    }
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
         clock = new MutableClock(NOW);
         restClientBuilder = RestClient.builder();
         server = MockRestServiceServer.bindTo(restClientBuilder).build();
@@ -333,13 +339,31 @@ class GoogleAccessTokenClientTest {
         assertNull(invalidKey.getCause());
 
         server.expect(requestTo(GoogleAccessTokenClient.TOKEN_ENDPOINT))
-                .andRespond(withSuccess("SENSITIVE_RESPONSE_BODY", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(tokenResponse("SENSITIVE_RESPONSE_BODY", 3600), MediaType.APPLICATION_JSON));
         try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
             AiProviderException oversized = assertThrows(AiProviderException.class,
                     () -> client.accessToken(credentials(GoogleAccessTokenClient.TOKEN_ENDPOINT.toString())));
 
-            assertFalse(String.valueOf(oversized).contains("SENSITIVE_RESPONSE_BODY"));
+            assertEquals("Google OAuth token response exceeded the configured size limit", oversized.getMessage());
+            assertSecretAbsent(oversized, "SENSITIVE_RESPONSE_BODY");
             assertNull(oversized.getCause());
+        }
+        server.verify();
+    }
+
+    @Test
+    void accessToken_malformedResponseIsSanitized() throws Exception {
+        GoogleAccessTokenClient client = client(32768);
+        server.expect(requestTo(GoogleAccessTokenClient.TOKEN_ENDPOINT))
+                .andRespond(withSuccess("SENSITIVE_RESPONSE_BODY", MediaType.APPLICATION_JSON));
+
+        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
+            AiProviderException malformed = assertThrows(AiProviderException.class,
+                    () -> client.accessToken(credentials(GoogleAccessTokenClient.TOKEN_ENDPOINT.toString())));
+
+            assertEquals("Google OAuth token response was invalid", malformed.getMessage());
+            assertSecretAbsent(malformed, "SENSITIVE_RESPONSE_BODY");
+            assertNull(malformed.getCause());
         }
         server.verify();
     }

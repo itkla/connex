@@ -80,6 +80,23 @@ class DealMapperXmlTest {
         assertTrue(sql.endsWith("FOR UPDATE"));
     }
 
+    /**
+     * The owner change locks only the primary-key record its update locks anyway, and never the
+     * composite foreign-key index a child insert holds (#1948).
+     */
+    @Test
+    void ownerChangeLookupLocksOnlyThePrimaryKey() throws Exception {
+        Configuration configuration = configuration();
+
+        String sql = sql(configuration, "getDealByPrimaryKeyForUpdate", MemberScope.allTeam());
+
+        assertTrue(sql.contains("FROM deal FORCE INDEX (PRIMARY)"));
+        assertTrue(sql.contains("WHERE workspace_id = ? AND id = ?"));
+        assertTrue(sql.endsWith("FOR UPDATE"));
+        assertTrue(configuration.getMappedStatement(DealMapper.class.getName() + ".getDealByPrimaryKeyForUpdate")
+            .isFlushCacheRequired());
+    }
+
     @Test
     void batchPositionUpdateKeepsWorkspaceAndStagePredicates() throws Exception {
         String sql = sql(configuration(), "setPositions", MemberScope.allTeam());
@@ -158,6 +175,23 @@ class DealMapperXmlTest {
         String mapperXml = resource("mappers/DealMapper.xml").toLowerCase(Locale.ROOT);
         assertFalse(mapperXml.contains("app_user"));
         assertFalse(mapperXml.contains("password_hash"));
+    }
+
+    /**
+     * The replacement's audited and returned collaborator lists must be current reads of exactly this
+     * deal's rows: a covering scan of the workspace-wide user index would lock every collaborator row
+     * in the workspace, and a cached answer would replay a pre-lock or pre-write result (#1942).
+     */
+    @Test
+    void lockedCollaboratorLookupIsAnUncachedCurrentReadOfTheDealsPrimaryKeyRange() throws Exception {
+        Configuration configuration = configuration();
+
+        String sql = sql(configuration, "getCollaboratorIdsForUpdate", MemberScope.allTeam());
+
+        assertEquals("SELECT dc.user_id FROM deal_collaborator dc FORCE INDEX (PRIMARY) "
+            + "WHERE dc.workspace_id = ? AND dc.deal_id = ? ORDER BY dc.user_id FOR UPDATE", sql);
+        assertTrue(configuration.getMappedStatement(DealMapper.class.getName() + ".getCollaboratorIdsForUpdate")
+            .isFlushCacheRequired());
     }
 
     @Test

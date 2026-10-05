@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 import {
     ArrowPathIcon,
     CheckCircleIcon,
@@ -15,6 +14,7 @@ import {
     XCircleIcon,
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { Fragment, useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
@@ -22,7 +22,9 @@ import {
     askConnexCreatedRecordHref,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
+    askConnexToolChanges,
     askConnexToolOutcomeSummary,
+    askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
     askConnexToolTargetHref,
     askConnexUndoWindow,
@@ -36,6 +38,7 @@ import {
 import type {
     AiAssistantCreatedRecordKind,
     AiAssistantToolCallChange,
+    AiAssistantToolCallChangeField,
     AiAssistantToolCallChangeState,
 } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -50,10 +53,26 @@ type StatusPresentation = {
     badgeVariant: 'default' | 'secondary' | 'destructive' | 'outline';
 };
 
-/** Localized names for the record fields an assistant proposal can rewrite. */
+/** Localized names for fields and template details reviewed before an assistant action. */
 export type AskConnexChangeFieldLabels = {
     owner: string;
     stage: string;
+    tag: string;
+    responseDue: string;
+    taskStatus: string;
+    dueDate: string;
+    document: string;
+    report: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
+    name: string;
+    currency: string;
+    template: string;
+    templateDefaults: string;
 };
 
 /** Localized names for the values a completed assistant action reports. */
@@ -66,6 +85,22 @@ export type AskConnexOutcomeFieldLabels = Record<AskConnexOutcomeField, string> 
 export type AskConnexUnresolvedValueLabels = {
     owner: string;
     stage: string;
+    tag: string;
+    responseDue: string;
+    taskStatus: string;
+    dueDate: string;
+    document: string;
+    report: string;
+    title: string;
+    website: string;
+    industry: string;
+    address: string;
+    value: string;
+    expectedCloseDate: string;
+    name: string;
+    currency: string;
+    template: string;
+    templateDefaults: string;
 };
 
 /** Localized copy consumed by the presentational assistant tool-call card. */
@@ -75,12 +110,36 @@ export type AskConnexToolCardLabels = {
     applyAria: (target: string) => string;
     applying: string;
     changeField: AskConnexChangeFieldLabels;
+    /**
+     * States one reviewed value in the reader's own language and time zone, by the field it
+     * belongs to and whether it is what the record holds now or what the proposal would write.
+     */
+    changeValue: (
+        field: AiAssistantToolCallChangeField,
+        value: string,
+        side: 'current' | 'proposed',
+        toolName: string,
+    ) => string;
     changeNotSet: string;
     /** What the record currently holds, when this workspace can no longer name who or what it is. */
     changeCurrentUnresolved: AskConnexUnresolvedValueLabels;
     /** What the proposal asked for, when that value no longer exists in this workspace. */
     changeProposedUnresolved: string;
+    changeProposedWithheld: string;
     changeState: Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>;
+    /**
+     * Field-specific review context, including non-blocking context for an applicable change. A
+     * contact that already has a first-response deadline keeps it, rather than already holding
+     * the proposed value, and a contact shared in from another workspace takes no deadline here.
+     */
+    changeStateForField: Partial<Record<
+        AiAssistantToolCallChangeField,
+        Partial<Record<Exclude<AiAssistantToolCallChangeState, 'ready'>, string>> & {
+            ready?: (currentValue: string | null) => string | null;
+        }
+    >>;
+    /** Why a removal cannot be made once what it would remove has changed since the proposal. */
+    changeStateUnresolvedRemoval: string;
     diffAfter: string;
     diffBefore: string;
     discard: string;
@@ -99,7 +158,7 @@ export type AskConnexToolCardLabels = {
     outcome: string;
     outcomeField: AskConnexOutcomeFieldLabels;
     /** States one written value in the reader's own locale, by the kind of value the field holds. */
-    outcomeValue: (field: string, value: string) => string;
+    outcomeValue: (field: string, value: string, toolName: string) => string;
     pendingDetail: string;
     pendingStatus: string;
     proposalChanged: string;
@@ -209,6 +268,7 @@ const CHANGE_STATE_ICON: Record<
     recordChanged: ClockIcon,
     permissionLost: LockClosedIcon,
     unresolved: ExclamationTriangleIcon,
+    withheld: ExclamationTriangleIcon,
 };
 
 function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
@@ -233,12 +293,29 @@ function NotSetValue({ labels }: { labels: AskConnexToolCardLabels }) {
  * left this workspace holds a real value nobody here can name, and a proposal whose value no
  * longer exists asked for something that is gone — writing either as an empty field would read as
  * a legitimate clearing proposal and contradict the very notice printed underneath it.
+ *
+ * A removal is the exception on the proposed side: its empty after-value is exactly what it
+ * proposed, and when it can no longer be made it is what it would remove that changed, so the
+ * after-value stays "not set" and its notice says why. So is an unresolved change that still states
+ * its proposed value: a deadline for a contact shared in from another workspace is a real number
+ * of hours, and it is the target, not the value, that the notice says cannot take it.
+ *
+ * An additional document draft has no before-row: its current value is the latest version from
+ * that template, stated as context by the notice rather than as a value being replaced.
+ *
+ * Every displayed value is written through `changeValue`, because the server states what the
+ * record stores rather than what a member reads: a first-response deadline arrives as a UTC
+ * date-time and its proposal as a count of hours, and neither is quoted back as it stands.
  */
 export function AskConnexChangeRow({
+    toolName,
     change,
+    removal,
     labels,
 }: {
+    toolName: string;
     change: AiAssistantToolCallChange;
+    removal: boolean;
     labels: AskConnexToolCardLabels;
 }) {
     const fieldLabel = labels.changeField[change.field];
@@ -248,19 +325,29 @@ export function AskConnexChangeRow({
                 {fieldLabel}
             </span>
             <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1">
-                <MinusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">{labels.diffBefore}</span>
-                <span className="break-words text-sm text-muted-foreground line-through decoration-muted-foreground/70">
-                    {change.currentValueUnresolved
-                        ? labels.changeCurrentUnresolved[change.field]
-                        : change.currentValue ?? <NotSetValue labels={labels} />}
-                </span>
+                {change.field !== 'document' ? (
+                    <>
+                        <MinusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs text-muted-foreground">{labels.diffBefore}</span>
+                        <span className="break-words text-sm text-muted-foreground line-through decoration-muted-foreground/70">
+                            {change.currentValueUnresolved
+                                ? labels.changeCurrentUnresolved[change.field]
+                                : change.currentValue !== null
+                                    ? labels.changeValue(change.field, change.currentValue, 'current', toolName)
+                                    : <NotSetValue labels={labels} />}
+                        </span>
+                    </>
+                ) : null}
                 <PlusCircleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground" />
                 <span className="text-xs text-muted-foreground">{labels.diffAfter}</span>
                 <span className="break-words text-sm font-medium text-foreground">
-                    {change.state === 'unresolved'
+                    {change.state === 'withheld'
+                        ? labels.changeProposedWithheld
+                        : change.state === 'unresolved' && !removal && change.proposedValue === null
                         ? labels.changeProposedUnresolved
-                        : change.proposedValue ?? <NotSetValue labels={labels} />}
+                        : change.proposedValue !== null
+                            ? labels.changeValue(change.field, change.proposedValue, 'proposed', toolName)
+                            : <NotSetValue labels={labels} />}
                 </span>
             </div>
         </div>
@@ -268,7 +355,7 @@ export function AskConnexChangeRow({
 }
 
 /**
- * Why a reviewed change cannot be applied as it stands.
+ * Field-specific context before approval, or why a reviewed change cannot be applied.
  *
  * A record written since the proposal was made reads here as a change that has to be asked for
  * again, not as a caution to read before applying, and its card carries no apply control. That is
@@ -277,22 +364,35 @@ export function AskConnexChangeRow({
  * moved is re-asked rather than re-baselined against values nobody reviewed.
  */
 export function AskConnexChangeNotice({
+    field,
     state,
+    currentValue = null,
+    removal,
     labels,
 }: {
+    field: AiAssistantToolCallChangeField;
     state: AiAssistantToolCallChangeState;
+    currentValue?: string | null;
+    removal: boolean;
     labels: AskConnexToolCardLabels;
 }) {
-    if (state === 'ready') return null;
-    const NoticeIcon = CHANGE_STATE_ICON[state];
-    const blocking = state === 'permissionLost' || state === 'unresolved';
+    const notice = state === 'ready'
+        ? labels.changeStateForField[field]?.ready?.(currentValue)
+        : state === 'unresolved' && removal
+            ? labels.changeStateUnresolvedRemoval
+            : labels.changeStateForField[field]?.[state] ?? labels.changeState[state];
+    if (!notice) return null;
+    const NoticeIcon = state === 'ready' ? InformationCircleIcon : CHANGE_STATE_ICON[state];
+    const blocking = state === 'permissionLost' || state === 'unresolved' || state === 'withheld';
     return (
         <p className={cn(
             'flex items-start gap-2 text-xs leading-relaxed',
             blocking ? 'text-destructive' : 'text-muted-foreground',
         )}>
             <NoticeIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
-            <span>{labels.changeState[state]}</span>
+            <span>
+                {notice}
+            </span>
         </p>
     );
 }
@@ -326,7 +426,8 @@ export default function AskConnexToolCard({
     const outcomeSummary = askConnexToolOutcomeSummary(card, labels.summaries);
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
-    const proposal = status === 'proposed' ? card.change : null;
+    const changes = status === 'proposed' ? askConnexToolChanges(card) : [];
+    const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'
         ? askConnexCreatedRecordHref(card.createdRecord)
@@ -456,6 +557,8 @@ export default function AskConnexToolCard({
                                 ) : null}
                                 <span className="truncate">{card.target.label}</span>
                             </Link>
+                        ) : card.target.kind === 'workspace' && card.target.label !== null ? (
+                            <span className="break-words text-sm text-muted-foreground">{card.target.label}</span>
                         ) : (
                             <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
                                 <NoSymbolIcon aria-hidden className="size-4 shrink-0" />
@@ -464,11 +567,26 @@ export default function AskConnexToolCard({
                         )}
                     </div>
 
-                    {proposal !== null ? (
+                    {changes.length > 0 ? (
                         <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">{labels.proposedChange}</p>
-                            <AskConnexChangeRow change={proposal} labels={labels} />
-                            <AskConnexChangeNotice state={proposal.state} labels={labels} />
+                            {changes.map((change) => (
+                                <Fragment key={change.field}>
+                                    <AskConnexChangeRow
+                                        toolName={card.toolName}
+                                        change={change}
+                                        removal={removal}
+                                        labels={labels}
+                                    />
+                                    <AskConnexChangeNotice
+                                        field={change.field}
+                                        state={change.state}
+                                        currentValue={change.currentValue}
+                                        removal={removal}
+                                        labels={labels}
+                                    />
+                                </Fragment>
+                            ))}
                         </div>
                     ) : null}
 
@@ -486,7 +604,7 @@ export default function AskConnexToolCard({
                                                     : labels.outcomeField.other}
                                             </dt>
                                             <dd className="min-w-0 break-words text-sm text-foreground">
-                                                {labels.outcomeValue(value.field, value.value)}
+                                                {labels.outcomeValue(value.field, value.value, card.toolName)}
                                             </dd>
                                         </div>
                                     ))}
@@ -519,7 +637,7 @@ export default function AskConnexToolCard({
                         </div>
                     ) : null}
 
-                    {affordances.length > 0 || (proposal !== null && targetHref !== null) ? (
+                    {affordances.length > 0 || (changes.length > 0 && targetHref !== null) ? (
                         <div className="flex flex-wrap justify-end gap-2 pt-1">
                             {affordances.includes('reject') ? (
                                 <Button
@@ -533,7 +651,7 @@ export default function AskConnexToolCard({
                                     {card.pendingAction === 'reject' ? labels.discarding : labels.discard}
                                 </Button>
                             ) : null}
-                            {proposal !== null && targetHref !== null ? (
+                            {changes.length > 0 && targetHref !== null ? (
                                 <Button asChild variant="outline" size="dialog">
                                     <Link
                                         href={targetHref}

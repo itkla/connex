@@ -1,0 +1,33 @@
+{
+  "id": "create_report_proposal",
+  "selector": "connex_script_create_report_proposal",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_workspace\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_report",
+        "arguments": "{\"template\":\"sales-performance\",\"name\":\"Pipeline overview\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I prepared a report for your review.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

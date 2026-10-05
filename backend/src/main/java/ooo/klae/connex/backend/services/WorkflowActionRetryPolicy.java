@@ -1,13 +1,19 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.CannotSerializeTransactionException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionSystemException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -32,16 +38,43 @@ public class WorkflowActionRetryPolicy {
         };
     }
 
+    /**
+     * Whether a later attempt, in a new transaction, can clear a failure: a lock wait, a
+     * serialization failure, a deadlock or a timeout anywhere among its causes.
+     *
+     * <p>A transaction the database rolled back under code that swallowed the failure fails its
+     * commit with that failure itself. A savepoint the rollback destroyed fails with a
+     * {@link TransactionSystemException} that carries the original failure as its application
+     * exception rather than as a cause, so that exception is walked too (#1947). A transaction
+     * failure with no such exception, such as a commit the translator could not classify, is not
+     * retried: whether it took effect is unknown.
+     *
+     * @param failure the failure, walked through its causes
+     * @return whether the action should be retried
+     */
     public boolean transientDatabaseFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Deque<Throwable> pending = new ArrayDeque<>();
+        if (failure != null) {
+            pending.push(failure);
+        }
+        while (!pending.isEmpty()) {
+            Throwable current = pending.pop();
+            if (!seen.add(current)) {
+                continue;
+            }
             if (current instanceof CannotAcquireLockException
                     || current instanceof CannotSerializeTransactionException
                     || current instanceof DeadlockLoserDataAccessException
                     || current instanceof QueryTimeoutException) {
                 return true;
             }
-            current = current.getCause();
+            if (current instanceof TransactionSystemException lost && lost.getApplicationException() != null) {
+                pending.push(lost.getApplicationException());
+            }
+            if (current.getCause() != null) {
+                pending.push(current.getCause());
+            }
         }
         return false;
     }

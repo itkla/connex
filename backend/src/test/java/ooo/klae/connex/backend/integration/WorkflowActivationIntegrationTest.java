@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -29,6 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.servlet.Filter;
 
@@ -51,7 +54,11 @@ import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.test.context.TestContextManager;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.DirtiesContext;
@@ -102,7 +109,9 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationPushListener;
 import ooo.klae.connex.backend.notifications.NotificationSourceChangedListener;
 import ooo.klae.connex.backend.services.RuleTriggerListener;
+import ooo.klae.connex.backend.services.LegacyWorkflowBackfillRunner;
 import ooo.klae.connex.backend.services.WorkflowInterventionRecorder;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
@@ -143,6 +152,7 @@ class WorkflowActivationIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TenantLifecycleMapper lifecycleMapper;
     @Autowired private TenantLifecycleControlMapper lifecycleControlMapper;
     @MockitoSpyBean private WorkspaceMapper workspaceMapper;
@@ -300,6 +310,52 @@ class WorkflowActivationIntegrationTest {
             }
         });
         pendingCleanup.remove(committed);
+    }
+
+    @Test
+    void startupBackfillSucceedsAfterCommittedActivationFixturesAreRemoved() throws Exception {
+        int workspaceId = workspace.getId();
+        int ruleId = createRule(author, ruleBody(true, "person.owner_changed", "create_note"));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspaceId, ruleId);
+        assertNotNull(workflow);
+        assertTrue(workflow.isEnabled());
+        assertNotNull(workflow.getActiveVersionId());
+        assertNotNull(workflowVersionMapper.getById(workspaceId, workflow.getId(), workflow.getActiveVersionId()));
+
+        deleteCommittedFixture();
+        assertTrue(pendingCleanup.isEmpty());
+        assertNull(ruleMapper.getById(workspaceId, ruleId));
+        assertNull(workflowMapper.getById(workspaceId, workflow.getId()));
+        assertNull(workflowVersionMapper.getById(workspaceId, workflow.getId(), workflow.getActiveVersionId()));
+        fixture = null;
+
+        TestContextManager startup = new TestContextManager(StartupProbe.class);
+        try {
+            startup.beforeTestClass();
+            StartupProbe probe = new StartupProbe();
+            startup.prepareTestInstance(probe);
+            assertNotSame(context, probe.context);
+            assertTrue(probe.context.isActive());
+            verify(probe.backfillRunner).run(isA(ApplicationArguments.class));
+        } finally {
+            try {
+                startup.afterTestClass();
+            } finally {
+                startup.getTestContext().markApplicationContextDirty(DirtiesContext.HierarchyMode.EXHAUSTIVE);
+                RequestContextHolder.resetRequestAttributes();
+            }
+        }
+    }
+
+    @SpringBootTest(properties = {
+        "connex.workflows.runtime.enabled=false",
+        "connex.workflows.runtime.scheduling-enabled=false",
+        "connex.rules.scheduling-enabled=false"
+    })
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
+    static class StartupProbe {
+        @Autowired private ConfigurableApplicationContext context;
+        @MockitoSpyBean private LegacyWorkflowBackfillRunner backfillRunner;
     }
 
     @Test
@@ -585,10 +641,12 @@ class WorkflowActivationIntegrationTest {
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondAttempted = new CountDownLatch(1);
         CountDownLatch secondLocked = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
         WorkflowMapper realWorkflowMapper = sqlSessionTemplate.getMapper(WorkflowMapper.class);
         doAnswer(invocation -> {
             String current = contender.get();
             if ("second".equals(current)) {
+                waitingConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                 secondAttempted.countDown();
             }
             realWorkflowMapper.acquireTriggerAdmissionMutex(invocation.getArgument(0));
@@ -609,7 +667,9 @@ class WorkflowActivationIntegrationTest {
             var secondResult = executor.submit(() -> enableAs("second", manager, second));
             assertTrue(secondAttempted.await(30, TimeUnit.SECONDS),
                 "The second activation must reach the admission upsert before it blocks");
-            assertFalse(secondLocked.await(5, TimeUnit.SECONDS),
+            MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, waitingConnection.get(),
+                "workflow_trigger_admission", Integer.toString(workspace.getId()));
+            assertEquals(1, secondLocked.getCount(),
                 "The admission upsert must block the second activation until the first "
                     + "transaction commits");
             releaseFirst.countDown();
@@ -645,10 +705,12 @@ class WorkflowActivationIntegrationTest {
         CountDownLatch legacyRequestsMutex = new CountDownLatch(1);
         CountDownLatch legacyHoldsMutex = new CountDownLatch(1);
         CountDownLatch legacyCompleted = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
         WorkflowMapper realWorkflowMapper = sqlSessionTemplate.getMapper(WorkflowMapper.class);
         doAnswer(invocation -> {
             String current = contender.get();
             if ("legacy".equals(current)) {
+                waitingConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                 legacyRequestsMutex.countDown();
             }
             realWorkflowMapper.acquireTriggerAdmissionMutex(invocation.getArgument(0));
@@ -680,7 +742,9 @@ class WorkflowActivationIntegrationTest {
             if (enabled) {
                 assertTrue(legacyRequestsMutex.await(30, TimeUnit.SECONDS),
                     "Legacy enable must request admission before checking capacity");
-                assertFalse(legacyHoldsMutex.await(5, TimeUnit.SECONDS),
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, waitingConnection.get(),
+                    "workflow_trigger_admission", Integer.toString(workspace.getId()));
+                assertEquals(1, legacyHoldsMutex.getCount(),
                     "Legacy enable must wait for the activation's admission transaction to commit");
             } else {
                 assertTrue(legacyCompleted.await(10, TimeUnit.SECONDS),
@@ -745,11 +809,13 @@ class WorkflowActivationIntegrationTest {
         CountDownLatch enableRequestsMutex = new CountDownLatch(1);
         CountDownLatch enableHoldsMutex = new CountDownLatch(1);
         CountDownLatch enableRequestsRole = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
         WorkflowMapper realWorkflowMapper = sqlSessionTemplate.getMapper(WorkflowMapper.class);
         RoleMapper realRoleMapper = sqlSessionTemplate.getMapper(RoleMapper.class);
         doAnswer(invocation -> {
             String current = contender.get();
             if ("enable".equals(current)) {
+                waitingConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                 enableRequestsMutex.countDown();
             }
             realWorkflowMapper.acquireTriggerAdmissionMutex(invocation.getArgument(0));
@@ -784,7 +850,9 @@ class WorkflowActivationIntegrationTest {
             assertTrue(enableRequestsMutex.await(30, TimeUnit.SECONDS),
                 "Enable must reach the admission upsert while installation holds the role");
             if (admissionBeforeRole) {
-                assertFalse(enableHoldsMutex.await(5, TimeUnit.SECONDS),
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, waitingConnection.get(),
+                    "workflow_trigger_admission", Integer.toString(workspace.getId()));
+                assertEquals(1, enableHoldsMutex.getCount(),
                     "Enable must wait at admission before it can request the shared role");
             } else {
                 assertTrue(enableHoldsMutex.await(30, TimeUnit.SECONDS),

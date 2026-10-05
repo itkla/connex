@@ -21,6 +21,7 @@ import {
     termApplies,
 } from "@/lint/vocabulary.mjs";
 
+const entries = Object.freeze(messageEntries().map((entry) => Object.freeze(entry)));
 const model = loadVocabularyModel();
 const violations = scanMessageCatalogs(model);
 const current = baselineEntries(violations);
@@ -39,7 +40,7 @@ function suppressedMatches(
 ): string[] {
     const compiled = terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
     const found: string[] = [];
-    for (const entry of messageEntries()) {
+    for (const entry of entries) {
         if (!inScope(entry)) continue;
         for (const { term, expression } of compiled) {
             if (term.locale === "ja" && entry.locale !== "ja") continue;
@@ -94,7 +95,7 @@ describe("message catalogue vocabulary", () => {
     it("keeps the baseline sorted, deduplicated, and scoped to real message keys", () => {
         expect(baseline).toEqual([...new Set(baseline)].sort());
 
-        const keys = new Set(messageEntries().map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`));
+        const keys = new Set(entries.map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`));
         const orphaned = baseline
             .map(parseBaselineEntry)
             .filter((entry) => !keys.has(`${entry.locale}/${entry.file}:${entry.keyPath}`))
@@ -109,7 +110,7 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("scans the strings inside arrays, not only the object leaves", () => {
-        const inArrays = messageEntries().filter((entry) => entry.keyPath.includes("["));
+        const inArrays = entries.filter((entry) => entry.keyPath.includes("["));
 
         expect(inArrays.length).toBeGreaterThan(1000);
 
@@ -133,7 +134,7 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("scans the workflow seam and holds it at an empty baseline", () => {
-        const scanned = messageEntries().filter((entry) => isWorkflowSurface(entry.file, entry.namespace));
+        const scanned = entries.filter((entry) => isWorkflowSurface(entry.file, entry.namespace));
         const flagged = violations
             .filter((violation) => isWorkflowSurface(violation.file, namespaceOf(violation.keyPath)))
             .map(describeViolation);
@@ -186,7 +187,7 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("leaves the command palette's search aliases out of the scan", () => {
-        const aliases = messageEntries().filter((entry) => isSearchAlias(entry.file, entry.keyPath));
+        const aliases = entries.filter((entry) => isSearchAlias(entry.file, entry.keyPath));
         const suppressed = suppressedMatches((entry) => isSearchAlias(entry.file, entry.keyPath));
         const reported = new Set(violations.map((violation) => violation.entry));
 
@@ -243,6 +244,18 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("states the file, key path, term, and §4 row of every violation", () => {
+        const synthetic: Parameters<typeof describeViolation>[0] = {
+            entry: "ja/probe.json:Probe.distinctKey#forbidden-term",
+            locale: "ja",
+            file: "probe.json",
+            keyPath: "Probe.distinctKey",
+            term: "forbidden-term",
+            match: "matched-text",
+            source: "§4 row 73 — synthetic vocabulary rule",
+        };
+        expect(describeViolation(synthetic)).toBe(
+            'ja/probe.json → Probe.distinctKey: "matched-text" is banned as "forbidden-term" by docs/PRODUCT.md §4 row 73 — synthetic vocabulary rule',
+        );
         for (const violation of violations) {
             const described = describeViolation(violation);
             expect(described).toContain(violation.file);
@@ -253,7 +266,7 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("limits the conditional creation notice to grants that require email verification", () => {
-        const notices = messageEntries().filter((entry) => entry.file === "users.json"
+        const notices = entries.filter((entry) => entry.file === "users.json"
             && entry.keyPath === "UsersNewUserDialog.toastCreatedVerification");
 
         expect(notices).toHaveLength(2);
@@ -269,7 +282,7 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("says nothing false about where records are shared", () => {
-        const shared = new Map(messageEntries().map((entry) => [`${entry.locale}/${entry.file}:${entry.keyPath}`, entry.value]));
+        const shared = new Map(entries.map((entry) => [`${entry.locale}/${entry.file}:${entry.keyPath}`, entry.value]));
         const scopeClaims = [
             "contacts.json:ContactsNewContactDialog.description",
             "companies.json:CompaniesNewDialog.description",

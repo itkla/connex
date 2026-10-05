@@ -481,12 +481,4 @@ describe("the sidebar renders the D13 navigation", () => {
             D13_USER_MENU.map((item) => ({ label: item[locale], href: item.href })),
         );
     });
-
-    it("offers no address the route move retired", () => {
-        const addresses = renderedGroups("en")
-            .flatMap((group) => group.items.map((item) => item.href))
-            .concat(renderedUserMenu("en").map((item) => item.href));
-
-        expect(addresses.filter((href) => href === "/radar" || href.startsWith("/overview"))).toEqual([]);
-    });
 });

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -86,6 +87,7 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
@@ -201,6 +203,25 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
     }
 
+    /**
+     * A pending invitee is not an active member, so the membership lock refuses them and no collaborator
+     * row is written: the tenant-only insert trusts that lock rather than joining the membership table
+     * (#1793).
+     */
+    @Test
+    void collaboratorReplacementRefusesAPendingMemberWithoutWritingARow() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+        User pending = newPendingMember();
+
+        assertThrows(ForbiddenException.class, () -> dealService.replaceCollaborators(
+            deal.getId(), List.of(member.getId(), pending.getId())));
+
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+    }
+
     @Test
     void collaboratorProfilesHydrateOutsideTheTenantWriteTransaction() {
         Pipeline pipeline = newPipeline();
@@ -258,7 +279,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
         int auditBefore = jdbcTemplate.queryForObject(
@@ -269,7 +290,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> dealService.removeTag(deal.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -286,6 +307,26 @@ class DealServiceTest extends AbstractServiceTest {
         assertThrows(
             ConflictException.class,
             () -> dealService.removeTagIfUnchanged(deal.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        Tag tag = newTag();
+        dealService.addTag(deal.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(dealService.removeTag(deal.getId(), tag.getId()));
+        assertFalse(dealService.removeTag(deal.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'deal.removeTag'",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test
@@ -1744,7 +1785,8 @@ class DealServiceTest extends AbstractServiceTest {
         shared.setName("Shared " + unique());
         personMapper.insert(shared);
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         dealService.addPerson(deal.getId(), shared.getId(), "champion");
         assertEquals(1, shareMapper.unsharePerson(
             shared.getId(), sibling.getId(), workspace.getId()));

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static ooo.klae.connex.backend.services.WorkflowParityTestSupport.assertEffectsParity;
 import static ooo.klae.connex.backend.services.WorkflowParityTestSupport.assertParity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,10 +11,8 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mockingDetails;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -23,10 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -72,7 +68,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * {@link WorkflowRuntimeService} as the engine-core parity seam; {@link ProductionPathParity}
  * separately drives durable intake and leased outbox delivery as production-path parity.
  */
-@Import(WorkflowEngineParityIntegrationTest.FixedDedupeConfiguration.class)
+@Import(WorkflowFixedDedupeTestConfiguration.class)
 @TestPropertySource(properties = {
     "connex.workflows.runtime.enabled=true",
     "connex.workflows.runtime.scheduling-enabled=false",
@@ -134,6 +130,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
         assertParity(snapshots.legacy(), snapshots.canonical());
         assertEquals(List.of(tag.getId()), snapshots.legacy().tagIds());
+        assertEquals(1, snapshots.legacy().actionInvocationCount());
     }
 
     @Test
@@ -454,20 +451,6 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             subject("deal", pair.legacy().getId()),
             subject("deal", pair.canonical().getId()),
             "deal.updated");
-    }
-
-    @Test
-    void p9AddTagActionHasParity() {
-        Company legacy = createCompany();
-        Company canonical = createCompany();
-        Tag tag = createTag();
-        assertActionParity(
-            entityRule(
-                "company", "company.updated", List.of(addTag(tag.getId())), null,
-                null, null, "user"),
-            subject("company", legacy.getId()),
-            subject("company", canonical.getId()),
-            "company.updated");
     }
 
     @Test
@@ -973,13 +956,13 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 ownerWorkspace.getId(),
                 workspace.getId(),
                 currentUser.getId(),
-                false));
+                false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
             assertEquals(1, shareMapper.sharePerson(
                 canonicalPerson.getId(),
                 ownerWorkspace.getId(),
                 workspace.getId(),
                 currentUser.getId(),
-                false));
+                false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
             RuleDto rule = entityRule(
                 "person", "person.updated", List.of(notifyAction("Shared person")), null,
                 null, null, "user");
@@ -1848,17 +1831,6 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
         private boolean quiescent() {
             return pendingOutbox.isEmpty() && nonterminalRuns.isEmpty();
-        }
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class FixedDedupeConfiguration {
-
-        @Bean
-        @Primary
-        WorkflowDedupeKey parityWorkflowDedupeKey() {
-            return new WorkflowDedupeKey(Clock.fixed(
-                Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC));
         }
     }
 }

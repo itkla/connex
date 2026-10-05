@@ -38,9 +38,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -566,8 +570,10 @@ class ProductImportServiceTest {
         assertEquals("B-2", inserted.getFirst().getSku());
     }
 
-    @Test
-    void commitFailsOnlyTheRowsWhoseLockedTargetChangedItsSku() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("changedTargets")
+    void commitFailsOnlyTheRowsWhoseLockedTargetChanged(
+            String scenario, String changedSku, String changedName) {
         catalog(31, "A-1", "Existing widget");
         Product survivor = catalog(32, "C-3", "Existing gadget");
         queuePreview();
@@ -576,7 +582,7 @@ class ProductImportServiceTest {
         service.previewProducts(request);
         request.setDuplicateReviewProof(PROOF);
         queueCommit();
-        Product renamed = catalogSnapshot(31, "RENAMED-1", "Existing widget");
+        Product renamed = catalogSnapshot(31, changedSku, changedName);
         when(productMapper.getByIdForUpdate(WORKSPACE_ID, 31)).thenAnswer(invocation -> {
             catalogById.put(31, renamed);
             return renamed;
@@ -589,7 +595,7 @@ class ProductImportServiceTest {
         assertEquals(
             "Catalog row for SKU A-1 changed before the import committed",
             result.failed().getFirst().getReason());
-        assertEquals("Existing widget", renamed.getName());
+        assertEquals(changedName, renamed.getName());
         assertEquals("Gadget", survivor.getName());
         verify(productMapper, never()).update(renamed);
     }
@@ -704,32 +710,10 @@ class ProductImportServiceTest {
         assertNotEquals(beforeRename, latestDecisionFingerprint());
     }
 
-    @Test
-    void commitFailsOnlyTheRowsWhoseLockedTargetChangedItsName() {
-        catalog(31, "A-1", "Existing widget");
-        Product survivor = catalog(32, "C-3", "Existing gadget");
-        queuePreview();
-        ProductImportRequest request =
-            request(OVERWRITE, row("A-1", "Widget"), row("C-3", "Gadget"));
-        service.previewProducts(request);
-        request.setDuplicateReviewProof(PROOF);
-        queueCommit();
-        Product renamed = catalogSnapshot(31, "A-1", "Renamed by someone else");
-        when(productMapper.getByIdForUpdate(WORKSPACE_ID, 31)).thenAnswer(invocation -> {
-            catalogById.put(31, renamed);
-            return renamed;
-        });
-
-        ProductImportResult result = service.commitProducts(request);
-
-        assertEquals(1, result.updated());
-        assertEquals(1, result.failed().size());
-        assertEquals(
-            "Catalog row for SKU A-1 changed before the import committed",
-            result.failed().getFirst().getReason());
-        assertEquals("Renamed by someone else", renamed.getName());
-        assertEquals("Gadget", survivor.getName());
-        verify(productMapper, never()).update(renamed);
+    private static Stream<Arguments> changedTargets() {
+        return Stream.of(
+            Arguments.of("SKU only", "RENAMED-1", "Existing widget"),
+            Arguments.of("name only", "A-1", "Renamed by someone else"));
     }
 
     @Test

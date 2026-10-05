@@ -6,6 +6,7 @@ import java.util.TreeSet;
 import java.util.function.IntConsumer;
 
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -115,6 +116,31 @@ public class SecretStore {
         }
         StoredSecret secret = secretValueMapper.findById(parsed.id());
         return secret != null && matches(secret, purpose, scopeId);
+    }
+
+    /**
+     * Whether {@link #get} has what it needs to decrypt the reference, decided without decrypting it or
+     * writing a secret-use audit: the row exists in the asked scope, uses the supported algorithms, and
+     * its key-encryption key is configured and enabled. When a read would also re-wrap the row under the
+     * active key (lazy rewrap is on and the row is sealed under an older key), the active key must be
+     * available to encrypt too, because {@link #get} fails without it. A ciphertext that has been
+     * altered in place still passes; only a decrypt can detect that.
+     *
+     * @param purpose the purpose and scope type the reference must belong to
+     * @param scopeId the scope the reference must belong to
+     * @param reference the stored secret reference
+     * @return whether a decrypt would find the row and its key
+     */
+    public boolean canDecrypt(SecretPurpose purpose, int scopeId, String reference) {
+        SecretReference parsed = SecretReference.parseOrNull(reference);
+        if (parsed == null) {
+            return false;
+        }
+        StoredSecret secret = secretValueMapper.findById(parsed.id());
+        return secret != null && matches(secret, purpose, scopeId)
+                && supportedAlgorithms(secret) && crypto.hasKey(secret.getKeyId())
+                && (!properties.isLazyRewrapEnabled() || crypto.isActiveKey(secret.getKeyId())
+                        || crypto.isAvailable());
     }
 
     /** Deletes the current scoped reference without consulting a potentially older transaction snapshot. */
@@ -248,15 +274,34 @@ public class SecretStore {
                 exception.getClass().getSimpleName()));
     }
 
+    /**
+     * Records an independent audit once the current transaction has completed, or at once outside one,
+     * so the append never contends with the scope locks this transaction holds.
+     *
+     * <p>The audit's content stays lazy, because whether a lazy rewrap counts depends on the outcome, but
+     * its actor is fixed at the call. A secret read inside {@code AutomationExecutor.runAs} joins the
+     * transaction enclosing that call, and {@code runAs} restores its caller's security context before
+     * the transaction completes, so an actor resolved at completion would be the scheduler thread's
+     * empty one (#1931). The append runs under the authentication the secret was used with, and the
+     * context in place at completion is restored afterwards, whatever the append does.
+     */
     private void deferIndependentAudit(IntConsumer recordAudit) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             recordAudit.accept(TransactionSynchronization.STATUS_COMMITTED);
             return;
         }
+        SecurityContext useContext = SecurityContextHolder.createEmptyContext();
+        useContext.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                recordAudit.accept(status);
+                SecurityContext completionContext = SecurityContextHolder.getContext();
+                SecurityContextHolder.setContext(useContext);
+                try {
+                    recordAudit.accept(status);
+                } finally {
+                    SecurityContextHolder.setContext(completionContext);
+                }
             }
         });
     }
@@ -281,10 +326,14 @@ public class SecretStore {
     }
 
     private static void requireSupportedAlgorithms(StoredSecret secret) {
-        if (!SecretStoreCrypto.KEY_ALGORITHM.equals(secret.getKeyAlgorithm())
-                || !SecretStoreCrypto.DATA_ALGORITHM.equals(secret.getDataAlgorithm())) {
+        if (!supportedAlgorithms(secret)) {
             throw new SecretUnavailableException("Encrypted integration secret algorithm is not supported");
         }
+    }
+
+    private static boolean supportedAlgorithms(StoredSecret secret) {
+        return SecretStoreCrypto.KEY_ALGORITHM.equals(secret.getKeyAlgorithm())
+                && SecretStoreCrypto.DATA_ALGORITHM.equals(secret.getDataAlgorithm());
     }
 
     private static String scopeEntityType(StoredSecret secret) {

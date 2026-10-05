@@ -1,23 +1,24 @@
+import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
     AiAssistantToolCallChange,
+    AiAssistantToolCallChangeField,
     AiAssistantToolCallCreatedRecord,
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
-    AiChatTodo,
+    AiChatNarrationFrame,
     AiChatPageContext,
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
-    AiChatNarrationFrame,
     AiChatThinkingFrame,
+    AiChatTodo,
     Page,
 } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
-import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
+import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
 const RESOURCE_HANDLE = /(^|[^\p{L}\p{N}_])r[1-9]\d*($|[^\p{L}\p{N}_])/u;
@@ -330,24 +331,49 @@ export type AskConnexToolSummaryLabels = {
     createActivity: string;
     createTask: string;
     createNote: string;
+    createPerson: string;
+    createDeal: string;
+    createCompany: string;
+    createReport: string;
+    personCreated: string;
+    dealCreated: string;
+    companyCreated: string;
+    reportCreated: string;
     addTag: string;
+    removeTag: string;
+    removeTagNamed: (value: string) => string;
+    draftDocument: string;
+    draftDocumentFrom: (value: string) => string;
+    documentDrafted: string;
     changeDealStage: string;
     changeDealStageTo: (value: string) => string;
     assignOwner: string;
     assignOwnerTo: (value: string) => string;
     removeOwner: string;
+    completeTask: string;
+    rescheduleTask: string;
+    updateRecordFields: string;
+    recordFieldsUpdated: string;
+    setResponseDue: string;
+    setResponseDueIn: (hours: number) => string;
     runWriteTool: string;
     requestRejected: string;
     requestFailed: string;
     createdRecordRemoved: string;
     activityCreated: string;
     taskCreated: string;
+    taskCompleted: string;
+    taskRescheduled: string;
     noteCreated: string;
     tagAdded: string;
     tagAlreadyPresent: string;
+    tagRemoved: string;
+    tagNotPresent: string;
     dealStageChanged: string;
     ownerRemoved: string;
     ownerAssigned: string;
+    responseDueSet: string;
+    responseDueAlreadySet: string;
     requestCompleted: string;
 };
 
@@ -375,6 +401,7 @@ export type AskConnexToolCardsEvent =
         mutation: AiAssistantToolCallMutation;
     }
     | { type: 'actionSettled'; toolCall: AiAssistantToolCall }
+    | { type: 'proposalsRefreshed'; toolCalls: readonly AiAssistantToolCall[] }
     | { type: 'reset' };
 
 /** Tool cards partitioned by their transcript message or nearest visible turn position. */
@@ -411,13 +438,21 @@ function sameToolCallProjection(
     current: AskConnexToolCardState,
     incoming: AiAssistantToolCall,
 ): boolean {
+    const currentChanges = askConnexToolChanges(current);
+    const incomingChanges = askConnexToolChanges(incoming);
     return current.status === incoming.status
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt
-        && current.change?.state === incoming.change?.state
-        && current.change?.currentValue === incoming.change?.currentValue
-        && current.change?.proposedValue === incoming.change?.proposedValue;
+        && currentChanges.length === incomingChanges.length
+        && currentChanges.every((change, index) => {
+            const incomingChange = incomingChanges[index];
+            return change.field === incomingChange.field
+                && change.state === incomingChange.state
+                && change.currentValue === incomingChange.currentValue
+                && change.currentValueUnresolved === incomingChange.currentValueUnresolved
+                && change.proposedValue === incomingChange.proposedValue;
+        });
 }
 
 function compareToolCalls(
@@ -460,6 +495,16 @@ export function reduceAskConnexToolCards(
                 failure: current.failure,
                 undoBlocked: current.undoBlocked,
             };
+        });
+    }
+    if (event.type === 'proposalsRefreshed') {
+        const refreshedById = new Map(event.toolCalls.map((toolCall) => [toolCall.id, toolCall]));
+        return state.map((card) => {
+            const refreshed = refreshedById.get(card.id);
+            return card.status === 'proposed' && card.pendingAction === null
+                && refreshed?.status === 'proposed'
+                ? { ...card, ...refreshed }
+                : card;
         });
     }
     if (event.type === 'actionSettled') {
@@ -545,6 +590,28 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
     return change.state === 'ready';
 }
 
+/** Reads every field reviewed by record edits and creates, retaining older single-row tools. */
+export function askConnexToolChanges(
+    card: Pick<AiAssistantToolCall, 'toolName' | 'change' | 'changes'>,
+): AiAssistantToolCallChange[] {
+    const singleChange = card.change ? [card.change] : [];
+    return ['update_record_fields', 'create_person', 'create_deal', 'create_company', 'create_report'].includes(card.toolName)
+        ? card.changes ?? singleChange : singleChange;
+}
+
+/**
+ * Whether a tool's reviewed change takes a value off its record rather than writing one.
+ *
+ * A removal proposes an empty after-value on purpose. When it can no longer be made, what changed
+ * is the value it would remove — renamed, deleted or replaced since the proposal — not a proposed
+ * value that disappeared, so its card keeps that empty after-value and gives its own reason.
+ */
+export function askConnexToolProposesRemoval(
+    toolCall: Pick<AiAssistantToolCall, 'toolName'>,
+): boolean {
+    return toolCall.toolName === 'remove_tag';
+}
+
 /**
  * Whether one reviewed proposal can still be part of what a member applies.
  *
@@ -555,8 +622,10 @@ export function askConnexChangeApplicable(change: AiAssistantToolCallChange | nu
  * in, because retrying it is the whole point.
  */
 export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+    const changes = askConnexToolChanges(card);
     return (card.failure === null || card.failure === 'actionFailed')
-        && askConnexChangeApplicable(card.change);
+        && changes.some(askConnexChangeApplicable)
+        && changes.every((change) => change.state === 'ready' || change.state === 'unchanged');
 }
 
 /** How an executed action's undo window reads right now. */
@@ -711,7 +780,7 @@ export function toggleAskConnexProposalExclusion(
 
 /** Resolves a viewer-authorized assistant tool target to its record-detail route. */
 export function askConnexToolTargetHref(target: AiAssistantToolCall['target']): string | null {
-    if (target.id === null) return null;
+    if (target.id === null || target.kind === 'task' || target.kind === 'workspace') return null;
     if (target.kind === 'person') return `/records/contacts/${target.id}`;
     if (target.kind === 'company') return `/records/companies/${target.id}`;
     return `/records/deals/${target.id}`;
@@ -732,17 +801,29 @@ export function askConnexCreatedRecordHref(
     if (createdRecord === null) return null;
     if (createdRecord.kind === 'activity') return `/activity/activities/${createdRecord.id}`;
     if (createdRecord.kind === 'task') return `/activity/tasks/${createdRecord.id}`;
+    if (createdRecord.kind === 'person') return `/records/contacts/${createdRecord.id}`;
+    if (createdRecord.kind === 'deal') return `/records/deals/${createdRecord.id}`;
+    if (createdRecord.kind === 'company') return `/records/companies/${createdRecord.id}`;
+    if (createdRecord.kind === 'report') return `/insights/reports/${createdRecord.id}`;
     return `/activity/notes/${createdRecord.id}`;
 }
 
 /** The fields a completed assistant action reports values for, in the order they are shown. */
 export const ASK_CONNEX_OUTCOME_FIELDS = [
+    'name',
+    'template',
+    'currency',
     'type',
     'subject',
     'start',
     'description',
     'dueDate',
     'title',
+    'website',
+    'industry',
+    'address',
+    'value',
+    'expectedCloseDate',
     'visibility',
     'tag',
     'stage',
@@ -769,6 +850,73 @@ function summaryValue(summary: string, prefix: string): string | null {
         : null;
 }
 
+/**
+ * States one value a pending proposal reviews, in the reader's own language and time zone.
+ *
+ * A first-response deadline the contact already holds arrives as the offset-less UTC date-time
+ * the database stores, and is read as UTC exactly as the contact's own lead panel reads it, so the
+ * two surfaces print the same deadline. The deadline a proposal would start arrives as the whole
+ * hours from the approval the server will count them from, and is stated in the member's words.
+ * Task dates and completion states use the reader's locale. A value that does not parse stands
+ * as it is. Every other reviewed value is a name the workspace already wrote in its own words,
+ * and stands as it is.
+ */
+export function askConnexChangeValueText(
+    field: AiAssistantToolCallChangeField,
+    value: string,
+    side: 'current' | 'proposed',
+    locale: string,
+    responseDueInHours: (hours: number) => string,
+    taskStatus?: Readonly<Record<'open' | 'done', string>>,
+): string {
+    if (field === 'dueDate') return formatDate(value, locale);
+    if (field === 'taskStatus' && (value === 'open' || value === 'done')) {
+        return taskStatus?.[value] ?? value;
+    }
+    if (field !== 'responseDue') return value;
+    if (side === 'current') return formatUtcDateTime(value, locale, value);
+    const hours = Number(value);
+    return Number.isInteger(hours) && hours > 0 ? responseDueInHours(hours) : value;
+}
+
+/** Localized rendering contract for the fields a pinned creation template fills. */
+export type AskConnexTemplateDefaultsLabels = {
+    field: (key: string) => string;
+    leadSource: (value: string) => string;
+    fieldValue: (field: string, value: string) => string;
+    none: string;
+    unavailable: string;
+};
+
+/** Lists template-filled fields without displaying private defaults or unrecognized identifiers. */
+export function askConnexTemplateDefaultsText(
+    value: string,
+    locale: string,
+    labels: AskConnexTemplateDefaultsLabels,
+): string {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return labels.unavailable;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return labels.unavailable;
+    }
+    const entries = Object.entries(parsed);
+    if (entries.some(([, defaultValue]) => typeof defaultValue !== 'string')) {
+        return labels.unavailable;
+    }
+    const fields = entries.map(([key, defaultValue]) => {
+        const field = labels.field(key);
+        return key === 'leadSource' && typeof defaultValue === 'string' && defaultValue.length > 0
+            ? labels.fieldValue(field, labels.leadSource(defaultValue))
+            : field;
+    });
+    return fields.length === 0 ? labels.none
+        : new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format([...new Set(fields)]);
+}
+
 /** Localizes one resolved tool request while retaining viewer-safe dynamic record values. */
 export function askConnexToolRequestSummary(
     toolCall: AiAssistantToolCall,
@@ -776,8 +924,23 @@ export function askConnexToolRequestSummary(
 ): string {
     if (toolCall.toolName === 'create_activity') return labels.createActivity;
     if (toolCall.toolName === 'create_task') return labels.createTask;
+    if (toolCall.toolName === 'complete_task') return labels.completeTask;
+    if (toolCall.toolName === 'reschedule_task') return labels.rescheduleTask;
+    if (toolCall.toolName === 'update_record_fields') return labels.updateRecordFields;
     if (toolCall.toolName === 'create_note') return labels.createNote;
+    if (toolCall.toolName === 'create_person') return labels.createPerson;
+    if (toolCall.toolName === 'create_deal') return labels.createDeal;
+    if (toolCall.toolName === 'create_company') return labels.createCompany;
+    if (toolCall.toolName === 'create_report') return labels.createReport;
     if (toolCall.toolName === 'add_tag') return labels.addTag;
+    if (toolCall.toolName === 'remove_tag') {
+        const tag = summaryValue(toolCall.requestSummary, 'Remove tag:');
+        return tag === null ? labels.removeTag : labels.removeTagNamed(tag);
+    }
+    if (toolCall.toolName === 'draft_document') {
+        const template = summaryValue(toolCall.requestSummary, 'Draft document from:');
+        return template === null ? labels.draftDocument : labels.draftDocumentFrom(template);
+    }
     if (toolCall.toolName === 'change_deal_stage') {
         const stage = summaryValue(toolCall.requestSummary, 'Change deal stage to:');
         return stage === null ? labels.changeDealStage : labels.changeDealStageTo(stage);
@@ -786,6 +949,13 @@ export function askConnexToolRequestSummary(
         if (toolCall.requestSummary === 'Remove the current owner') return labels.removeOwner;
         const owner = summaryValue(toolCall.requestSummary, 'Assign owner:');
         return owner === null ? labels.assignOwner : labels.assignOwnerTo(owner);
+    }
+    if (toolCall.toolName === 'set_response_due') {
+        const hours = Number(summaryValue(
+            toolCall.requestSummary, 'Set first-response deadline in hours:'));
+        return Number.isInteger(hours) && hours > 0
+            ? labels.setResponseDueIn(hours)
+            : labels.setResponseDue;
     }
     return labels.runWriteTool;
 }
@@ -801,17 +971,37 @@ export function askConnexToolOutcomeSummary(
     if (toolCall.status === 'undone') return labels.createdRecordRemoved;
     if (toolCall.toolName === 'create_activity') return labels.activityCreated;
     if (toolCall.toolName === 'create_task') return labels.taskCreated;
+    if (toolCall.toolName === 'complete_task') return labels.taskCompleted;
+    if (toolCall.toolName === 'reschedule_task') return labels.taskRescheduled;
+    if (toolCall.toolName === 'update_record_fields') return labels.recordFieldsUpdated;
     if (toolCall.toolName === 'create_note') return labels.noteCreated;
+    if (toolCall.toolName === 'create_person') return labels.personCreated;
+    if (toolCall.toolName === 'create_deal') return labels.dealCreated;
+    if (toolCall.toolName === 'create_company') return labels.companyCreated;
+    if (toolCall.toolName === 'create_report') return labels.reportCreated;
     if (toolCall.toolName === 'add_tag') {
         if (toolCall.outcomeSummary === 'Tag added') return labels.tagAdded;
         if (toolCall.outcomeSummary === 'Tag was already present') return labels.tagAlreadyPresent;
         return labels.requestCompleted;
     }
+    if (toolCall.toolName === 'remove_tag') {
+        if (toolCall.outcomeSummary === 'Tag removed') return labels.tagRemoved;
+        if (toolCall.outcomeSummary === 'Tag was not on the record') return labels.tagNotPresent;
+        return labels.requestCompleted;
+    }
+    if (toolCall.toolName === 'draft_document') return labels.documentDrafted;
     if (toolCall.toolName === 'change_deal_stage') return labels.dealStageChanged;
     if (toolCall.toolName === 'assign_owner') {
         return toolCall.outcomeSummary === 'Owner removed'
             ? labels.ownerRemoved
             : labels.ownerAssigned;
+    }
+    if (toolCall.toolName === 'set_response_due') {
+        if (toolCall.outcomeSummary === 'First-response deadline set') return labels.responseDueSet;
+        if (toolCall.outcomeSummary === 'A first-response deadline was already set') {
+            return labels.responseDueAlreadySet;
+        }
+        return labels.requestCompleted;
     }
     return labels.requestCompleted;
 }

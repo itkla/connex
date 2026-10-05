@@ -15,6 +15,7 @@ public record AiAssistantToolCallReadDto(
         String requestSummary,
         String outcomeSummary,
         Change change,
+        List<Change> changes,
         List<OutcomeValue> outcomeValues,
         CreatedRecord createdRecord,
         Integer messageId,
@@ -25,7 +26,10 @@ public record AiAssistantToolCallReadDto(
         String updatedAt,
         String executedAt) {
 
-    /** Viewer-authorized target identity, with null details when only its kind is safe. */
+    /**
+     * Viewer-authorized person, company, deal, task or workspace identity, with null details when only its
+     * kind is safe. Task and workspace targets have no record navigation link.
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Target(
             String kind,
@@ -40,7 +44,8 @@ public record AiAssistantToolCallReadDto(
      * a shared-session participant never learns a field value of a record they cannot open. Both
      * values are nullable in their own right: a record with no owner has no current value, and an
      * unassign proposal has no proposed value, so a clearing change is represented rather than
-     * flattened into a missing field.
+     * flattened into a missing field. For an additional document draft, the current value is the
+     * latest existing version from the pinned template, used as context rather than a before-row.
      *
      * <p>A current value the workspace can no longer name — a record owned by someone who has left
      * it — is a third thing again, and says so through {@code currentValueUnresolved} rather than

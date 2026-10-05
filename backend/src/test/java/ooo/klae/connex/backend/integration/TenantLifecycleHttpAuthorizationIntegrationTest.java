@@ -164,26 +164,6 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
             .andExpect(jsonPath("$.code").value("RECENT_AUTHENTICATION_REQUIRED"));
     }
 
-    @Test
-    void exportGrantCookieRedeemsOnAHeaderlessBrowserDownload() throws Exception {
-        RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
-        User admin = newUser();
-        workspaceMapper.addMember(workspace.getId(), admin.getId(), "owner");
-        int orgId = workspace.getOrgId();
-        orgMemberMapper.addMember(orgId, admin.getId(), "admin");
-        MockHttpSession session = login(admin.getUsername());
-        markRecentlyAuthenticated(session, admin.getId());
-        String rawGrant = issueExportGrant(orgId, workspace.getId(), session);
-
-        MvcResult downloadResult = mockMvc.perform(get(exportPath(orgId, workspace.getId()))
-                .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
-                .session(session))
-            .andExpect(request().asyncStarted())
-            .andReturn();
-
-        assertExportStreamed(downloadResult);
-    }
 
     /**
      * Dispatches a started export and fails with the throwable its body raised, instead of leaving

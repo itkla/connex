@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -16,7 +17,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 
@@ -71,29 +74,31 @@ class MigrationLineageArchTest {
     /** Keywords the FROM/JOIN and DML scans can capture that are not table names. */
     private static final Set<String> SQL_NOISE = Set.of("DUAL", "SELECT", "CURRENT_TIMESTAMP");
 
+    private static MigrationInventory inventory;
+
+    @BeforeAll
+    static void readMigrationInventory() throws IOException {
+        inventory = MigrationInventory.read(repoRoot().resolve("backend/src/main/resources/db/migration"));
+    }
+
     @Test
     void tenantLineageTouchesOnlyOrgDataTables() throws IOException {
-        assertLineagePurity("tenant", TablePlaneRegistry.ORG_DATA_TABLES);
+        assertLineagePurity(inventory, "tenant", TablePlaneRegistry.ORG_DATA_TABLES);
     }
 
     @Test
     void controlLineageTouchesOnlyControlPlaneTables() throws IOException {
-        assertLineagePurity("control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
+        assertLineagePurity(inventory, "control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
     }
 
     @Test
     void migrationFilesUseThePortableConvention() throws IOException {
-        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
-        List<String> invalidNames;
-        try (Stream<Path> files = Files.walk(root)) {
-            invalidNames = files
-                .filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-                .filter(path -> !migrationResourceIsValid(root, path))
-                .map(path -> path.getFileName().toString())
-                .map(MigrationLineageArchTest::displayName)
-                .sorted()
-                .toList();
-        }
+        List<String> invalidNames = inventory.resources().stream()
+            .filter(path -> !migrationResourceIsValid(inventory.root(), path))
+            .map(path -> inventory.root().relativize(path).toString())
+            .map(MigrationLineageArchTest::displayName)
+            .sorted()
+            .toList();
         assertTrue(invalidNames.isEmpty(),
             "Flyway migrations must be regular files named V{integer}__{snake_case}.sql "
                 + "or R__{snake_case}.sql, apart from the two lineage .gitkeep files: "
@@ -102,19 +107,13 @@ class MigrationLineageArchTest {
 
     @Test
     void migrationsAfterTheReviewedGlobalBaselineAreSequentialAndUnique() throws IOException {
-        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
-        List<BigInteger> actual;
-        try (Stream<Path> files = Files.walk(root)) {
-            actual = files
-                    .map(path -> VERSIONED_MIGRATION_FILE_NAME.matcher(
-                            path.getFileName().toString()))
-                    .filter(Matcher::matches)
-                    .map(matcher -> new BigInteger(matcher.group(1)))
-                    .filter(version -> version.compareTo(
-                            REVIEWED_GLOBAL_MIGRATION_BASELINE) > 0)
-                    .sorted()
-                    .toList();
-        }
+        List<BigInteger> actual = inventory.resources().stream()
+            .map(path -> VERSIONED_MIGRATION_FILE_NAME.matcher(path.getFileName().toString()))
+            .filter(Matcher::matches)
+            .map(matcher -> new BigInteger(matcher.group(1)))
+            .filter(version -> version.compareTo(REVIEWED_GLOBAL_MIGRATION_BASELINE) > 0)
+            .sorted()
+            .toList();
         BigInteger latest = actual.isEmpty()
                 ? REVIEWED_GLOBAL_MIGRATION_BASELINE
                 : actual.getLast();
@@ -135,47 +134,87 @@ class MigrationLineageArchTest {
      */
     @Test
     void rootLineageIsFrozenAtTheSplit() throws IOException {
-        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
-        List<String> escapees = new ArrayList<>();
-        try (Stream<Path> files = Files.list(root)) {
-            for (Path file : files
-                    .filter(path -> SQL_MIGRATION_FILE_NAME
-                        .matcher(path.getFileName().toString()).matches())
-                    .toList()) {
-                String fileName = file.getFileName().toString();
-                Matcher versionedName = VERSIONED_MIGRATION_FILE_NAME.matcher(fileName);
-                if (!versionedName.matches()
-                        || new BigInteger(versionedName.group(1))
-                            .compareTo(BigInteger.valueOf(65)) > 0) {
-                    escapees.add(file.getFileName().toString());
-                }
-            }
-        }
+        List<String> escapees = inventory.sqlResources().stream()
+            .filter(path -> path.getParent().equals(inventory.root()))
+            .filter(path -> !historicalRootMigration(path))
+            .map(path -> path.getFileName().toString())
+            .toList();
         assertTrue(escapees.isEmpty(),
             "The root migration lineage is frozen at V65; place new migrations under db/migration/tenant "
                 + "or db/migration/control (see backend/AGENTS.md): " + escapees);
     }
 
-    private void assertLineagePurity(String lineage, Set<String> allowedTables) throws IOException {
-        Path directory = repoRoot().resolve("backend/src/main/resources/db/migration/" + lineage);
+    @Test
+    void allSqlResourcesBelongToAnApprovedLineage() {
+        assertApprovedPlacement(inventory);
+    }
+
+    @Test
+    void nestedSqlCannotEscapeEitherPlaneCheck(@TempDir Path root) throws IOException {
+        Path tenant = root.resolve("tenant/nested/R__tenant_escape.sql");
+        Path control = root.resolve("control/nested/R__control_escape.sql");
+        Files.createDirectories(tenant.getParent());
+        Files.createDirectories(control.getParent());
+        Files.writeString(tenant, "ALTER TABLE app_user ADD escaped INT;");
+        Files.writeString(control, "ALTER TABLE person ADD escaped INT;");
+        MigrationInventory fixture = MigrationInventory.read(root);
+
+        assertTrue(migrationResourceIsValid(root, tenant));
+        assertTrue(migrationResourceIsValid(root, control));
+        assertApprovedPlacement(fixture);
+        assertThrows(AssertionError.class,
+            () -> assertLineagePurity(fixture, "tenant", TablePlaneRegistry.ORG_DATA_TABLES));
+        assertThrows(AssertionError.class,
+            () -> assertLineagePurity(fixture, "control", TablePlaneRegistry.CONTROL_PLANE_TABLES));
+    }
+
+    @Test
+    void unapprovedDirectoriesCannotMasqueradeAsHistoricalRoot(@TempDir Path root) throws IOException {
+        Path escape = root.resolve("unapproved/nested/V1__escape.sql");
+        Files.createDirectories(escape.getParent());
+        Files.writeString(escape, "SELECT 1;");
+        MigrationInventory fixture = MigrationInventory.read(root);
+
+        assertTrue(migrationResourceIsValid(root, escape));
+        assertThrows(AssertionError.class, () -> assertApprovedPlacement(fixture));
+    }
+
+    private static void assertApprovedPlacement(MigrationInventory migrations) {
+        List<Path> escapees = migrations.sqlResources().stream()
+            .filter(path -> {
+                Path relative = migrations.root().relativize(path);
+                return relative.getNameCount() == 1
+                    ? !historicalRootMigration(path)
+                    : !Set.of("tenant", "control").contains(relative.getName(0).toString());
+            })
+            .map(migrations.root()::relativize)
+            .toList();
+        assertTrue(escapees.isEmpty(), "SQL resources outside approved migration lineages: " + escapees);
+    }
+
+    private static boolean historicalRootMigration(Path path) {
+        Matcher version = VERSIONED_MIGRATION_FILE_NAME.matcher(path.getFileName().toString());
+        return version.matches() && new BigInteger(version.group(1)).compareTo(BigInteger.valueOf(65)) <= 0;
+    }
+
+    private static void assertLineagePurity(
+            MigrationInventory migrations, String lineage, Set<String> allowedTables) throws IOException {
+        Path directory = migrations.root().resolve(lineage);
         assertTrue(Files.isDirectory(directory),
             "Missing lineage directory " + directory + " — the split location must exist even while empty.");
-
         List<String> violations = new ArrayList<>();
-        try (Stream<Path> files = Files.list(directory)) {
-            for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
-                String sql = stripComments(Files.readString(file));
-                for (Pattern pattern : TABLE_REFERENCES) {
-                    Matcher matcher = pattern.matcher(sql);
-                    while (matcher.find()) {
-                        for (int group = 1; group <= matcher.groupCount(); group++) {
-                            String table = matcher.group(group);
-                            if (table == null || SQL_NOISE.contains(table.toUpperCase(Locale.ROOT))) {
-                                continue;
-                            }
-                            if (!allowedTables.contains(table) && !allowedTables.contains(table.toUpperCase(Locale.ROOT))) {
-                                violations.add(file.getFileName() + " touches " + table);
-                            }
+        for (Path file : migrations.sqlResources().stream().filter(path -> path.startsWith(directory)).toList()) {
+            String sql = stripComments(Files.readString(file));
+            for (Pattern pattern : TABLE_REFERENCES) {
+                Matcher matcher = pattern.matcher(sql);
+                while (matcher.find()) {
+                    for (int group = 1; group <= matcher.groupCount(); group++) {
+                        String table = matcher.group(group);
+                        if (table == null || SQL_NOISE.contains(table.toUpperCase(Locale.ROOT))) {
+                            continue;
+                        }
+                        if (!allowedTables.contains(table) && !allowedTables.contains(table.toUpperCase(Locale.ROOT))) {
+                            violations.add(migrations.root().relativize(file) + " touches " + table);
                         }
                     }
                 }
@@ -185,6 +224,24 @@ class MigrationLineageArchTest {
             "Migrations in db/migration/" + lineage + " may only touch " + lineage + "-plane tables "
                 + "(TablePlaneRegistry); move the statement to the other lineage or revisit the table's "
                 + "placement on #440: " + violations);
+    }
+
+    private record MigrationInventory(Path root, List<Path> resources) {
+        MigrationInventory {
+            resources = List.copyOf(resources);
+        }
+
+        static MigrationInventory read(Path root) throws IOException {
+            try (Stream<Path> files = Files.walk(root)) {
+                return new MigrationInventory(root, files
+                    .filter(path -> !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                    .sorted().toList());
+            }
+        }
+
+        List<Path> sqlResources() {
+            return resources.stream().filter(path -> path.getFileName().toString().endsWith(".sql")).toList();
+        }
     }
 
     private static String stripComments(String sql) {
@@ -214,7 +271,7 @@ class MigrationLineageArchTest {
             .replace("\t", "\\t");
     }
 
-    private Path repoRoot() {
+    private static Path repoRoot() {
         Path current = Path.of("").toAbsolutePath();
         while (current != null && !Files.exists(current.resolve("backend/src/main/resources/db/migration"))) {
             current = current.getParent();

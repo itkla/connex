@@ -317,6 +317,7 @@ class AiAssistantPromptInjectionGoldenTest {
         ScoringService scoringService = mock(ScoringService.class);
         AiAssistantToolExecutor executor = new AiAssistantToolExecutor(
                 catalog,
+                new AiAssistantWriteToolRegistry(catalog, AiAssistantDeclaredWriteTools.tools()),
                 searchService,
                 personService,
                 companyService,

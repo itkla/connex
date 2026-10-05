@@ -29,11 +29,15 @@ import tools.jackson.databind.JsonNode;
  * non-recoverably — spending the governance step the load cost and forcing the turn to close
  * without the read it loaded the set for.
  *
- * <p>Loading is narrowing only. Every tool in every loadable toolset is already callable on a
- * routed or generic turn, so a load restores reach the taxonomy removed and grants nothing new;
+ * <p>Loading is narrowing only. A load restores reach the taxonomy removed and grants nothing new;
  * write authority stays with {@code requireSkillAuthority} and scope honesty with
- * {@link AiChatScopedToolPolicy}. This loader reads no database, resolves no handle, and consults
- * no declared scope.
+ * {@link AiChatScopedToolPolicy}. What a turn may load is its <em>offer</em>, fixed once per turn
+ * by the loop: every loadable toolset on a generic turn, and on a routed turn only the families
+ * {@link AiSkillCatalog#mayHold} admits for the skill's authority and allowed tools. A request
+ * outside the offer is refused recoverably, so a read-only skill's model is told the family is not
+ * available and can still answer, instead of loading write tools whose first use the authority
+ * gate ends the turn for. This loader reads no database, resolves no handle, and consults no
+ * declared scope.
  */
 @Component
 @RequiredArgsConstructor
@@ -50,6 +54,7 @@ public class AiAssistantToolsetLoader {
     private static final String TOOLSET_ARGUMENT = "toolset";
     private static final String ALREADY_LOADED = "toolset_already_loaded";
     private static final String LOAD_LIMIT_REACHED = "toolset_load_limit_reached";
+    private static final String UNAVAILABLE_FOR_SKILL = "toolset_unavailable_for_skill";
     private static final String INVALID_ARGUMENTS = "invalid_tool_arguments";
 
     private final AiAssistantToolCatalog toolCatalog;
@@ -75,13 +80,18 @@ public class AiAssistantToolsetLoader {
      *
      * <p>The result states the complete active set rather than a delta, so one row is enough to
      * reconstruct what the turn held, and so the model is never told it holds less than it does.
-     * Both refusals are recoverable: the model can correct the key or stop asking.
+     * Every refusal is recoverable: the model can correct the key or stop asking.
+     *
+     * <p>The offer is checked after the cap, so a turn already at the cap is told so whichever
+     * family it asks for, and a toolset outside the offer is refused with
+     * {@code toolset_unavailable_for_skill} before anything about it reaches the result.
      *
      * @param args validated raw arguments carrying the closed {@code toolset} enum
      * @param loadedToolsets the turn's current loaded set, read but never written
+     * @param offeredToolsets the loadable toolsets this turn may hold, fixed for the whole turn
      * @return the prospective load
      */
-    public Load load(JsonNode args, Set<Toolset> loadedToolsets) {
+    public Load load(JsonNode args, Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         Toolset requested = requestedToolset(args);
         if (loadedToolsets.contains(requested)) {
             throw AiAssistantLoopException.refusedArguments(ALREADY_LOADED);
@@ -89,6 +99,9 @@ public class AiAssistantToolsetLoader {
         int loadable = loadableCount(loadedToolsets);
         if (loadable >= AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN) {
             throw AiAssistantLoopException.refusedArguments(LOAD_LIMIT_REACHED);
+        }
+        if (!offeredToolsets.contains(requested)) {
+            throw AiAssistantLoopException.refusedArguments(UNAVAILABLE_FOR_SKILL);
         }
         Set<Toolset> prospective = new LinkedHashSet<>(loadedToolsets);
         prospective.add(requested);

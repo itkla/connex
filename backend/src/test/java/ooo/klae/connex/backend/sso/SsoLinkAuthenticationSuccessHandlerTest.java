@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.sso;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,6 +12,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -79,8 +81,13 @@ class SsoLinkAuthenticationSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(authService).downgradeToUnauthenticatedSession(request, response);
-        verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
+        InOrder order = inOrder(authService, ssoLinkService, oneTimeLinkFlowService);
+        order.verify(authService).downgradeToUnauthenticatedSession(request, response);
+        order.verify(ssoLinkService).createChallenge(linkRequired);
+        order.verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
+        order.verify(oneTimeLinkFlowService).issue(
+            request, "browser-binding", Purpose.SSO_LINK,
+            ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256("raw-link-token"));
         verify(oneTimeLinkFlowCookie).set(
             response, Purpose.SSO_LINK, "browser-grant", java.time.Duration.ofMinutes(10));
         assertEquals("https://app.example/sso/link", response.getRedirectedUrl());

@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -14,106 +13,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 
-import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
-import ooo.klae.connex.backend.capability.CapabilityEntitlement;
-import ooo.klae.connex.backend.config.LogoutAuditHandler;
-import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
-import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
-import ooo.klae.connex.backend.config.RequestBodySizeProperties;
-import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
-import ooo.klae.connex.backend.mappers.UserMapper;
-import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
-import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
-import ooo.klae.connex.backend.observability.ErrorReporter;
-import ooo.klae.connex.backend.services.AuditService;
-import ooo.klae.connex.backend.services.BulkOperationService;
-import ooo.klae.connex.backend.services.CompanyService;
-import ooo.klae.connex.backend.services.DealRiskService;
-import ooo.klae.connex.backend.services.DealService;
-import ooo.klae.connex.backend.services.LoginRateLimiter;
-import ooo.klae.connex.backend.services.MemberScopeResolver;
-import ooo.klae.connex.backend.services.PersonService;
-import ooo.klae.connex.backend.services.PrivilegedAccountService;
-import ooo.klae.connex.backend.services.SessionSecurityService;
-import ooo.klae.connex.backend.services.WorkspaceService;
-import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
-import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
-import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
-import ooo.klae.connex.backend.sso.SsoHttpClient;
-import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
-import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
-import ooo.klae.connex.backend.tenant.TenantContext;
-import ooo.klae.connex.backend.tenant.WorkspaceCookie;
-import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
-import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
-@WebMvcTest(
-    controllers = LegacyRecordCreationController.class,
-    properties = {
-        "connex.sso.enabled=false",
-        "connex.record-creation.guided-cutover-enabled=false"
-    }
-)
-@Import({SecurityConfig.class,
-    RequestBodySizeProperties.class,
-    LegacyRecordCreationControllerTest.MapperTestConfig.class})
 @WithMockUser
-class LegacyRecordCreationControllerTest {
+class LegacyRecordCreationControllerTest extends RecordControllerMvcTestSupport {
     private static final String LEGACY_STALE_MESSAGE =
         "Duplicate candidates changed before creation; review them again";
 
     @Autowired private MockMvc mockMvc;
-
-    @MockitoBean private PersonService personService;
-    @MockitoBean private CompanyService companyService;
-    @MockitoBean private DealService dealService;
-    @MockitoBean private BulkOperationService bulkOperationService;
-    @MockitoBean private DealRiskService dealRiskService;
-    @MockitoBean private AiGenerationAdapterService aiGenerationAdapterService;
-    @MockitoBean private WorkspaceService workspaceService;
-    @MockitoBean private MemberScopeResolver memberScopeResolver;
-    @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
-    @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
-    @MockitoBean private SsoHttpClient ssoHttpClient;
-    @MockitoBean private DbRelyingPartyRegistrationRepository relyingPartyRegistrationRepository;
-    @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
-    @MockitoBean private SessionSecurityService sessionSecurityService;
-    @MockitoBean private UserMapper userMapper;
-    @MockitoBean private WebSocketSessionRegistry webSocketSessions;
-    @MockitoBean private PrivilegedMfaProperties privilegedMfaProperties;
-    @MockitoBean private PrivilegedAccountService privilegedAccountService;
-    @MockitoBean private WebAuthnService webAuthnService;
-    @MockitoBean private AuditService auditService;
-    @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
-    @MockitoBean private CapabilityEntitlement capabilityEntitlement;
-    @MockitoBean private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
-    @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
-    @MockitoBean private TenantContext tenantContext;
-    @MockitoBean private WorkspaceCookie workspaceCookie;
-    @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
-    @MockitoBean private OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
-    @MockitoBean private LogoutAuditHandler logoutAuditHandler;
-    @MockitoBean private LoginRateLimiter loginRateLimiter;
-    @MockitoBean private ClientIpResolver clientIpResolver;
-    @MockitoBean private ErrorReporter errorReporter;
 
     @Test
     void dealCreateDelegatesTheWriteOnlyDuplicateReviewToken() throws Exception {
@@ -277,20 +193,5 @@ class LegacyRecordCreationControllerTest {
         deal.setStageId(11);
         deal.setCompanyId(18);
         return deal;
-    }
-
-    @TestConfiguration
-    static class MapperTestConfig {
-        @Bean
-        SqlSessionFactory sqlSessionFactory() {
-            SqlSessionFactory sqlSessionFactory = mock(SqlSessionFactory.class);
-            org.apache.ibatis.mapping.Environment environment = new org.apache.ibatis.mapping.Environment(
-                "test",
-                mock(org.apache.ibatis.transaction.TransactionFactory.class),
-                mock(javax.sql.DataSource.class));
-            when(sqlSessionFactory.getConfiguration())
-                .thenReturn(new org.apache.ibatis.session.Configuration(environment));
-            return sqlSessionFactory;
-        }
     }
 }

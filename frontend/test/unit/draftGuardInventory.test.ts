@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { act, createElement, type ReactElement, type ReactNode } from "react";
+import { act, createElement, useState, type ReactElement, type ReactNode } from "react";
 import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -355,9 +355,9 @@ vi.mock("@/app/components/ProtectedMediaImage", () => ({ default: () => null }))
  * `lint/draft-guard-inventory.json` wires `useUnsavedChangesGuard` + `ConfirmDiscardDialog`, itself or
  * through a component it renders.
  *
- * The executable table also mounts every real guard owner, changes the owner's real draft input,
- * and proves outside dismissal, keep-editing, and confirmed discard behavior for every inventory
- * entry. Delegating entries run against the shared owner named by their inventory contract.
+ * The executable table mounts each real guard owner once, changes its draft input, and proves
+ * outside dismissal, keep-editing, and confirmed discard behavior. Separate composer scenarios
+ * exercise delegated draft-state wiring without bubbling an input event to the shared shell.
  *
  * It is list-driven, and that is its one blind spot: a new dialog or drawer that accumulates input and
  * is never added to the inventory is invisible here and this suite still passes. The inventory is the
@@ -948,7 +948,7 @@ describe("draft-guard inventory", () => {
     });
 });
 
-describe.each(inventory.surfaces)("$surface draft guard", (entry) => {
+describe.each(inventory.surfaces.filter((entry) => entry.guard === OWN_GUARD))("$surface draft guard", (entry) => {
     it("executes its real owner through dirty input, outside dismissal, keep editing, and discard", async () => {
         const owner = resolveOwner(entry);
         if (owner === null) throw new Error(`${entry.surface} has no guard owner`);
@@ -970,6 +970,170 @@ describe.each(inventory.surfaces)("$surface draft guard", (entry) => {
             await act(async () => requiredDismiss()(false));
             await act(async () => requiredConfirm().onDiscard());
             expect(mounted.onClose, `${entry.surface} did not close after confirmed discard`).toHaveBeenCalledOnce();
+        } finally {
+            await mounted.unmount();
+        }
+    });
+});
+
+const delegationScenarios: Record<string, OwnerScenario> = {
+    "app/components/records/contacts/QuickEditSheet.tsx": async () => {
+        const { default: QuickEditSheet } = await import("@/app/components/records/contacts/QuickEditSheet");
+        const contact = {
+            id: 1, name: "Contact", email: "", phone: "", title: "", imageUrl: "",
+            createdAt: "2026-09-01", updatedAt: "2026-09-01",
+        };
+        function Harness({ onClose }: { onClose: (open: boolean) => void }) {
+            const [drafts, setDrafts] = useState<Parameters<typeof QuickEditSheet>[0]["drafts"]>({
+                1: { name: contact.name, email: "", phone: "", title: "" },
+            });
+            return createElement(QuickEditSheet, {
+                editSheetOpen: true,
+                setEditSheetOpen: onClose,
+                selectedIds: new Set([contact.id]),
+                selectedContacts: [contact],
+                drafts,
+                updateDraft: (id, patch) => setDrafts((current) => ({
+                    ...current, [id]: { ...current[id], ...patch },
+                })),
+                isSaving: false,
+                saveEdits: vi.fn(),
+            });
+        }
+        return mountOwner(
+            (onClose) => createElement(Harness, { onClose }),
+            () => requiredInput("name-1")("Renamed contact"),
+        );
+    },
+    "app/components/records/companies/QuickEditCompanySheet.tsx": async () => {
+        const { default: QuickEditCompanySheet } = await import("@/app/components/records/companies/QuickEditCompanySheet");
+        const company = {
+            id: 1, name: "Company", website: "", industry: "", phone: "", address: "", logoUrl: "",
+            createdAt: "2026-09-01", updatedAt: "2026-09-01",
+        };
+        function Harness({ onClose }: { onClose: (open: boolean) => void }) {
+            const [drafts, setDrafts] = useState<Parameters<typeof QuickEditCompanySheet>[0]["drafts"]>({
+                1: { name: company.name, website: "", industry: "", phone: "", address: "" },
+            });
+            return createElement(QuickEditCompanySheet, {
+                open: true,
+                onOpenChange: onClose,
+                selectedIds: new Set([company.id]),
+                selectedCompanies: [company],
+                drafts,
+                updateDraft: (id, patch) => setDrafts((current) => ({
+                    ...current, [id]: { ...current[id], ...patch },
+                })),
+                isSaving: false,
+                saveEdits: vi.fn(),
+            });
+        }
+        return mountOwner(
+            (onClose) => createElement(Harness, { onClose }),
+            () => requiredInput("name-1")("Renamed company"),
+        );
+    },
+    "app/components/records/deals/QuickEditDealSheet.tsx": async () => {
+        const { default: QuickEditDealSheet } = await import("@/app/components/records/deals/QuickEditDealSheet");
+        const deal = {
+            id: 1, name: "Deal", value: 100, actualValue: 0, currency: "JPY", pipeline: 1, stage: 1,
+            company: null, position: 0, createdAt: "2026-09-01", updatedAt: "2026-09-01",
+        };
+        function Harness({ onClose }: { onClose: (open: boolean) => void }) {
+            const [drafts, setDrafts] = useState<Parameters<typeof QuickEditDealSheet>[0]["drafts"]>({
+                1: {
+                    name: deal.name, value: 100, actualValue: 0, currency: "JPY", pipeline: 1, stage: 1,
+                    company: null, expectedCloseDate: "", closedAt: null, closedReason: null, won: null,
+                },
+            });
+            return createElement(QuickEditDealSheet, {
+                open: true,
+                onOpenChange: onClose,
+                selectedIds: new Set([deal.id]),
+                selectedDeals: [deal],
+                drafts,
+                updateDraft: (id, patch) => setDrafts((current) => ({
+                    ...current, [id]: { ...current[id], ...patch },
+                })),
+                pipelines: [],
+                stagesByPipeline: {},
+                isSaving: false,
+                saveEdits: vi.fn(),
+            });
+        }
+        return mountOwner(
+            (onClose) => createElement(Harness, { onClose }),
+            () => requiredInput("deal-name-1")("Renamed deal"),
+        );
+    },
+    "app/components/records/pipelines/QuickEditPipelineSheet.tsx": async () => {
+        const { default: QuickEditPipelineSheet } = await import("@/app/components/records/pipelines/QuickEditPipelineSheet");
+        const pipeline = { id: 1, name: "Pipeline", createdAt: "2026-09-01", updatedAt: "2026-09-01" };
+        function Harness({ onClose }: { onClose: (open: boolean) => void }) {
+            const [drafts, setDrafts] = useState<Parameters<typeof QuickEditPipelineSheet>[0]["drafts"]>({
+                1: { name: pipeline.name, stages: [] },
+            });
+            return createElement(QuickEditPipelineSheet, {
+                open: true,
+                onOpenChange: onClose,
+                selectedIds: new Set([pipeline.id]),
+                selectedPipelines: [pipeline],
+                drafts,
+                updateDraft: (id, patch) => setDrafts((current) => ({
+                    ...current, [id]: { ...current[id], ...patch },
+                })),
+                updateStageName: vi.fn(),
+                updateStageKind: vi.fn(),
+                addStage: vi.fn(),
+                removeStage: vi.fn(),
+                isSaving: false,
+                saveEdits: vi.fn(),
+            });
+        }
+        return mountOwner(
+            (onClose) => createElement(Harness, { onClose }),
+            () => requiredInput("name-1")("Renamed pipeline"),
+        );
+    },
+    "app/components/marketing/campaigns/EditCampaignSheet.tsx": async () => {
+        const { default: EditCampaignSheet } = await import("@/app/components/marketing/campaigns/EditCampaignSheet");
+        function Harness({ onClose }: { onClose: (open: boolean) => void }) {
+            const [payload, setPayload] = useState<Parameters<typeof EditCampaignSheet>[0]["payload"]>({
+                name: "Campaign", type: "event", status: "draft",
+            });
+            return createElement(EditCampaignSheet, {
+                open: true,
+                onOpenChange: onClose,
+                payload,
+                setPayload,
+                isSubmitting: false,
+                onSubmit: vi.fn(),
+            });
+        }
+        return mountOwner(
+            (onClose) => createElement(Harness, { onClose }),
+            () => requiredInput("campaign-name")("Renamed campaign"),
+        );
+    },
+};
+
+describe.each(Object.entries(delegationScenarios))("%s draft-state delegation", (_file, scenario) => {
+    it("protects a draft changed through a non-bubbling control using the real shell", async () => {
+        const mounted = await scenario();
+        try {
+            expect(requiredConfirm().open).toBe(false);
+            await mounted.makeDirty();
+            await act(async () => requiredDismiss()(false));
+            expect(mounted.onClose).not.toHaveBeenCalled();
+            expect(requiredConfirm().open).toBe(true);
+
+            await act(async () => requiredConfirm().onKeepEditing());
+            expect(mounted.onClose).not.toHaveBeenCalled();
+            expect(requiredConfirm().open).toBe(false);
+
+            await act(async () => requiredDismiss()(false));
+            await act(async () => requiredConfirm().onDiscard());
+            expect(mounted.onClose).toHaveBeenCalledExactlyOnceWith(false);
         } finally {
             await mounted.unmount();
         }

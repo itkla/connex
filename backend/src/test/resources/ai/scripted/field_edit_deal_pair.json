@@ -1,0 +1,33 @@
+{
+  "id": "field_edit_deal_pair",
+  "selector": "connex_script_field_edit_deal_pair",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_fields\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "update_record_fields",
+        "arguments": "{\"handle\":\"r1\",\"value\":\"1250.50\",\"expected_close_date\":\"2026-10-15\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"Review the proposed value and close date before applying.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

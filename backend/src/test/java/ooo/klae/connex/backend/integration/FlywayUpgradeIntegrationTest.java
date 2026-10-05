@@ -11,7 +11,6 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
@@ -27,14 +26,11 @@ import tools.jackson.databind.json.JsonMapper;
  * Migrates representative populated V73 data through the current Flyway lineage on real MySQL.
  */
 class FlywayUpgradeIntegrationTest {
-    private static final String SCRATCH_CATALOG =
-        "connex_upgrade_it_" + UUID.randomUUID().toString().replace("-", "");
 
-    private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
     private static String password;
-    private static boolean created;
+    private static MySqlScratchCatalog scratchCatalog;
 
     @BeforeAll
     static void createScratchCatalog() {
@@ -46,12 +42,10 @@ class FlywayUpgradeIntegrationTest {
         assumeTrue(
             username != null && password != null,
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping Flyway upgrade integration test");
-        bootstrapUrl = withCatalog(configuredUrl, "mysql");
-        scratchUrl = withCatalog(configuredUrl, SCRATCH_CATALOG);
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE `" + SCRATCH_CATALOG + "` CHARACTER SET utf8mb4");
-            created = true;
+        try {
+            scratchCatalog = MySqlScratchCatalog.create(configuredUrl, username, password,
+                "connex_upgrade_it_", "utf8mb4", null);
+            scratchUrl = scratchCatalog.url();
         } catch (SQLException exception) {
             assumeTrue(
                 false,
@@ -61,12 +55,8 @@ class FlywayUpgradeIntegrationTest {
 
     @AfterAll
     static void dropScratchCatalog() throws SQLException {
-        if (!created) {
-            return;
-        }
-        try (Connection connection = DriverManager.getConnection(bootstrapUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("DROP DATABASE IF EXISTS `" + SCRATCH_CATALOG + "`");
+        if (scratchCatalog != null) {
+            scratchCatalog.close();
         }
     }
 
@@ -460,7 +450,7 @@ class FlywayUpgradeIntegrationTest {
                 FROM information_schema.statistics
                 WHERE table_schema = ? AND table_name = ? AND index_name = ?
                 """)) {
-            statement.setString(1, SCRATCH_CATALOG);
+            statement.setString(1, scratchCatalog.name());
             statement.setString(2, table);
             statement.setString(3, index);
             try (ResultSet resultSet = statement.executeQuery()) {
@@ -470,13 +460,4 @@ class FlywayUpgradeIntegrationTest {
         }
     }
 
-    private static String withCatalog(String jdbcUrl, String catalog) {
-        int authorityEnd = jdbcUrl.indexOf('/', "jdbc:mysql://".length());
-        if (authorityEnd < 0) {
-            throw new IllegalArgumentException("CONNEX_DB_URL must include a database path");
-        }
-        int queryStart = jdbcUrl.indexOf('?', authorityEnd);
-        String suffix = queryStart < 0 ? "" : jdbcUrl.substring(queryStart);
-        return jdbcUrl.substring(0, authorityEnd + 1) + catalog + suffix;
-    }
 }

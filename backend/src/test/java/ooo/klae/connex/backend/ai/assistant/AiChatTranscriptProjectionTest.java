@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.dto.AiChatCitationDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
@@ -53,17 +54,30 @@ class AiChatTranscriptProjectionTest {
         message.setAuthorKind("assistant");
         message.setContent("Restricted generated answer");
 
+        List<AiChatCitationDto> citations = List.of(
+                new AiChatCitationDto("r1", "person", 23, "Restricted contact"));
+        List<String> suggestions = List.of("Review recent activity");
+        List<AiChatNarration> narration = List.of(new AiChatNarration(1, "Read the contact"));
+        List<AiChatTodo> todos = List.of(new AiChatTodo("Review the contact", "done"));
         AiChatMessageDto projected = AiChatMessageDto.from(
-                message,
-                List.of(),
-                List.of("Review recent activity"),
-                null,
-                true);
+                message, citations, suggestions, null, true, narration, todos);
 
         assertTrue(projected.isContentWithheld());
         assertEquals("", projected.getContent());
         assertEquals(List.of(), projected.getCitations());
         assertEquals(List.of(), projected.getSuggestions());
+        assertEquals(List.of(), projected.getNarration());
+        assertEquals(List.of(), projected.getTodos());
+
+        AiChatMessageDto visible = AiChatMessageDto.from(
+                message, citations, suggestions, null, false, narration, todos);
+
+        assertFalse(visible.isContentWithheld());
+        assertEquals("Restricted generated answer", visible.getContent());
+        assertEquals(citations, visible.getCitations());
+        assertEquals(suggestions, visible.getSuggestions());
+        assertEquals(narration, visible.getNarration());
+        assertEquals(todos, visible.getTodos());
     }
 
     @Test

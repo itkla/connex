@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.ai.lease;
 
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -60,6 +62,7 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     Workspace neighbourWorkspace;
     User member;
     TransactionTemplate transactions;
+    private final Set<AiRunLeaseKey> fixtureKeys = new HashSet<>();
 
     @BeforeEach
     void createTenantFixture() {
@@ -104,6 +107,7 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     @AfterEach
     void removeTenantFixture() {
         tenantContext.clear();
+        fixtureKeys.forEach(key -> leaseRegistry.find(key).ifPresent(leaseRegistry::forget));
         if (neighbourWorkspace != null) {
             jdbcTemplate.update(
                     "DELETE FROM ai_run_lease WHERE workspace_id = ?", neighbourWorkspace.getId());
@@ -115,6 +119,15 @@ abstract class AbstractAiRunLeaseIntegrationTest {
                     "DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
+        if (member != null) {
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", member.getId());
+        }
+        if (neighbourOrganization != null) {
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", neighbourOrganization.getId());
+        }
+        if (organization != null) {
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
+        }
     }
 
     void pinTenant() {
@@ -123,11 +136,16 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     }
 
     AiRunLeaseKey key(AiRunLeaseSubject subject, long subjectId) {
-        return new AiRunLeaseKey(workspace.getId(), subject, subjectId);
+        return trackKey(new AiRunLeaseKey(workspace.getId(), subject, subjectId));
     }
 
     AiRunLeaseKey neighbourKey(AiRunLeaseSubject subject, long subjectId) {
-        return new AiRunLeaseKey(neighbourWorkspace.getId(), subject, subjectId);
+        return trackKey(new AiRunLeaseKey(neighbourWorkspace.getId(), subject, subjectId));
+    }
+
+    private AiRunLeaseKey trackKey(AiRunLeaseKey key) {
+        fixtureKeys.add(key);
+        return key;
     }
 
     AiRunLease acquire(AiRunLeaseKey key) {

@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +26,45 @@ class AiAssistantToolCatalogTest {
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
+    void workspaceCreatesHaveNoModelTargetAndReportTemplatesExcludeQuotaAttainment() {
+        for (String key : AiAssistantCreateReportWriteTool.TEMPLATE_KEYS) {
+            assertTrue(catalog.permitsArguments("create_report",
+                    objectMapper.createObjectNode().put("template", key).put("name", "Sales report")));
+        }
+        assertEquals(10, AiAssistantCreateReportWriteTool.TEMPLATE_KEYS.size());
+        assertFalse(catalog.permitsArguments("create_report",
+                objectMapper.createObjectNode().put("template", "quota-attainment").put("name", "Quota")));
+        for (String tool : List.of("create_company", "create_report")) {
+            var args = objectMapper.createObjectNode().put("name", "New record");
+            if ("create_report".equals(tool)) {
+                args.put("template", "sales-performance");
+            }
+            assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier(tool));
+            assertTrue(catalog.permitsArguments(tool, args));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("handle", "r1")));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("workspaceId", 99)));
+            assertFalse(catalog.permitsArguments(tool, args.deepCopy().put("name", "")));
+        }
+    }
+
+    @Test
+    void draftDocumentsRequireABoundedTemplateName() throws Exception {
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("draft_document"));
+        for (int length : List.of(1, 128)) {
+            assertTrue(catalog.permitsArguments("draft_document", objectMapper.readTree(
+                    "{\"handle\":\"r1\",\"template\":\"" + "x".repeat(length) + "\"}")));
+        }
+        for (String arguments : List.of(
+                "{\"handle\":\"r1\"}",
+                "{\"handle\":\"r1\",\"template\":\"\"}",
+                "{\"handle\":\"t1\",\"template\":\"Quote\"}",
+                "{\"handle\":\"r1\",\"template\":1}",
+                "{\"handle\":\"r1\",\"template\":\"" + "x".repeat(129) + "\"}")) {
+            assertFalse(catalog.permitsArguments("draft_document", objectMapper.readTree(arguments)));
+        }
+    }
+
+    @Test
     void catalogKeepsReadAndWriteSafetyTiersExplicit() throws Exception {
         assertEquals(
                 List.of(
@@ -32,16 +72,27 @@ class AiAssistantToolCatalogTest {
                         "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
-                        "change_deal_stage", "assign_owner"),
+                        "remove_tag", "change_deal_stage", "assign_owner", "draft_document", "set_response_due", "complete_task", "reschedule_task", "update_record_fields", "create_person", "create_deal", "create_company", "create_report"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(16, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).size() - 1L,
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
         assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("create_activity"));
         assertEquals(AiAssistantToolCatalog.ToolTier.AUTO, catalog.tier("add_tag"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("remove_tag"));
+        assertEquals(
+                Set.of("create_activity", "create_task", "create_note", "add_tag"),
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                        .filter(spec -> spec.tier() == AiAssistantToolCatalog.ToolTier.AUTO)
+                        .map(AiAssistantToolCatalog.ToolSpec::name)
+                        .collect(Collectors.toSet()),
+                "docs/PRODUCT.md enumerates the only immediate assistant writes; every other"
+                        + " write tool is confirm-tier");
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("change_deal_stage"));
         assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("assign_owner"));
+        assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier("set_response_due"));
         assertFalse(catalog.isExecutable("get_deal_brief"));
         assertEquals(
                 "deal_brief_nested_generation_unavailable",
@@ -98,7 +149,8 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(16, definitions.size());
+        assertEquals(catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                .filter(ToolSpec::executable).count(), definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -141,12 +193,17 @@ class AiAssistantToolCatalogTest {
         assertEquals(List.of("find_schedule_conflicts"), byToolset.get(Toolset.SCHEDULE));
         assertEquals(List.of("create_activity", "create_task"),
                 byToolset.get(Toolset.WRITE_ACTIVITY));
-        assertEquals(List.of("create_note", "add_tag"), byToolset.get(Toolset.WRITE_CONTENT));
-        assertEquals(List.of("change_deal_stage", "assign_owner"),
+        assertEquals(List.of("create_note", "add_tag", "remove_tag"),
+                byToolset.get(Toolset.WRITE_CONTENT));
+        assertEquals(List.of("change_deal_stage", "assign_owner", "draft_document"),
                 byToolset.get(Toolset.WRITE_PIPELINE));
+        assertEquals(List.of("set_response_due", "complete_task", "reschedule_task"), byToolset.get(Toolset.WRITE_FOLLOWUP));
+        assertEquals(List.of("update_record_fields"), byToolset.get(Toolset.WRITE_FIELDS));
+        assertEquals(List.of("create_person", "create_deal", "create_company"), byToolset.get(Toolset.WRITE_CREATE));
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).size(),
                 byToolset.values().stream().mapToInt(List::size).sum());
+        assertEquals(List.of("create_report"), byToolset.get(Toolset.WRITE_WORKSPACE));
         assertEquals(Toolset.CORE, catalog.toolsetOf("list_tasks"));
         assertNull(catalog.toolsetOf("delete_record"));
     }
@@ -183,11 +240,11 @@ class AiAssistantToolCatalogTest {
     void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
         assertEquals(
                 List.of("core", "analytics", "schedule",
-                        "write_activity", "write_content", "write_pipeline"),
+                        "write_activity", "write_content", "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 Arrays.stream(Toolset.values()).map(Toolset::key).toList());
         assertEquals(
                 List.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
         assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
         for (Map.Entry<Toolset, String> entry : catalog.directory()) {
@@ -197,7 +254,7 @@ class AiAssistantToolCatalogTest {
                     entry.getKey().key() + " needs a server-authored summary");
         }
         assertEquals(Set.of(Toolset.CORE), AiAssistantToolCatalog.CORE);
-        assertEquals(6, AiAssistantToolCatalog.ALL.size());
+        assertEquals(Toolset.values().length, AiAssistantToolCatalog.ALL.size());
     }
 
     /** Both prompt-facing views narrow to the loaded set and keep stable catalog order. */
@@ -252,7 +309,7 @@ class AiAssistantToolCatalogTest {
         assertTrue(argument.required());
         assertEquals(
                 Set.of("analytics", "schedule", "write_activity", "write_content",
-                        "write_pipeline"),
+                        "write_pipeline", "write_followup", "write_fields", "write_create", "write_workspace"),
                 argument.values());
         assertFalse(argument.values().contains("core"));
     }
@@ -296,6 +353,27 @@ class AiAssistantToolCatalogTest {
         assertFalse(catalog.isDeclaredVocabulary(null));
     }
 
+    /**
+     * A first-response deadline is a bounded whole number of hours, never text: a date or time the
+     * member typed can reach the model as the redaction marker, and the marker can never pass as a
+     * deadline. Widening the argument to text turns the marker cases red.
+     */
+    @Test
+    void setResponseDueAcceptsOnlyABoundedWholeNumberOfHours() throws Exception {
+        assertTrue(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\",\"due_in_hours\":48}")));
+        assertTrue(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\",\"due_in_hours\":8760}")));
+        for (String deadline : List.of(
+                "\"[redacted]\"", "\"[omitted by policy]\"", "\"48\"", "\"2026-10-15\"",
+                "0", "8761", "-1", "4.5", "null")) {
+            assertFalse(catalog.permitsArguments("set_response_due", objectMapper.readTree(
+                    "{\"handle\":\"r1\",\"due_in_hours\":" + deadline + "}")), deadline);
+        }
+        assertFalse(catalog.permitsArguments("set_response_due",
+                objectMapper.readTree("{\"handle\":\"r1\"}")));
+    }
+
     /** The closed enum is enforced where the raw arguments are validated, not only in a schema. */
     @Test
     void findToolsRefusesEveryArgumentOutsideTheDeclaredEnum() throws Exception {
@@ -333,4 +411,55 @@ class AiAssistantToolCatalogTest {
         assertFalse(first.containsAll(AiAssistantToolCatalog.LOADABLE),
                 "reserving for the whole catalog would defeat the point of toolsets");
     }
+    @Test
+    void taskAndRecordArgumentNamespacesAreDisjointAndPatternsStayServerSide() throws Exception {
+        for (String tool : List.of("complete_task", "reschedule_task")) {
+            String date = "reschedule_task".equals(tool) ? ",\"due_date\":\"2026-10-15\"" : "";
+            assertEquals(AiAssistantToolCatalog.ToolTier.CONFIRM, catalog.tier(tool));
+            assertTrue(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"t1\"" + date + "}")));
+            assertFalse(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"r1\"" + date + "}")));
+            assertFalse(catalog.permitsArguments(tool, objectMapper.readTree("{\"handle\":\"t0\"" + date + "}")));
+        }
+        for (ToolSpec tool : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            if (Set.of("complete_task", "reschedule_task").contains(tool.name())) {
+                continue;
+            }
+            for (var argument : tool.arguments()) {
+                if (!Set.of("handle", "handles").contains(argument.name())) {
+                    continue;
+                }
+                var args = objectMapper.createObjectNode();
+                for (var required : tool.arguments()) {
+                    if (!required.required()) {
+                        continue;
+                    }
+                    String value = required.values().stream().sorted().findFirst()
+                            .orElse("x".repeat(Math.max(1, required.minimum())));
+                    switch (required.kind()) {
+                        case STRING -> args.put(required.name(), value);
+                        case INTEGER -> args.put(required.name(), required.minimum());
+                        case STRING_LIST, TEXT_LIST -> args.putArray(required.name()).add(value);
+                    }
+                }
+                if ("handles".equals(argument.name())) {
+                    args.putArray(argument.name()).add("r1");
+                } else {
+                    args.put(argument.name(), "r1");
+                }
+                assertTrue(catalog.permitsArguments(tool.name(), args), tool.name());
+                if ("handles".equals(argument.name())) {
+                    args.putArray(argument.name()).add("t1");
+                } else {
+                    args.put(argument.name(), "t1");
+                }
+                assertFalse(catalog.permitsArguments(tool.name(), args), tool.name());
+            }
+        }
+        assertFalse(catalog.permitsArguments("get_records", objectMapper.readTree("{\"handles\":[\"t1\"]}")));
+        assertFalse(catalog.permitsArguments("reschedule_task", objectMapper.readTree(
+                "{\"handle\":\"t1\",\"due_date\":\"tomorrow\"}")));
+        catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL).forEach(definition ->
+                assertFalse(definition.parametersSchema().toString().contains("\"pattern\"")));
+    }
+
 }

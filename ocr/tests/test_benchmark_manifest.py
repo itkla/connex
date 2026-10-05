@@ -335,6 +335,9 @@ class BenchmarkManifestTest(unittest.TestCase):
             }
             runtime = {"containers": {"backend": {"imageReference": "backend@sha256:" + "b" * 64}}}
 
+            expected_manifest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            requirements_lock = Path(__file__).parents[1] / "requirements.lock"
+            expected_requirements = hashlib.sha256(requirements_lock.read_bytes()).hexdigest()
             fixture_digest = hashlib.sha256()
             for case in sorted(cases, key=lambda item: item["id"]):
                 fixture_digest.update(case["id"].encode("utf-8"))
@@ -360,9 +363,9 @@ class BenchmarkManifestTest(unittest.TestCase):
 
         self.assertEqual("a" * 40, result["sourceRevision"])
         self.assertEqual(runtime, result["runtime"])
-        self.assertEqual(64, len(result["manifestSha256"]))
-        self.assertEqual(64, len(result["fixturesSha256"]))
-        self.assertEqual(64, len(result["ocrRequirementsLockSha256"]))
+        self.assertEqual(expected_manifest, result["manifestSha256"])
+        self.assertEqual(expected_fixtures, result["fixturesSha256"])
+        self.assertEqual(expected_requirements, result["ocrRequirementsLockSha256"])
 
     def test_runtime_rejects_noncanonical_manifest(self) -> None:
         canonical = Path(__file__).parents[1] / "benchmark" / "manifest.json"

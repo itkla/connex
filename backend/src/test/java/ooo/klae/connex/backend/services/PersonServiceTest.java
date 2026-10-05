@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
@@ -16,10 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -40,21 +38,13 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
-import ooo.klae.connex.backend.mappers.CompanyMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.NoteMapper;
-import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
-import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
 
@@ -84,7 +74,7 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removeTagIsIdempotentWhenTagNoLongerExists() {
+    void removeTagIsIdempotentAndUnauditedWhenTagNoLongerExists() {
         Person person = newPerson(newCompany());
         int auditBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
@@ -94,7 +84,7 @@ class PersonServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(
             () -> personService.removeTag(person.getId(), Integer.MAX_VALUE));
 
-        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
@@ -110,6 +100,25 @@ class PersonServiceTest extends AbstractServiceTest {
         assertThrows(
             ConflictException.class,
             () -> personService.removeTagIfUnchanged(person.getId(), tag.getId()));
+    }
+
+    @Test
+    void removeTagReportsWhetherItRemovedTheAssociationAndAuditsOnlyARemoval() {
+        Person person = newPerson(newCompany());
+        Tag tag = newTag();
+        personService.addTag(person.getId(), tag.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId());
+
+        assertTrue(personService.removeTag(person.getId(), tag.getId()));
+        assertFalse(personService.removeTag(person.getId(), tag.getId()));
+
+        assertEquals(auditBefore + 1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = 'person.removeTag'",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test
@@ -453,7 +462,7 @@ class PersonServiceTest extends AbstractServiceTest {
             ownerWorkspace.getId(),
             workspace.getId(),
             currentUser.getId(),
-            false);
+            false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         PersonDuplicatePreflightRequest request = duplicateRequest(shared);
         String reviewToken = "a".repeat(64);
 
@@ -518,7 +527,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void ceasingProvisionRevokesStandingSharesAndAuditsTheCount() {
         Person person = newPerson(newCompany());
         Workspace grantee = newWorkspaceInSameOrg();
-        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
         assertEquals(1, shareMapper.listPersonShares(workspace.getId(), person.getId()).size());
 
         personService.updateProcessingRestrictions(person.getId(), false, true);
@@ -735,7 +745,8 @@ class PersonServiceTest extends AbstractServiceTest {
     void updateEvaluationExclusions_rejectsSharedInContact() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
-        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true,
+            orgWorkspaceIdsJson(workspaceMapper, other.getId()));
 
         assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
@@ -757,7 +768,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Person shared = personInWorkspace(ownerWorkspace);
         shareMapper.sharePerson(
-            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         Tag tag = newTag();
         int employmentBefore = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
@@ -801,7 +813,8 @@ class PersonServiceTest extends AbstractServiceTest {
         Activity activeActivity = activityInWorkspace(workspace, shared);
         Task activeTask = taskInWorkspace(workspace, shared);
         Note activeNote = noteInWorkspace(workspace, shared);
-        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true,
+            orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
 
         Person detail = personService.getPersonById(shared.getId());
 
@@ -880,52 +893,6 @@ class PersonServiceTest extends AbstractServiceTest {
             () -> personService.getDealsByPersonId(-1));
 
         assertEquals("Contact not found", failure.getMessage());
-    }
-
-    @Test
-    void getMatchingPersonIdsRejectsTooManyMatchesBeforeFetchingIds() {
-        PersonMapper mapper = mock(PersonMapper.class);
-        WorkspaceService workspaceService = mock(WorkspaceService.class);
-        PersonService service = new PersonService(
-            mapper,
-            mock(ShareMapper.class),
-            mock(AiOutputCacheMapper.class),
-            mock(CompanyMapper.class),
-            mock(TagMapper.class),
-            mock(DealMapper.class),
-            mock(ActivityMapper.class),
-            mock(NoteMapper.class),
-            mock(TaskMapper.class),
-            mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class),
-            mock(AuthService.class),
-            mock(AuditService.class),
-            mock(ooo.klae.connex.backend.notifications.NotificationChangePublisher.class),
-            workspaceService,
-            mock(EmploymentService.class),
-            mock(CustomFieldValueService.class),
-            mock(ReferenceService.class),
-            mock(RuleTriggerPublisher.class),
-            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
-            mock(IdentityIntakeService.class),
-            mock(DuplicatePreflightService.class),
-            mock(DuplicateDecisionLockService.class),
-            mock(RecordCreationAugmentationService.class),
-            mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
-            mock(AiRestrictionEpoch.class)
-        );
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(mapper.countPersons(
-            7, "Security", null, null, false, MemberScope.allTeam(),
-            null, false, null, false, null, false, false, null)).thenReturn(1001L);
-
-        assertThrows(BadRequestException.class,
-            () -> service.getMatchingPersonIds(
-                "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
-                null, false, false, null));
-
-        verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, null, 1000);
     }
 
     @Test

@@ -3445,13 +3445,15 @@ export type AiChatTurn = {
 
 /** Viewer-authorized target identity for an assistant write-tool call. */
 export type AiAssistantToolCallTarget = {
-    kind: AiChatPageContextKind;
+    kind: AiChatPageContextKind | 'task' | 'workspace';
     id: number | null;
     label: string | null;
 };
 
-/** The field an assistant proposal would rewrite on an existing record. */
-export type AiAssistantToolCallChangeField = 'owner' | 'stage';
+/** A field or template detail reviewed before an assistant edit or creation. */
+export type AiAssistantToolCallChangeField = 'owner' | 'stage' | 'tag' | 'responseDue' | 'taskStatus' | 'dueDate'
+    | 'document' | 'title' | 'website' | 'industry' | 'address' | 'value' | 'expectedCloseDate'
+    | 'name' | 'currency' | 'template' | 'templateDefaults' | 'report';
 
 /**
  * Whether a reviewed change can still be applied as reviewed.
@@ -3467,7 +3469,8 @@ export type AiAssistantToolCallChangeState =
     | 'unchanged'
     | 'recordChanged'
     | 'permissionLost'
-    | 'unresolved';
+    | 'unresolved'
+    | 'withheld';
 
 /**
  * The exact before and after values one pending proposal would write.
@@ -3475,7 +3478,9 @@ export type AiAssistantToolCallChangeState =
  * Absent entirely for a viewer who did not ask for the proposal or cannot currently open its
  * target, which is what keeps one record's field value out of a shared chat. Either value may be
  * null in its own right: a record with no owner has no current value, and a proposal to clear an
- * owner has no proposed one. `currentValueUnresolved` is the third case: the record does hold a
+ * owner has no proposed one. For an additional document draft, the current value is the latest
+ * version from the pinned template, displayed as context rather than a before-row.
+ * `currentValueUnresolved` is the third case: the record does hold a
  * value, and this workspace can no longer name who or what it is.
  */
 export type AiAssistantToolCallChange = {
@@ -3493,7 +3498,7 @@ export type AiAssistantToolCallOutcomeValue = {
 };
 
 /** The record kinds an assistant action can create, each of which has a detail route. */
-export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note';
+export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note' | 'person' | 'deal' | 'company' | 'report';
 
 /**
  * The record a completed assistant action created.
@@ -3517,6 +3522,7 @@ export type AiAssistantToolCall = {
     requestSummary: string;
     outcomeSummary: string | null;
     change: AiAssistantToolCallChange | null;
+    changes?: AiAssistantToolCallChange[];
     outcomeValues: AiAssistantToolCallOutcomeValue[];
     createdRecord: AiAssistantToolCallCreatedRecord | null;
     messageId: number | null;

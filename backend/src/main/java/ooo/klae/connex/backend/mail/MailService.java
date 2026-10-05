@@ -72,10 +72,12 @@ public class MailService {
         return config != null && config.usable();
     }
 
-    /** Returns whether the workspace currently resolves to a usable SMTP transport. */
+    /**
+     * Returns whether the workspace currently resolves to a usable SMTP transport, decided without
+     * decrypting the workspace SMTP password or writing a secret-use audit (#1932).
+     */
     public boolean hasUsableWorkspaceTransport(int workspaceId) {
-        ResolvedMailConfig config = resolver.resolveForWorkspace(workspaceId);
-        return config != null && config.usable();
+        return resolver.canSendForWorkspace(workspaceId);
     }
 
     /**

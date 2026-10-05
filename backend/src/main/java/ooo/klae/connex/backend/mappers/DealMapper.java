@@ -315,6 +315,18 @@ public interface DealMapper {
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Reads and locks one deal {@code FOR UPDATE} through the primary key alone: the record a
+     * single-column update of its owner, expected close date or risk exclusion locks anyway. Unlike
+     * {@link #getDealByIdForUpdate} it takes no lock on {@code uq_deal_workspace_id}, so those
+     * updates never wait behind a composite foreign-key child insert holding that entry (#1948,
+     * #1958).
+     *
+     * @param workspaceId the deal's workspace
+     * @param id the deal
+     * @return the current deal, or {@code null} when it no longer exists in the workspace
+     */
+    Deal getDealByPrimaryKeyForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
         @Param("workspaceId") int workspaceId,
@@ -467,12 +479,38 @@ public interface DealMapper {
      * @return collaborator user ids in ascending order
      */
     List<Integer> getCollaboratorIds(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    /**
+     * Lists one deal's collaborator rows and locks them, with the gap after them, {@code FOR UPDATE}
+     * through the primary key. A current read returns the committed rows plus this transaction's own
+     * writes, never a consistent read view opened before the caller took its locks (#1942). Callers
+     * take it after the deal row, which is where the collaborator rows sit in the documented lock
+     * order.
+     *
+     * @param workspaceId workspace that owns the deal
+     * @param dealId deal whose collaborators are listed
+     * @return collaborator user ids in ascending order
+     */
+    List<Integer> getCollaboratorIdsForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId
+    );
     int clearCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int removeCollaborator(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,
         @Param("userId") int userId
     );
+    /**
+     * Inserts the given users as collaborators on the deal, if the deal is in the workspace. The
+     * statement is tenant-only and trusts the ids: callers must already hold each user's active
+     * membership row locked in this transaction ({@code WorkspaceService.lockAndRequireMembers}), which
+     * is what stops a member offboarded concurrently from being written back (#1793).
+     *
+     * @param workspaceId the deal's workspace
+     * @param dealId the deal
+     * @param userIds locked, active members of the workspace
+     * @return the number of collaborator rows inserted
+     */
     int insertCollaborators(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,

@@ -34,15 +34,11 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
     @Autowired PersonEdgeMapper personEdgeMapper;
     @Autowired OrganizationMapper organizationMapper;
 
-    @Test
-    void upsert_assignsGeneratedId() {
-        AiOutputCache row = save(workspace, "deal.brief", 29, 0, "hash-1", "{\"sections\":[]}", 0);
-        assertNotEquals(0, row.getId());
-    }
 
     @Test
     void getBySubject_returnsStoredRow() {
-        save(workspace, "deal.brief", 29, 0, "hash-1", "{\"sections\":[{\"title\":\"A\",\"body\":\"B\"}]}", 2);
+        AiOutputCache row = save(workspace, "deal.brief", 29, 0, "hash-1", "{\"sections\":[{\"title\":\"A\",\"body\":\"B\"}]}", 2);
+        assertNotEquals(0, row.getId());
 
         AiOutputCache found = aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief", 29, 0);
 

@@ -229,20 +229,19 @@ describe('Ask Connex stream reassembly', () => {
     });
 
     it('stops requesting hydration after the bounded retry limit', () => {
-        let state = applyAskConnexStreamDelta(createAskConnexStream(9), delta(50, 'tail')).state;
+        let transition = applyAskConnexStreamDelta(createAskConnexStream(9), delta(50, 'tail'));
+        expect(transition.hydrate).toBe(true);
         let requests = 1;
-        while (settleAskConnexStreamHydration(state, '').hydrate) {
-            state = settleAskConnexStreamHydration(state, '').state;
-            requests += 1;
+        for (let attempt = 0; attempt < ASK_CONNEX_STREAM_HYDRATION_LIMIT + 1 && transition.hydrate; attempt += 1) {
+            transition = settleAskConnexStreamHydration(transition.state, '');
+            if (transition.hydrate) requests += 1;
         }
 
         expect(requests).toBe(ASK_CONNEX_STREAM_HYDRATION_LIMIT);
-        expect(settleAskConnexStreamHydration(state, '').state.hydrating).toBe(false);
+        expect(transition.hydrate).toBe(false);
+        expect(transition.state.hydrating).toBe(false);
 
-        const afterCap = applyAskConnexStreamDelta(
-            settleAskConnexStreamHydration(state, '').state,
-            delta(60, 'more'),
-        );
+        const afterCap = applyAskConnexStreamDelta(transition.state, delta(60, 'more'));
         expect(afterCap.hydrate).toBe(false);
     });
 

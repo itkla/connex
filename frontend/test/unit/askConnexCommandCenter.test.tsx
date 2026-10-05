@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +13,8 @@ import {
     askConnexWatchTriggerText,
 } from "@/app/components/ask-connex/askConnexWatch";
 import type { AiWatch, AiWatchSubjectKind } from "@/app/lib/types";
+import en from "@/messages/en/common.json";
+import ja from "@/messages/ja/common.json";
 
 const MESSAGES_ROOT = join(process.cwd(), "messages");
 const LOCALES = ["en", "ja"] as const;
@@ -35,37 +38,15 @@ function lookup(tree: unknown, path: string): unknown {
     }, tree);
 }
 
-/**
- * Resolves the one ICU construct this copy uses, so a plural message is proved to render rather
- * than passed over as an opaque string. `next-intl` does the real formatting at runtime; this only
- * has to agree with it about which branch a count selects.
- */
-function selectPlurals(raw: string, values: Record<string, string | number>, locale: string) {
-    return raw.replace(
-        /\{(\w+), plural,(?:\s*one \{([^{}]*)\})?\s*other \{([^{}]*)\}\}/g,
-        (whole, name: string, one: string | undefined, other: string) => {
-            const value = values[name];
-            if (typeof value !== "number") return whole;
-            const branch = new Intl.PluralRules(locale).select(value) === "one" && one !== undefined
-                ? one
-                : other;
-            return branch.replaceAll("#", String(value));
-        },
-    );
-}
-
 /** A translator over one real message catalog, so the tests read the shipped copy. */
-function translator(locale: string) {
-    const messages = catalog(locale);
-    return (key: string, values?: Record<string, string | number>) => {
-        const raw = lookup(messages, `AskConnex.commandCenter.${key}`);
-        if (typeof raw !== "string") return `MISSING:${key}`;
-        if (values === undefined) return raw;
-        return Object.entries(values).reduce(
-            (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
-            selectPlurals(raw, values, locale),
-        );
+function translator(locale: "en" | "ja") {
+    const config: Parameters<typeof createTranslator>[0] = {
+        locale,
+        messages: locale === "en" ? en : ja,
+        namespace: "AskConnex.commandCenter",
+        onError: (error) => { throw error; },
     };
+    return createTranslator(config);
 }
 
 function watch(overrides: Partial<AiWatch> = {}): AiWatch {

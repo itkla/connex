@@ -15,6 +15,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,14 +40,12 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.DuplicateReviewDecisionRequest;
 import ooo.klae.connex.backend.dto.DuplicateReviewItemDto;
 import ooo.klae.connex.backend.dto.DuplicateReviewQuery;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
-import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -57,7 +57,6 @@ class DuplicateReviewConcurrencyIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
-    @Autowired private RoleMapper roleMapper;
     @Autowired private PersonService personService;
     @Autowired private DuplicateReviewService duplicateReviewService;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -84,8 +83,8 @@ class DuplicateReviewConcurrencyIntegrationTest {
         workspace.setName("Duplicate concurrency " + suffix);
         workspace.setSlug("duplicate-concurrency-" + suffix);
         workspaceMapper.insert(workspace);
-        firstActor = newCustomRoleActor("first");
-        secondActor = newCustomRoleActor("second");
+        firstActor = newMemberActor("first");
+        secondActor = newMemberActor("second");
         withContext(firstActor, () -> {
             first = personService.create(person("Concurrency First", "race@example.com"));
             second = personService.create(person("Concurrency Second", "race@example.com"));
@@ -106,12 +105,6 @@ class DuplicateReviewConcurrencyIntegrationTest {
             jdbcTemplate.update("DELETE FROM person_identity WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspaceId);
-            jdbcTemplate.update(
-                "DELETE wrp FROM workspace_role_permission wrp"
-                    + " JOIN workspace_role wr ON wr.id = wrp.workspace_role_id"
-                    + " WHERE wr.workspace_id = ?",
-                workspaceId);
-            jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
         }
         if (firstActor != null) {
@@ -133,6 +126,7 @@ class DuplicateReviewConcurrencyIntegrationTest {
         CountDownLatch releaseFirstMutex = new CountDownLatch(1);
         CountDownLatch secondStarted = new CountDownLatch(1);
         AtomicInteger mutexAcquisitions = new AtomicInteger();
+        AtomicLong waitingConnection = new AtomicLong();
         doAnswer(invocation -> {
             int orgId = (int) invocation.callRealMethod();
             if (mutexAcquisitions.incrementAndGet() == 1) {
@@ -142,18 +136,20 @@ class DuplicateReviewConcurrencyIntegrationTest {
             return orgId;
         }).when(duplicateDecisionLockService).lockCurrentOrganization();
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
             Future<String> firstResult = executor.submit(
                 () -> inNewTransaction(firstActor, () ->
                     duplicateReviewService.dismiss(request).state()));
             assertTrue(firstAcquiredMutex.await(5, TimeUnit.SECONDS));
             Future<String> secondResult = executor.submit(
-                () -> {
+                () -> inNewTransaction(secondActor, () -> {
+                    waitingConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                     secondStarted.countDown();
-                    return inNewTransaction(secondActor, () ->
-                        duplicateReviewService.dismiss(request).state());
-                });
+                    return duplicateReviewService.dismiss(request).state();
+                }));
             assertTrue(secondStarted.await(5, TimeUnit.SECONDS));
+            awaitMySqlOrganizationMutex(waitingConnection.get(), organization.getId(), secondResult);
             assertEquals(1, mutexAcquisitions.get());
             assertFalse(firstResult.isDone());
             assertFalse(secondResult.isDone());
@@ -162,7 +158,7 @@ class DuplicateReviewConcurrencyIntegrationTest {
             assertEquals("dismissed", firstResult.get(10, TimeUnit.SECONDS));
             assertEquals("dismissed", secondResult.get(10, TimeUnit.SECONDS));
         } finally {
-            releaseFirstMutex.countDown();
+            releaseAndShutDown(executor, releaseFirstMutex);
         }
         assertEquals(1, jdbcTemplate.queryForObject(
             """
@@ -202,6 +198,7 @@ class DuplicateReviewConcurrencyIntegrationTest {
         CountDownLatch releaseFirstMutex = new CountDownLatch(1);
         CountDownLatch editStarted = new CountDownLatch(1);
         AtomicInteger mutexAcquisitions = new AtomicInteger();
+        AtomicLong waitingConnection = new AtomicLong();
         doAnswer(invocation -> {
             int orgId = (int) invocation.callRealMethod();
             if (mutexAcquisitions.incrementAndGet() == 1) {
@@ -211,7 +208,8 @@ class DuplicateReviewConcurrencyIntegrationTest {
             return orgId;
         }).when(duplicateDecisionLockService).lockCurrentOrganization();
 
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
             Future<String> dismissal = executor.submit(
                 () -> inNewTransaction(firstActor, () -> {
                     try {
@@ -223,16 +221,16 @@ class DuplicateReviewConcurrencyIntegrationTest {
                 }));
             assertTrue(firstAcquiredMutex.await(5, TimeUnit.SECONDS));
             Future<String> edit = executor.submit(
-                () -> {
+                () -> inNewTransaction(secondActor, () -> {
+                    waitingConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                     editStarted.countDown();
-                    return inNewTransaction(secondActor, () -> {
-                        personService.update(
-                            first.getId(),
-                            person("Concurrency First", "changed-race@example.com"));
-                        return "updated";
-                    });
-                });
+                    personService.update(
+                        first.getId(),
+                        person("Concurrency First", "changed-race@example.com"));
+                    return "updated";
+                }));
             assertTrue(editStarted.await(5, TimeUnit.SECONDS));
+            awaitMySqlOrganizationMutex(waitingConnection.get(), organization.getId(), edit);
             assertEquals(1, mutexAcquisitions.get());
             assertFalse(dismissal.isDone());
             assertFalse(edit.isDone());
@@ -242,7 +240,7 @@ class DuplicateReviewConcurrencyIntegrationTest {
                 dismissal.get(10, TimeUnit.SECONDS)));
             assertEquals("updated", edit.get(10, TimeUnit.SECONDS));
         } finally {
-            releaseFirstMutex.countDown();
+            releaseAndShutDown(executor, releaseFirstMutex);
         }
 
         String changedFingerprint = DuplicateReviewService.evidenceFingerprint(
@@ -280,6 +278,83 @@ class DuplicateReviewConcurrencyIntegrationTest {
         assertEquals(
             ooo.klae.connex.backend.dto.DuplicateMatchKind.EMAIL,
             visible.items().getFirst().evidence().kind());
+    }
+
+    private void awaitMySqlOrganizationMutex(
+            long connectionId, int organizationId, Future<?> competingResult) throws Exception {
+        if (connectionId <= 0) {
+            throw new AssertionError("The waiting transaction did not expose its connection id");
+        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadlineNanos) {
+            if (competingResult.isDone()) {
+                throw new AssertionError("Competing transaction completed before mutex contention: "
+                    + competingResult.get());
+            }
+            Integer waiting = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM performance_schema.data_lock_waits lock_wait
+                JOIN performance_schema.data_locks requested_lock
+                  ON requested_lock.ENGINE = lock_wait.ENGINE
+                 AND requested_lock.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.data_locks blocking_lock
+                  ON blocking_lock.ENGINE = lock_wait.ENGINE
+                 AND blocking_lock.ENGINE_LOCK_ID = lock_wait.BLOCKING_ENGINE_LOCK_ID
+                JOIN performance_schema.threads waiting_thread
+                  ON waiting_thread.THREAD_ID = lock_wait.REQUESTING_THREAD_ID
+                WHERE waiting_thread.PROCESSLIST_ID = ?
+                  AND requested_lock.OBJECT_SCHEMA = DATABASE()
+                  AND requested_lock.OBJECT_NAME = 'organization_duplicate_decision_lock'
+                  AND requested_lock.INDEX_NAME = 'PRIMARY'
+                  AND requested_lock.LOCK_TYPE = 'RECORD'
+                  AND requested_lock.LOCK_MODE LIKE 'X%'
+                  AND requested_lock.LOCK_STATUS = 'WAITING'
+                  AND requested_lock.LOCK_DATA = CAST(? AS CHAR)
+                  AND blocking_lock.OBJECT_SCHEMA = requested_lock.OBJECT_SCHEMA
+                  AND blocking_lock.OBJECT_NAME = requested_lock.OBJECT_NAME
+                  AND blocking_lock.INDEX_NAME = requested_lock.INDEX_NAME
+                  AND blocking_lock.LOCK_TYPE = requested_lock.LOCK_TYPE
+                  AND blocking_lock.LOCK_STATUS = 'GRANTED'
+                  AND blocking_lock.LOCK_DATA = requested_lock.LOCK_DATA
+                """,
+                Integer.class,
+                connectionId,
+                organizationId);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+        }
+        throw new AssertionError(
+            "The waiting transaction did not block on organization duplicate mutex PRIMARY key "
+                + organizationId + "; observed waits: " + jdbcTemplate.queryForList(
+                    """
+                    SELECT requested_lock.OBJECT_NAME, requested_lock.INDEX_NAME,
+                           requested_lock.LOCK_MODE, requested_lock.LOCK_DATA
+                    FROM performance_schema.data_lock_waits lock_wait
+                    JOIN performance_schema.data_locks requested_lock
+                      ON requested_lock.ENGINE = lock_wait.ENGINE
+                     AND requested_lock.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.threads waiting_thread
+                      ON waiting_thread.THREAD_ID = lock_wait.REQUESTING_THREAD_ID
+                    WHERE waiting_thread.PROCESSLIST_ID = ?
+                      AND requested_lock.OBJECT_SCHEMA = DATABASE()
+                    """, connectionId));
+    }
+
+    private static void releaseAndShutDown(
+            ExecutorService executor, CountDownLatch... releases) throws InterruptedException {
+        for (CountDownLatch release : releases) {
+            release.countDown();
+        }
+        executor.shutdown();
+        if (!executor.awaitTermination(20, TimeUnit.SECONDS)) {
+            executor.shutdownNow();
+            assertTrue(
+                executor.awaitTermination(10, TimeUnit.SECONDS),
+                "Concurrent transactions did not terminate after barrier release");
+        }
     }
 
     private <T> T inNewTransaction(User actor, Callable<T> work) {
@@ -325,7 +400,7 @@ class DuplicateReviewConcurrencyIntegrationTest {
         }
     }
 
-    private User newCustomRoleActor(String label) {
+    private User newMemberActor(String label) {
         String suffix = suffix();
         User actor = new User();
         actor.setUsername("duplicate_concurrency_" + label + "_" + suffix);
@@ -335,22 +410,12 @@ class DuplicateReviewConcurrencyIntegrationTest {
         actor.setTimezone("UTC");
         userMapper.insert(actor);
         workspaceMapper.addMember(workspace.getId(), actor.getId(), "member");
-        WorkspaceRole customRole = new WorkspaceRole();
-        customRole.setWorkspaceId(workspace.getId());
-        customRole.setName("Duplicate concurrency " + label + " " + suffix);
-        roleMapper.insertRole(customRole);
-        roleMapper.insertPermissions(
-            workspace.getId(),
-            customRole.getId(),
-            List.of("PERSON_CREATE", "PERSON_UPDATE", "REPORT_READ"));
-        workspaceMapper.setMemberCustomRole(
-            workspace.getId(), actor.getId(), customRole.getId());
         return actor;
     }
 
     private static void await(CountDownLatch latch) {
         try {
-            if (!latch.await(10, TimeUnit.SECONDS)) {
+            if (!latch.await(30, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("Organization mutex test gate did not resume");
             }
         } catch (InterruptedException exception) {

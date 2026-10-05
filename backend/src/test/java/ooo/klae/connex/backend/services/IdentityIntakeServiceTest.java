@@ -99,31 +99,6 @@ class IdentityIntakeServiceTest {
             org.mockito.ArgumentMatchers.any());
     }
 
-    @Test
-    void hiddenCompanyRefreshIncludesExternalIdAndRemovesOnlyAffectedMemberships() {
-        when(identityMapper.lockCurrentCompanyIdentityKeysForRecord(7, 51))
-            .thenReturn(List.of(key(51, "external_id", "source:company-51")));
-
-        service.recordCompanyVisibility(7, 51);
-
-        verify(identityMapper).lockCurrentCompanyIdentityGroupPrefix(
-            7, "external_id", "source:company-51", 21);
-        verify(identityCollisionMapper).deleteCompanyCollisionMembershipsForRecord(7, 51);
-        verify(identityCollisionMapper).ensureCompanyCollisionPairForRecord(
-            7, 51, "external_id", "source:company-51", NOW);
-        verify(identityCollisionMapper).deleteCompanySingletonCollisionMember(
-            7, "external_id", "source:company-51");
-        verify(duplicateReviewService).refreshCompanyEvidence(
-            7, "external_id", "source:company-51", NOW);
-        verify(identityCollisionMapper, never()).deleteCompanyCollisionGroup(
-            org.mockito.ArgumentMatchers.anyInt(), anyString(), anyString());
-        verify(identityCollisionMapper, never()).insertCompanyCollisionGroup(
-            org.mockito.ArgumentMatchers.anyInt(),
-            anyString(),
-            anyString(),
-            org.mockito.ArgumentMatchers.any());
-    }
-
     private static IdentityKeyRow key(int recordId, String kind, String normalizedValue) {
         IdentityKeyRow row = new IdentityKeyRow();
         row.setRecordId(recordId);

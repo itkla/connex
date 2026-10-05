@@ -41,6 +41,7 @@ class FakeClamd:
         self.failure: ClamdUnavailable | None = None
         self.scans = 0
         self.gate: threading.Event | None = None
+        self.started = threading.Event()
 
     def ping(self) -> bool:
         return self.alive
@@ -50,8 +51,10 @@ class FakeClamd:
 
     def scan(self, content: bytes, deadline: float) -> ScanResult:
         self.scans += 1
+        self.started.set()
         if self.gate is not None:
-            self.gate.wait(timeout=5)
+            if not self.gate.wait(timeout=5):
+                raise RuntimeError("test timeout")
         if self.failure is not None:
             raise self.failure
         return self.result
@@ -185,23 +188,34 @@ class ConcurrencyTest(ServerTestCase):
         client = FakeClamd()
         client.gate = threading.Event()
         _, base = self.build(client, CONNEX_CLAMAV_MAX_CONCURRENT_SCANS="1")
-        statuses: list[int] = []
+        first_status: list[int] = []
+        second_status: list[int] = []
 
-        def call_once() -> None:
+        def call_once(statuses: list[int]) -> None:
             statuses.append(self.call(base, "POST", "/v1/scan", b"probe")[0])
 
-        first = threading.Thread(target=call_once)
+        first = threading.Thread(target=call_once, args=(first_status,))
+        second = threading.Thread(target=call_once, args=(second_status,))
         first.start()
-        for _ in range(200):
-            if client.scans >= 1:
-                break
-            threading.Event().wait(0.01)
-        second = threading.Thread(target=call_once)
-        second.start()
-        second.join(timeout=10)
-        client.gate.set()
-        first.join(timeout=10)
-        self.assertIn(429, statuses)
+        try:
+            self.assertTrue(client.started.wait(timeout=2))
+            second.start()
+            second.join(timeout=2)
+            self.assertFalse(second.is_alive())
+            self.assertEqual([429], second_status)
+            self.assertTrue(first.is_alive())
+            self.assertEqual([], first_status)
+            self.assertEqual(client.scans, 1)
+        finally:
+            client.gate.set()
+            first.join(timeout=10)
+            if second.ident is not None:
+                second.join(timeout=10)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual([200], first_status)
+        self.assertEqual(client.scans, 1)
 
 
 if __name__ == "__main__":

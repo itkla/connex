@@ -23,6 +23,10 @@ public interface ReportMapper {
 
     List<ReportDefinition> getDefinitions(@Param("workspaceId") int workspaceId);
 
+    /** Returns only still-live definitions in the resolved workspace for assistant created links. */
+    List<Integer> getDefinitionIdsIn(
+        @Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+
     /**
      * Bounded global-search slice of saved report definitions, matched on name and description.
      *

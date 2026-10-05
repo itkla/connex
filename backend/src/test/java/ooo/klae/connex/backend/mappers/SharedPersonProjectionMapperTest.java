@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -51,7 +52,8 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         Company foreignCompany = companyIn(sibling, "Sibling Company");
         Person shared = personIn(sibling, foreignCompany, "Alpha Shared Contact");
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false));
+            shared.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         assertEquals(1, dealMapper.addPerson(
             workspace.getId(), deal.getId(), shared.getId(), "champion"));
         Task task = taskFor(recipient, shared, deal);
@@ -70,7 +72,8 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
             .anyMatch(candidate -> candidate.getPersonId() == shared.getId()));
 
         assertEquals(1, shareMapper.shareCompany(
-            foreignCompany.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false));
+            foreignCompany.getId(), sibling.getId(), workspace.getId(), recipient.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         assertEquals(foreignCompany.getId(),
             sharedDealPerson(deal, shared).getPerson().getCompany().getId());
         assertEquals(foreignCompany.getId(), sharedPersonForDeal(deal, shared).getCompany().getId());

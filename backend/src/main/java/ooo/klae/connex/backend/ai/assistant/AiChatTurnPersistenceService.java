@@ -518,6 +518,35 @@ public class AiChatTurnPersistenceService {
         return toolCall.getId();
     }
 
+    /**
+     * Reads the stored arguments of the write proposal that already holds one step's key.
+     *
+     * <p>The loop reads them before the step prepares its call, because a step whose proposal is
+     * already durable must replay that proposal rather than prepare a new one: a confirm-tier
+     * proposal stores the resolution and principals its card was reviewed against, and resolving
+     * them afresh against the workspace as it is now would disagree with the stored row after any
+     * rename or offboarding in between. The arguments are only an input to {@link
+     * #proposeWriteTool}, which still decides under its own locks whether the call is the stored
+     * proposal. The read takes no lock.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @return the stored arguments, or empty when no proposal holds the step's key yet
+     */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public Optional<String> storedWriteArguments(AiChatQueuedTurn turn, int stepNumber) {
+        requireCurrentActorRead(turn);
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                turn.workspaceId(), turn.userId(), turn.sessionId());
+        if (session == null) {
+            throw inaccessible();
+        }
+        return Optional.ofNullable(chatMapper.getToolCallByIdempotencyKey(
+                        turn.workspaceId(),
+                        turnStepKey(turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL)))
+                .map(AiChatToolCall::getArgumentsJson);
+    }
+
     /** Persists or replays one validated write proposal under its caller-retained key. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAssistantToolProposal proposeWriteTool(
@@ -565,11 +594,9 @@ public class AiChatTurnPersistenceService {
     /**
      * Renders the durable idempotency key one tool call owns.
      *
-     * <p>A call that was the only one its step made keeps the exact key this service has always
-     * written — no suffix at all — so every write, every {@code find_tools}, every unbatched read
-     * and every server-side skill plan step stays byte-identical, along with the {@code
-     * turn-N-step-} prefix scan that reads them back. Only a call that shared its step renders the
-     * {@code -call-k} suffix, which fits the existing column and its uniqueness constraint.
+     * <p>The grammar is {@link AiAssistantToolCallKey}'s alone: the sole call of a step keeps the
+     * exact unsuffixed key this service has always written, and only a call that shared its step
+     * renders the {@code -call-k} suffix.
      *
      * @param turnId the durable turn id
      * @param stepNumber the durable model-step number
@@ -577,13 +604,7 @@ public class AiChatTurnPersistenceService {
      * @return the durable idempotency key
      */
     private static String turnStepKey(int turnId, int stepNumber, int callOrdinal) {
-        if (turnId <= 0
-                || stepNumber <= 0
-                || stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
-            throw new IllegalArgumentException("Assistant tool turn and step must be positive");
-        }
-        return "turn-" + turnId + "-step-" + stepNumber
-                + new AiAssistantToolCallRef(stepNumber, callOrdinal).keySuffix();
+        return new AiAssistantToolCallKey(turnId, stepNumber, callOrdinal).value();
     }
 
     private String userMessageMetadata(

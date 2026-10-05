@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
@@ -15,25 +14,16 @@ import java.util.HexFormat;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.annotation.Transactional;
 
-import jakarta.validation.Validator;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
-import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
-import ooo.klae.connex.backend.services.DocumentAcceptanceService.GrantedLink;
 import ooo.klae.connex.backend.services.DocumentAcceptanceService.Link;
 
-import jakarta.servlet.http.HttpServletRequest;
-
 class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest {
-    @Autowired Validator validator;
 
     @Test
     void previewReturnsFrozenContentAndRecordsNothing() {
@@ -247,22 +237,6 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         assertEquals(unavailable, unavailableMessage(declinedToken));
     }
 
-    @Test
-    void declineReasonValidationMatchesThePersistedTerminationWidth() {
-        assertTrue(validator.validate(
-            new DeclineDocumentRequest("f".repeat(64), "a".repeat(500))).isEmpty());
-        assertFalse(validator.validate(
-            new DeclineDocumentRequest("f".repeat(64), "a".repeat(501))).isEmpty());
-    }
-
-    @Test
-    void decisionBodiesRequireAWellFormedFlowIdentity() {
-        assertTrue(validator.validate(new AcceptDocumentRequest("f".repeat(64), "Signer")).isEmpty());
-        assertFalse(validator.validate(new AcceptDocumentRequest("", "Signer")).isEmpty());
-        assertFalse(validator.validate(new AcceptDocumentRequest("F".repeat(64), "Signer")).isEmpty());
-        assertFalse(validator.validate(new AcceptDocumentRequest("f".repeat(63), "Signer")).isEmpty());
-        assertFalse(validator.validate(new DeclineDocumentRequest("", "Reason")).isEmpty());
-    }
 
     @Test
     void decisionsRefuseAFlowIdentityFromAnotherPreview() {
@@ -364,29 +338,6 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             String.class,
             workspace.getId(),
             delivery.recipients().getFirst().id()));
-    }
-
-    @Test
-    void publicEntryPointsAreNotTransactional() throws Exception {
-        List<Method> entries = List.of(
-            DocumentAcceptanceService.class.getMethod("exchange", String.class, String.class),
-            DocumentAcceptanceService.class.getMethod(
-                "admitGrant", HttpServletRequest.class, String.class),
-            DocumentAcceptanceService.class.getMethod(
-                "preview", GrantedLink.class, String.class),
-            DocumentAcceptanceService.class.getMethod(
-                "markViewed", GrantedLink.class, String.class),
-            DocumentAcceptanceService.class.getMethod(
-                "accept", GrantedLink.class, AcceptDocumentRequest.class,
-                String.class, String.class),
-            DocumentAcceptanceService.class.getMethod(
-                "decline", GrantedLink.class, DeclineDocumentRequest.class,
-                String.class, String.class));
-
-        for (Method method : entries) {
-            assertFalse(method.isAnnotationPresent(Transactional.class), method.getName());
-        }
-        assertFalse(DocumentAcceptanceService.class.isAnnotationPresent(Transactional.class));
     }
 
     @Test

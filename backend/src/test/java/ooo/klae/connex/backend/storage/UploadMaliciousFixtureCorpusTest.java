@@ -849,8 +849,19 @@ class UploadMaliciousFixtureCorpusTest {
 
     @Test
     void rejectsEntityExpansionCompressionAndEntryCountBombs() throws Exception {
-        String entity = "<!DOCTYPE x [<!ENTITY a \"aaaaaaaaaa\">"
-            + "<!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\">]><x>&b;</x>";
+        String document = PackageFixtures.defaultMainXml(UploadFormat.DOCX)
+            .replace("<w:body/>", "<w:body><w:p><w:r><w:t>&b;</w:t></w:r></w:p></w:body>");
+        String entity = "<!DOCTYPE w:document [<!ENTITY a \"aaaaaaaaaa\">"
+            + "<!ENTITY b \"&a;&a;\">]>" + document;
+        Map<String, byte[]> picture = PackageFixtures.members(
+            "word/media/image1.png", PackageFixtures.png(8 * 1024 * 1024));
+        byte[] literal = PackageFixtures.ooxml(UploadFormat.DOCX,
+            document.replace("&b;", "aaaaaaaaaaaaaaaaaaaa"), "", "", PackageFixtures.members());
+        byte[] stored = PackageFixtures.ooxml(UploadFormat.DOCX,
+            PackageFixtures.defaultMainXml(UploadFormat.DOCX),
+            PackageFixtures.defaultType("png", "image/png"), "", picture, true);
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, literal));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, stored));
         Map<String, byte[]> manyEntries = new LinkedHashMap<>();
         for (int index = 0; index < 600; index++) {
             manyEntries.put("word/part" + index + ".xml", PackageFixtures.ascii("<p/>"));
@@ -862,7 +873,7 @@ class UploadMaliciousFixtureCorpusTest {
             UploadFormat.DOCX,
             PackageFixtures.defaultType("png", "image/png"),
             "",
-            PackageFixtures.members("word/media/image1.png", new byte[8 * 1024 * 1024])));
+            picture));
         refused(UploadFormat.DOCX, PackageFixtures.ooxml(
             UploadFormat.DOCX, "", "", manyEntries));
     }

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,6 +12,10 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import jakarta.servlet.http.HttpSession;
 
 import ooo.klae.connex.backend.beans.ReportSchedule;
 import ooo.klae.connex.backend.beans.User;
@@ -20,6 +25,7 @@ import ooo.klae.connex.backend.dto.ReportConfig;
 import ooo.klae.connex.backend.dto.ReportDefinitionDto;
 import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.dto.ReportFilters;
 import ooo.klae.connex.backend.dto.ReportLayoutItem;
 import ooo.klae.connex.backend.dto.ReportScheduleDto;
@@ -34,6 +40,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
 
     @Autowired private ScheduleService scheduleService;
     @Autowired private ScheduleMapper scheduleMapper;
+    @Autowired private PrivilegedAccountService privilegedAccountService;
     @Autowired private ReportService reportService;
     @Autowired private RoleService roleService;
     @Autowired private WorkspaceService workspaceService;
@@ -220,6 +227,85 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertEquals(
                 List.of(replacement.getId()),
                 scheduleService.activeRecipientsForDocument(claimed, document).stream().map(User::getId).toList());
+    }
+
+    /**
+     * The step-up gate (#1763) is scoped to accounts that administer other principals. A report
+     * manager holds no administrative permission, and the recipients it may name are already
+     * confined to members holding the report's own read permissions, so it schedules on its
+     * session alone.
+     */
+    @Test
+    void anUnprivilegedReportManagerSchedulesWithoutAFreshStepUp() {
+        int reportId = createReport("count").id();
+        User manager = newUser();
+        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE"));
+        authenticateAs(manager, workspace.getId());
+        clearStepUp();
+
+        assertFalse(privilegedAccountService.isPrivileged(manager.getId()));
+        assertEquals(
+                List.of(manager.getId()),
+                scheduleService.create(reportId, request("weekly", List.of(manager.getId()), 9, true))
+                        .recipientUserIds());
+        assertEquals(
+                "monthly",
+                scheduleService.update(reportId, request("monthly", List.of(manager.getId()), 10, true))
+                        .cadence());
+    }
+
+    /**
+     * The schedule gate is worth nothing if the parent report can be deleted without one:
+     * {@code report_schedule} and {@code report_snapshot} both cascade from
+     * {@code report_definition}, so deleting the report removes the standing channel and its
+     * retained snapshots (#1763).
+     */
+    @Test
+    void deletingTheParentReportNeedsTheSameFreshStepUp() {
+        int reportId = createReport("count").id();
+        scheduleService.create(reportId, request("weekly", List.of(currentUser.getId()), 9, true));
+        clearStepUp();
+
+        assertTrue(privilegedAccountService.isPrivileged(currentUser.getId()));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> reportService.delete(reportId));
+        assertNotNull(scheduleService.get(reportId), "the cascade must not have run");
+    }
+
+    /**
+     * Delivery is deliberately not gated: an occurrence runs on a scheduler thread with no servlet
+     * session and no step-up stamp, so claiming, run-as resolution, and recipient re-derivation must
+     * all still succeed after the interactive session is gone.
+     */
+    @Test
+    void anExistingScheduleKeepsDeliveringWithoutAnInteractiveSession() {
+        int reportId = createReport("count").id();
+        User recipient = newUser();
+        scheduleService.create(reportId, request("weekly", List.of(recipient.getId()), 9, true));
+        ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
+        LocalDateTime dueAt = LocalDateTime.of(2026, 7, 13, 9, 0);
+        stored.setNextRunAt(dueAt.minusMinutes(1));
+        assertEquals(1, scheduleMapper.update(stored));
+        ReportDocumentDto document = reportService.generate(reportId, null, ReportService.NarrativeMode.FULL);
+        RequestContextHolder.resetRequestAttributes();
+
+        ReportSchedule claimed = scheduleService.claimDue(stored.getId(), currentUser.getId(), dueAt);
+
+        assertNotNull(claimed);
+        assertTrue(scheduleService.deliveryAccess(claimed).allowed());
+        assertEquals(
+                List.of(recipient.getId()),
+                scheduleService.activeRecipientsForDocument(claimed, document).stream()
+                        .map(User::getId).toList());
+    }
+
+    private void clearStepUp() {
+        ServletRequestAttributes attributes =
+                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        assertNotNull(attributes);
+        HttpSession session = attributes.getRequest().getSession(false);
+        assertNotNull(session);
+        session.removeAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR);
+        session.removeAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR);
     }
 
     private ReportDefinitionDto createReport(String measure) {

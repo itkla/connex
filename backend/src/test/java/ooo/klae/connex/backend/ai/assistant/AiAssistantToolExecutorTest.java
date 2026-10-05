@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -16,8 +18,11 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -81,12 +86,138 @@ class AiAssistantToolExecutorTest {
         companyMapper = mock(CompanyMapper.class);
         dealMapper = mock(DealMapper.class);
         dateResolver = mock(AiAssistantDateResolver.class);
-        executor = new AiAssistantToolExecutor(
-                new AiAssistantToolCatalog(), searchService, personService, companyService,
+        executor = executor(AiAssistantDeclaredWriteTools.tools());
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools) {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        return new AiAssistantToolExecutor(
+                catalog, new AiAssistantWriteToolRegistry(catalog, writeTools),
+                searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
                 mock(AiAssistantScopeReadService.class));
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+    }
+
+    /**
+     * A handle is refused before any proposal unless it names a kind its tool accepts, pinned here
+     * as a reviewed literal table rather than read back from the beans under test: widening a write
+     * tool's accepted kinds, or a read tool's, turns this red instead of widening the model-facing
+     * {@code wrong_handle_kind} contract silently.
+     */
+    @Test
+    void aHandleIsCheckedAgainstTheKindsItsToolAccepts() throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        Map<String, String> handles = Map.of(
+                "person", resources.register("person", 7),
+                "company", resources.register("company", 5),
+                "deal", resources.register("deal", 8),
+                "task", resources.registerTask(9));
+        Map<String, String> arguments = new HashMap<>(Map.of(
+                "create_activity", ",\"type\":\"call\",\"subject\":\"Call\",\"start\":\"today\"",
+                "create_task", ",\"description\":\"Follow up\"",
+                "create_note", ",\"content\":\"Met\"",
+                "add_tag", ",\"tag\":\"VIP\"",
+                "remove_tag", ",\"tag\":\"VIP\"",
+                "set_response_due", ",\"due_in_hours\":24",
+                "change_deal_stage", ",\"stage\":\"Won\"",
+                "assign_owner", ",\"owner\":\"Ana\"",
+                "get_deal_brief", "",
+                "find_schedule_conflicts", ",\"start\":\"start\",\"end\":\"end\""));
+        arguments.put("draft_document", ",\"template\":\"Quote\"");
+        arguments.put("complete_task", "");
+        arguments.put("reschedule_task", ",\"due_date\":\"2026-10-15\"");
+        arguments.put("update_record_fields", ",\"title\":\"Director\"");
+        arguments.put("create_person", ",\"name\":\"Morgan\"");
+        arguments.put("create_deal", ",\"name\":\"Expansion\",\"stage\":\"Discovery\",\"value\":\"1250\",\"currency\":\"JPY\"");
+        arguments.put("create_company", ",\"name\":\"New company\"");
+        arguments.put("create_report", ",\"template\":\"sales-performance\",\"name\":\"Sales report\"");
+        Map<String, Set<String>> accepted = new HashMap<>(Map.of(
+                "create_activity", Set.of("person", "deal"),
+                "create_task", Set.of("person", "deal"),
+                "create_note", Set.of("person", "deal"),
+                "change_deal_stage", Set.of("deal"),
+                "add_tag", Set.of("person", "company", "deal"),
+                "remove_tag", Set.of("person", "company", "deal"),
+                "set_response_due", Set.of("person"),
+                "assign_owner", Set.of("person", "company", "deal"),
+                "get_deal_brief", Set.of("deal"),
+                "find_schedule_conflicts", Set.of("person")));
+        accepted.put("create_person", Set.of("company"));
+        accepted.put("create_deal", Set.of("company"));
+        accepted.put("create_company", Set.of("workspace"));
+        accepted.put("create_report", Set.of("workspace"));
+        accepted.put("draft_document", Set.of("deal"));
+        accepted.put("complete_task", Set.of("task"));
+        accepted.put("reschedule_task", Set.of("task"));
+        accepted.put("update_record_fields", Set.of("person", "company", "deal"));
+        assertEquals(arguments.keySet(), accepted.keySet());
+        Map<String, Set<String>> declared = new HashMap<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            declared.put(tool.name(), tool.acceptedTargetKinds());
+        }
+        assertEquals(Set.copyOf(AiAssistantToolCatalog.writeToolNames()), declared.keySet());
+        for (Map.Entry<String, Set<String>> tool : declared.entrySet()) {
+            assertEquals(accepted.get(tool.getKey()), tool.getValue(), tool.getKey());
+        }
+        for (Map.Entry<String, Set<String>> tool : accepted.entrySet()) {
+            if (tool.getValue().equals(Set.of("workspace"))) {
+                executor.validateReferences(tool.getKey(),
+                        objectMapper.readTree("{" + arguments.get(tool.getKey()).substring(1) + "}"), resources);
+            }
+            for (Map.Entry<String, String> handle : handles.entrySet()) {
+                var args = objectMapper.readTree("{\"handle\":\"" + handle.getValue() + "\""
+                        + arguments.get(tool.getKey()) + "}");
+                if (tool.getValue().contains(handle.getKey())) {
+                    executor.validateReferences(tool.getKey(), args, resources);
+                } else {
+                    AiAssistantLoopException refused = assertThrows(
+                            AiAssistantLoopException.class,
+                            () -> executor.validateReferences(tool.getKey(), args, resources),
+                            tool.getKey() + " on a " + handle.getKey());
+                    assertEquals("task".equals(handle.getKey()) || tool.getValue().equals(Set.of("task"))
+                            || tool.getValue().equals(Set.of("workspace"))
+                            ? "invalid_tool_arguments" : "wrong_handle_kind", refused.detailReason());
+                }
+            }
+        }
+    }
+
+    /**
+     * The executor holds no copy of a write tool's kinds: narrowing what the registered tool
+     * accepts narrows the handle check with it, so the check and the write path can never
+     * disagree.
+     */
+    @Test
+    void theHandleCheckReadsTheRegisteredToolRatherThanACopyOfItsKinds() throws Exception {
+        List<AiAssistantWriteTool> tools = new ArrayList<>();
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            if ("add_tag".equals(tool.name())) {
+                AiAssistantWriteTool narrowed = spy(tool);
+                when(narrowed.acceptedTargetKinds()).thenReturn(Set.of("person"));
+                tools.add(narrowed);
+            } else {
+                tools.add(tool);
+            }
+        }
+        AiAssistantToolExecutor narrowedExecutor = executor(tools);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        String person = resources.register("person", 7);
+        String company = resources.register("company", 5);
+
+        narrowedExecutor.validateReferences(
+                "add_tag",
+                objectMapper.readTree("{\"handle\":\"" + person + "\",\"tag\":\"VIP\"}"),
+                resources);
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> narrowedExecutor.validateReferences(
+                        "add_tag",
+                        objectMapper.readTree(
+                                "{\"handle\":\"" + company + "\",\"tag\":\"VIP\"}"),
+                        resources));
+        assertEquals("wrong_handle_kind", refused.detailReason());
     }
 
     @Test
@@ -262,6 +393,41 @@ class AiAssistantToolExecutorTest {
                 privateResult.data().get("notes"));
     }
 
+    @Test
+    void sharedBulkReadsExcludePrivateNotesWhilePrivateSessionsKeepThem() throws Exception {
+        Note workspaceNote = new Note();
+        workspaceNote.setVisibility("workspace");
+        workspaceNote.setContent("Visible to the workspace");
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setContent("Owner only");
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+
+        AiAssistantToolResult shared = executor.execute(
+                "get_records", objectMapper.readTree("{\"handles\":[\"r1\"]}"), resources, false);
+        AiAssistantToolResult privateResult = executor.execute(
+                "get_records", objectMapper.readTree("{\"handles\":[\"r1\"]}"), resources, true);
+
+        List<?> sharedRecords = assertInstanceOf(List.class, shared.data().get("records"));
+        List<?> privateRecords = assertInstanceOf(List.class, privateResult.data().get("records"));
+        assertEquals(1, sharedRecords.size());
+        assertEquals(1, privateRecords.size());
+        assertEquals(
+                List.of(Map.of("content", "Visible to the workspace")),
+                assertInstanceOf(Map.class, sharedRecords.getFirst()).get("notes"));
+        assertEquals(
+                List.of(
+                        Map.of("content", "Visible to the workspace"),
+                        Map.of("content", "Owner only")),
+                assertInstanceOf(Map.class, privateRecords.getFirst()).get("notes"));
+    }
+
     /**
      * The bulk read collapses a record crawl into one step without granting anything the serial
      * form did not: every handle resolves through the registry, duplicates are read once, and each
@@ -286,14 +452,16 @@ class AiAssistantToolExecutorTest {
                 objectMapper.readTree("{\"handles\":[\"r1\",\"r2\",\"r1\"]}"),
                 resources, false);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> records =
-                (List<Map<String, Object>>) result.data().get("records");
+        List<?> records = assertInstanceOf(List.class, result.data().get("records"));
         assertEquals(2, records.size());
-        assertEquals("r1", records.get(0).get("handle"));
-        assertEquals("r2", records.get(1).get("handle"));
-        assertEquals("Ada Lovelace", records.get(0).get("name"));
-        assertEquals("Grace Hopper", records.get(1).get("name"));
+        Map<?, ?> first = assertInstanceOf(Map.class, records.get(0));
+        Map<?, ?> second = assertInstanceOf(Map.class, records.get(1));
+        assertEquals("r1", first.get("handle"));
+        assertEquals("r2", second.get("handle"));
+        assertEquals("Ada Lovelace", first.get("name"));
+        assertEquals("Grace Hopper", second.get("name"));
+        verify(personService).getPersonById(17);
+        verify(personService).getPersonById(18);
     }
 
     @Test
@@ -729,4 +897,35 @@ class AiAssistantToolExecutorTest {
         assertEquals("malformed_output", refused.terminalReason());
         assertFalse(refused.recoverable());
     }
+    @Test
+    void todosRefuseTaskHandlesRecoverably() throws Exception {
+        AiAssistantLoopException refusal = assertThrows(AiAssistantLoopException.class,
+                () -> executor.execute("set_todos", objectMapper.readTree(
+                        "{\"items\":[\"Complete t1\"]}"), new AiChatResourceRegistry(), false));
+        assertEquals("todo_contains_handle", refusal.detailReason());
+    }
+
+    @Test
+    void taskListsExposeOnlyTurnHandlesAndAssigneeBooleans() throws Exception {
+        Task task = new Task();
+        task.setId(73);
+        task.setDescription("Prepare the agenda");
+        task.setStatus("todo");
+        ooo.klae.connex.backend.beans.User assignee = new ooo.klae.connex.backend.beans.User();
+        assignee.setId(19);
+        task.setAssignedTo(assignee);
+        when(workspaceService.getCurrentUserId()).thenReturn(19);
+        when(companyService.getCompanyById(5)).thenReturn(new Company());
+        when(historyService.tasksForCompany(5, 10)).thenReturn(List.of(task));
+        AiChatResourceRegistry registry = new AiChatResourceRegistry();
+        registry.register("company", 5);
+        var result = executor.execute("list_tasks", objectMapper.readTree("{\"handle\":\"r1\"}"), registry, false);
+        var data = objectMapper.valueToTree(result.data()).path("tasks").path(0);
+        assertEquals("t1", data.path("handle").asString());
+        assertTrue(data.path("assignedToMe").asBoolean());
+        assertFalse(data.has("id"));
+        assertFalse(data.has("assignedToId"));
+        assertEquals(73, registry.resolve("t1").id());
+    }
+
 }

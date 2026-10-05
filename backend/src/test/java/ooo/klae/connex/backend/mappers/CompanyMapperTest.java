@@ -47,14 +47,6 @@ class CompanyMapperTest extends AbstractMapperTest {
     @Autowired private NoteMapper noteMapper;
     @Autowired private TaskMapper taskMapper;
 
-    /**
-     * Inserts a new company and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Company company = newCompany();
-        assertNotEquals(0, company.getId());
-    }
 
     /**
      * Gets a company by ID and checks if the returned company is not null.
@@ -62,6 +54,7 @@ class CompanyMapperTest extends AbstractMapperTest {
     @Test
     void getCompanyById_returnsInsertedRow() {
         Company company = newCompany();
+        assertNotEquals(0, company.getId());
 
         Company found = companyMapper.getCompanyById(workspace.getId(), company.getId());
 

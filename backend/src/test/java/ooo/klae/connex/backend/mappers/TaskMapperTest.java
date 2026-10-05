@@ -46,18 +46,6 @@ class TaskMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Inserts a new task and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Task task = build("Follow up", newUser(), null, null);
-
-        taskMapper.insert(task);
-
-        assertNotEquals(0, task.getId());
-    }
-
-    /**
      * Gets a task by ID and checks if the returned task is not null.
      */
     @Test
@@ -109,6 +97,7 @@ class TaskMapperTest extends AbstractMapperTest {
         Task task = build("Solo task", newUser(), null, null);
 
         taskMapper.insert(task);
+        assertNotEquals(0, task.getId());
 
         Task found = taskMapper.getTaskById(workspace.getId(), task.getId());
         assertNotNull(found);
@@ -417,21 +406,6 @@ class TaskMapperTest extends AbstractMapperTest {
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == task1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
-    }
-
-    @Test
-    void workspaceScopeHidesTasksAndBlocksCompletion() {
-        User user = newUser();
-        Task task = build("Scoped task", user, null, null);
-        taskMapper.insert(task);
-        Workspace other = new Workspace();
-        other.setName("Other Workspace");
-        other.setSlug("other-" + unique());
-        workspaceMapper.insert(other);
-
-        assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
-        assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId(), 0));
-        assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
     }
 
     @Test

@@ -267,11 +267,29 @@ describe("settings navigation equals the manifest", () => {
 
 describe("settings navigation gates on the manifest's visibility bucket", () => {
     it("hides a destination whose visibility permission the viewer lacks", () => {
-        const model = resolveSettingsNavigation(context("en", { permissions: new Set() }));
-        const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+        const offered = (permissions: ReadonlySet<string>) =>
+            resolveSettingsNavigation(context("en", { permissions }))
+                .flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+        const everythingButSettings = new Set(
+            [...EVERY_VISIBILITY_PERMISSION].filter((permission) => permission !== "WORKSPACE_SETTINGS"),
+        );
+
+        expect(offered(new Set())).not.toContain("workspace.general");
+        expect(
+            offered(everythingButSettings),
+            "holding every other permission must not stand in for the one the destination requires",
+        ).not.toContain("workspace.general");
+        expect(
+            offered(new Set(["WORKSPACE_SETTINGS"])),
+            "the permission the destination requires is enough to be offered it",
+        ).toContain("workspace.general");
+    });
+
+    it("never offers a redirect stub as a destination, whatever the viewer holds", () => {
+        const ids = resolveSettingsNavigation(context("en"))
+            .flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
 
         expect(ids).not.toContain("workspace.roles");
-        expect(ids).not.toContain("workspace.general");
         expect(ids).not.toContain("workspace.audit-log");
     });
 

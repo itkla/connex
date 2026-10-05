@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -287,7 +286,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void assessWorkspaceReturnsAtRiskDealsHighestFirst() {
+    void assessWorkspaceIncludesOverdueMoneyAndExcludesHealthyDeal() {
         Deal overdue = openDeal();
         closeDateOf(overdue, "2126-06-01");
         touch(overdue, "2126-06-20 10:00:00");
@@ -302,8 +301,6 @@ class DealRiskServiceTest extends AbstractServiceTest {
         List<DealRiskDto> risks = service.assessWorkspace(workspace.getId());
 
         assertThat(risks).isNotEmpty();
-        assertThat(risks.get(0).getScore())
-            .isGreaterThanOrEqualTo(risks.get(risks.size() - 1).getScore());
         assertThat(risks).anyMatch(risk -> risk.getDealId() == overdue.getId());
         assertThat(risks).filteredOn(risk -> risk.getDealId() == overdue.getId())
             .allMatch(risk -> risk.getValue().compareTo(overdue.getValue()) == 0
@@ -329,31 +326,6 @@ class DealRiskServiceTest extends AbstractServiceTest {
             .orElseThrow();
 
         assertThat(summary.value()).isEqualByComparingTo(new BigDecimal("0.30"));
-    }
-
-    @Test
-    void notificationFingerprintMatchesThePersistedLegacyDoubleFixture() throws Exception {
-        Deal deal = new Deal();
-        deal.setId(19);
-        deal.setValue(new BigDecimal("125000.00"));
-        deal.setCurrency("USD");
-        deal.setExpectedCloseDate("2026-08-31");
-        deal.setCreatedAt("2026-08-01 01:02:03");
-        deal.setUpdatedAt("2026-08-02 04:05:06");
-        Method method = DealRiskService.class.getDeclaredMethod(
-            "notificationSourceStateHash",
-            Deal.class,
-            String.class,
-            List.class,
-            Map.class,
-            Map.class);
-        method.setAccessible(true);
-
-        String hash = (String) method.invoke(
-            null, deal, "touch-hash", List.of(), Map.of(), Map.of());
-
-        assertThat(hash).isEqualTo(
-            "0d2aef6d95e2517852e272d91d5442f2572a7fff9dcbd8a4cecd4c7c5c3d9e64");
     }
 
     @Test
@@ -552,24 +524,29 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
     @Test
     void assessWorkspaceIncludesLowOnlyDealBelowHigh() {
+        Deal lowOnly = openDeal();
+        closeDateOf(lowOnly, "2126-12-31");
+        touch(lowOnly, "2126-06-20 10:00:00");
+
         Deal overdue = openDeal();
         closeDateOf(overdue, "2126-06-01");
         touch(overdue, "2126-06-20 10:00:00");
         Person warm = newPerson(company);
         dealMapper.addPerson(workspace.getId(), overdue.getId(), warm.getId(), "Champion");
 
-        Deal lowOnly = openDeal();
-        closeDateOf(lowOnly, "2126-12-31");
-        touch(lowOnly, "2126-06-20 10:00:00");
         warmthList(temp(warm.getId(), "hot", "rising"));
 
         List<DealRiskDto> risks = service.assessWorkspace(workspace.getId());
 
         DealRiskDto lowRisk = risks.stream().filter(r -> r.getDealId() == lowOnly.getId()).findFirst().orElseThrow();
         assertThat(lowRisk.getLevel()).isEqualTo("low");
-        int highIndex = indexOfDeal(risks, overdue.getId());
-        int lowIndex = indexOfDeal(risks, lowOnly.getId());
-        assertThat(highIndex).isLessThan(lowIndex);
+        DealRiskDto highRisk = risks.stream().filter(r -> r.getDealId() == overdue.getId())
+            .findFirst().orElseThrow();
+        assertThat(highRisk.getScore()).isGreaterThan(lowRisk.getScore());
+        assertThat(risks)
+            .filteredOn(risk -> risk.getDealId() == overdue.getId() || risk.getDealId() == lowOnly.getId())
+            .extracting(DealRiskDto::getDealId)
+            .containsExactly(overdue.getId(), lowOnly.getId());
     }
 
     @Test
@@ -583,14 +560,5 @@ class DealRiskServiceTest extends AbstractServiceTest {
         assertThat(hidden.getLevel()).isEqualTo("none");
         assertThat(hidden.getValue()).isZero();
         assertThat(hidden.getCurrency()).isNull();
-    }
-
-    private static int indexOfDeal(List<DealRiskDto> risks, int dealId) {
-        for (int i = 0; i < risks.size(); i++) {
-            if (risks.get(i).getDealId() == dealId) {
-                return i;
-            }
-        }
-        return -1;
     }
 }

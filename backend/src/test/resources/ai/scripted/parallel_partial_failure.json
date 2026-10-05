@@ -1,0 +1,36 @@
+{
+  "id": "parallel_partial_failure",
+  "selector": "connex_script_parallel_partial_failure",
+  "capabilityClass": "scripted-native-parallel",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Pellinore\",\"kinds\":[\"person\"]}"
+          },
+          {
+            "toolName": "get_record",
+            "arguments": "{\"handle\":\"r7\"}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Pellinore\",\"kinds\":[\"company\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I read [the contact](record:r1) and [the company](record:r2); the third record I asked for was not one I could open.\",\"citations\":[\"r1\",\"r2\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

@@ -69,6 +69,48 @@
     ORDER BY t.name
   </select>
 
+  <!-- Driven from the association's primary-key prefix and locking only its rows: a tag
+       replacement reads the tags it is about to clear under these locks, so a concurrent removal
+       cannot change the set between the read and the delete. -->
+  <select id="getTagsByPersonIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM person_tag pt
+    STRAIGHT_JOIN tag t ON t.id = pt.tag_id
+    WHERE pt.person_id = #{personId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF pt
+  </select>
+
+  <!-- The company counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByCompanyIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM company_tag ct
+    STRAIGHT_JOIN tag t ON t.id = ct.tag_id
+    WHERE ct.company_id = #{companyId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF ct
+  </select>
+
+  <!-- The deal counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByDealIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM deal_tag dt
+    STRAIGHT_JOIN tag t ON t.id = dt.tag_id
+    WHERE dt.deal_id = #{dealId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF dt
+  </select>
+
+  <!-- The attachment counterpart of getTagsByPersonIdForUpdate. -->
+  <select id="getTagsByAttachmentIdForUpdate" resultType="Tag" flushCache="true">
+    SELECT t.id, t.workspace_id, t.name, t.color
+    FROM attachment_tag att
+    STRAIGHT_JOIN tag t ON t.id = att.tag_id
+    WHERE att.attachment_id = #{attachmentId} AND t.workspace_id = #{workspaceId}
+    ORDER BY t.name
+    FOR UPDATE OF att
+  </select>
+
   <select id="getTagsByDealId" resultType="Tag">
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
@@ -83,6 +125,43 @@
     JOIN attachment_tag at ON at.tag_id = t.id
     WHERE t.workspace_id = #{workspaceId} AND at.attachment_id = #{attachmentId}
     ORDER BY t.name
+  </select>
+
+  <select id="getTagsForRecords" resultType="ooo.klae.connex.backend.beans.RecordTag">
+    <choose>
+      <when test="recordType == 'person'">
+        SELECT pt.person_id AS record_id, t.id AS tag_id, t.name
+        FROM person_tag pt
+        JOIN person r ON r.id = pt.person_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE pt.person_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY pt.person_id, t.name
+      </when>
+      <when test="recordType == 'company'">
+        SELECT ct.company_id AS record_id, t.id AS tag_id, t.name
+        FROM company_tag ct
+        JOIN company r ON r.id = ct.company_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = ct.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE ct.company_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY ct.company_id, t.name
+      </when>
+      <when test="recordType == 'deal'">
+        SELECT dt.deal_id AS record_id, t.id AS tag_id, t.name
+        FROM deal_tag dt
+        JOIN deal r ON r.id = dt.deal_id AND r.workspace_id = #{workspaceId}
+        JOIN tag t ON t.id = dt.tag_id AND t.workspace_id = #{workspaceId}
+        WHERE dt.deal_id IN
+          <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY dt.deal_id, t.name
+      </when>
+      <otherwise>
+        SELECT t.id AS record_id, t.id AS tag_id, t.name
+        FROM tag t
+        WHERE t.workspace_id = #{workspaceId} AND 1 = 0
+      </otherwise>
+    </choose>
   </select>
 
   <select id="getPersonTagNames" resultType="map">

@@ -42,6 +42,12 @@ export type MatrixRoute = {
     /** Set when the route is expected to deny the seeded member, giving the matrix a real 403 row. */
     deniesMember?: boolean;
     /**
+     * Set when the route looks gated but the seeded member legitimately reaches it, so the matrix
+     * asserts the admitted content instead of a denial. The seeder gives every non-owner user
+     * organization-admin standing, and the product catalog is readable by any workspace member.
+     */
+    admitsMember?: boolean;
+    /**
      * Pathnames this route may legitimately settle on, when it does not render itself. Declaring the
      * redirect is what lets the sweep reject an *undeclared* one — a session that expired mid-run
      * lands on `/auth/login`, which is otherwise indistinguishable from a healthy render because the
@@ -77,7 +83,7 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'calendar', path: '/activity/calendar', area: 'calendar', tier: 1, role: 'member' },
     { id: 'settings-diagnostics', path: '/settings/diagnostics', area: 'diagnostics', tier: 1, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/audit-diagnostics'] },
 
-    { id: 'org-diagnostics', path: '/organization/diagnostics', area: 'diagnostics', tier: 2, role: 'owner', deniesMember: true, landsOn: ['/settings/organization/audit-diagnostics'] },
+    { id: 'org-diagnostics', path: '/organization/diagnostics', area: 'diagnostics', tier: 2, role: 'owner', admitsMember: true, landsOn: ['/settings/organization/audit-diagnostics'] },
     { id: 'connections', path: '/settings/personal/connected-accounts', area: 'connections', tier: 2, role: 'member' },
     { id: 'connections-legacy', path: '/account/connections', area: 'connections', tier: 2, role: 'member', landsOn: ['/settings/personal/connected-accounts'] },
     { id: 'connections-reviews', path: '/account/connections/reviews', area: 'import', tier: 2, role: 'member', landsOn: ['/settings/personal/connected-accounts'] },
@@ -89,7 +95,7 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'settings-members', path: '/settings/members', area: 'settings', tier: 2, role: 'member', landsOn: ['/settings/workspace/people'] },
     { id: 'settings-roles', path: '/settings/roles', area: 'settings', tier: 2, role: 'owner', landsOn: ['/settings/workspace/people'] },
     { id: 'admin-logs', path: '/admin/logs', area: 'settings', tier: 2, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/audit-diagnostics'] },
-    { id: 'products', path: '/records/products', area: 'deals', tier: 2, role: 'admin', deniesMember: true },
+    { id: 'products', path: '/records/products', area: 'deals', tier: 2, role: 'admin', admitsMember: true },
     { id: 'activity-all', path: '/activity/all', area: 'tasks', tier: 2, role: 'member' },
     { id: 'notes', path: '/activity/notes', area: 'tasks', tier: 2, role: 'member' },
     { id: 'files', path: '/library/files', area: 'other', tier: 2, role: 'member' },

@@ -70,6 +70,7 @@ import {
     activeSelectionAskConnexContext,
     appendAskConnexPrompt,
     appendAskConnexTurnSegment,
+    askConnexChangeValueText,
     askConnexReasoningSurvives,
     askConnexContextCorrected,
     askConnexMessageContent,
@@ -79,6 +80,7 @@ import {
     askConnexRetryPrompt,
     askConnexScopePreview,
     askConnexSessionStorageKey,
+    askConnexTemplateDefaultsText,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     formatAnswerInstant,
@@ -160,11 +162,13 @@ import {
 } from '@/app/lib/askConnexStream';
 import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
+import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     AiAssistantCreatedRecordKind,
+    AiAssistantToolCallChangeField,
     AiChatCitation,
     AiChatAttachment,
     AiChatDeltaFrame,
@@ -186,6 +190,8 @@ import type {
 type OpenSource = 'standard' | 'keyboard';
 
 const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
+const ASK_CONNEX_DOCUMENT_TYPES: readonly string[] = ['quote', 'proposal', 'order_form', 'contract'];
+
 /** The activity types this client has words for, so an unfamiliar one is left as the record has it. */
 const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
     'call',
@@ -407,6 +413,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
     const tDisclosure = useTranslations('Assistant.disclosure');
     const tWarmth = useTranslations('Temperature');
+    const tProvenance = useTranslations('ContactProvenance');
+    const tReports = useTranslations('Reports.templates');
     const locale = useLocale();
     const now = useLiveNow();
     const router = useRouter();
@@ -2076,6 +2084,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     || operationEpoch !== sessionEpochRef.current
                     || activeSessionRef.current?.id !== session.id) return mutated;
                 dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                if (mutated && card.toolName === 'draft_document') {
+                    const pending = await getAiAssistantToolCalls(
+                        session.id, { pendingOnly: true }, { signal },
+                    );
+                    if (signal.aborted
+                        || operationEpoch !== sessionEpochRef.current
+                        || activeSessionRef.current?.id !== session.id) return mutated;
+                    dispatchToolCalls({
+                        type: 'proposalsRefreshed',
+                        toolCalls: pending.filter((proposal) => proposal.id !== toolCallId
+                            && proposal.toolName === 'draft_document'
+                            && proposal.target.kind === card.target.kind
+                            && proposal.target.id === card.target.id),
+                    });
+                }
             } catch {
                 if (!signal.aborted
                     && operationEpoch === sessionEpochRef.current
@@ -2470,7 +2493,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * English database back at them. A token this client has no word for is left as it stands rather
      * than guessed at.
      */
-    const outcomeValueText = useCallback((field: string, value: string): string => {
+    const outcomeValueText = useCallback((field: string, value: string, toolName: string): string => {
+        if (toolName === 'create_report' && field === 'template') {
+            return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
+                : t('toolCards.templateDefaults.unavailable');
+        }
         if (field === 'start') return formatUtcDateTime(value, locale, value);
         if (field === 'dueDate') return formatDate(value, locale);
         if (field === 'visibility') {
@@ -2479,12 +2506,67 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 : value;
         }
         if (field === 'type') {
-            return ASK_CONNEX_ACTIVITY_TYPES.includes(value)
+            return (ASK_CONNEX_ACTIVITY_TYPES.includes(value) || ASK_CONNEX_DOCUMENT_TYPES.includes(value))
                 ? t(`toolCards.outcomeValues.type.${value}`)
                 : value;
         }
         return value;
-    }, [locale, t]);
+    }, [locale, t, tReports]);
+    /** States one value a pending proposal reviews; see `askConnexChangeValueText`. */
+    const changeValueText = useCallback((
+        field: AiAssistantToolCallChangeField,
+        value: string,
+        side: 'current' | 'proposed',
+        toolName: string,
+    ): string => {
+        if (toolName === 'create_report' && field === 'template') {
+            return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
+                : t('toolCards.templateDefaults.unavailable');
+        }
+        if (field === 'templateDefaults') {
+            const fields: Readonly<Record<string, string>> = {
+                name: t('toolCards.change.fieldName'),
+                title: t('toolCards.change.fieldTitle'),
+                website: t('toolCards.change.fieldWebsite'),
+                industry: t('toolCards.change.fieldIndustry'),
+                address: t('toolCards.change.fieldAddress'),
+                email: t('toolCards.templateDefaults.email'),
+                phone: t('toolCards.templateDefaults.phone'),
+                company: t('toolCards.templateDefaults.company'),
+                leadSource: tProvenance('sourceLabel'),
+                leadSourceDetail: tProvenance('detailLabel'),
+                referrerPerson: tProvenance('referrerLabel'),
+                value: t('toolCards.change.fieldValue'),
+                currency: t('toolCards.change.fieldCurrency'),
+                pipeline: t('toolCards.templateDefaults.pipeline'),
+                stage: t('toolCards.change.fieldStage'),
+                expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                tags: t('toolCards.templateDefaults.tags'),
+                customFields: t('toolCards.templateDefaults.customFields'),
+            };
+            return askConnexTemplateDefaultsText(value, locale, {
+                field: (key) => Object.hasOwn(fields, key)
+                    ? fields[key] : t('toolCards.templateDefaults.other'),
+                leadSource: (source) => {
+                    const known = LEAD_SOURCES.find((candidate) => candidate === source);
+                    return known === undefined ? t('toolCards.templateDefaults.unavailable')
+                        : tProvenance(`source.${known}`);
+                },
+                fieldValue: (fieldLabel, defaultValue) =>
+                    t('toolCards.templateDefaults.fieldValue', { field: fieldLabel, value: defaultValue }),
+                none: t('toolCards.templateDefaults.none'),
+                unavailable: t('toolCards.templateDefaults.unavailable'),
+            });
+        }
+        return askConnexChangeValueText(
+            field,
+            value,
+            side,
+            locale,
+            (hours) => t('toolCards.change.responseDueInHours', { hours }),
+            { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
+        );
+    }, [locale, t, tProvenance, tReports]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2640,18 +2722,64 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             changeField: {
                 owner: t('toolCards.change.fieldOwner'),
                 stage: t('toolCards.change.fieldStage'),
+                tag: t('toolCards.change.fieldTag'),
+                responseDue: t('toolCards.change.fieldResponseDue'),
+                taskStatus: t('toolCards.change.fieldTaskStatus'),
+                dueDate: t('toolCards.change.fieldDueDate'),
+                document: t('toolCards.change.fieldDocument'),
+                report: t('toolCards.change.fieldReport'),
+                title: t('toolCards.change.fieldTitle'),
+                website: t('toolCards.change.fieldWebsite'),
+                industry: t('toolCards.change.fieldIndustry'),
+                address: t('toolCards.change.fieldAddress'),
+                value: t('toolCards.change.fieldValue'),
+                expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                name: t('toolCards.change.fieldName'),
+                currency: t('toolCards.change.fieldCurrency'),
+                template: t('toolCards.change.fieldTemplate'),
+                templateDefaults: t('toolCards.change.fieldTemplateDefaults'),
             },
+            changeValue: changeValueText,
             changeNotSet: t('toolCards.change.notSet'),
             changeCurrentUnresolved: {
                 owner: t('toolCards.change.currentUnresolvedOwner'),
                 stage: t('toolCards.change.currentUnresolvedStage'),
+                tag: t('toolCards.change.currentUnresolvedTag'),
+                responseDue: t('toolCards.change.currentUnresolvedResponseDue'),
+                taskStatus: t('toolCards.change.currentUnresolvedTaskStatus'),
+                dueDate: t('toolCards.change.currentUnresolvedDueDate'),
+                document: t('toolCards.change.currentUnresolvedDocument'),
+                report: t('toolCards.change.currentUnresolvedField'),
+                title: t('toolCards.change.currentUnresolvedField'),
+                website: t('toolCards.change.currentUnresolvedField'),
+                industry: t('toolCards.change.currentUnresolvedField'),
+                address: t('toolCards.change.currentUnresolvedField'),
+                value: t('toolCards.change.currentUnresolvedField'),
+                expectedCloseDate: t('toolCards.change.currentUnresolvedField'),
+                name: t('toolCards.change.currentUnresolvedField'),
+                currency: t('toolCards.change.currentUnresolvedField'),
+                template: t('toolCards.change.currentUnresolvedField'),
+                templateDefaults: t('toolCards.change.currentUnresolvedField'),
             },
             changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
+            changeProposedWithheld: t('toolCards.change.proposedWithheld'),
+            changeStateUnresolvedRemoval: t('toolCards.change.stateUnresolvedRemoval'),
+            changeStateForField: {
+                document: {
+                    ready: (version: string | null) => version === null ? null
+                        : t('toolCards.change.existingDocument', { version }),
+                },
+                responseDue: {
+                    unchanged: t('toolCards.change.stateUnchangedResponseDue'),
+                    unresolved: t('toolCards.change.stateUnresolvedResponseDue'),
+                },
+            },
             changeState: {
                 unchanged: t('toolCards.change.stateUnchanged'),
                 recordChanged: t('toolCards.change.stateRecordChanged'),
                 permissionLost: t('toolCards.change.statePermissionLost'),
                 unresolved: t('toolCards.change.stateUnresolved'),
+                withheld: t('toolCards.change.stateWithheld'),
             },
             diffAfter: t('toolCards.change.after'),
             diffBefore: t('toolCards.change.before'),
@@ -2682,6 +2810,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 tag: t('toolCards.outcomeFields.tag'),
                 stage: t('toolCards.outcomeFields.stage'),
                 owner: t('toolCards.outcomeFields.owner'),
+                website: t('toolCards.change.fieldWebsite'),
+                industry: t('toolCards.change.fieldIndustry'),
+                address: t('toolCards.change.fieldAddress'),
+                value: t('toolCards.change.fieldValue'),
+                expectedCloseDate: t('toolCards.change.fieldExpectedCloseDate'),
+                name: t('toolCards.change.fieldName'),
+                currency: t('toolCards.change.fieldCurrency'),
+                template: t('toolCards.change.fieldTemplate'),
                 other: t('toolCards.outcomeFields.other'),
             },
             outcomeValue: outcomeValueText,
@@ -2706,29 +2842,55 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             summaries: {
                 createActivity: t('toolCards.summaries.createActivity'),
                 createTask: t('toolCards.summaries.createTask'),
+                completeTask: t('toolCards.summaries.completeTask'),
+                rescheduleTask: t('toolCards.summaries.rescheduleTask'),
+                updateRecordFields: t('toolCards.summaries.updateRecordFields'),
+                recordFieldsUpdated: t('toolCards.summaries.recordFieldsUpdated'),
                 createNote: t('toolCards.summaries.createNote'),
+                createPerson: t('toolCards.summaries.createPerson'),
+                createDeal: t('toolCards.summaries.createDeal'),
+                createCompany: t('toolCards.summaries.createCompany'),
+                createReport: t('toolCards.summaries.createReport'),
+                personCreated: t('toolCards.summaries.personCreated'),
+                dealCreated: t('toolCards.summaries.dealCreated'),
+                companyCreated: t('toolCards.summaries.companyCreated'),
+                reportCreated: t('toolCards.summaries.reportCreated'),
                 addTag: t('toolCards.summaries.addTag'),
+                removeTag: t('toolCards.summaries.removeTag'),
+                removeTagNamed: (value: string) => t('toolCards.summaries.removeTagNamed', { value }),
+                draftDocument: t('toolCards.summaries.draftDocument'),
+                draftDocumentFrom: (value: string) => t('toolCards.summaries.draftDocumentFrom', { value }),
+                documentDrafted: t('toolCards.summaries.documentDrafted'),
                 changeDealStage: t('toolCards.summaries.changeDealStage'),
                 changeDealStageTo: (value: string) => t('toolCards.summaries.changeDealStageTo', { value }),
                 assignOwner: t('toolCards.summaries.assignOwner'),
                 assignOwnerTo: (value: string) => t('toolCards.summaries.assignOwnerTo', { value }),
                 removeOwner: t('toolCards.summaries.removeOwner'),
+                setResponseDue: t('toolCards.summaries.setResponseDue'),
+                setResponseDueIn: (hours: number) =>
+                    t('toolCards.summaries.setResponseDueIn', { hours }),
                 runWriteTool: t('toolCards.summaries.runWriteTool'),
                 requestRejected: t('toolCards.summaries.requestRejected'),
                 requestFailed: t('toolCards.summaries.requestFailed'),
                 createdRecordRemoved: t('toolCards.summaries.createdRecordRemoved'),
                 activityCreated: t('toolCards.summaries.activityCreated'),
                 taskCreated: t('toolCards.summaries.taskCreated'),
+                taskCompleted: t('toolCards.summaries.taskCompleted'),
+                taskRescheduled: t('toolCards.summaries.taskRescheduled'),
                 noteCreated: t('toolCards.summaries.noteCreated'),
                 tagAdded: t('toolCards.summaries.tagAdded'),
                 tagAlreadyPresent: t('toolCards.summaries.tagAlreadyPresent'),
+                tagRemoved: t('toolCards.summaries.tagRemoved'),
+                tagNotPresent: t('toolCards.summaries.tagNotPresent'),
                 dealStageChanged: t('toolCards.summaries.dealStageChanged'),
                 ownerRemoved: t('toolCards.summaries.ownerRemoved'),
                 ownerAssigned: t('toolCards.summaries.ownerAssigned'),
+                responseDueSet: t('toolCards.summaries.responseDueSet'),
+                responseDueAlreadySet: t('toolCards.summaries.responseDueAlreadySet'),
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
+    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({

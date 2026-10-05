@@ -2,14 +2,18 @@ package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
@@ -17,6 +21,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,8 +40,10 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 class PrivilegedMfaEnforcementFilterTest {
@@ -47,6 +54,8 @@ class PrivilegedMfaEnforcementFilterTest {
             new SessionSecurityProperties(), properties, Clock.systemUTC(),
             mock(UserMapper.class), mock(SpringSessionMapper.class)));
     private final AuditService auditService = mock(AuditService.class);
+    private final DenialAuditRateLimiter denialAuditRateLimiter =
+            new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry());
     private final FilterChain filterChain = mock(FilterChain.class);
     private PrivilegedMfaEnforcementFilter filter;
 
@@ -58,7 +67,9 @@ class PrivilegedMfaEnforcementFilterTest {
                 privilegedAccountService,
                 webAuthnService,
                 sessionSecurityService,
-                auditService);
+                auditService,
+                denialAuditRateLimiter,
+                new ClientIpResolver(""));
         User user = new User();
         user.setId(7);
         user.setDisplayName("Admin");
@@ -80,7 +91,106 @@ class PrivilegedMfaEnforcementFilterTest {
         assertTrue(response.getContentAsString().contains(
                 PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE));
         verify(filterChain, never()).doFilter(any(), any());
-        verify(auditService).recordFailureScoped(
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+    }
+
+    /**
+     * A cross-site navigation carries the {@code SameSite=Lax} session cookie, so another site can
+     * replay this denial at will. Every request is still refused, but the audit trail records the
+     * confinement once per window rather than once per forged visit (#1850).
+     */
+    @Test
+    void repeatedConfinementDenialsFromOneAddressAreAuditedOnce() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+        }
+
+        verify(filterChain, never()).doFilter(any(), any());
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+    }
+
+    @Test
+    void aConfinementDenialFromAnotherAddressIsAuditedAgain() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+        assertEquals(403, execute("GET", "/api/companies", "198.51.100.9").getStatus());
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+    }
+
+    @Test
+    void repeatedStepUpDenialsFromOneAddressAreAuditedOnce() throws Exception {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals(403, execute("GET", "/api/audit/export", "203.0.113.5").getStatus());
+        }
+        assertEquals(403, execute("GET", "/api/audit/export", "198.51.100.9").getStatus());
+
+        verify(filterChain, never()).doFilter(any(), any());
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq(AuditService.EXPORT_STEP_UP_ACTION), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq(AuditService.EXPORT_STEP_UP_SUMMARY), eq("step_up_required"));
+    }
+
+    /**
+     * The key is the address {@link ClientIpResolver} resolves, which is the one the audit row records,
+     * not the proxy's: behind a trusted proxy, two clients are two addresses.
+     */
+    @Test
+    void denialsAreKeyedOnTheResolvedClientAddressBehindATrustedProxy() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        PrivilegedMfaEnforcementFilter proxied = new PrivilegedMfaEnforcementFilter(
+                properties,
+                privilegedAccountService,
+                webAuthnService,
+                sessionSecurityService,
+                auditService,
+                new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry()),
+                new ClientIpResolver("10.0.0.0/8"));
+
+        for (String client : List.of("203.0.113.5", "203.0.113.5", "198.51.100.9")) {
+            MockHttpServletRequest request = request("GET", "/api/companies");
+            request.setRemoteAddr("10.0.0.2");
+            request.addHeader("X-Forwarded-For", client);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            proxied.doFilter(request, response, filterChain);
+            assertEquals(403, response.getStatus());
+        }
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+    }
+
+    /**
+     * A denial whose audit row could not be written must not silence the trail for the rest of the
+     * window, and the failure must never turn the refusal into anything but a 403.
+     */
+    @Test
+    void aDenialWhoseAuditFailedIsAuditedByTheNextOne() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        doThrow(new IllegalStateException("audit unavailable"))
+                .doNothing()
+                .when(auditService).recordStrictFailureIndependentScoped(
+                        any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
                 eq("enrollment_required"));
@@ -117,8 +227,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
         assertEquals(200, response.getStatus());
         verify(filterChain).doFilter(any(), any());
-        verify(auditService, never()).recordFailureScoped(
-                any(), any(), any(), any(), any(), any(), any(), any());
+        verifyNoInteractions(auditService);
     }
 
     private static Stream<Arguments> linkFlowPaths() {
@@ -319,8 +428,38 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(sessionSecurityService, org.mockito.Mockito.times(2)).isExportStepUpSatisfied(null, 7);
     }
 
+    /**
+     * An {@link Error} escaping the audit write must release the window as well; otherwise one dead
+     * write would silence the trail for the rest of the hour.
+     */
+    @Test
+    void aDenialWhoseAuditWriteDiedWithAnErrorIsAuditedByTheNextOne() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        doThrow(new LinkageError("audit write died"))
+                .doNothing()
+                .when(auditService).recordStrictFailureIndependentScoped(
+                        any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThrows(LinkageError.class, () -> execute("GET", "/api/companies", "203.0.113.5"));
+        assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+    }
+
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {
         MockHttpServletRequest request = request(method, path);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, filterChain);
+        return response;
+    }
+
+    private MockHttpServletResponse execute(String method, String path, String remoteAddress)
+            throws ServletException, IOException {
+        MockHttpServletRequest request = request(method, path);
+        request.setRemoteAddr(remoteAddress);
         MockHttpServletResponse response = new MockHttpServletResponse();
         filter.doFilter(request, response, filterChain);
         return response;

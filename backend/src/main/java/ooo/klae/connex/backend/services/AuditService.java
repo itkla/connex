@@ -12,6 +12,9 @@ import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -62,6 +65,14 @@ public class AuditService {
     public static final String EXPORT_STEP_UP_ACTION = "auth.mfa.step_up.required";
     public static final String EXPORT_STEP_UP_SUMMARY = "Recent MFA required for data export";
     public static final String EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON = "service_boundary";
+    public static final String SCHEDULE_DELETE_STEP_UP_SUMMARY =
+            "Recent MFA required to delete a report delivery schedule";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION =
+            "auth.passkey.bootstrap_confirmation.required";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY =
+            "First-passkey enrollment refused pending emailed confirmation";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON =
+            "bootstrap_confirmation_required";
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -181,6 +192,7 @@ public class AuditService {
             String targetLabel,
             String summary,
             Object changes) {
+        boolean inTransaction = TransactionSynchronizationManager.isActualTransactionActive();
         try {
             writeUnchecked(
                 action,
@@ -197,6 +209,7 @@ public class AuditService {
                 null,
                 false);
         } catch (Exception exception) {
+            rethrowIfTransactionLost(exception, false, inTransaction);
             log.error(
                 "Failed to record audit event action={} entityType={} entityId={}",
                 action,
@@ -324,10 +337,71 @@ public class AuditService {
      */
     public void recordFailure(String action, String entityType, Integer entityId,
             String targetLabel, String summary, String errorMessage) {
-        Object context = errorMessage == null ? null
-                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        Object context = failureContext(errorMessage);
         write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
                 false, null, null);
+    }
+
+    /**
+     * Records the same failure as {@link #recordFailure}, appended once the current transaction has
+     * completed.
+     *
+     * <p>For a refusal decided while the <em>current</em> transaction holds a row the independent
+     * append locks, such as the actor's {@code app_user} row. Holding it exclusively, an immediate
+     * append would wait on this transaction's own lock until the InnoDB timeout; holding it shared, it
+     * would queue behind any writer already waiting on this transaction (#1986, #1993). It does not
+     * help from an inner {@code REQUIRES_NEW} transaction while a suspended outer one holds the lock:
+     * the append would run when the inner one completes and wait on the outer lock. Never use it where
+     * the row must exist before the operation continues; use a strict recorder there. The entry,
+     * including its tenant scope, actor and request metadata, is built at the call. Delivery is
+     * best-effort, as for the deferred step-up recorders, and this method never throws. Without an
+     * active transaction synchronization the row is appended immediately.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param errorMessage sanitized error class or reason
+     */
+    public void deferFailure(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, String errorMessage) {
+        deferFailureEntry(action, entityType, entityId, targetLabel, summary, errorMessage, false,
+                null, null);
+    }
+
+    /**
+     * Records the same failure as {@link #recordFailureScoped}, appended once the current transaction
+     * has completed, under the same contract as {@link #deferFailure}: for a refusal decided while
+     * the current transaction holds a row the independent append locks, built at the call with its
+     * explicit scope, actor and request metadata, best-effort, and never throwing (#1995).
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param errorMessage sanitized error class or reason
+     */
+    public void deferFailureScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String errorMessage) {
+        deferFailureEntry(action, entityType, entityId, targetLabel, summary, errorMessage, true,
+                workspaceId, orgId);
+    }
+
+    private void deferFailureEntry(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, String errorMessage, boolean explicitScope,
+            Integer workspaceId, Integer orgId) {
+        Object context = failureContext(errorMessage);
+        try {
+            deferIndependent(buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary,
+                    null, context, explicitScope, workspaceId, orgId, true));
+        } catch (Exception e) {
+            log.error("Failed to record audit event action={} entityType={} entityId={}",
+                    action, entityType, entityId, e);
+        }
     }
 
     /**
@@ -343,10 +417,13 @@ public class AuditService {
      */
     public void recordFailureScoped(String action, String entityType, Integer entityId,
             Integer workspaceId, Integer orgId, String targetLabel, String summary, String errorMessage) {
-        Object context = errorMessage == null ? null
-                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        Object context = failureContext(errorMessage);
         write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
                 true, workspaceId, orgId);
+    }
+
+    private static Object failureContext(String errorMessage) {
+        return errorMessage == null ? null : Map.of("error", truncate(errorMessage, ERROR_MAX));
     }
 
     /**
@@ -363,13 +440,70 @@ public class AuditService {
     private void write(String action, String entityType, Integer entityId, String targetLabel,
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId) {
+        boolean inTransaction = TransactionSynchronizationManager.isActualTransactionActive();
         try {
-            writeUnchecked(action, entityType, entityId, targetLabel, outcome, summary, changes,
-                    context, independent, explicitScope, workspaceId, orgId, true);
+            AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, outcome, summary,
+                    changes, context, explicitScope, workspaceId, orgId, true);
+            if (independent && auditIntegrityService.holdsHead(entry)) {
+                deferIndependent(entry);
+            } else {
+                appendAndObserve(entry, independent);
+            }
         } catch (Exception e) {
+            rethrowIfTransactionLost(e, independent, inTransaction);
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
         }
+    }
+
+    /**
+     * Rethrows an audit failure that means the caller's transaction no longer exists.
+     *
+     * <p>An audit failure normally must not break the operation it records. But inside the caller's
+     * transaction a {@code NESTED} append runs on a savepoint, and fails with
+     * {@link TransactionSystemException} only when that savepoint is gone, as it is after the database
+     * rolled the whole transaction back on a deadlock. That transaction can no longer commit, so the
+     * operation stops here instead of running on into the implicit transaction that replaced it
+     * (#1947). Without a caller transaction the append runs on its own, and an independent append
+     * always does, so their failures never mean that.
+     */
+    private static void rethrowIfTransactionLost(Exception failure, boolean independent, boolean inTransaction) {
+        if (inTransaction && !independent && failure instanceof TransactionSystemException lost) {
+            throw lost;
+        }
+    }
+
+    /**
+     * Appends an independent audit row once the current transaction has completed.
+     *
+     * <p>Used when an immediate {@code REQUIRES_NEW} append would wait on a lock this transaction
+     * holds or keeps contended. When this transaction already holds the entry's integrity head, the
+     * append would suspend the holder and then wait on its own lock for the full InnoDB lock-wait
+     * timeout before failing, losing the row (#1879). When it holds the actor's {@code app_user} row
+     * {@code FOR SHARE}, the append's own shared request on that row queues behind any exclusive
+     * request already waiting on it, which in turn waits on this transaction (#1986). After
+     * completion those locks have been released, and the row is recorded whether the holder
+     * committed or rolled back. Delivery is best-effort, as for any independent append: the
+     * append's own waits are not bounded, and a failure or a crash before it commits loses the row.
+     * The entry is built at the call, so its actor and request metadata are those of the refused
+     * operation, not of whatever runs later.
+     */
+    private void deferIndependent(AuditLog entry) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            appendAndObserve(entry, true);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    appendAndObserve(entry, true);
+                } catch (Exception e) {
+                    log.error("Failed to record deferred audit event action={} entityType={} entityId={}",
+                            entry.getAction(), entry.getEntityType(), entry.getEntityId(), e);
+                }
+            }
+        });
     }
 
     /**
@@ -379,6 +513,14 @@ public class AuditService {
             String outcome, String summary, Object changes, Object context, boolean independent,
             boolean explicitScope, Integer workspaceId, Integer orgId,
             boolean includeRequestMetadata) {
+        appendAndObserve(buildEntry(action, entityType, entityId, targetLabel, outcome, summary,
+                changes, context, explicitScope, workspaceId, orgId, includeRequestMetadata),
+                independent);
+    }
+
+    private AuditLog buildEntry(String action, String entityType, Integer entityId, String targetLabel,
+            String outcome, String summary, Object changes, Object context, boolean explicitScope,
+            Integer workspaceId, Integer orgId, boolean includeRequestMetadata) {
         AuditLog entry = new AuditLog();
         entry.setAction(truncate(action, ACTION_MAX));
         entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
@@ -401,7 +543,10 @@ public class AuditService {
         if (includeRequestMetadata) {
             resolveRequest(entry);
         }
+        return entry;
+    }
 
+    private void appendAndObserve(AuditLog entry, boolean independent) {
         if (independent) {
             auditIntegrityService.appendIndependent(entry);
         } else {
@@ -524,28 +669,89 @@ public class AuditService {
     }
 
     /**
-     * Records the service-boundary refusal of an export that carried no fresh passkey assertion.
+     * Records the service-boundary refusal of an export, or of a mutation that would open a
+     * scheduled one, that carried no fresh passkey assertion.
      *
      * <p>The path-matching filter emits the same action for the requests it recognises. The
      * {@code service_boundary} reason marks the independent guard that runs even when no filter
      * matched the route, so a refusal reached only by the deeper control stays distinguishable in
      * the audit trail instead of looking like the filter refused it.
      *
-     * <p>The entry is appended in an independent transaction that re-takes the actor's
-     * {@code app_user} row {@code FOR SHARE}, so this must not be called from a transaction that
-     * already holds that row {@code FOR UPDATE}; it would wait on its own lock.
+     * <p>The entry is appended immediately in an independent transaction that re-takes the actor's
+     * {@code app_user} row {@code FOR SHARE}. A transaction that already holds that row, shared or
+     * exclusive, must use {@link #deferExportStepUpRefusal()} instead: holding it exclusively, the
+     * append would wait on its own lock, and holding it shared, the append would queue behind any
+     * writer already waiting on this transaction.
      */
     public void recordExportStepUpRefused() {
-        Integer actorId = null;
-        String actorLabel = null;
+        recordStepUpRefused(EXPORT_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the same refusal as {@link #recordExportStepUpRefused()}, appended once the current
+     * transaction has completed.
+     *
+     * <p>For a gate that refuses while it holds the actor's {@code app_user} row. Deferring removes the
+     * wait cycle an immediate append can form with a writer queued on that row (#1986); it does not
+     * bound the append's own waits or guarantee delivery. Without an active transaction
+     * synchronization the row is appended immediately.
+     */
+    public void deferExportStepUpRefusal() {
+        deferStepUpRefusal(EXPORT_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the refusal of a deletion that destroys a report delivery schedule.
+     *
+     * <p>Covers both routes to that outcome: the direct schedule endpoint, and deleting the parent
+     * report, whose cascade is the reason that endpoint is gated at all. Same action and reason as
+     * {@link #recordExportStepUpRefused()}, which the whole step-up control shares, but its summary
+     * names data export. No export is attempted on either route, so reusing it would describe a
+     * refused destructive deletion as a refused download to anyone reading the trail or alerting
+     * on it.
+     */
+    public void recordScheduleDeleteStepUpRefused() {
+        recordStepUpRefused(SCHEDULE_DELETE_STEP_UP_SUMMARY);
+    }
+
+    /**
+     * Records the same refusal as {@link #recordScheduleDeleteStepUpRefused()}, appended once the
+     * current transaction has completed, for a gate that refuses while it holds the actor's
+     * {@code app_user} row; see {@link #deferExportStepUpRefusal()}.
+     */
+    public void deferScheduleDeleteStepUpRefusal() {
+        deferStepUpRefusal(SCHEDULE_DELETE_STEP_UP_SUMMARY);
+    }
+
+    private void recordStepUpRefused(String summary) {
+        StepUpActor actor = stepUpActor();
+        recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actor.id(), null, null, actor.label(),
+                summary, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+    }
+
+    private void deferStepUpRefusal(String summary) {
+        StepUpActor actor = stepUpActor();
+        try {
+            deferIndependent(buildEntry(EXPORT_STEP_UP_ACTION, "user", actor.id(), actor.label(),
+                    OUTCOME_FAILURE, summary, null,
+                    Map.of("error", truncate(EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON, ERROR_MAX)),
+                    true, null, null, true));
+        } catch (Exception e) {
+            log.error("Failed to record audit event action={} entityType={} entityId={}",
+                    EXPORT_STEP_UP_ACTION, "user", actor.id(), e);
+        }
+    }
+
+    private static StepUpActor stepUpActor() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && authentication.getPrincipal() instanceof User user) {
-            actorId = user.getId();
-            actorLabel = user.getDisplayName();
+            return new StepUpActor(user.getId(), user.getDisplayName());
         }
-        recordFailureScoped(EXPORT_STEP_UP_ACTION, "user", actorId, null, null, actorLabel,
-                EXPORT_STEP_UP_SUMMARY, EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON);
+        return new StepUpActor(null, null);
+    }
+
+    private record StepUpActor(Integer id, String label) {
     }
 
     private void requireExportStepUp() {

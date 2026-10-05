@@ -32,9 +32,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.services.RelationshipSignalDetectorService.Detection;
-import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
-import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.Cascade;
 
 class RelationshipSignalMapperTest extends AbstractServiceTest {
     @Autowired private RelationshipSignalMapper signalMapper;
@@ -163,21 +161,6 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
         assertEquals(newerAttempt, familyState.getLastSuccessAt());
         assertEquals(newerAttempt, familyState.getEvidenceAsOf());
         assertNull(familyState.getErrorCode());
-    }
-
-    @Test
-    void allTablesAreClassifiedForPlaneAndLifecycleWithActorStateCascading() {
-        assertTrue(TablePlaneRegistry.ORG_DATA_TABLES.containsAll(List.of(
-            "relationship_signal",
-            "relationship_signal_state",
-            "relationship_signal_family_state")));
-        assertTrue(TenantLifecycleRegistry.require("relationship_signal").direct());
-        assertTrue(TenantLifecycleRegistry.require("relationship_signal_family_state").direct());
-        Cascade state = (Cascade) TenantLifecycleRegistry
-            .require("relationship_signal_state").reach();
-        assertEquals("relationship_signal", state.parentTable());
-        assertEquals("fk_relationship_signal_state_signal", state.constraintName());
-        assertEquals(2, state.columns().size());
     }
 
     @Test

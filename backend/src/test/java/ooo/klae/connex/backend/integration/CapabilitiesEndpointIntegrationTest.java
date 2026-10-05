@@ -23,10 +23,7 @@ import ooo.klae.connex.backend.support.AuthenticatedSessions;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 
-@SpringBootTest(properties = {
-    "connex.mail.managed=true",
-    "connex.security.privileged-mfa.enforced=true"
-})
+@SpringBootTest(properties = "connex.mail.managed=true")
 class CapabilitiesEndpointIntegrationTest {
 
     @Autowired private WebApplicationContext context;

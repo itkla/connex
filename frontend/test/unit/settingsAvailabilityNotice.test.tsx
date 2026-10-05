@@ -42,21 +42,37 @@ const STATES: readonly SettingsAvailabilityState[] = ["managed", "not-enabled", 
 
 const LOCALES = ["en", "ja"] as const;
 
+function isCatalog(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function freezeCatalog(value: unknown): void {
+    if (typeof value !== "object" || value === null) return;
+    Object.values(value).forEach(freezeCatalog);
+    Object.freeze(value);
+}
+
 function catalog(language: string): Record<string, unknown> {
     const directory = path.join(process.cwd(), "messages", language);
     const merged: Record<string, unknown> = {};
     for (const file of readdirSync(directory).sort()) {
         if (!file.endsWith(".json")) continue;
-        Object.assign(merged, JSON.parse(readFileSync(path.join(directory, file), "utf8")) as object);
+        const parsed: unknown = JSON.parse(readFileSync(path.join(directory, file), "utf8"));
+        if (!isCatalog(parsed)) throw new Error(`invalid catalog ${language}/${file}`);
+        Object.assign(merged, parsed);
     }
+    freezeCatalog(merged);
     return merged;
 }
 
+const catalogs = new Map(LOCALES.map((language) => [language, catalog(language)]));
+
 function message(language: string, key: string): string {
-    let current: unknown = catalog(language);
+    if (language !== "en" && language !== "ja") throw new Error(`unsupported locale ${language}`);
+    let current: unknown = catalogs.get(language);
     for (const segment of key.split(".")) {
-        if (typeof current !== "object" || current === null) throw new Error(`unresolved ${key}`);
-        current = (current as Record<string, unknown>)[segment];
+        if (!isCatalog(current)) throw new Error(`unresolved ${key}`);
+        current = current[segment];
     }
     if (typeof current !== "string") throw new Error(`unresolved ${key}`);
     return current;

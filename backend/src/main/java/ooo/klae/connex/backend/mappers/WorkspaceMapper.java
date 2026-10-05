@@ -88,6 +88,28 @@ public interface WorkspaceMapper {
         @Param("afterId") int afterId, @Param("limit") int limit);
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
+    /**
+     * Loads the id, organization and name of every workspace in the anchor workspace's
+     * organization, ordered by name then id. This is the control-plane snapshot record sharing
+     * uses as its same-organization ceiling and as its workspace-name hydration source (#811), so
+     * it deliberately applies no lifecycle filter — the {@code ShareMapper} joins it replaces
+     * applied none either. {@link #findByOrgId} answers the same question for the read-path
+     * ceilings and does filter on lifecycle, so the two statements return different sets for a
+     * winding-down organization and neither may be substituted for the other.
+     *
+     * @param workspaceId workspace anchoring the organization
+     * @return id/org/name rows in name then id order, empty when the anchor does not exist
+     */
+    List<Workspace> findOrganizationWorkspacesForShare(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Loads every active workspace of an active organization, which is the scope the read-path
+     * organization ceilings bind. It diverges from
+     * {@link #findOrganizationWorkspacesForShare} by filtering on lifecycle state.
+     *
+     * @param orgId organization to resolve
+     * @return the organization's active workspaces in id order
+     */
     List<Workspace> findByOrgId(@Param("orgId") int orgId);
     List<Workspace> findActiveByOrgIdPage(
         @Param("orgId") int orgId,

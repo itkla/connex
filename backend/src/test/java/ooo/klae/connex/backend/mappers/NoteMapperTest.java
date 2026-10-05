@@ -38,18 +38,6 @@ class NoteMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Inserts a new note and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Note note = build("hello", newUser(), null, null);
-
-        noteMapper.insert(note);
-
-        assertNotEquals(0, note.getId());
-    }
-
-    /**
      * Gets a note by ID and checks if the returned note is not null.
      */
     @Test
@@ -90,6 +78,7 @@ class NoteMapperTest extends AbstractMapperTest {
         Note note = build("orphan note", newUser(), null, null);
 
         noteMapper.insert(note);
+        assertNotEquals(0, note.getId());
 
         Note found = noteMapper.getNoteById(workspace.getId(), note.getId());
         assertNotNull(found);

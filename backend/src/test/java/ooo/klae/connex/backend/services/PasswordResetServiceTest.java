@@ -145,11 +145,12 @@ class PasswordResetServiceTest extends AbstractServiceTest {
         for (int i = 0; i < 5; i++) {
             passwordResetService.requestReset(user.getEmail(), unique());
         }
-        int callsBeforeLimit = email.calls;
+        assertEquals(5, email.calls);
+        assertEquals(5, passwordResetTokenMapper.countRecentByUser(user.getId(), 900));
         passwordResetService.requestReset(user.getEmail(), unique());
 
-        assertEquals(callsBeforeLimit, email.calls, "requests beyond the limit must not send more emails");
-        assertTrue(passwordResetTokenMapper.countRecentByUser(user.getId(), 900) <= 5);
+        assertEquals(5, email.calls, "requests beyond the limit must not send more emails");
+        assertEquals(5, passwordResetTokenMapper.countRecentByUser(user.getId(), 900));
     }
 
     /**

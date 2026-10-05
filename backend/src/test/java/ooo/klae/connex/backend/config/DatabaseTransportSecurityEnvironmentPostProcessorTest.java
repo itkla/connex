@@ -18,6 +18,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.util.Map;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
@@ -267,178 +273,6 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
     }
 
     @Test
-    void failsOutsideDevAndTestForNonMysqlDatasourceUrl() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mariadb://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenSslModeIsMissing() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenSslModeDoesNotVerifyCertificateAuthority() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=REQUIRED")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenLegacyTlsModeQueryParameterCanConflictWithVerifiedSslMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty(
-                "spring.datasource.url",
-                "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA&useSSL=false"
-            )
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenSslModeIsAmbiguous() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty(
-                "spring.datasource.url",
-                "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA&sslMode=DISABLED"
-            )
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHostSpecificSslModeCanOverrideVerifiedGlobalMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty(
-                "spring.datasource.url",
-                "jdbc:mysql://address=(host=db.example.com)(port=3306)(sslMode=DISABLED)/connexdb?sslMode=VERIFY_CA"
-            )
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenEncodedHostSpecificSslModeCanOverrideVerifiedGlobalMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty(
-                "spring.datasource.url",
-                "jdbc:mysql://address=(host=db.example.com)(port=3306)(ssl%4dode=DISABLED)/connexdb?sslMode=VERIFY_CA"
-            )
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHostSpecificLegacyTlsModeCanConflictWithVerifiedSslMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty(
-                "spring.datasource.url",
-                "jdbc:mysql://address=(host=db.example.com)(port=3306)(useSSL=false)/connexdb?sslMode=VERIFY_CA"
-            )
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHikariJdbcUrlCanOverrideDatasourceUrl() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.hikari.jdbc-url", "jdbc:mysql://db.example.com:3306/connexdb");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHikariJdbcUrlIsBlank() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.hikari.jdbc-url", " ");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHikariDataSourceClassCanBypassValidatedUrl() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.hikari.data-source-class-name", "com.mysql.cj.jdbc.MysqlDataSource");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenDatasourceTypeCanBypassValidatedUrl() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.type", "com.mysql.cj.jdbc.MysqlDataSource");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHikariJndiCanBypassValidatedUrl() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.hikari.data-source-j-n-d-i", "jdbc/connex");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenHikariDatasourcePropertiesCanOverrideSslMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.datasource.hikari.data-source-properties.sslMode", "DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenEnvironmentStyleHikariDatasourcePropertiesCanOverrideSslMode() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_SSLMODE", "DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
     void allowsVerifyCaOutsideDevAndTest() {
         MockEnvironment environment = productionEnvironment()
             .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
@@ -457,52 +291,6 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
             .withProperty("spring.datasource.hikari.jdbc-url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA");
 
         assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenFlywayUrlDisablesTls() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.flyway.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenEnvironmentStyleFlywayUrlDisablesTls() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("SPRING_FLYWAY_URL", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenFlywayJdbcPropertiesDisableTls() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("spring.flyway.url",
-                "jdbc:mysql://migrations.example.com:3306/connexdb?sslMode=VERIFY_IDENTITY")
-            .withProperty("spring.flyway.jdbc-properties.sslMode", "DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
-    }
-
-    @Test
-    void failsOutsideDevAndTestWhenEnvironmentStyleFlywayJdbcPropertiesDisableTls() {
-        MockEnvironment environment = productionEnvironment()
-            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
-            .withProperty("spring.datasource.username", "connex")
-            .withProperty("spring.datasource.password", "x")
-            .withProperty("SPRING_FLYWAY_JDBC_PROPERTIES_SSLMODE", "DISABLED");
-
-        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
     }
 
     @Test
@@ -670,6 +458,78 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
         }
         ConfigurationPropertySources.attach(environment);
         return environment;
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rejectedDatasourceUrls")
+    void rejectsDatasourceUrl(String scenario, String url) {
+        MockEnvironment environment = productionEnvironment(url);
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("rejectedOverrideProperties")
+    void rejectsOverrideProperties(String scenario, Map<String, String> overrides) {
+        MockEnvironment environment = productionEnvironment(
+            "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA");
+        overrides.forEach(environment::withProperty);
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    private static Stream<Arguments> rejectedDatasourceUrls() {
+        return Stream.of(
+            Arguments.of("failsOutsideDevAndTestForNonMysqlDatasourceUrl",
+                "jdbc:mariadb://db.example.com:3306/connexdb?sslMode=VERIFY_CA"),
+            Arguments.of("failsOutsideDevAndTestWhenSslModeIsMissing",
+                "jdbc:mysql://db.example.com:3306/connexdb"),
+            Arguments.of("failsOutsideDevAndTestWhenSslModeDoesNotVerifyCertificateAuthority",
+                "jdbc:mysql://db.example.com:3306/connexdb?sslMode=REQUIRED"),
+            Arguments.of("failsOutsideDevAndTestWhenLegacyTlsModeQueryParameterCanConflictWithVerifiedSslMode",
+                "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA&useSSL=false"),
+            Arguments.of("failsOutsideDevAndTestWhenSslModeIsAmbiguous",
+                "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA&sslMode=DISABLED"),
+            Arguments.of("failsOutsideDevAndTestWhenHostSpecificSslModeCanOverrideVerifiedGlobalMode",
+                "jdbc:mysql://address=(host=db.example.com)(port=3306)(sslMode=DISABLED)/connexdb?sslMode=VERIFY_CA"),
+            Arguments.of("failsOutsideDevAndTestWhenEncodedHostSpecificSslModeCanOverrideVerifiedGlobalMode",
+                "jdbc:mysql://address=(host=db.example.com)(port=3306)(ssl%4dode=DISABLED)/connexdb?sslMode=VERIFY_CA"),
+            Arguments.of("failsOutsideDevAndTestWhenHostSpecificLegacyTlsModeCanConflictWithVerifiedSslMode",
+                "jdbc:mysql://address=(host=db.example.com)(port=3306)(useSSL=false)/connexdb?sslMode=VERIFY_CA"));
+    }
+
+    private static Stream<Arguments> rejectedOverrideProperties() {
+        return Stream.of(
+            Arguments.of("failsOutsideDevAndTestWhenHikariJdbcUrlCanOverrideDatasourceUrl", Map.of(
+                "spring.datasource.hikari.jdbc-url", "jdbc:mysql://db.example.com:3306/connexdb")),
+            Arguments.of("failsOutsideDevAndTestWhenHikariJdbcUrlIsBlank", Map.of(
+                "spring.datasource.hikari.jdbc-url", " ")),
+            Arguments.of("failsOutsideDevAndTestWhenHikariDataSourceClassCanBypassValidatedUrl", Map.of(
+                "spring.datasource.hikari.data-source-class-name", "com.mysql.cj.jdbc.MysqlDataSource")),
+            Arguments.of("failsOutsideDevAndTestWhenDatasourceTypeCanBypassValidatedUrl", Map.of(
+                "spring.datasource.type", "com.mysql.cj.jdbc.MysqlDataSource")),
+            Arguments.of("failsOutsideDevAndTestWhenHikariJndiCanBypassValidatedUrl", Map.of(
+                "spring.datasource.hikari.data-source-j-n-d-i", "jdbc/connex")),
+            Arguments.of("failsOutsideDevAndTestWhenHikariDatasourcePropertiesCanOverrideSslMode", Map.of(
+                "spring.datasource.hikari.data-source-properties.sslMode", "DISABLED")),
+            Arguments.of("failsOutsideDevAndTestWhenEnvironmentStyleHikariDatasourcePropertiesCanOverrideSslMode", Map.of(
+                "SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_SSLMODE", "DISABLED")),
+            Arguments.of("failsOutsideDevAndTestWhenFlywayUrlDisablesTls", Map.of(
+                "spring.flyway.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED")),
+            Arguments.of("failsOutsideDevAndTestWhenEnvironmentStyleFlywayUrlDisablesTls", Map.of(
+                "SPRING_FLYWAY_URL", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED")),
+            Arguments.of("failsOutsideDevAndTestWhenFlywayJdbcPropertiesDisableTls", Map.of(
+                "spring.flyway.url", "jdbc:mysql://migrations.example.com:3306/connexdb?sslMode=VERIFY_IDENTITY",
+                "spring.flyway.jdbc-properties.sslMode", "DISABLED")),
+            Arguments.of("failsOutsideDevAndTestWhenEnvironmentStyleFlywayJdbcPropertiesDisableTls", Map.of(
+                "SPRING_FLYWAY_JDBC_PROPERTIES_SSLMODE", "DISABLED")));
+    }
+
+    private static MockEnvironment productionEnvironment(String datasourceUrl) {
+        return productionEnvironment()
+            .withProperty("spring.datasource.url", datasourceUrl)
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x");
     }
 
     private static MockEnvironment productionEnvironment() {

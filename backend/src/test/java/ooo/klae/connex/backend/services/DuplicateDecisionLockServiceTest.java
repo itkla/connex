@@ -199,6 +199,64 @@ class DuplicateDecisionLockServiceTest {
         order.verify(organizationMapper).lockDuplicateDecision(3);
     }
 
+    /**
+     * Pipeline sharing takes the same actor, workspace and membership roots, in the same order, as
+     * a company or person grant, so the target workspace row is held from before its organization
+     * ceiling is judged until the tenant insert lands. It stops short of the duplicate mutex: a
+     * pipeline is not a duplicate candidate, so entering it would serialize pipeline sharing
+     * behind every person and company decision in the organization for no invariant of its own.
+     */
+    @Test
+    void pipelineGrantRetainsTheSameSortedRootsWithoutEnteringTheDuplicateMutex() {
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentOrgId()).thenReturn(3);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockActiveWorkspaceForShare(5)).thenReturn(3);
+        when(workspaceMapper.lockActiveWorkspaceForShare(7)).thenReturn(3);
+        when(workspaceMapper.lockAuthorizationMembership(5, 9))
+            .thenReturn(membership("active"));
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership("active"));
+        Map<Integer, Set<Permission>> required = Map.of(9, Set.of(Permission.SHARE_MANAGE));
+        LockedPermissionSnapshot authority = mock(LockedPermissionSnapshot.class);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(7, required)).thenReturn(authority);
+
+        assertEquals(authority, service()
+            .lockCurrentWorkspacesWithMemberWorkspace(5, Permission.SHARE_MANAGE));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, workspaceService);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(5);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(5, 9);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(7, required);
+        verify(organizationMapper, never()).lockActiveByIdForShare(3);
+        verify(organizationMapper, never()).lockDuplicateDecision(3);
+    }
+
+    /**
+     * A target workspace the lock no longer finds active is refused before any authority is
+     * derived, which is what stops a grant consuming a pre-lock organization snapshot that still
+     * lists a workspace whose teardown has since committed.
+     */
+    @Test
+    void pipelineGrantRefusesATargetWorkspaceThatIsNoLongerActive() {
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentOrgId()).thenReturn(3);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockActiveWorkspaceForShare(5)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service()
+            .lockCurrentWorkspacesWithMemberWorkspace(5, Permission.SHARE_MANAGE));
+
+        verify(workspaceMapper, never()).lockAuthorizationMembership(5, 9);
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(
+            7, Map.of(9, Set.of(Permission.SHARE_MANAGE)));
+    }
+
     @Test
     void revokedPermissionRejectsBeforeDuplicateMutex() {
         when(workspaceService.getCurrentUserId()).thenReturn(9);

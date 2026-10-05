@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.math.BigDecimal;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
@@ -241,9 +242,11 @@ class RelationshipEvidenceSecurityIntegrationTest {
         note(ownerWorkspace, owner, person, "private");
         task(ownerWorkspace, owner, person);
         shareMapper.sharePerson(
-            person.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(), owner.getId(), false);
+            person.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(), owner.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
         shareMapper.shareCompany(
-            company.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(), owner.getId(), false);
+            company.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(), owner.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId()));
 
         MockHttpSession granteeSession = login(grantee.getUsername());
         mockMvc.perform(get(contactEvidencePath(person))

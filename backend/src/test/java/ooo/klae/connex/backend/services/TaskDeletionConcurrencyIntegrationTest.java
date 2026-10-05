@@ -24,6 +24,8 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -161,8 +163,9 @@ class TaskDeletionConcurrencyIntegrationTest {
         assertDeleteSideEffectsOccurredOnce();
     }
 
-    @Test
-    void boardRootMakesConcurrentDeleteHitDatabaseLockTimeout() throws Exception {
+    @ParameterizedTest
+    @EnumSource(CompetingMutation.class)
+    void competingMutationTimesOutWhileDeleteOwnsBoard(CompetingMutation mutation) throws Exception {
         int workspaceId = workspace.getId();
         int taskId = task.getId();
         int orgId = organization.getId();
@@ -202,7 +205,12 @@ class TaskDeletionConcurrencyIntegrationTest {
         try {
             Future<Boolean> first = executor.submit(() -> deleteTask(taskId, workspaceId, orgId));
             assertTrue(firstLocked.await(10, TimeUnit.SECONDS));
-            Future<Boolean> second = executor.submit(() -> deleteTask(taskId, workspaceId, orgId));
+            Future<?> second = executor.submit(() -> {
+                switch (mutation) {
+                    case DELETE -> deleteTask(taskId, workspaceId, orgId);
+                    case UPDATE -> updateTask(taskId, workspaceId, orgId);
+                }
+            });
             assertTrue(secondReadStarted.await(10, TimeUnit.SECONDS));
 
             ExecutionException failure = assertThrows(
@@ -221,64 +229,9 @@ class TaskDeletionConcurrencyIntegrationTest {
         assertDeleteSideEffectsOccurredOnce();
     }
 
-    @Test
-    void boardLockedDeleteMakesConcurrentUpdateHitDatabaseLockTimeout() throws Exception {
-        int workspaceId = workspace.getId();
-        int taskId = task.getId();
-        int orgId = organization.getId();
-        CountDownLatch firstLocked = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        CountDownLatch secondReadStarted = new CountDownLatch(1);
-        AtomicInteger lockAttempts = new AtomicInteger();
-        TaskMapper realTaskMapper = sqlSessionTemplate.getMapper(TaskMapper.class);
-        doAnswer(invocation -> {
-            int lockAttempt = lockAttempts.incrementAndGet();
-            if (lockAttempt == 2) {
-                secondReadStarted.countDown();
-                Integer previousTimeout = jdbcTemplate.queryForObject(
-                    "SELECT @@SESSION.innodb_lock_wait_timeout",
-                    Integer.class
-                );
-                jdbcTemplate.execute("SET SESSION innodb_lock_wait_timeout = 1");
-                try {
-                    realTaskMapper.lockTaskBoard(workspaceId);
-                    return null;
-                } finally {
-                    if (previousTimeout != null) {
-                        jdbcTemplate.execute(
-                            "SET SESSION innodb_lock_wait_timeout = " + previousTimeout);
-                    }
-                }
-            }
-            realTaskMapper.lockTaskBoard(workspaceId);
-            if (lockAttempt == 1) {
-                firstLocked.countDown();
-                assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
-            }
-            return null;
-        }).when(taskMapperSpy).lockTaskBoard(workspaceId);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        try {
-            Future<Boolean> deletion = executor.submit(() -> deleteTask(taskId, workspaceId, orgId));
-            assertTrue(firstLocked.await(10, TimeUnit.SECONDS));
-            Future<Task> update = executor.submit(() -> updateTask(taskId, workspaceId, orgId));
-            assertTrue(secondReadStarted.await(10, TimeUnit.SECONDS));
-
-            ExecutionException failure = assertThrows(
-                ExecutionException.class,
-                () -> update.get(5, TimeUnit.SECONDS)
-            );
-            assertTrue(hasCause(failure, CannotAcquireLockException.class));
-            releaseFirst.countDown();
-            assertTrue(deletion.get(20, TimeUnit.SECONDS));
-        } finally {
-            releaseFirst.countDown();
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
-        }
-
-        assertDeleteSideEffectsOccurredOnce();
+    private enum CompetingMutation {
+        DELETE,
+        UPDATE
     }
 
     @Test

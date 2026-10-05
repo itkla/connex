@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
-import java.io.IOException;
 import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.core.type.classreading.MetadataReader;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -93,7 +91,7 @@ class TenantJournalAttributionArchTest {
     @Test
     void conditionallyRegisteredControllersAreVisibleToTheClientDrivenScan() {
         List<Class<?>> conditionAware = scanControllers(BACKEND_PACKAGE);
-        List<Class<?>> conditionIndependent = scanAllControllers(BACKEND_PACKAGE);
+        List<Class<?>> conditionIndependent = ControllerDiscovery.scanAllControllers(BACKEND_PACKAGE, Controller.class);
 
         assertTrue(conditionIndependent.containsAll(conditionAware),
             "The condition-independent scan must not lose a controller the ordinary scan returns");
@@ -111,7 +109,7 @@ class TenantJournalAttributionArchTest {
         List<String> actual = new ArrayList<>();
         List<String> fullySilent = new ArrayList<>();
         List<String> unjournaled = new ArrayList<>();
-        for (Class<?> controller : scanAllControllers(BACKEND_PACKAGE)) {
+        for (Class<?> controller : ControllerDiscovery.scanAllControllers(BACKEND_PACKAGE, Controller.class)) {
             boolean classAttributable =
                 AnnotatedElementUtils.hasAnnotation(controller, TenantJournalAttributable.class);
             for (Method method : controller.getDeclaredMethods()) {
@@ -212,20 +210,6 @@ class TenantJournalAttributionArchTest {
 
     private static List<Class<?>> scanControllers(String basePackage) {
         return collect(new ClassPathScanningCandidateComponentProvider(false), basePackage);
-    }
-
-    /**
-     * Scans controllers without evaluating {@code @Conditional}, so a conditionally registered
-     * controller cannot hide a journal marker from an exact-set assertion.
-     */
-    private static List<Class<?>> scanAllControllers(String basePackage) {
-        return collect(new ClassPathScanningCandidateComponentProvider(false) {
-            @Override
-            protected boolean isCandidateComponent(MetadataReader metadataReader) throws IOException {
-                return new AnnotationTypeFilter(Controller.class)
-                    .match(metadataReader, getMetadataReaderFactory());
-            }
-        }, basePackage);
     }
 
     private static List<Class<?>> collect(

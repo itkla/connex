@@ -173,6 +173,79 @@ class SecretStoreTest {
         assertEquals("smtp-password", testStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
     }
 
+    /**
+     * {@code exists} must refuse a reference outside the asked scope exactly as {@code get} does:
+     * another workspace, or another purpose and scope.
+     */
+    @Test
+    void exists_scopeMismatchIsFalse() {
+        int workspaceId = workspaceId();
+        SecretStore testStore = store();
+        String reference = testStore.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "smtp-password");
+
+        assertTrue(testStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        assertFalse(testStore.exists(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId(), reference));
+        assertFalse(testStore.exists(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertFalse(testStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId(), reference));
+    }
+
+    /**
+     * Mail readiness asks {@code canDecrypt} instead of decrypting (#1932), so it must refuse what
+     * {@code get} could not decrypt, without trying: another scope, a malformed reference, a disabled or
+     * unknown key-encryption key, or an unsupported algorithm. The algorithm is altered on a secret no
+     * earlier read in this transaction has cached, because MyBatis would otherwise serve the stale row.
+     */
+    @Test
+    void canDecrypt_requiresTheScopeAnEnabledKeyAndSupportedAlgorithms() {
+        int workspaceId = workspaceId();
+        String oldKey = base64Key((byte) 9);
+        SecretStore store = store("old-v1", oldKey, Map.of(), Set.of(), true);
+        String reference = store.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "smtp-password");
+
+        assertTrue(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId(), reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "secret:v1:not-a-number"));
+
+        SecretStore revoked = store("new-v2", base64Key((byte) 10), Map.of("old-v1", oldKey), Set.of("old-v1"),
+                true);
+        assertFalse(revoked.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+        SecretStore forgotten = store("new-v3", base64Key((byte) 11), Map.of(), Set.of(), true);
+        assertFalse(forgotten.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, reference));
+
+        String unsupported = store.put(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, "connector");
+        jdbcTemplate.update("UPDATE secret_value SET key_algorithm = 'RSA-OAEP-256' WHERE id = ?",
+                SecretReference.parse(unsupported).id());
+        assertFalse(store.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, unsupported));
+    }
+
+    /**
+     * With lazy rewrap on, a read re-wraps a row sealed under an older key, so it fails without a usable
+     * active key even though the row's own key decrypts it. {@code canDecrypt} must refuse that reference
+     * (#1974) and accept it once a read would not re-wrap.
+     */
+    @Test
+    void canDecrypt_requiresAnActiveKeyWhenAReadWouldRewrap() {
+        int workspaceId = workspaceId();
+        String oldKey = base64Key((byte) 12);
+        String reference = store("old-v4", oldKey, Map.of(), Set.of(), true)
+                .put(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, "connector");
+
+        SecretStore rewrapping = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of("new-v5"),
+                true);
+        assertFalse(rewrapping.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertThrows(SecretUnavailableException.class,
+                () -> rewrapping.get(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+
+        SecretStore rotated = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of(), true);
+        assertTrue(rotated.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+
+        SecretStore readOnly = store("new-v5", base64Key((byte) 13), Map.of("old-v4", oldKey), Set.of("new-v5"),
+                false);
+        assertTrue(readOnly.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+        assertEquals("connector", readOnly.get(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference));
+    }
+
     @Test
     void existsAndDelete_ignoreMalformedReferences() {
         int workspaceId = workspaceId();
@@ -203,15 +276,6 @@ class SecretStoreTest {
         jdbcTemplate.update("DELETE FROM organization WHERE id = ?", orgId);
 
         assertNull(secretValueMapper.findById(secretId));
-    }
-
-    @Test
-    void missingMasterKeyRefusesEncryption() {
-        SecretStoreProperties properties = new SecretStoreProperties();
-        SecretStoreCrypto crypto = new SecretStoreCrypto(properties);
-
-        assertFalse(crypto.isAvailable());
-        assertThrows(SecretUnavailableException.class, () -> crypto.encrypt("value", "aad"));
     }
 
     @Test

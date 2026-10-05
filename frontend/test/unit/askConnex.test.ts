@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import enCommon from '@/messages/en/common.json';
+import jaCommon from '@/messages/ja/common.json';
 
 import {
     ANSWER_ROW_PLACEHOLDER,
@@ -14,6 +17,9 @@ import {
     ASK_CONNEX_SEGMENT_CHAR_CAP,
     anchorAskConnexToolCards,
     appendAskConnexTurnSegment,
+    askConnexChangeValueText,
+    askConnexCreatedRecordHref,
+    askConnexTemplateDefaultsText,
     askConnexReasoningSurvives,
     askConnexMessageNarration,
     askConnexCitationHref,
@@ -28,6 +34,7 @@ import {
     askConnexToolCardStatus,
     askConnexToolOutcomeSummary,
     askConnexToolRequestSummary,
+    askConnexToolTargetHref,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     extractAskConnexAttachments,
@@ -61,25 +68,50 @@ import type {
 const TOOL_SUMMARY_LABELS = {
     createActivity: '活動を作成',
     createTask: 'タスクを作成',
+    completeTask: 'タスクを完了する',
+    rescheduleTask: 'タスクの期限を変更する',
+    updateRecordFields: 'レコードの項目を更新する',
+    recordFieldsUpdated: 'レコードの項目を更新しました',
     createNote: 'メモを作成',
+    createPerson: '連絡先を作成',
+    createDeal: '案件を作成',
+    createCompany: '会社を作成',
+    createReport: 'レポートを作成',
+    personCreated: '連絡先を作成しました',
+    dealCreated: '案件を作成しました',
+    companyCreated: '会社を作成しました',
+    reportCreated: 'レポートを作成しました',
     addTag: 'タグを追加',
+    removeTag: 'タグを削除',
+    removeTagNamed: (value: string) => `タグ削除: ${value}`,
+    draftDocument: '書類の下書きを作成',
+    draftDocumentFrom: (value: string) => `書類の下書き: ${value}`,
+    documentDrafted: '書類の下書き作成済み',
     changeDealStage: 'ステージを変更',
     changeDealStageTo: (value: string) => `ステージ: ${value}`,
     assignOwner: '担当者を割り当て',
     assignOwnerTo: (value: string) => `担当者: ${value}`,
     removeOwner: '担当者を解除',
+    setResponseDue: '初回応答期限を設定',
+    setResponseDueIn: (hours: number) => `初回応答期限: ${hours}時間後`,
     runWriteTool: '書き込み操作',
     requestRejected: '却下',
     requestFailed: '失敗',
     createdRecordRemoved: '削除済み',
     activityCreated: '活動作成済み',
     taskCreated: 'タスク作成済み',
+    taskCompleted: 'タスクを完了しました',
+    taskRescheduled: 'タスクの期限を変更しました',
     noteCreated: 'メモ作成済み',
     tagAdded: 'タグ追加済み',
     tagAlreadyPresent: 'タグ追加済みでした',
+    tagRemoved: 'タグ削除済み',
+    tagNotPresent: 'タグなし',
     dealStageChanged: 'ステージ変更済み',
     ownerRemoved: '担当者解除済み',
     ownerAssigned: '担当者割り当て済み',
+    responseDueSet: '期限設定済み',
+    responseDueAlreadySet: '期限設定済みでした',
     requestCompleted: '完了',
 };
 
@@ -508,6 +540,64 @@ describe('Ask Connex reasoning retention', () => {
 });
 
 describe('Ask Connex tool-call cards', () => {
+    it('localizes task requests and outcomes without a generic fallback', () => {
+        const completing: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'complete_task',
+            target: { kind: 'task', id: 19, label: 'Call Ada' },
+            requestSummary: 'Complete the task',
+            outcomeSummary: 'Task completed',
+        };
+        const rescheduling: AiAssistantToolCall = {
+            ...completing,
+            toolName: 'reschedule_task',
+            requestSummary: 'Reschedule the task',
+            outcomeSummary: 'Task rescheduled',
+        };
+        expect(askConnexToolRequestSummary(completing, TOOL_SUMMARY_LABELS))
+            .toBe('タスクを完了する');
+        expect(askConnexToolOutcomeSummary(completing, TOOL_SUMMARY_LABELS))
+            .toBe('タスクを完了しました');
+        expect(askConnexToolRequestSummary(rescheduling, TOOL_SUMMARY_LABELS))
+            .toBe('タスクの期限を変更する');
+        expect(askConnexToolOutcomeSummary(rescheduling, TOOL_SUMMARY_LABELS))
+            .toBe('タスクの期限を変更しました');
+        expect(askConnexToolOutcomeSummary(
+            { ...completing, status: 'failed' }, TOOL_SUMMARY_LABELS,
+        )).toBe(TOOL_SUMMARY_LABELS.requestFailed);
+        expect(askConnexToolOutcomeSummary(
+            { ...rescheduling, outcomeSummary: null }, TOOL_SUMMARY_LABELS,
+        )).toBeNull();
+    });
+
+    it('keeps task targets unlinked while preserving record detail links', () => {
+        expect(askConnexToolTargetHref({ kind: 'task', id: 19, label: 'Call Ada' })).toBeNull();
+        expect(askConnexToolTargetHref({ kind: 'person', id: 19, label: 'Ada' }))
+            .toBe('/records/contacts/19');
+        expect(askConnexToolTargetHref({ kind: 'company', id: 19, label: 'Acme' }))
+            .toBe('/records/companies/19');
+        expect(askConnexToolTargetHref({ kind: 'deal', id: 19, label: 'Renewal' }))
+            .toBe('/records/deals/19');
+    });
+
+    it.each(['en', 'ja'] as const)('localizes task diffs in %s', (locale) => {
+        const messages = locale === 'en' ? enCommon : jaCommon;
+        const t = createTranslator({ locale, messages, namespace: 'AskConnex' });
+        const statuses = {
+            open: t('toolCards.change.taskOpen'),
+            done: t('toolCards.change.taskDone'),
+        };
+        expect(askConnexChangeValueText(
+            'taskStatus', 'open', 'current', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'Open' : '未完了');
+        expect(askConnexChangeValueText(
+            'taskStatus', 'done', 'proposed', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'Done' : '完了');
+        expect(askConnexChangeValueText(
+            'dueDate', '2026-10-03', 'proposed', locale, responseDueInHours(locale), statuses,
+        )).toBe(locale === 'en' ? 'October 3, 2026' : '2026年10月3日');
+    });
+
     it('maps confirm proposals and live auto executions to distinct affordances', () => {
         const confirm = {
             ...TOOL_CALL,
@@ -678,6 +768,37 @@ describe('Ask Connex tool-call cards', () => {
             .toEqual(['reject', 'approve']);
         expect(askConnexToolCardAffordances(permissionLostCard, now)).toEqual(['reject']);
         expect(askConnexToolCardAffordances(failedUndoCard, now)).toEqual(['undo']);
+    });
+
+    it('refreshes draft context without rearming a decided or in-flight sibling', () => {
+        const proposed: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'draft_document',
+            tier: 'confirm',
+            status: 'proposed',
+            change: { ...PROPOSED_CHANGE, field: 'document', currentValue: null, proposedValue: 'Quote' },
+            undoAvailable: false,
+            undoExpiresAt: null,
+        };
+        const loaded = reduceAskConnexToolCards(EMPTY_ASK_CONNEX_TOOL_CARDS, {
+            type: 'replace',
+            toolCalls: [proposed],
+        });
+        const refresh = {
+            type: 'proposalsRefreshed' as const,
+            toolCalls: [{ ...proposed, change: { ...PROPOSED_CHANGE, field: 'document' as const, currentValue: '1', proposedValue: 'Quote' } }],
+        };
+        const refreshed = reduceAskConnexToolCards(loaded, refresh);
+        expect(refreshed[0].change?.currentValue).toBe('1');
+        expect(askConnexToolCardAffordances(refreshed[0], Date.now())).toContain('approve');
+        const started = reduceAskConnexToolCards(loaded, {
+            type: 'actionStarted', toolCallId: proposed.id, action: 'approve',
+        });
+        expect(reduceAskConnexToolCards(started, refresh)).toEqual(started);
+        const settled = reduceAskConnexToolCards(started, {
+            type: 'actionSettled', toolCall: { ...proposed, status: 'executed', change: null },
+        });
+        expect(reduceAskConnexToolCards(settled, refresh)).toEqual(settled);
     });
 
     it('settles successful actions into canonical terminal state', () => {
@@ -911,6 +1032,156 @@ describe('Ask Connex tool-call cards', () => {
             outcomeSummary: 'Request completed',
         }, TOOL_SUMMARY_LABELS)).toBe('完了');
     });
+
+    it('localizes a draft document request and its outcome', () => {
+        const draft: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'draft_document',
+            tier: 'confirm',
+            requestSummary: 'Draft document from: Quote',
+            outcomeSummary: 'Document drafted',
+        };
+        expect(askConnexToolRequestSummary(draft, TOOL_SUMMARY_LABELS)).toBe('書類の下書き: Quote');
+        expect(askConnexToolRequestSummary(
+            { ...draft, requestSummary: 'Draft a deal document' }, TOOL_SUMMARY_LABELS,
+        )).toBe('書類の下書きを作成');
+        expect(askConnexToolOutcomeSummary(draft, TOOL_SUMMARY_LABELS)).toBe('書類の下書き作成済み');
+    });
+
+    it.each([
+        { toolName: 'create_person', kind: 'person', request: '連絡先を作成', outcome: '連絡先を作成しました', href: '/records/contacts/74' },
+        { toolName: 'create_deal', kind: 'deal', request: '案件を作成', outcome: '案件を作成しました', href: '/records/deals/74' },
+    ] as const)('localizes $toolName and links to its created record', ({ toolName, kind, request, outcome, href }) => {
+        const createCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName,
+            tier: 'confirm',
+            target: { kind: 'company', id: 42, label: 'Acme' },
+            requestSummary: 'Create a record',
+            outcomeSummary: 'Record created',
+            createdRecord: { kind, id: 74 },
+        };
+        expect(askConnexToolRequestSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(request);
+        expect(askConnexToolOutcomeSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(outcome);
+        expect(askConnexCreatedRecordHref(createCall.createdRecord)).toBe(href);
+        expect(askConnexToolTargetHref(createCall.target)).toBe('/records/companies/42');
+    });
+
+    it.each([
+        { toolName: 'create_company', kind: 'company', request: '会社を作成', outcome: '会社を作成しました', href: '/records/companies/74' },
+        { toolName: 'create_report', kind: 'report', request: 'レポートを作成', outcome: 'レポートを作成しました', href: '/insights/reports/74' },
+    ] as const)('localizes $toolName without linking its workspace target', ({ toolName, kind, request, outcome, href }) => {
+        const createCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName,
+            tier: 'confirm',
+            target: { kind: 'workspace', id: 42, label: 'Japan sales' },
+            requestSummary: 'Create a record',
+            outcomeSummary: 'Record created',
+            createdRecord: { kind, id: 74 },
+        };
+        expect(askConnexToolRequestSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(request);
+        expect(askConnexToolOutcomeSummary(createCall, TOOL_SUMMARY_LABELS)).toBe(outcome);
+        expect(askConnexCreatedRecordHref(createCall.createdRecord)).toBe(href);
+        expect(askConnexToolTargetHref(createCall.target)).toBeNull();
+    });
+
+    it.each([
+        { locale: 'en', messages: enCommon, source: 'Source', referral: 'Referral', expected: 'Source: Referral and Tags' },
+        { locale: 'ja', messages: jaCommon, source: '流入元', referral: '紹介', expected: '流入元：紹介、タグ' },
+    ])('renders pinned template defaults in $locale without exposing private values or keys', ({ locale, messages, source, referral, expected }) => {
+        const t = createTranslator({ locale, messages, namespace: 'AskConnex.toolCards.templateDefaults' });
+        const labels = {
+            field: (key: string) => key === 'leadSource' ? source
+                : key === 'tags' ? t('tags') : t('other'),
+            leadSource: (value: string) => value === 'REFERRAL' ? referral : t('unavailable'),
+            fieldValue: (field: string, value: string) => t('fieldValue', { field, value }),
+            none: t('none'),
+            unavailable: t('unavailable'),
+        };
+        expect(askConnexTemplateDefaultsText('{"leadSource":"REFERRAL","tags":""}', locale, labels))
+            .toBe(expected);
+        expect(askConnexTemplateDefaultsText('{"tags":"private tag","unrecognizedKey":"private value"}', locale, labels))
+            .toBe(new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format([t('tags'), t('other')]));
+        expect(askConnexTemplateDefaultsText('{"leadSource":"UNKNOWN_SOURCE"}', locale, labels))
+            .toBe(t('fieldValue', { field: source, value: t('unavailable') }));
+        expect(askConnexTemplateDefaultsText('{}', locale, labels)).toBe(t('none'));
+        for (const malformed of ['{', 'null', '[]', '{"tags":1}', '{"tags":{"name":"private"}}']) {
+            expect(askConnexTemplateDefaultsText(malformed, locale, labels)).toBe(t('unavailable'));
+        }
+    });
+
+    it('localizes field-edit requests and outcomes without interpreting proposed values', () => {
+        const editCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'update_record_fields',
+            tier: 'confirm',
+            requestSummary: 'Update record fields',
+            outcomeSummary: 'Record fields updated',
+        };
+
+        expect(askConnexToolRequestSummary(editCall, TOOL_SUMMARY_LABELS))
+            .toBe(TOOL_SUMMARY_LABELS.updateRecordFields);
+        expect(askConnexToolOutcomeSummary(editCall, TOOL_SUMMARY_LABELS))
+            .toBe(TOOL_SUMMARY_LABELS.recordFieldsUpdated);
+    });
+
+    it('localizes a tag removal by the tag it names and by whether it removed anything', () => {
+        const removeCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'remove_tag',
+            tier: 'confirm',
+            requestSummary: 'Remove tag: Dormant',
+            outcomeSummary: 'Tag removed',
+        };
+
+        expect(askConnexToolRequestSummary(removeCall, TOOL_SUMMARY_LABELS)).toBe('タグ削除: Dormant');
+        expect(askConnexToolRequestSummary(
+            { ...removeCall, requestSummary: 'Remove a tag' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('タグを削除');
+        expect(askConnexToolOutcomeSummary(removeCall, TOOL_SUMMARY_LABELS)).toBe('タグ削除済み');
+        expect(askConnexToolOutcomeSummary(
+            { ...removeCall, outcomeSummary: 'Tag was not on the record' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('タグなし');
+        expect(askConnexToolOutcomeSummary(
+            { ...removeCall, outcomeSummary: 'Request completed' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('完了');
+    });
+
+    it('localizes a response deadline by its hours and by whether it started a clock', () => {
+        const deadlineCall: AiAssistantToolCall = {
+            ...TOOL_CALL,
+            toolName: 'set_response_due',
+            tier: 'confirm',
+            requestSummary: 'Set first-response deadline in hours: 48',
+            outcomeSummary: 'First-response deadline set',
+        };
+
+        expect(askConnexToolRequestSummary(deadlineCall, TOOL_SUMMARY_LABELS))
+            .toBe('初回応答期限: 48時間後');
+        for (const requestSummary of [
+            'Set a first-response deadline',
+            'Set first-response deadline in hours: soon',
+            'Set first-response deadline in hours: 0',
+        ]) {
+            expect(askConnexToolRequestSummary(
+                { ...deadlineCall, requestSummary },
+                TOOL_SUMMARY_LABELS,
+            )).toBe('初回応答期限を設定');
+        }
+        expect(askConnexToolOutcomeSummary(deadlineCall, TOOL_SUMMARY_LABELS)).toBe('期限設定済み');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'A first-response deadline was already set' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('期限設定済みでした');
+        expect(askConnexToolOutcomeSummary(
+            { ...deadlineCall, outcomeSummary: 'Request completed' },
+            TOOL_SUMMARY_LABELS,
+        )).toBe('完了');
+    });
 });
 
 describe('Ask Connex citations', () => {
@@ -1050,9 +1321,11 @@ describe('Ask Connex follow-up suggestions', () => {
         expect(askConnexLatestMessagePages(100, 50)).toEqual([2]);
     });
 
-    it('refetches the tail when a concurrent write moves a full page to a new page', async () => {
+    it.each([
+        { boundary: 'full', initialTotal: 100 },
+        { boundary: 'partial', initialTotal: 99 },
+    ])('refetches the tail when concurrent writes cross a $boundary page', async ({ initialTotal }) => {
         const calls: number[] = [];
-        let firstTailRead = true;
         const messages = await loadAskConnexLatestMessages(
             {
                 items: Array.from({ length: 50 }, (_, index) => ({
@@ -1060,22 +1333,11 @@ describe('Ask Connex follow-up suggestions', () => {
                     id: index + 1,
                     seq: index + 1,
                 })),
-                total: 100,
+                total: initialTotal,
             },
             50,
             async (page) => {
                 calls.push(page);
-                if (page === 2 && firstTailRead) {
-                    firstTailRead = false;
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
                 if (page === 2) {
                     return {
                         items: Array.from({ length: 50 }, (_, index) => ({
@@ -1097,53 +1359,6 @@ describe('Ask Connex follow-up suggestions', () => {
         expect(messages.map((message) => message.seq)).toEqual(
             Array.from({ length: 50 }, (_, index) => index + 52),
         );
-        expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
-    });
-
-    it('refetches both tail pages when concurrent writes cross from a partial page', async () => {
-        const calls: number[] = [];
-        let firstTailRead = true;
-        const messages = await loadAskConnexLatestMessages(
-            {
-                items: Array.from({ length: 50 }, (_, index) => ({
-                    ...assistant,
-                    id: index + 1,
-                    seq: index + 1,
-                })),
-                total: 99,
-            },
-            50,
-            async (page) => {
-                calls.push(page);
-                if (page === 2 && firstTailRead) {
-                    firstTailRead = false;
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
-                if (page === 2) {
-                    return {
-                        items: Array.from({ length: 50 }, (_, index) => ({
-                            ...assistant,
-                            id: index + 51,
-                            seq: index + 51,
-                        })),
-                        total: 101,
-                    };
-                }
-                return {
-                    items: [{ ...assistant, id: 101, seq: 101, suggestions: ['Current follow-up'] }],
-                    total: 101,
-                };
-            },
-        );
-
-        expect(calls).toEqual([2, 2, 3]);
         expect(messages.at(-1)?.seq).toBe(101);
         expect(latestAskConnexSuggestions(messages, false)).toEqual(['Current follow-up']);
     });
@@ -1448,5 +1663,82 @@ describe('narration accumulation and replay', () => {
         expect(askConnexMessageNarration({ narration: null })).toEqual([]);
         expect(askConnexMessageNarration({ narration: [] })).toEqual([]);
         expect(askConnexMessageNarration({})).toBe(askConnexMessageNarration({ narration: [] }));
+    });
+});
+
+/**
+ * Runs one assertion with the process clock in a zone east of UTC, where reading an offset-less
+ * UTC value as local time lands nine hours away from the instant it names. A suite pinned to UTC,
+ * as CI is, cannot tell the two readings apart without it.
+ */
+function inTokyo<T>(run: () => T): T {
+    const previous = process.env.TZ;
+    process.env.TZ = 'Asia/Tokyo';
+    try {
+        return run();
+    } finally {
+        if (previous === undefined) delete process.env.TZ;
+        else process.env.TZ = previous;
+    }
+}
+
+/** The provider's own hour wording, formatted through the real message catalogue. */
+function responseDueInHours(locale: 'en' | 'ja') {
+    const t = createTranslator({
+        locale,
+        messages: locale === 'en' ? enCommon : jaCommon,
+        namespace: 'AskConnex',
+    });
+    return (hours: number) => t('toolCards.change.responseDueInHours', { hours });
+}
+
+describe('a reviewed first-response deadline', () => {
+    it('reads the stored deadline as UTC, exactly as the contact lead panel does', () => {
+        const stored = '2026-08-13T09:30:15';
+
+        inTokyo(() => {
+            const text = askConnexChangeValueText(
+                'responseDue', stored, 'current', 'en', responseDueInHours('en'));
+
+            expect(text).toBe(new Intl.DateTimeFormat('en', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+                timeZone: 'Asia/Tokyo',
+            }).format(Date.UTC(2026, 7, 13, 9, 30, 15)));
+            expect(text).toContain('6:30');
+            expect(text).toBe(formatUtcDateTime(stored, 'en', stored));
+        });
+    });
+
+    it('states a deadline that does not parse as it stands', () => {
+        expect(askConnexChangeValueText(
+            'responseDue', 'soon', 'current', 'en', responseDueInHours('en'))).toBe('soon');
+        for (const proposed of ['soon', '0', '1.5']) {
+            expect(askConnexChangeValueText(
+                'responseDue', proposed, 'proposed', 'en', responseDueInHours('en')))
+                .toBe(proposed);
+        }
+    });
+
+    it('states the proposed hours in the reader\'s own words', () => {
+        const en = responseDueInHours('en');
+        const ja = responseDueInHours('ja');
+
+        expect(askConnexChangeValueText('responseDue', '1', 'proposed', 'en', en))
+            .toBe('1 hour after it\'s applied');
+        expect(askConnexChangeValueText('responseDue', '48', 'proposed', 'en', en))
+            .toBe('48 hours after it\'s applied');
+        expect(askConnexChangeValueText('responseDue', '1', 'proposed', 'ja', ja))
+            .toBe('適用から1時間後');
+        expect(askConnexChangeValueText('responseDue', '48', 'proposed', 'ja', ja))
+            .toBe('適用から48時間後');
+    });
+
+    it('leaves every other reviewed value as the workspace wrote it', () => {
+        expect(askConnexChangeValueText('stage', '48', 'proposed', 'en', responseDueInHours('en')))
+            .toBe('48');
+        expect(askConnexChangeValueText(
+            'owner', '2026-08-13T09:30:15', 'current', 'en', responseDueInHours('en')))
+            .toBe('2026-08-13T09:30:15');
     });
 });

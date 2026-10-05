@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.config;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
@@ -10,6 +12,9 @@ import static org.mockito.Mockito.when;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
+
+import org.flywaydb.core.api.FlywayException;
 
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationVersion;
@@ -30,6 +35,7 @@ class DealDuplicateNameV156MigrationCallbackTest {
         verify(fixture.update()).setInt(3, 7);
         verify(fixture.update()).setString(4, "ＲＥＮＥＷＡＬ　ＯＰＰＯＲＴＵＮＩＴＹ");
         verify(fixture.update()).addBatch();
+        verify(fixture.update()).executeBatch();
     }
 
     @Test
@@ -52,6 +58,27 @@ class DealDuplicateNameV156MigrationCallbackTest {
         verify(fixture.connection()).prepareStatement(
             contains("AND BINARY name = BINARY ?"));
         verify(fixture.update()).addBatch();
+        verify(fixture.update()).executeBatch();
+    }
+
+    @Test
+    void v156RejectsFailedBatchEntries() throws Exception {
+        Fixture fixture = fixture("Renewal", new int[] {Statement.EXECUTE_FAILED});
+
+        assertThrows(FlywayException.class, () -> new DealDuplicateNameV156MigrationCallback().handle(
+            Event.AFTER_EACH_MIGRATE, fixture.context()));
+
+        verify(fixture.update()).executeBatch();
+    }
+
+    @Test
+    void v156AcceptsSuccessfulBatchEntriesWithoutRowCounts() throws Exception {
+        Fixture fixture = fixture("Renewal", new int[] {Statement.SUCCESS_NO_INFO});
+
+        assertDoesNotThrow(() -> new DealDuplicateNameV156MigrationCallback().handle(
+            Event.AFTER_EACH_MIGRATE, fixture.context()));
+
+        verify(fixture.update()).executeBatch();
     }
 
     @Test

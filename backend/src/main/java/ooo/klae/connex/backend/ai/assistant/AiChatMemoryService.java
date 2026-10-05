@@ -209,6 +209,7 @@ public class AiChatMemoryService {
                 }
                 String generated = parsedSummary.summary().strip();
                 if (generated.isBlank()
+                        || AiAssistantStepGuard.containsHandle(generated)
                         || AiGeneratedContentScreen.containsPlaceholder(generated)
                         || AiGeneratedContentScreen.rejectionReason(generated) != null) {
                     throw new AiAssistantLoopException(
@@ -259,7 +260,8 @@ public class AiChatMemoryService {
                 budget,
                 inputTokens,
                 outputTokens,
-                nativeTools);
+                nativeTools,
+                capabilities.parallelToolCalls());
     }
 
     static List<AiChatMessage> boundedHistory(

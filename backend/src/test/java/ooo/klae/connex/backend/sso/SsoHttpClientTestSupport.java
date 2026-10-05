@@ -29,6 +29,8 @@ import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
 
 /** Provides deterministic DNS fixtures without changing the production resolver contract. */
 public final class SsoHttpClientTestSupport {
+    static final Duration EXHAUSTED_DEADLINE = Duration.ofSeconds(1);
+
     private SsoHttpClientTestSupport() {
     }
 

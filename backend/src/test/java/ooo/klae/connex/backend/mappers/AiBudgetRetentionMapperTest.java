@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -90,9 +91,7 @@ class AiBudgetRetentionMapperTest {
         int orgId = newOrganization();
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).plusDays(8);
         LocalDate day = now.toLocalDate();
-        for (int index = 0; index < 1_024; index++) {
-            reservation(orgId, day, now.minusDays(1), "settled");
-        }
+        seedSettledHistory(orgId, day, now.minusDays(1));
         List<String> expired = new ArrayList<>();
         for (int index = 0; index < 120; index++) {
             expired.add(reservation(orgId, day, now.minusHours(1),
@@ -113,6 +112,28 @@ class AiBudgetRetentionMapperTest {
         expired.forEach(mapper::deleteReservation);
         assertTrue(mapper.listExpiredReservationIds(now).isEmpty());
         assertStateLeadingRange("listExpiredReservationIds", "now", now);
+    }
+
+    private void seedSettledHistory(int orgId, LocalDate day, LocalDateTime expiresAt) {
+        int batchSize = 256;
+        String sql = """
+                INSERT INTO organization_ai_budget_reservation
+                    (reservation_id, org_id, usage_day, reserved_tokens, expires_at, state, consumed_tokens)
+                VALUES
+                """ + String.join(", ", Collections.nCopies(batchSize, "(?, ?, ?, ?, ?, 'settled', ?)"));
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        for (int batch = 0; batch < 4; batch++) {
+            List<Object> parameters = new ArrayList<>(batchSize * 6);
+            for (int row = 0; row < batchSize; row++) {
+                parameters.add(UUID.randomUUID().toString());
+                parameters.add(orgId);
+                parameters.add(java.sql.Date.valueOf(day));
+                parameters.add(1);
+                parameters.add(Timestamp.valueOf(expiresAt));
+                parameters.add(1);
+            }
+            assertEquals(batchSize, jdbc.update(sql, parameters.toArray()));
+        }
     }
 
     private void assertStateLeadingRange(String statement, String parameter, LocalDateTime value) {

@@ -204,6 +204,38 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertFalse(backend["frontend_sast"])
         self.assertFalse(backend["profile_boot"])
 
+    def test_browser_scripted_fixture_change_runs_the_backend_suite_that_loads_it(self) -> None:
+        """A change confined to the browser stack's scripted-provider fixtures must select `backend`.
+
+        `ScriptedAiScriptLoaderTest` loads that directory in the backend suite, so a bad script fails
+        there, naming the script, instead of as the e2e backend refusing to boot. The directory is
+        read from the `Frontend — unit & e2e` boot step, so moving it in the workflow without moving
+        the classifier fails here. The selection stays that narrow: the spec, its support code, and
+        any sibling fixture directory keep their frontend-only classification.
+        """
+        boot = next(
+            step
+            for step in self.workflow["jobs"]["frontend-tests"]["steps"]
+            if step.get("name") == "Boot backend (dev profile, fresh schema)"
+        )
+        fixture_dir = boot["env"]["CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR"].removeprefix(
+            "${{ github.workspace }}/"
+        )
+        categories = self.classify(f"{fixture_dir}/e2e_send_tools_answer.json")
+        self.assertTrue(categories["backend"])
+        self.assertTrue(categories["cross_stack"])
+        self.assertFalse(categories["profile_boot"])
+        self.assertFalse(categories["full"])
+
+        for path in (
+            "frontend/test/e2e/ask-connex-trajectory.spec.ts",
+            "frontend/test/e2e/support/api.ts",
+            "frontend/test/e2e/fixtures/other/fixture.json",
+            f"{fixture_dir}-archive/e2e_send_tools_answer.json",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(self.classify(path)["backend"])
+
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))

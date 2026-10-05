@@ -1030,7 +1030,20 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="getDealByIdForUpdate" resultMap="DealResult">
+  <!-- The lock for single-column deal updates (owner, expected close date, risk exclusion): only
+       the PRIMARY record their UPDATE locks anyway. Also taking uq_deal_workspace_id would queue
+       them behind a composite foreign-key child insert that goes on to take locks their own
+       transaction may already hold. flushCache keeps a cached pre-lock answer from standing in. -->
+  <select id="getDealByPrimaryKeyForUpdate" resultMap="DealResult" flushCache="true">
+    SELECT <include refid="dealColumns"/>
+    FROM deal FORCE INDEX (PRIMARY)
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <!-- flushCache is required: a caller may read this deal through getDealById before the lock
+       and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+  <select id="getDealByIdForUpdate" resultMap="DealResult" flushCache="true">
     SELECT <include refid="dealColumns"/>
     FROM deal FORCE INDEX (uq_deal_workspace_id)
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -1330,6 +1343,17 @@
     ORDER BY dc.user_id
   </select>
 
+  <!-- A current read of one deal's primary-key range. FORCE INDEX keeps the lock off the
+       workspace-wide user index, and flushCache keeps a cached answer from hiding this
+       transaction's own writes or a concurrent commit. -->
+  <select id="getCollaboratorIdsForUpdate" resultType="int" flushCache="true">
+    SELECT dc.user_id
+    FROM deal_collaborator dc FORCE INDEX (PRIMARY)
+    WHERE dc.workspace_id = #{workspaceId} AND dc.deal_id = #{dealId}
+    ORDER BY dc.user_id
+    FOR UPDATE
+  </select>
+
   <delete id="clearCollaborators">
     DELETE FROM deal_collaborator
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
@@ -1344,15 +1368,15 @@
 
   <insert id="insertCollaborators">
     INSERT INTO deal_collaborator (workspace_id, deal_id, user_id)
-    SELECT d.workspace_id, d.id, wm.user_id
+    SELECT d.workspace_id, d.id, requested.user_id
     FROM deal d
-    JOIN workspace_member wm ON wm.workspace_id = d.workspace_id
+    JOIN (
+      <foreach collection="userIds" item="userId" separator=" UNION ALL ">
+        SELECT #{userId} AS user_id
+      </foreach>
+    ) requested
     WHERE d.workspace_id = #{workspaceId}
       AND d.id = #{dealId}
-      AND wm.user_id IN
-      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
-        #{userId}
-      </foreach>
   </insert>
 
   <update id="clearMemberDealOwnership">

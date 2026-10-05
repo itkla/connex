@@ -1,7 +1,10 @@
+import hashlib
+import http.client
 import io
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +14,7 @@ from ocr_service.prefetch import (
     ModelArtifact,
     _download,
     _extract,
+    _fetch,
     _validate_members,
 )
 
@@ -23,6 +27,11 @@ class DownloadResponse(io.BytesIO):
 
     def geturl(self) -> str:
         return self._url
+
+
+class TruncatedResponse(DownloadResponse):
+    def read(self, size: int = -1) -> bytes:
+        raise http.client.IncompleteRead(b"partial")
 
 
 class ModelArchiveTest(unittest.TestCase):
@@ -126,18 +135,130 @@ class ModelDownloadTest(unittest.TestCase):
 
     def test_download_rejects_changed_length_hash_and_host(self) -> None:
         content = b"model"
-        artifact = ModelArtifact(name="test-model", size=len(content), sha256="0" * 64)
-        cases = (
-            DownloadResponse(content, artifact.url, str(len(content) + 1)),
-            DownloadResponse(content, artifact.url, str(len(content))),
-            DownloadResponse(content, "https://example.test/model.tar", str(len(content))),
+        artifact = ModelArtifact(
+            name="test-model", size=len(content), sha256=hashlib.sha256(content).hexdigest()
         )
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for index, response in enumerate(cases):
+        cases = (
+            ("length", artifact.url, len(content) + 1, artifact.sha256, "length changed"),
+            ("hash", artifact.url, len(content), "0" * 64, "integrity check failed"),
+            ("host", "https://example.test/model.tar", len(content), artifact.sha256,
+             "left the trusted host"),
+        )
+        for name, url, length, checksum, error in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                response = DownloadResponse(content, url, str(length))
+                pinned = ModelArtifact(name=artifact.name, size=artifact.size, sha256=checksum)
                 with patch("ocr_service.prefetch._MODEL_OPENER.open", return_value=response):
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        _download(pinned, Path(temporary) / "model.tar")
+
+
+class ModelFetchRetryTest(unittest.TestCase):
+    content = b"pinned model"
+    artifact = ModelArtifact(
+        name="test-model",
+        size=len(content),
+        sha256="3e81645fd76fce1e1888a9258bfa81df8fd9cb8fb2ac1d1607d44fee4927b921",
+    )
+
+    def test_transport_failures_retry_and_leave_no_partial_archive(self) -> None:
+        attempts = [
+            urllib.error.URLError(OSError(101, "Network is unreachable")),
+            TruncatedResponse(self.content, self.artifact.url, str(len(self.content))),
+            DownloadResponse(self.content, self.artifact.url, str(len(self.content))),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "model.tar"
+            with self._opener(attempts) as opener:
+                _fetch(self.artifact, destination)
+
+            self.assertEqual(3, opener.call_count)
+            self.assertEqual(self.content, destination.read_bytes())
+
+    def test_retries_stay_bounded(self) -> None:
+        failure = urllib.error.URLError(OSError(101, "Network is unreachable"))
+        with tempfile.TemporaryDirectory() as temporary:
+            with self._opener([failure] * 8) as opener:
+                with self.assertRaises(urllib.error.URLError):
+                    _fetch(self.artifact, Path(temporary) / "model.tar")
+
+            self.assertEqual(4, opener.call_count)
+
+    def test_verification_failures_are_never_retried(self) -> None:
+        cases = {
+            "length": DownloadResponse(
+                self.content, self.artifact.url, str(len(self.content) + 1)
+            ),
+            "host": DownloadResponse(
+                self.content, "https://example.test/model.tar", str(len(self.content))
+            ),
+            "hash": DownloadResponse(
+                b"t" * len(self.content), self.artifact.url, str(len(self.content))
+            ),
+        }
+        for name, response in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                good = DownloadResponse(
+                    self.content, self.artifact.url, str(len(self.content))
+                )
+                with self._opener([response, good]) as opener:
                     with self.assertRaises(RuntimeError):
-                        _download(artifact, root / f"model-{index}.tar")
+                        _fetch(self.artifact, Path(temporary) / "model.tar")
+
+                self.assertEqual(1, opener.call_count)
+
+    def test_a_body_that_ends_early_is_retried_and_still_verified(self) -> None:
+        short = DownloadResponse(
+            self.content[:4], self.artifact.url, str(len(self.content))
+        )
+        good = DownloadResponse(self.content, self.artifact.url, str(len(self.content)))
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "model.tar"
+            with self._opener([short, good]) as opener:
+                _fetch(self.artifact, destination)
+
+            self.assertEqual(2, opener.call_count)
+            self.assertEqual(self.content, destination.read_bytes())
+
+    def test_a_body_that_never_completes_fails_closed(self) -> None:
+        attempts = [
+            DownloadResponse(self.content[:4], self.artifact.url, str(len(self.content)))
+            for _ in range(4)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "model.tar"
+            with self._opener(attempts) as opener:
+                with self.assertRaises(OSError):
+                    _fetch(self.artifact, destination)
+
+            self.assertEqual(4, opener.call_count)
+            self.assertFalse(destination.exists())
+
+    def test_client_errors_are_not_retried_but_server_errors_are(self) -> None:
+        cases = ((404, 1), (429, 2), (503, 2))
+        for status, expected in cases:
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                failure = urllib.error.HTTPError(
+                    self.artifact.url, status, "rejected", {}, None
+                )
+                good = DownloadResponse(
+                    self.content, self.artifact.url, str(len(self.content))
+                )
+                destination = Path(temporary) / "model.tar"
+                with self._opener([failure, good]) as opener:
+                    if expected == 1:
+                        with self.assertRaises(urllib.error.HTTPError):
+                            _fetch(self.artifact, destination)
+                    else:
+                        _fetch(self.artifact, destination)
+
+                self.assertEqual(expected, opener.call_count)
+
+    def _opener(self, attempts: list[object]):
+        patcher = patch("ocr_service.prefetch._MODEL_OPENER.open", side_effect=attempts)
+        self.addCleanup(patch.stopall)
+        patch("ocr_service.prefetch.time.sleep").start()
+        return patcher
 
 
 if __name__ == "__main__":

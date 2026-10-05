@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,10 +14,12 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.AiBriefSchedule;
 import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
@@ -127,13 +130,20 @@ class AiBriefSchedulerTest {
         pending.setPendingSessionId(3);
         pending.setPendingTurnId(9);
         when(scheduleMapper.findPendingDelivery(7)).thenReturn(List.of(pending));
-        when(scheduleMapper.findEnabled(7)).thenReturn(List.of());
+        AiBriefSchedule due = schedule("Asia/Tokyo");
+        due.setId(5);
+        due.setDailyEnabled(true);
+        when(scheduleMapper.findEnabled(7)).thenReturn(List.of(due));
+        when(runService.start(due, AiBriefRunService.DAILY, LocalDate.parse("2026-08-24")))
+                .thenReturn(AiBriefRunService.Outcome.STARTED);
         when(runService.deliverPending(any())).thenReturn(AiBriefRunService.Outcome.DELIVERED);
 
         scheduler(Clock.fixed(MONDAY_0700_UTC, ZoneOffset.UTC)).sweepWorkspace(7);
 
-        verify(runService).deliverPending(pending);
-        verify(runService, never()).start(any(), anyString(), any());
+        InOrder ordered = inOrder(runService);
+        ordered.verify(runService).deliverPending(pending);
+        ordered.verify(runService).start(
+                due, AiBriefRunService.DAILY, LocalDate.parse("2026-08-24"));
     }
 
     @Test

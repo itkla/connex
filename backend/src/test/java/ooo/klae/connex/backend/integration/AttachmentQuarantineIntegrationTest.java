@@ -65,6 +65,7 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
 
@@ -293,7 +294,8 @@ class AttachmentQuarantineIntegrationTest {
             }
         } finally {
             clearContext();
-            jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", admin.getUsername());
+            jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?",
+                new AccountSessionIndex(admin.getId()).getName());
             for (Workspace fixture : List.of(owning, foreign)) {
                 jdbc.update("DELETE FROM object_deletion_queue WHERE workspace_id = ?", fixture.getId());
                 jdbc.update("DELETE FROM attachment WHERE workspace_id = ?", fixture.getId());

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -120,7 +121,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         personMapper.insert(person);
         assertTrue(shareMapper.sharePerson(
                 person.getId(), ownerWorkspace.getId(), granteeWorkspace.getId(),
-                owner.getId(), false) > 0);
+                owner.getId(), false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())) > 0);
 
         company = new Company();
         company.setWorkspaceId(granteeWorkspace.getId());

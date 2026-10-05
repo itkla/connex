@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -196,22 +197,43 @@ class ApiRequestBodySizeFilterTest {
     }
 
     @Test
-    void rejectsUnknownLengthBodyWhileInputStreamIsRead() throws Exception {
+    void rejectsUnknownLengthBodyBeforeEnteringTheChain() throws Exception {
         MockHttpServletRequest request = unknownLengthJsonRequest("POST", "/api/tasks", "123456789");
         MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
 
-        filter.doFilter(request, response, drainingInputStreamChain());
+        filter.doFilter(request, response, chain);
 
         assertEquals(413, response.getStatus());
+        assertNull(chain.getRequest());
     }
 
-    @Test
-    void rejectsUnknownLengthBodyWhileReaderIsRead() throws Exception {
-        MockHttpServletRequest request = unknownLengthJsonRequest("POST", "/api/tasks", "123456789");
+    @ParameterizedTest(name = "understated length is enforced through {0}")
+    @ValueSource(strings = {"input stream", "reader"})
+    void rejectsUnderstatedLengthBodyWhileDownstreamReadsIt(String access) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/tasks") {
+            @Override
+            public int getContentLength() {
+                return 8;
+            }
+
+            @Override
+            public long getContentLengthLong() {
+                return 8;
+            }
+        };
+        request.setContentType("application/json");
+        request.setContent("123456789".getBytes(StandardCharsets.UTF_8));
         MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean entered = new AtomicBoolean();
+        FilterChain reader = access.equals("reader") ? drainingReaderChain() : drainingInputStreamChain();
 
-        filter.doFilter(request, response, drainingReaderChain());
+        filter.doFilter(request, response, (bounded, output) -> {
+            entered.set(true);
+            reader.doFilter(bounded, output);
+        });
 
+        assertTrue(entered.get());
         assertEquals(413, response.getStatus());
     }
 

@@ -231,7 +231,7 @@ class DbClientRegistrationRepositoryTest {
                 }
             }
             return new InetAddress[] { publicAddress };
-        }, Duration.ofSeconds(5)));
+        }, SsoHttpClientTestSupport.EXHAUSTED_DEADLINE));
         CloseableHttpClient client = mock(CloseableHttpClient.class);
         when(client.executeOpen(any(), any(), any())).thenThrow(new AssertionError("Expired discovery reached HTTP"));
         doReturn(client).when(http).pinnedClient(anyString(), any(InetAddress[].class));

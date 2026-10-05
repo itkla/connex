@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -29,12 +30,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.beans.ReportDefinition;
+import ooo.klae.connex.backend.beans.ReportSchedule;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
@@ -47,12 +51,14 @@ import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
 
 class ReportServiceTest {
     private static final int WORKSPACE_ID = 7;
     private static final int REPORT_ID = 11;
+    private static final int ACTOR_ID = 23;
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-07-12T12:00:00Z"), ZoneOffset.UTC);
 
@@ -64,17 +70,24 @@ class ReportServiceTest {
     private final AiRestrictionEpoch aiRestrictionEpoch = mock(AiRestrictionEpoch.class);
     private final ReportPermissionPolicy reportPermissionPolicy = mock(ReportPermissionPolicy.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final PrivilegedAccountService privilegedAccountService =
+            mock(PrivilegedAccountService.class);
+    private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
+    private final UserMapper userMapper = mock(UserMapper.class);
+    private final AuthService authService = mock(AuthService.class);
     private ReportService service;
 
     @BeforeEach
     void setUp() {
         service = new ReportService(
                 sessionSecurityService,
+                privilegedAccountService,
                 reportMapper,
-                mock(ScheduleMapper.class),
+                scheduleMapper,
+                userMapper,
                 mock(GoalMapper.class),
                 workspaceService,
-                mock(AuthService.class),
+                authService,
                 mock(ScoringService.class),
                 dealRiskService,
                 mock(ReportNetworkService.class),
@@ -94,6 +107,39 @@ class ReportServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"sales-performance", "pipeline-health", "forecasting", "relationship-coverage",
+            "relationship-health", "network-warm-intros", "employment-moves", "commercial-documents",
+            "lead-lifecycle", "activity-team"})
+    void assistantTemplatesCreateSavedDefinitionsWithLocalizableTitlesAndNoDescription(String key) {
+        var template = service.templates().stream().filter(candidate -> key.equals(candidate.key())).findFirst().orElseThrow();
+        var source = template.config();
+        var config = new ooo.klae.connex.backend.dto.ReportConfig(source.widgets().stream()
+                .map(widget -> new ReportWidgetConfig(widget.id(), null, widget.dataSource(), widget.measure(),
+                        widget.groupBy(), widget.chartType())).toList(),
+                source.filters(), source.range(), source.bucket(), source.layout());
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ReportDefinition definition = invocation.getArgument(0);
+            definition.setId(REPORT_ID);
+            when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(definition);
+            return null;
+        }).when(reportMapper).insertDefinition(any());
+
+        var created = service.create(new ooo.klae.connex.backend.dto.ReportDefinitionRequest(
+                "営業レポート", null, template.cadence(), key, config));
+
+        assertEquals(ACTOR_ID, created.createdBy());
+        assertEquals("営業レポート", created.name());
+        assertNull(created.description());
+        assertTrue(created.config().widgets().stream().allMatch(widget -> widget.title() == null));
+        assertEquals(config, created.config());
+        verifyNoInteractions(aiReportNarrativeService);
+        verify(auditService).record("report.create", "report", REPORT_ID, "営業レポート", "Created report 営業レポート", null);
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportExportsRequireStepUpBeforeGeneratingOrLoadingSnapshots(boolean snapshot) {
         doThrow(new RecentAuthenticationRequiredException())
@@ -108,6 +154,71 @@ class ReportServiceTest {
                 });
         verify(auditService).recordExportStepUpRefused();
         verifyNoInteractions(reportMapper);
+    }
+
+    /**
+     * {@code DELETE /api/reports/{id}} carries no entry in {@code PrivilegedMfaEnforcementFilter}'s
+     * path list, so the filter emits nothing for it. The refusal has to be recorded at the service
+     * boundary or a refused destructive attempt on a scheduled report leaves no audit trace (#1763).
+     */
+    @Test
+    void refusingTheParentDeleteStepUpBeforeLocksIsAuditedAsADeletion() {
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        actor.setDisplayName("Scheduling Admin");
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
+        when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
+        when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(true);
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+
+        verify(auditService).recordScheduleDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).deferScheduleDeleteStepUpRefusal();
+        verifyNoInteractions(userMapper, reportMapper);
+        verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
+    }
+
+    /**
+     * The same refusal found only under the locks is recorded through the deferred recorder: the
+     * actor's account row is held there, so an immediate independent append could queue behind a
+     * writer already waiting on it (#1986).
+     */
+    @Test
+    void refusingTheParentDeleteStepUpUnderLocksIsAuditedAsADeletion() {
+        User actor = new User();
+        actor.setId(ACTOR_ID);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
+        when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
+        when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(false, true);
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.delete(REPORT_ID));
+
+        InOrder ordered = inOrder(scheduleMapper, privilegedAccountService, userMapper,
+                workspaceService, reportMapper, sessionSecurityService, auditService);
+        ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
+        ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        ordered.verify(workspaceService).isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID);
+        ordered.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+        ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
+        ordered.verify(reportMapper).getDefinition(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
+        ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
+        ordered.verify(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
+        ordered.verify(auditService).deferScheduleDeleteStepUpRefusal();
+        verify(auditService, never()).recordScheduleDeleteStepUpRefused();
+        verify(auditService, never()).recordExportStepUpRefused();
+        verify(auditService, never()).deferExportStepUpRefusal();
+        verify(reportMapper, never()).deleteDefinition(anyInt(), anyInt());
     }
 
     @Test

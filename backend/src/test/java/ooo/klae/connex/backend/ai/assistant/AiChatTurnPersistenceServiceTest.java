@@ -23,6 +23,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,7 @@ import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -53,6 +56,7 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiChatTurnPersistenceServiceTest {
@@ -768,6 +772,33 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     /**
+     * The loop reads what already holds a write step's key before it prepares that step: the
+     * step's sole-call key only, after the caller's current access is revalidated, and without
+     * taking any lock.
+     */
+    @Test
+    void storedWriteArgumentsReadTheStepsSoleCallKeyWithoutLocking() {
+        when(workspaceService.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(Set.of(Permission.AI_USE));
+        AiChatToolCall existing = new AiChatToolCall();
+        existing.setArgumentsJson("{\"tool\":\"assign_owner\",\"principals\":[21]}");
+        when(chatMapper.getToolCallByIdempotencyKey(TURN.workspaceId(), "turn-17-step-3"))
+                .thenReturn(existing);
+
+        assertEquals(
+                Optional.of(existing.getArgumentsJson()), service.storedWriteArguments(TURN, 3));
+        assertEquals(Optional.empty(), service.storedWriteArguments(TURN, 4));
+        verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).getTurnByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(workspaceService, never()).lockAndRequireMember(anyInt(), anyInt());
+
+        when(workspaceService.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(Set.of());
+        assertThrows(
+                ResourceNotFoundException.class, () -> service.storedWriteArguments(TURN, 3));
+    }
+
+    /**
      * The key a step's only call writes has not changed, and a batched one suffixes it.
      *
      * <p>Ordinal 0 means "the sole call of its step" and has to render the exact legacy key: every
@@ -797,11 +828,23 @@ class AiChatTurnPersistenceServiceTest {
         assertTrue(persisted.getAllValues().getLast().getIdempotencyKey().length() <= 64);
     }
 
+    /**
+     * An ordinal outside the per-step call ceiling writes no row at all.
+     *
+     * <p>Bounded on both sides for the same reason the step number is bounded above: the key is
+     * read back by anchored patterns that this ceiling is part of, so a position no step could have
+     * produced must be refused where it is rendered rather than written and silently skipped by
+     * every reader afterwards.
+     */
     @Test
-    void aNegativeCallOrdinalIsRefusedBeforeAnyRowIsWritten() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> service.proposeTool(TURN, 4, -1, "search_records", "{}"));
+    void aCallOrdinalOutsideTheStepsCallCeilingIsRefusedBeforeAnyRowIsWritten() {
+        for (int invalid : new int[] {
+                -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1}) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> service.proposeTool(TURN, 4, invalid, "search_records", "{}"),
+                    "expected a refusal for call ordinal " + invalid);
+        }
 
         verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
     }

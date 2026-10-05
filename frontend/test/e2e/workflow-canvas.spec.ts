@@ -1,7 +1,53 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 
 import { csrfBootstrap } from "./support/api";
 import { runFixture } from "./support/fixtures";
+import { deferred } from "./support/deferred";
+
+function requestGate() {
+    const pending = deferred<void>();
+    const released = deferred<void>();
+    const completed = deferred<void>();
+    return {
+        pending: pending.promise,
+        completed: completed.promise,
+        release: () => released.resolve(),
+        fetchAndHold: async (route: Route) => {
+            pending.resolve();
+            const response = await route.fetch();
+            await released.promise;
+            await route.fulfill({ response });
+            completed.resolve();
+        },
+        hold: async (deliver: () => Promise<void>) => {
+            pending.resolve();
+            await released.promise;
+            await deliver();
+            completed.resolve();
+        },
+    };
+}
+
+async function gateCreation(page: Page) {
+    const create = requestGate();
+    const navigation = requestGate();
+    await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
+        const pathname = new URL(route.request().url()).pathname;
+        if (!/^\/workflows\/\d+$/.test(pathname)) {
+            await route.continue();
+            return;
+        }
+        await navigation.hold(() => route.continue());
+    });
+    await page.route("**/api/workflows", async (route) => {
+        if (route.request().method() !== "POST") {
+            await route.continue();
+            return;
+        }
+        await create.fetchAndHold(route);
+    });
+    return { create, navigation };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -176,64 +222,28 @@ async function workflowPanePoint(pane: Locator): Promise<{ x: number; y: number 
 
 test.describe("workflow canvas", () => {
     test("locks initial authoring until creation finishes", async ({ page }) => {
-        let releaseCreate: () => void = () => undefined;
-        const createReleased = new Promise<void>((resolve) => {
-            releaseCreate = resolve;
-        });
-        let markCreatePending: () => void = () => undefined;
-        const createPending = new Promise<void>((resolve) => {
-            markCreatePending = resolve;
-        });
-        let releaseNavigation: () => void = () => undefined;
-        const navigationReleased = new Promise<void>((resolve) => {
-            releaseNavigation = resolve;
-        });
-        let markNavigationPending: () => void = () => undefined;
-        const navigationPending = new Promise<void>((resolve) => {
-            markNavigationPending = resolve;
-        });
-
         await page.goto("/workflows/new");
         await page.getByLabel("Workflow name").fill("Create without lost edits");
-        await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
-            const pathname = new URL(route.request().url()).pathname;
-            if (!/^\/workflows\/\d+$/.test(pathname)) {
-                await route.continue();
-                return;
-            }
-            markNavigationPending();
-            await navigationReleased;
-            await route.continue();
-        });
-        await page.route("**/api/workflows", async (route) => {
-            if (route.request().method() !== "POST") {
-                await route.continue();
-                return;
-            }
-            markCreatePending();
-            const response = await route.fetch();
-            await createReleased;
-            await route.fulfill({ response });
-        });
+        const { create, navigation } = await gateCreation(page);
 
         try {
             await page.getByRole("button", { name: "Save draft" }).click();
-            await createPending;
+            await create.pending;
             await expect(page.getByRole("button", { name: "Saving draft…" })).toBeDisabled();
             await expect(page.getByLabel("Workflow name")).toBeDisabled();
             await expect(page.locator(".react-flow__node").first()).not.toHaveClass(/(?:^|\s)draggable(?:\s|$)/);
             await expectCanvasViewportLocked(page);
         } finally {
-            releaseCreate();
+            create.release();
         }
 
         try {
-            await navigationPending;
+            await navigation.pending;
             await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
             await expect(page.getByLabel("Workflow name")).toBeDisabled();
             await expectCanvasViewportLocked(page);
         } finally {
-            releaseNavigation();
+            navigation.release();
         }
 
         await expect(page).toHaveURL(/\/workflows\/\d+$/);
@@ -241,45 +251,9 @@ test.describe("workflow canvas", () => {
     });
 
     test("ignores a pan that ends after creation locks", async ({ page }) => {
-        let releaseCreate: () => void = () => undefined;
-        const createReleased = new Promise<void>((resolve) => {
-            releaseCreate = resolve;
-        });
-        let markCreatePending: () => void = () => undefined;
-        const createPending = new Promise<void>((resolve) => {
-            markCreatePending = resolve;
-        });
-        let releaseNavigation: () => void = () => undefined;
-        const navigationReleased = new Promise<void>((resolve) => {
-            releaseNavigation = resolve;
-        });
-        let markNavigationPending: () => void = () => undefined;
-        const navigationPending = new Promise<void>((resolve) => {
-            markNavigationPending = resolve;
-        });
-
         await page.goto("/workflows/new");
         await page.getByLabel("Workflow name").fill("Create after an interrupted pan");
-        await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
-            const pathname = new URL(route.request().url()).pathname;
-            if (!/^\/workflows\/\d+$/.test(pathname)) {
-                await route.continue();
-                return;
-            }
-            markNavigationPending();
-            await navigationReleased;
-            await route.continue();
-        });
-        await page.route("**/api/workflows", async (route) => {
-            if (route.request().method() !== "POST") {
-                await route.continue();
-                return;
-            }
-            markCreatePending();
-            const response = await route.fetch();
-            await createReleased;
-            await route.fulfill({ response });
-        });
+        const { create, navigation } = await gateCreation(page);
 
         const pane = page.locator(".react-flow__pane");
         const viewport = page.locator(".react-flow__viewport");
@@ -295,33 +269,26 @@ test.describe("workflow canvas", () => {
                 if (!(button instanceof HTMLElement)) throw new Error("Save draft must be an HTML button");
                 button.click();
             });
-            await createPending;
+            await create.pending;
             await expect(page.getByRole("button", { name: "Saving draft…" })).toBeDisabled();
             await page.mouse.up();
         } finally {
-            releaseCreate();
+            create.release();
         }
 
         try {
-            await navigationPending;
+            await navigation.pending;
             await expect(page.getByText("Draft saved", { exact: true })).toBeVisible();
             await expect(page.getByText("Unpublished changes", { exact: true })).toHaveCount(0);
         } finally {
-            releaseNavigation();
+            navigation.release();
         }
 
         await expect(page).toHaveURL(/\/workflows\/\d+$/);
     });
 
     test("keeps Back navigation when creation finishes in the background", async ({ page }) => {
-        let releaseCreate: () => void = () => undefined;
-        const createReleased = new Promise<void>((resolve) => {
-            releaseCreate = resolve;
-        });
-        let markCreatePending: () => void = () => undefined;
-        const createPending = new Promise<void>((resolve) => {
-            markCreatePending = resolve;
-        });
+        const create = requestGate();
         let createdNavigationRequested = false;
 
         await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
@@ -334,10 +301,7 @@ test.describe("workflow canvas", () => {
                 await route.continue();
                 return;
             }
-            markCreatePending();
-            const response = await route.fetch();
-            await createReleased;
-            await route.fulfill({ response });
+            await create.fetchAndHold(route);
         });
 
         await page.goto("/workflows/new");
@@ -346,11 +310,11 @@ test.describe("workflow canvas", () => {
             response.request().method() === "POST" && new URL(response.url()).pathname === "/api/workflows"
         ));
         await page.getByRole("button", { name: "Save draft" }).click();
-        await createPending;
+        await create.pending;
         await page.getByRole("button", { name: "Back to workflows" }).click();
         await expect(page).toHaveURL(/\/workflows$/);
 
-        releaseCreate();
+        create.release();
         const response = await createResponse;
         await response.finished();
         await settleBrowserTasks(page);
@@ -369,26 +333,27 @@ test.describe("workflow canvas", () => {
             `Conflict recovery ${testInfo.retry}`,
         );
         const id = workflowId(created);
-        let releaseSave: () => void = () => undefined;
-        const saveReleased = new Promise<void>((resolve) => {
-            releaseSave = resolve;
-        });
-        let markSavePending: () => void = () => undefined;
-        const savePending = new Promise<void>((resolve) => {
-            markSavePending = resolve;
-        });
+        const save = requestGate();
 
         await page.goto(`/workflows/${id}`);
         await page.route(`**/api/workflows/${id}/draft`, async (route) => {
-            markSavePending();
-            await saveReleased;
-            await route.continue();
+            await save.hold(() => route.continue());
         });
+        const rejectedSave = page.waitForResponse((response) => (
+            response.request().method() === "PUT"
+            && new URL(response.url()).pathname === `/api/workflows/${id}/draft`
+            && response.status() === 409
+        ));
+        const recoveredWorkflow = page.waitForResponse((response) => (
+            response.request().method() === "GET"
+            && new URL(response.url()).pathname === `/api/workflows/${id}`
+            && response.status() === 200
+        ));
         const name = page.getByLabel("Workflow name");
         await name.fill("Submitted name");
         await name.blur();
         await page.getByRole("button", { name: "Save draft" }).click();
-        await savePending;
+        await save.pending;
         try {
             await name.fill("Edited during conflict recovery");
             await name.blur();
@@ -405,11 +370,17 @@ test.describe("workflow canvas", () => {
             });
             expect(competingResponse.status(), await competingResponse.text()).toBe(200);
         } finally {
-            releaseSave();
+            save.release();
         }
 
-        await expect(name).toHaveValue("Edited during conflict recovery");
+        await (await rejectedSave).finished();
+        await (await recoveredWorkflow).finished();
         await expect(page.getByRole("button", { name: "Save draft" })).toBeEnabled();
+        await page.locator('.react-flow__node[data-id="trigger"]').click();
+        const description = page.locator('textarea[data-workflow-node="trigger"][data-workflow-field="description"]');
+        await expect(description).toBeVisible();
+        await expect(description).toHaveValue("Changed by another editor");
+        await expect(name).toHaveValue("Edited during conflict recovery");
     });
 
     test("ignores an older conflict recovery that finishes after a newer one", async ({ page }, testInfo) => {
@@ -448,18 +419,7 @@ test.describe("workflow canvas", () => {
         await page.getByRole("button", { name: "Keep editing locally" }).click();
 
         let recoveryCount = 0;
-        let releaseOlderRecovery: () => void = () => undefined;
-        const olderRecoveryReleased = new Promise<void>((resolve) => {
-            releaseOlderRecovery = resolve;
-        });
-        let markOlderRecoveryPending: () => void = () => undefined;
-        const olderRecoveryPending = new Promise<void>((resolve) => {
-            markOlderRecoveryPending = resolve;
-        });
-        let markOlderRecoveryCompleted: () => void = () => undefined;
-        const olderRecoveryCompleted = new Promise<void>((resolve) => {
-            markOlderRecoveryCompleted = resolve;
-        });
+        const olderRecovery = requestGate();
         await page.route(`**/api/workflows/${id}`, async (route) => {
             if (route.request().method() !== "GET") {
                 await route.continue();
@@ -468,15 +428,14 @@ test.describe("workflow canvas", () => {
             const recoveryIndex = ++recoveryCount;
             const response = await route.fetch();
             if (recoveryIndex === 1) {
-                markOlderRecoveryPending();
-                await olderRecoveryReleased;
+                await olderRecovery.hold(() => route.fulfill({ response }));
+            } else {
+                await route.fulfill({ response });
             }
-            await route.fulfill({ response });
-            if (recoveryIndex === 1) markOlderRecoveryCompleted();
         });
 
         await save.click();
-        await olderRecoveryPending;
+        await olderRecovery.pending;
         try {
             const newerServerResponse = await page.request.put(`/api/workflows/${id}/draft`, {
                 headers: {
@@ -493,9 +452,9 @@ test.describe("workflow canvas", () => {
             await save.click();
             await expect(page.getByText("Newer server name", { exact: true })).toBeVisible();
         } finally {
-            releaseOlderRecovery();
+            olderRecovery.release();
         }
-        await olderRecoveryCompleted;
+        await olderRecovery.completed;
         await settleBrowserTasks(page);
         await expect(page.getByText("Newer server name", { exact: true })).toBeVisible();
         await expect(page.getByText("Older server name", { exact: true })).toHaveCount(0);
@@ -513,18 +472,7 @@ test.describe("workflow canvas", () => {
         const id = workflowId(created);
         await page.goto(`/workflows/${id}`);
 
-        let releaseValidation: () => void = () => undefined;
-        const validationReleased = new Promise<void>((resolve) => {
-            releaseValidation = resolve;
-        });
-        let markValidationPending: () => void = () => undefined;
-        const validationPending = new Promise<void>((resolve) => {
-            markValidationPending = resolve;
-        });
-        let markValidationCompleted: () => void = () => undefined;
-        const validationCompleted = new Promise<void>((resolve) => {
-            markValidationCompleted = resolve;
-        });
+        const validation = requestGate();
         let validationValid: boolean | null = null;
         await page.route(`**/api/workflows/${id}/validate`, async (route) => {
             const response = await route.fetch();
@@ -533,22 +481,19 @@ test.describe("workflow canvas", () => {
                 throw new Error("Workflow validation response is missing its valid flag");
             }
             validationValid = result.valid;
-            markValidationPending();
-            await validationReleased;
-            await route.fulfill({ response });
-            markValidationCompleted();
+            await validation.hold(() => route.fulfill({ response }));
         });
 
         await page.getByRole("button", { name: "Validate" }).click();
-        await validationPending;
+        await validation.pending;
         try {
             const name = page.getByLabel("Workflow name");
             await name.fill("Edited after validation started");
             await name.blur();
         } finally {
-            releaseValidation();
+            validation.release();
         }
-        await validationCompleted;
+        await validation.completed;
         await settleBrowserTasks(page);
 
         if (validationValid === null) throw new Error("Workflow validation did not complete");
@@ -572,24 +517,10 @@ test.describe("workflow canvas", () => {
         const id = workflowId(created);
         await page.goto(`/workflows/${id}`);
 
-        let releaseSimulation: () => void = () => undefined;
-        const simulationReleased = new Promise<void>((resolve) => {
-            releaseSimulation = resolve;
-        });
-        let markSimulationPending: () => void = () => undefined;
-        const simulationPending = new Promise<void>((resolve) => {
-            markSimulationPending = resolve;
-        });
-        let markSimulationCompleted: () => void = () => undefined;
-        const simulationCompleted = new Promise<void>((resolve) => {
-            markSimulationCompleted = resolve;
-        });
+        const simulation = requestGate();
         await page.route(`**/api/workflows/${id}/simulate`, async (route) => {
             const response = await route.fetch();
-            markSimulationPending();
-            await simulationReleased;
-            await route.fulfill({ response });
-            markSimulationCompleted();
+            await simulation.hold(() => route.fulfill({ response }));
         });
 
         const preview = page.getByRole("button", { name: "Preview" });
@@ -599,7 +530,7 @@ test.describe("workflow canvas", () => {
         await record.fill(fixture.deals.primary.name);
         await page.getByRole("option", { name: fixture.deals.primary.name, exact: true }).click();
         await page.getByRole("button", { name: "Preview path" }).click();
-        await simulationPending;
+        await simulation.pending;
         try {
             await page.getByRole("dialog", { name: "Preview a workflow path" })
                 .getByRole("button", { name: "Close", exact: true })
@@ -611,9 +542,9 @@ test.describe("workflow canvas", () => {
             await page.getByRole("button", { name: "Save draft" }).click();
             await expect(page.getByText("Unpublished changes", { exact: true })).toHaveCount(0);
         } finally {
-            releaseSimulation();
+            simulation.release();
         }
-        await simulationCompleted;
+        await simulation.completed;
         await settleBrowserTasks(page);
 
         await preview.click();

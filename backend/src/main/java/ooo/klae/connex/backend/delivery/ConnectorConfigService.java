@@ -137,7 +137,7 @@ public class ConnectorConfigService {
                 && !isBlank(config.getEndpoint())
                 && !isBlank(config.getExternalListId())
                 && !isBlank(config.getCredentialRef())
-                && connectorSecretCipher.isAvailable();
+                && connectorSecretCipher.canDecryptCredential(workspaceId, config.getCredentialRef());
     }
 
     /**

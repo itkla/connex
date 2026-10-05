@@ -278,8 +278,8 @@ class AiChatMapperTest extends AbstractMapperTest {
                         workspace.getId(), session.getId(), toolCall.getId()).getId());
         assertEquals(
                 List.of(toolCall.getId()),
-                chatMapper.listPendingToolCallsBySession(
-                        workspace.getId(), session.getId()).stream()
+                chatMapper.listToolCallsBySession(
+                                workspace.getId(), session.getId(), true, 1).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertNull(chatMapper.getToolCallBySession(
@@ -302,8 +302,6 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(thoughtSignature, replayedTool.getThoughtSignature());
         assertEquals(toolCall.getId(), lockedTool.getId());
         assertEquals(thoughtSignature, lockedTool.getThoughtSignature());
-        assertTrue(chatMapper.listPendingToolCallsBySession(
-                workspace.getId(), session.getId()).isEmpty());
         AiChatToolCall secondToolCall = new AiChatToolCall();
         secondToolCall.setWorkspaceId(workspace.getId());
         secondToolCall.setMessageId(userMessage.getId());

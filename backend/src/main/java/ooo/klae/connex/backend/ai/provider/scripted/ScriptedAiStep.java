@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+
 /**
  * One scripted step: the predicate that selects it and the emission it produces.
  *
@@ -85,6 +87,8 @@ public record ScriptedAiStep(
     public enum Kind {
         /** Returns one function call. */
         TOOL_CALL,
+        /** Returns several function calls in one assistant message. */
+        TOOL_CALLS,
         /** Returns the full terminal step JSON. */
         FINAL,
         /** Returns deliberately unparseable text. */
@@ -111,6 +115,7 @@ public record ScriptedAiStep(
      * @param kind what the provider returns or raises
      * @param toolName function name for {@link Kind#TOOL_CALL}
      * @param arguments function arguments JSON text for {@link Kind#TOOL_CALL}
+     * @param calls the calls one assistant message carries, for {@link Kind#TOOL_CALLS}
      * @param text returned model text for {@link Kind#FINAL} and {@link Kind#MALFORMED}
      * @param failureKind typed failure for {@link Kind#FAILURE}
      * @param reasoning display-only reasoning returned beside the content, or an empty string
@@ -120,6 +125,7 @@ public record ScriptedAiStep(
             Kind kind,
             String toolName,
             String arguments,
+            List<ScriptedCall> calls,
             String text,
             FailureKind failureKind,
             String reasoning,
@@ -127,10 +133,27 @@ public record ScriptedAiStep(
 
         private static final Pattern TOOL_NAME = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
 
+        /** Creates an emission that carries at most one function call. */
+        public Emission(
+                Kind kind,
+                String toolName,
+                String arguments,
+                String text,
+                FailureKind failureKind,
+                String reasoning,
+                List<String> deltas) {
+            this(kind, toolName, arguments, List.of(), text, failureKind, reasoning, deltas);
+        }
+
         public Emission {
             Objects.requireNonNull(kind, "kind");
             reasoning = reasoning == null ? "" : reasoning;
             deltas = List.copyOf(Objects.requireNonNull(deltas, "deltas"));
+            calls = List.copyOf(Objects.requireNonNull(calls, "calls"));
+            if (kind != Kind.TOOL_CALLS && !calls.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Scripted AI calls belong only to a tool_calls emission");
+            }
             switch (kind) {
                 case TOOL_CALL -> {
                     if (toolName == null || !TOOL_NAME.matcher(toolName).matches()) {
@@ -139,6 +162,19 @@ public record ScriptedAiStep(
                     if (arguments == null || arguments.isBlank()) {
                         throw new IllegalArgumentException(
                                 "Scripted AI tool arguments are required");
+                    }
+                }
+                case TOOL_CALLS -> {
+                    if (toolName != null || arguments != null) {
+                        throw new IllegalArgumentException(
+                                "Scripted AI tool_calls declares its calls, not a single call");
+                    }
+                    if (calls.size() < 2
+                            || calls.size() > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
+                        throw new IllegalArgumentException(
+                                "Scripted AI tool_calls must declare between 2 and "
+                                        + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS
+                                        + " calls");
                     }
                 }
                 case FINAL, MALFORMED -> {
@@ -155,6 +191,28 @@ public record ScriptedAiStep(
             if (!deltas.isEmpty() && !String.join("", deltas).equals(text == null ? "" : text)) {
                 throw new IllegalArgumentException(
                         "Scripted AI step deltas must concatenate to its text");
+            }
+        }
+    }
+
+    /**
+     * One function call of a {@link Kind#TOOL_CALLS} emission.
+     *
+     * <p>Carries exactly what a single-call emission carries and is validated by the same rules, so
+     * a fixture cannot declare through the plural form anything the loader would refuse in the
+     * singular one.
+     *
+     * @param toolName function name this call declares
+     * @param arguments function arguments JSON text, carried through the provider verbatim
+     */
+    public record ScriptedCall(String toolName, String arguments) {
+
+        public ScriptedCall {
+            if (toolName == null || !Emission.TOOL_NAME.matcher(toolName).matches()) {
+                throw new IllegalArgumentException("Scripted AI tool name is invalid");
+            }
+            if (arguments == null || arguments.isBlank()) {
+                throw new IllegalArgumentException("Scripted AI tool arguments are required");
             }
         }
     }

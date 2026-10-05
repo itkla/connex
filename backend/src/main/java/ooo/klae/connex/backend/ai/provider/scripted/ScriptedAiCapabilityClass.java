@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.provider.scripted;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -28,7 +29,8 @@ public enum ScriptedAiCapabilityClass {
             AiReasoningMode.TAGGED,
             false,
             200_000,
-            16_384),
+            16_384,
+            1),
 
     /** Streamed native function calling, so a trajectory can drive ordered content deltas. */
     NATIVE_STREAM(
@@ -38,7 +40,43 @@ public enum ScriptedAiCapabilityClass {
             AiReasoningMode.TAGGED,
             true,
             200_000,
-            16_384),
+            16_384,
+            1),
+
+    /**
+     * Buffered native function calling for an endpoint an operator declared as carrying a batch.
+     *
+     * <p>The one capability class a fixture can use to rehearse what a declared endpoint really
+     * returns. No real endpoint can be probed from any development or CI environment, so a scripted
+     * class is the only place the server's handling of several calls in one assistant message is
+     * exercised at all.
+     */
+    NATIVE_PARALLEL(
+            "scripted-native-parallel",
+            AiStructuredOutputEnforcement.JSON_SCHEMA,
+            AiToolCallingMode.NATIVE_FUNCTIONS,
+            AiReasoningMode.TAGGED,
+            false,
+            200_000,
+            16_384,
+            AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS),
+
+    /**
+     * Streamed native function calling for a declared endpoint that also carries a batch.
+     *
+     * <p>Streaming and the per-step call bound are independent endpoint declarations, and the
+     * endpoint this feature targets is exactly the one an operator declares for streaming — so the
+     * combination has to be rehearsed rather than assumed to be either impossible or identical.
+     */
+    NATIVE_PARALLEL_STREAM(
+            "scripted-native-parallel-stream",
+            AiStructuredOutputEnforcement.JSON_SCHEMA,
+            AiToolCallingMode.NATIVE_FUNCTIONS,
+            AiReasoningMode.TAGGED,
+            true,
+            200_000,
+            16_384,
+            AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS),
 
     /** Prompt-only JSON protocol with no native tools. */
     JSON(
@@ -48,7 +86,8 @@ public enum ScriptedAiCapabilityClass {
             AiReasoningMode.TAGGED,
             false,
             200_000,
-            16_384),
+            16_384,
+            1),
 
     /** A window below the assistant context floor, so the floor refusal can be rehearsed. */
     SMALL_CONTEXT(
@@ -58,7 +97,8 @@ public enum ScriptedAiCapabilityClass {
             AiReasoningMode.TAGGED,
             false,
             32_768,
-            4_096);
+            4_096,
+            1);
 
     private final String modelId;
     private final AiStructuredOutputEnforcement structuredOutput;
@@ -67,6 +107,7 @@ public enum ScriptedAiCapabilityClass {
     private final boolean streaming;
     private final int contextWindowTokens;
     private final int maxOutputTokens;
+    private final int parallelToolCalls;
 
     ScriptedAiCapabilityClass(
             String modelId,
@@ -75,7 +116,8 @@ public enum ScriptedAiCapabilityClass {
             AiReasoningMode reasoning,
             boolean streaming,
             int contextWindowTokens,
-            int maxOutputTokens) {
+            int maxOutputTokens,
+            int parallelToolCalls) {
         this.modelId = modelId;
         this.structuredOutput = structuredOutput;
         this.toolCalling = toolCalling;
@@ -83,6 +125,7 @@ public enum ScriptedAiCapabilityClass {
         this.streaming = streaming;
         this.contextWindowTokens = contextWindowTokens;
         this.maxOutputTokens = maxOutputTokens;
+        this.parallelToolCalls = parallelToolCalls;
     }
 
     /** @return configured provider model id this capability class answers for */
@@ -118,6 +161,11 @@ public enum ScriptedAiCapabilityClass {
     /** @return declared maximum generated output in tokens */
     public int maxOutputTokens() {
         return maxOutputTokens;
+    }
+
+    /** @return how many function calls one model step of this class may carry */
+    public int parallelToolCalls() {
+        return parallelToolCalls;
     }
 
     /**

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -10,9 +11,13 @@ import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.services.WorkflowActionRetryPolicy.RetrySafety;
@@ -53,6 +58,38 @@ class WorkflowActionRetryPolicyTest {
             new IllegalStateException("unexpected")));
     }
 
+    /**
+     * A savepoint a deadlock destroyed carries the deadlock as its application exception, not as a
+     * cause, and retries; a transaction failure that carries none, such as an unclassified commit
+     * whose outcome is unknown, does not (#1947).
+     */
+    @Test
+    void aSavepointLostToADeadlockRetriesButAnUnclassifiedTransactionFailureDoesNot() {
+        WorkflowActionRetryPolicy policy = policy();
+        TransactionSystemException lostSavepoint =
+            new TransactionSystemException("Could not roll back to JDBC savepoint");
+        lostSavepoint.initApplicationException(new DeadlockLoserDataAccessException("Deadlock found", null));
+
+        assertTrue(policy.transientDatabaseFailure(lostSavepoint));
+        assertTrue(policy.transientDatabaseFailure(new IllegalStateException("wrapper", lostSavepoint)));
+        assertFalse(policy.transientDatabaseFailure(
+            new TransactionSystemException("Could not commit JDBC transaction")));
+        assertFalse(policy.transientDatabaseFailure(new CannotCreateTransactionException(
+            "Cannot create savepoint for transaction which is already marked as rollback-only")));
+    }
+
+    @Test
+    void aCyclicCauseChainEndsTheWalk() {
+        IllegalStateException first = new IllegalStateException("first");
+        IllegalStateException second = new IllegalStateException("second", first);
+        first.initCause(second);
+
+        WorkflowActionRetryPolicy policy = policy();
+
+        assertFalse(assertTimeoutPreemptively(
+            Duration.ofSeconds(5), () -> policy.transientDatabaseFailure(first)));
+    }
+
     @Test
     void retryDelayIsDeterministicAndBounded() {
         WorkflowActionRetryPolicy policy = policy();
@@ -62,6 +99,15 @@ class WorkflowActionRetryPolicyTest {
         assertTrue(first.compareTo(Duration.ofSeconds(30)) >= 0);
         assertTrue(policy.retryDelay(31L, "action", 3)
             .compareTo(Duration.ofMinutes(15)) <= 0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {6, 9, 20})
+    void retryDelaySaturatesAtTheConfiguredMaximum(int attempt) {
+        WorkflowActionRetryPolicy policy = policy();
+
+        assertEquals(Duration.ofMinutes(15), policy.retryDelay(31L, "action", attempt));
+        assertEquals(policy.retryDelay(31L, "action", attempt), policy.retryDelay(31L, "action", attempt));
     }
 
     private static WorkflowActionRetryPolicy policy() {

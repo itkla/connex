@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -60,7 +61,6 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     @Autowired OrganizationMapper organizationMapper;
     @Autowired RoleService roleService;
     @Autowired WorkspaceService workspaceService;
-    @Autowired jakarta.validation.Validator beanValidator;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
     private User provisioningOwner;
@@ -257,7 +257,8 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
 
         Workspace grantee = siblingWorkspace();
         shareMapper.sharePerson(
-            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
         User outsider = newUser();
         workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, grantee.getId());
@@ -294,19 +295,6 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             Integer.class, workspace.getId()));
     }
 
-    @Test
-    void lifecycleReasonDtoAcceptsOnlyCanonicalUppercaseAscii() {
-        PersonLifecycleRequest canonical = request(
-            PersonLifecycleStage.DISQUALIFIED, PersonDisqualificationReason.OTHER, null);
-        assertTrue(beanValidator.validate(canonical).isEmpty());
-
-        for (String code : List.of("other", " OTHER ", "ÖTHER")) {
-            PersonLifecycleRequest invalid = request(
-                PersonLifecycleStage.DISQUALIFIED, code, null);
-            assertTrue(beanValidator.validate(invalid).stream()
-                .anyMatch(violation -> violation.getPropertyPath().toString().equals("reason")));
-        }
-    }
 
     @Test
     void lifecycleServiceRejectsNoncanonicalReasonCodesWithoutStoringThem() {

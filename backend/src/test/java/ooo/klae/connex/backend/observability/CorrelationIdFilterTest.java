@@ -15,6 +15,7 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.ServletException;
 import ooo.klae.connex.backend.config.ApiRequestBodySizeFilter;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
@@ -120,6 +121,7 @@ class CorrelationIdFilterTest {
         String initial = response.getHeader(CorrelationIds.HEADER_NAME);
         assertTrue(CorrelationIds.isValid(initial));
         AtomicReference<String> duringRedispatch = new AtomicReference<>();
+        request.setDispatcherType(DispatcherType.ASYNC);
 
         filter.doFilter(request, response,
                 (ignoredRequest, ignoredResponse) -> duringRedispatch.set(MDC.get(CorrelationIds.MDC_KEY)));

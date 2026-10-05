@@ -176,8 +176,14 @@ class ApiCredentialAuthenticationFilterTest {
         MockHttpServletRequest request = authenticatedRequest("POST");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(request, response, (servletRequest, servletResponse) ->
-            assertFalse(TransactionSynchronizationManager.isActualTransactionActive()));
+        AtomicBoolean dispatched = new AtomicBoolean();
+        filter.doFilter(request, response, (servletRequest, servletResponse) -> {
+            dispatched.set(true);
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(1, transactionManager.commitCount());
+        });
+
+        assertTrue(dispatched.get());
 
         assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
         assertEquals(1, transactionManager.beginCount());

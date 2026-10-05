@@ -13,12 +13,25 @@ import java.util.Set;
  * @param repairMessage schema-repair instruction for the retry request, or null
  * @param finalOnly whether the provider must answer without calling any tool on this step —
  *     the closing step keeps its definitions for exchange pairing but forbids further calls
+ * @param maxParallelCalls how many calls this step's response may carry, from 1; the adapter that
+ *     serializes the request and the parser that bounds the response read it here rather than each
+ *     resolving the operator's endpoint declaration separately
  */
 public record AiNativeToolRequest(
         List<AiToolDefinition> definitions,
         List<AiToolExchange> exchanges,
         String repairMessage,
-        boolean finalOnly) {
+        boolean finalOnly,
+        int maxParallelCalls) {
+
+    /** Creates a request whose step carries one call, as every undeclared endpoint's does. */
+    public AiNativeToolRequest(
+            List<AiToolDefinition> definitions,
+            List<AiToolExchange> exchanges,
+            String repairMessage,
+            boolean finalOnly) {
+        this(definitions, exchanges, repairMessage, finalOnly, 1);
+    }
 
     public AiNativeToolRequest(
             List<AiToolDefinition> definitions,
@@ -32,6 +45,12 @@ public record AiNativeToolRequest(
         exchanges = List.copyOf(Objects.requireNonNull(exchanges, "exchanges"));
         if (definitions.isEmpty()) {
             throw new IllegalArgumentException("AI native tool definitions are required");
+        }
+        if (maxParallelCalls < 1
+                || maxParallelCalls > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
+            throw new IllegalArgumentException(
+                    "AI native tool parallel call bound must be between 1 and "
+                            + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
         }
         Set<String> names = new HashSet<>();
         for (AiToolDefinition definition : definitions) {
@@ -98,6 +117,7 @@ public record AiNativeToolRequest(
     @Override
     public String toString() {
         return "AiNativeToolRequest[definitions=" + definitions.size()
-                + ", exchanges=<redacted>, repairMessage=<redacted>]";
+                + ", exchanges=<redacted>, repairMessage=<redacted>"
+                + ", maxParallelCalls=" + maxParallelCalls + "]";
     }
 }

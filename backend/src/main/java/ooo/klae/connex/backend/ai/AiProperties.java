@@ -11,6 +11,7 @@ import java.util.Map;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
 import lombok.Data;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 
 /**
  * Instance-wide AI configuration, bound from {@code connex.ai.*} /
@@ -270,8 +272,30 @@ public class AiProperties {
         private Boolean thoughts;
 
         /**
-         * Exact provider endpoint the {@link #streaming} and {@link #thoughts} declarations apply
-         * to.
+         * How many function calls this endpoint may emit in one assistant message.
+         *
+         * <p>Declared only after a recorded probe, never assumed. The request field that permits
+         * several calls is already sent on every request as {@code false}, so flipping it cannot
+         * fail loudly; what has to be established first is behavioural — that the endpoint really
+         * emits several calls with distinct ids and a per-call replay signature, and that it
+         * accepts a replayed assistant message carrying several of them. There is no provider
+         * credential in any development or CI environment, so the probe is an operator step and the
+         * checklist lives in {@code docs/backend/AI_SECURITY.md}.
+         *
+         * <p>Only honoured together with {@link #endpoint}, on the same reasoning as
+         * {@link #streaming}: the same model id served by two gateways is two different answers.
+         * Unlike streaming, {@link #modelId} must also name the configured model id exactly,
+         * namespace included — {@code google/gemini-2.5-pro} covers neither the bare
+         * {@code gemini-2.5-pro} nor {@code somemirror/gemini-2.5-pro} on the same router, because
+         * the probe answered for one upstream model only.
+         */
+        @Min(1)
+        @Max(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS)
+        private Integer parallelReadCalls;
+
+        /**
+         * Exact provider endpoint the {@link #streaming}, {@link #thoughts} and
+         * {@link #parallelReadCalls} declarations apply to.
          *
          * <p>Scopes an endpoint-specific capability to the endpoint that was actually verified.
          * The token, modality, and pricing fields are properties of the model itself and ignore
@@ -322,8 +346,23 @@ public class AiProperties {
                     candidateEndpoint);
         }
 
-        private Boolean endpointScoped(
-                Boolean declared,
+        /**
+         * How many parallel calls this override declares for one exact configured endpoint.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId configured model id, trimmed and lower-cased with its namespace
+         *     kept, because this declaration speaks for one probed upstream model only
+         * @param candidateEndpoint configured provider endpoint
+         * @return the declared ceiling, or {@code null} when the override says nothing
+         */
+        public Integer parallelReadCallsFor(
+                String candidateProvider, String normalizedModelId, String candidateEndpoint) {
+            return endpointScoped(parallelReadCalls, candidateProvider, normalizedModelId,
+                    candidateEndpoint);
+        }
+
+        private <T> T endpointScoped(
+                T declared,
                 String candidateProvider,
                 String normalizedModelId,
                 String candidateEndpoint) {

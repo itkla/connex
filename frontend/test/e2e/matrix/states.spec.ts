@@ -17,10 +17,16 @@
  * denial from a not-found is the heroicon they pass: a closed padlock versus a magnifying glass.
  * Second, these specs deliberately induce failing responses, so unlike the sweep they record
  * response failures as evidence without asserting they are absent.
+ *
+ * The padlock is the grammar of a whole refused surface. A consolidated settings destination is not
+ * refused whole: it stays open and refuses each gated section in place with its own ask-an-admin
+ * notice. Those routes are asserted section by section against the catalogue's refusal copy, so one
+ * refused section cannot vouch for a neighbour that leaks its protected content.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
+import { message } from '../support/messages';
 import { MATRIX_ROUTES } from './routes';
 import {
     blockExternalRequests,
@@ -47,8 +53,35 @@ const NOT_FOUND_MARKER =
     '[data-app-main] :is(div.size-14, span.size-10) svg path[d^="m21 21-5.197-5.197"]';
 const EMPTY_STATE_MARKER = '[data-app-main] div.py-20.text-center h2';
 const SKELETON_MARKER = '[data-app-main] [data-slot="skeleton"]';
-const STALE_DISCLOSURE = '[data-app-main] div.rounded-lg.bg-card.px-4.py-3';
-const HARD_FAILURE_CARD = '[data-app-main] div.rounded-lg.bg-card.p-4';
+const SECTION_CONTROLS = 'table, form, input, textarea, select, button, [role="table"], [role="grid"]';
+
+type SectionRefusal = { section: string; heading: string; title: string; body: string };
+
+const ASK_ADMIN = {
+    title: message(DESKTOP.locale, 'settings', 'SettingsAvailability.askAdminTitle'),
+    body: message(DESKTOP.locale, 'settings', 'SettingsAvailability.askAdminBody'),
+};
+
+/** The sections each consolidated destination must refuse in place to a member, keyed by where it lands. */
+const CONSOLIDATED_REFUSALS: ReadonlyMap<string, readonly SectionRefusal[]> = new Map([
+    ['/settings/workspace/audit-diagnostics', [
+        {
+            section: 'audit',
+            heading: message(DESKTOP.locale, 'admin', 'AdminAuditLog.heading'),
+            title: message(DESKTOP.locale, 'admin', 'AdminAuditLog.deniedTitle'),
+            body: message(DESKTOP.locale, 'admin', 'AdminAuditLog.deniedBody'),
+        },
+        {
+            section: 'diagnostics',
+            heading: message(DESKTOP.locale, 'workspace', 'WorkspaceSettings.tabDiagnostics'),
+            ...ASK_ADMIN,
+        },
+    ]],
+    ['/settings/workspace/communications', [
+        { section: 'email', heading: message(DESKTOP.locale, 'workspace', 'WorkspaceEmail.title'), ...ASK_ADMIN },
+        { section: 'delivery', heading: message(DESKTOP.locale, 'workspace', 'WorkspaceDelivery.title'), ...ASK_ADMIN },
+    ]],
+]);
 
 test.describe('loading — a slow source must show its skeleton, not a fabricated empty result', () => {
     test.afterEach(() => {
@@ -188,8 +221,138 @@ test.describe('permission denied — real RBAC, not injected', () => {
                 landing.acceptedPaths.includes(landing.finalPath),
                 `a denied member must not be redirected somewhere undeclared — ${describeLanding(landing)}`,
             ).toBe(true);
-            expect(denied, `${route.path} must present the denial grammar to a member`).toBeGreaterThan(0);
+            const sectionRefusals = CONSOLIDATED_REFUSALS.get(landing.finalPath);
+            if (sectionRefusals === undefined) {
+                expect(denied, `${route.path} must present the denial grammar to a member`).toBeGreaterThan(0);
+            } else {
+                for (const refusal of sectionRefusals) {
+                    const region = page.locator(`[data-app-main] [id="${refusal.section}"]`);
+                    await expect(
+                        region.getByRole('heading', { name: refusal.heading, exact: true }),
+                        `${landing.finalPath} must keep its ${refusal.section} section in place for a member`,
+                    ).toBeVisible();
+                    await expect(
+                        region,
+                        `${landing.finalPath} must refuse its ${refusal.section} section to a member in place`,
+                    ).toContainText(refusal.title);
+                    await expect(region).toContainText(refusal.body);
+                    expect(
+                        await region.locator(SECTION_CONTROLS).count(),
+                        `the refused ${refusal.section} section must not render its protected content`,
+                    ).toBe(0);
+                }
+            }
             expect(notFound, `${route.path} must not disguise a denial as a not-found state`).toBe(0);
+            await context.close();
+        });
+    }
+});
+
+/**
+ * What each member-admitted route must render, proving the admission rather than a silent refusal.
+ *
+ * `protectedReads` are the browser-visible API reads the admitted content depends on; each must be
+ * requested and answer 200, so a panel that keeps its chrome over a failed read cannot pass as
+ * admitted. A route whose protected read happens on the server has none, and proves the read through
+ * its rendered content and the absence of the segment error state instead.
+ */
+type MemberAdmission = {
+    protectedReads: readonly RegExp[];
+    expectContent: (page: Page) => Promise<void>;
+};
+
+const MEMBER_ADMISSIONS: ReadonlyMap<string, MemberAdmission> = new Map([
+    ['org-diagnostics', {
+        protectedReads: [/^\/api\/orgs\/\d+\/audit$/, /^\/api\/orgs\/\d+\/diagnostics$/],
+        expectContent: async (page: Page) => {
+            const audit = page.locator('[data-app-main] [id="audit"]');
+            const diagnostics = page.locator('[data-app-main] [id="diagnostics"]');
+            await expect(
+                page.locator('[data-app-main]'),
+                'a member with organization standing must not be shown the organization refusal',
+            ).not.toContainText(message(DESKTOP.locale, 'organization', 'Organization.noAccessTitle'));
+            await expect(audit).toContainText(message(DESKTOP.locale, 'organization', 'OrgAudit.title'));
+            await expect(audit.locator('.animate-pulse'), 'the audit log must settle, not stay loading').toHaveCount(0);
+            await expect(
+                audit,
+                'an admitted audit log must load, not fall back to its error state',
+            ).not.toContainText(message(DESKTOP.locale, 'organization', 'OrgAudit.loadError'));
+            await expect(
+                diagnostics.getByRole('button', {
+                    name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
+                    exact: true,
+                }),
+                'the organization diagnostics panel must settle for a member with organization standing',
+            ).toBeVisible();
+            await expect(
+                diagnostics.getByRole('button', {
+                    name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.retry'),
+                    exact: true,
+                }),
+                'an admitted diagnostics report must load, not offer a retry over a failure',
+            ).toHaveCount(0);
+            await expect(diagnostics).not.toContainText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.loadFailed'));
+            await expect(diagnostics).not.toContainText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'));
+        },
+    }],
+    ['products', {
+        protectedReads: [],
+        expectContent: async (page: Page) => {
+            await expect(
+                page.locator('[data-app-main]'),
+                'the server-side catalog read must succeed rather than fall into the segment error state',
+            ).not.toContainText(message(DESKTOP.locale, 'errors', 'ErrorState.title'));
+            await expect(
+                page.getByRole('heading', { level: 1, name: message(DESKTOP.locale, 'products', 'ProductsBrowser.title'), exact: true }),
+                'the product catalog is readable by every workspace member',
+            ).toBeVisible();
+        },
+    }],
+]);
+
+test.describe('permission admitted — gated-looking routes the seeded member legitimately reaches', () => {
+    for (const route of MATRIX_ROUTES.filter((candidate) => candidate.admitsMember)) {
+        test(`${route.id} admits the seeded member`, async ({ browser }) => {
+            const admitted = MEMBER_ADMISSIONS.get(route.id);
+            if (admitted === undefined) throw new Error(`${route.id} declares a member admission without its expected content`);
+            const context = await matrixContext(browser, { ...DESKTOP, role: 'member' });
+            blockExternalRequests(context);
+            const page = await context.newPage();
+            const faults = captureFaults(page);
+            const responses = captureResponseFailures(page);
+            const protectedReads = admitted.protectedReads.map((pattern) => page.waitForResponse(
+                (candidate) => candidate.request().method() === 'GET' && pattern.test(new URL(candidate.url()).pathname),
+                { timeout: 30_000 },
+            ));
+
+            const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' });
+            const readStatuses = await Promise.all(protectedReads.map(async (read) => (await read).status()));
+            await page.waitForLoadState('networkidle').catch(() => undefined);
+            const landing = await landingOf(page, route.path, route.landsOn);
+            const denied = await page.locator(DENIED_MARKER).count();
+            const notFound = await page.locator(NOT_FOUND_MARKER).count();
+
+            await record(page, {
+                routeId: route.id,
+                path: route.path,
+                state: 'permission-admitted',
+                axes: { ...DESKTOP, role: 'member' },
+                faults: significantFaults(faults),
+                responseFailures: classifyResponseFailures(responses, { role: 'member' }),
+                httpStatus: response?.status() ?? null,
+                finalPath: landing.finalPath,
+                notes: `denial-markers=${denied} not-found-markers=${notFound} protected-reads=${readStatuses.join(',')}`,
+            });
+
+            expect(response?.status(), `${route.path} must answer its document with 200`).toBe(200);
+            expect(
+                readStatuses,
+                `every protected read ${route.path} depends on must succeed for an admitted member`,
+            ).toEqual(admitted.protectedReads.map(() => 200));
+            expect(landing.ok, `an admitted member must land on the route itself — ${describeLanding(landing)}`).toBe(true);
+            expect(denied, `${route.path} must not refuse a member it admits`).toBe(0);
+            expect(notFound, `${route.path} must not read as a missing page`).toBe(0);
+            await admitted.expectContent(page);
             await context.close();
         });
     }
@@ -266,6 +429,8 @@ test.describe('stale — a failed refresh must not present stale figures as curr
     });
 
     test('diagnostics discloses a failed refresh', async ({ browser }) => {
+        const route = MATRIX_ROUTES.find((candidate) => candidate.id === 'settings-diagnostics');
+        if (!route) throw new Error('Diagnostics route is missing from the matrix inventory');
         const { workspaceId } = matrixFixture();
         const diagnosticsPath = `/api/workspaces/${workspaceId}/diagnostics`;
         const context = await matrixContext(browser, { ...DESKTOP, role: 'admin' });
@@ -274,14 +439,20 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         const faults = captureFaults(page);
         const responses = captureResponseFailures(page);
 
-        await page.goto('/settings/diagnostics', { waitUntil: 'domcontentloaded' });
+        await page.goto(route.path, { waitUntil: 'domcontentloaded' });
         await page.waitForLoadState('networkidle').catch(() => undefined);
-        const healthy = await landingOf(page, '/settings/diagnostics');
+        const healthy = await landingOf(page, route.path, route.landsOn);
         expect(healthy.ok, `diagnostics must render as itself — ${describeLanding(healthy)}`).toBe(true);
-        const headingsBefore = await page.locator('[data-app-main] h2').allTextContents();
+        const diagnostics = page.locator('[data-app-main] [id="diagnostics"]');
+        const refresh = diagnostics.getByRole('button', {
+            name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
+            exact: true,
+        });
+        await expect(refresh, 'the diagnostics report must finish loading').toBeVisible();
+        const headingsBefore = await diagnostics.locator('h2').allTextContents();
         await record(page, {
             routeId: 'settings-diagnostics',
-            path: '/settings/diagnostics',
+            path: route.path,
             state: 'success',
             axes: { ...DESKTOP, role: 'admin' },
             faults: significantFaults(faults),
@@ -291,10 +462,9 @@ test.describe('stale — a failed refresh must not present stale figures as curr
             notes: `sections: ${headingsBefore.length}`,
         });
         expect(headingsBefore.length, 'the healthy panel must render its report before it is faulted').toBeGreaterThan(0);
-        expect(await page.locator(STALE_DISCLOSURE).count(), 'a healthy panel discloses nothing stale').toBe(0);
+        expect(await diagnostics.getByText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'), { exact: true }).count(), 'a healthy panel discloses nothing stale').toBe(0);
 
         setFaultRules({ fail: [diagnosticsPath] });
-        const refresh = page.getByRole('button', { name: /refresh|再読み込み|更新/i }).first();
         await expect(refresh, 'the diagnostics panel must expose a refresh control').toBeVisible();
         const failedRefresh = page.waitForResponse(
             (response) => response.url().includes(diagnosticsPath) && response.status() >= 500,
@@ -303,17 +473,18 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         await refresh.click();
         await failedRefresh;
 
-        const stale = page.locator(STALE_DISCLOSURE);
+        const stale = diagnostics.getByText(message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.staleAfterRefresh'), { exact: true });
         await expect(
             stale.first(),
             'a failed refresh must disclose that the figures on screen are the last good ones',
         ).toBeVisible({ timeout: 15_000 });
-        const headingsAfter = await page.locator('[data-app-main] h2').allTextContents();
-        const staleLanding = await landingOf(page, '/settings/diagnostics');
+        const headingsAfter = await diagnostics.locator('h2').allTextContents();
+        const staleLanding = await landingOf(page, route.path, route.landsOn);
+        expect(staleLanding.ok, describeLanding(staleLanding)).toBe(true);
         const body = ((await page.locator('main').first().textContent()) ?? '').replace(/\s+/g, ' ').trim();
         await record(page, {
             routeId: 'settings-diagnostics',
-            path: '/settings/diagnostics',
+            path: route.path,
             state: 'stale-after-failed-refresh',
             axes: { ...DESKTOP, role: 'admin' },
             faults: significantFaults(faults),
@@ -324,7 +495,7 @@ test.describe('stale — a failed refresh must not present stale figures as curr
         });
 
         expect(
-            await page.locator(HARD_FAILURE_CARD).count(),
+            await diagnostics.locator('div.rounded-lg.bg-card.p-4').count(),
             'a refresh failure over a good payload must not collapse into the hard-failure card',
         ).toBe(0);
         expect(

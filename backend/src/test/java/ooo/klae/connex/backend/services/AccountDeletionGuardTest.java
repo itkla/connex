@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,6 +46,25 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
     private final List<Integer> createdOrganizationIds = new ArrayList<>();
     private final List<Integer> createdNoteIds = new ArrayList<>();
     private final List<Integer> createdTaskIds = new ArrayList<>();
+
+    @Override
+    @BeforeEach
+    protected void setUpWorkspaceAndAuthentication() {
+        Organization organization = new Organization();
+        organization.setName("Account deletion " + unique());
+        organization.setSlug("account-deletion-" + unique());
+        organizationMapper.insert(organization);
+        createdOrganizationIds.add(organization.getId());
+        workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
+        workspace.setName("Account deletion " + unique());
+        workspace.setSlug("account-deletion-" + unique());
+        workspaceMapper.insert(workspace);
+        createdWorkspaceIds.add(workspace.getId());
+        currentUser = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+    }
 
     @AfterEach
     void cleanUpCommittedFixtures() {
@@ -137,8 +157,9 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
 
         assertNull(userMapper.getUserById(target.getId()));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
-        assertTrue(auditLogMapper.findRecent(workspace.getId(), 50, 0).stream()
-            .anyMatch(entry -> "user.delete".equals(entry.getAction())),
+        assertTrue(auditLogMapper.findByEntity(workspace.getId(), "user", target.getId(), 50, 0).stream()
+            .anyMatch(entry -> "user.delete".equals(entry.getAction())
+                && entry.getEntityId() == target.getId()),
             "account erasure must be audited; recording after the row delete was silently swallowed");
     }
 

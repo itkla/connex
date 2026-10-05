@@ -14,6 +14,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.UnsupportedEncodingException;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +27,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 
 import jakarta.servlet.Filter;
 
@@ -96,7 +101,6 @@ class PrelockAuthorizationConcurrencyTest {
         WorkspaceMapper.class.getName() + ".lockActiveWorkspaceForShare";
     private static final long BARRIER_ARRIVAL_SECONDS = 60;
     private static final long BARRIER_HOLD_SECONDS = 180;
-    private static final long BLOCKED_OBSERVATION_SECONDS = 10;
     private static final long RESPONSE_SECONDS = 60;
     private static final long SHUTDOWN_GRACE_SECONDS = 30;
 
@@ -154,6 +158,9 @@ class PrelockAuthorizationConcurrencyTest {
     void cleanUp() {
         clearContext();
         if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM pipeline WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (target != null) {
@@ -240,6 +247,7 @@ class PrelockAuthorizationConcurrencyTest {
         CountDownLatch releaseRevocation = new CountDownLatch(1);
         CountDownLatch workspaceRequested = new CountDownLatch(1);
         CountDownLatch workspaceGranted = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
         ProbePlan revocationProbe = ProbePlan.after(EXCLUSIVE_WORKSPACE_LOCK, (invocation, result) -> {
             if (hasParameter(invocation, "workspaceId", workspace.getId())) {
                 workspaceLocked.countDown();
@@ -252,6 +260,7 @@ class PrelockAuthorizationConcurrencyTest {
             SHARED_WORKSPACE_LOCK,
             (invocation, executor) -> {
                 if (hasParameter(invocation, "workspaceId", workspace.getId())) {
+                    waitingConnection.set(currentConnectionId(executor));
                     workspaceRequested.countDown();
                 }
             },
@@ -281,8 +290,8 @@ class PrelockAuthorizationConcurrencyTest {
                 fail("The waiting request never asked for the shared workspace root: "
                     + describe(request.get(RESPONSE_SECONDS, TimeUnit.SECONDS)));
             }
-            assertFalse(
-                workspaceGranted.await(BLOCKED_OBSERVATION_SECONDS, TimeUnit.SECONDS),
+            awaitMySqlWorkspaceMutex(waitingConnection.get(), workspace.getId());
+            assertEquals(1L, workspaceGranted.getCount(),
                 "The waiting request took the shared workspace root that the revocation still holds");
             releaseRevocation.countDown();
             MvcResult revoked = revocation.get(RESPONSE_SECONDS, TimeUnit.SECONDS);
@@ -293,6 +302,65 @@ class PrelockAuthorizationConcurrencyTest {
         } finally {
             releaseAndShutDown(executor, releaseRevocation);
         }
+    }
+
+    private static long currentConnectionId(Executor executor) throws SQLException {
+        try (Statement statement = executor.getTransaction().getConnection().createStatement();
+                ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            if (!result.next()) {
+                throw new AssertionError("MySQL did not return the current connection id");
+            }
+            long connectionId = result.getLong(1);
+            if (result.wasNull()) {
+                throw new AssertionError("MySQL did not return the current connection id");
+            }
+            return connectionId;
+        }
+    }
+
+    private void awaitMySqlWorkspaceMutex(long connectionId, int workspaceId) {
+        if (connectionId <= 0) {
+            throw new AssertionError("The waiting transaction did not expose its connection id");
+        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadlineNanos) {
+            Integer waiting = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM performance_schema.data_lock_waits lock_wait
+                JOIN performance_schema.data_locks requested_lock
+                  ON requested_lock.ENGINE = lock_wait.ENGINE
+                 AND requested_lock.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
+                JOIN performance_schema.data_locks blocking_lock
+                  ON blocking_lock.ENGINE = lock_wait.ENGINE
+                 AND blocking_lock.ENGINE_LOCK_ID = lock_wait.BLOCKING_ENGINE_LOCK_ID
+                JOIN performance_schema.threads waiting_thread
+                  ON waiting_thread.THREAD_ID = lock_wait.REQUESTING_THREAD_ID
+                WHERE waiting_thread.PROCESSLIST_ID = ?
+                  AND requested_lock.OBJECT_SCHEMA = DATABASE()
+                  AND requested_lock.OBJECT_NAME = 'workspace'
+                  AND requested_lock.INDEX_NAME = 'PRIMARY'
+                  AND requested_lock.LOCK_TYPE = 'RECORD'
+                  AND requested_lock.LOCK_MODE LIKE 'S%'
+                  AND requested_lock.LOCK_STATUS = 'WAITING'
+                  AND requested_lock.LOCK_DATA = CAST(? AS CHAR)
+                  AND blocking_lock.OBJECT_SCHEMA = requested_lock.OBJECT_SCHEMA
+                  AND blocking_lock.OBJECT_NAME = requested_lock.OBJECT_NAME
+                  AND blocking_lock.INDEX_NAME = requested_lock.INDEX_NAME
+                  AND blocking_lock.LOCK_TYPE = requested_lock.LOCK_TYPE
+                  AND blocking_lock.LOCK_STATUS = 'GRANTED'
+                  AND blocking_lock.LOCK_DATA = requested_lock.LOCK_DATA
+                """,
+                Integer.class,
+                connectionId,
+                workspaceId);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+        }
+        throw new AssertionError(
+            "The waiting transaction did not block on workspace PRIMARY key " + workspaceId);
     }
 
     /** Status and body of a completed exchange, so a failed drill names the refusing control. */

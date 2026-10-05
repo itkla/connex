@@ -1,0 +1,1417 @@
+package ooo.klae.connex.backend.ai.assistant;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
+
+import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
+import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.ReportConfig;
+import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
+import ooo.klae.connex.backend.mappers.IdentityMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.ReportService;
+import ooo.klae.connex.backend.services.TaskService;
+import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Goldens for the action surface: whole scripted trajectories whose assertions are about controls
+ * only the write framework owns.
+ *
+ * <p>One golden pins issue 1808: a read-only routed skill is offered no write family, so a model
+ * that asks for one is refused recoverably and still answers.
+ *
+ * <p>Two goldens pin issue 1865. A confirm-tier proposal names its stage or its owner by
+ * the name the model wrote, and the approval resolves that name again. Each golden changes, between
+ * the proposal and the approval, only which row that name resolves to — never the target record
+ * itself, which stays backdated, so the freshness refusal cannot be what refuses — and then
+ * approves. Without the resolution and principals pinned when the proposal was prepared, both
+ * approvals would succeed and write a row the member never reviewed.
+ *
+ * <p>The replay goldens pin that the pins never break a step's idempotency. A step hook stores the
+ * write step's proposal exactly as the loop would, as a worker that stopped right after storing it
+ * would leave it, and then moves which row its name resolves to before the loop reaches that step.
+ * The stored proposal must win: it is replayed with its original pins and no second row, where
+ * resolving the name again would disagree with the stored row and fail the turn on its key.
+ *
+ * <p>The {@code remove_tag} goldens pin the first confirm-tier tool added on the pinned SPI. The
+ * proposal leaves the association alone until the member approves it, and a tag deleted and
+ * re-created under the reviewed name between the proposal and the approval is another tag: only
+ * the pin refuses it, because the company stays backdated and the freshness refusal cannot fire.
+ *
+ * <p>The {@code set_response_due} goldens pin the first tool of the {@code write_followup} set.
+ * Its proposal starts no clock until the member approves it, and nothing is pinned, so what
+ * refuses a stale or unauthorized approval is the framework alone: a contact written after the
+ * proposal is refused on the framework's freshness rule, and an approver who lost the contact
+ * update permission is refused from the framework's locked permission snapshot with the
+ * framework's own message, before the clock service is reached and so with no audit row. A
+ * contact shared in from another workspace is refused when the deadline is proposed, so no card
+ * is ever stored for an approval the clock service would refuse.
+ */
+class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTrajectoryTest {
+
+    @Autowired private TaskMapper taskMapper;
+    @Autowired private TaskService taskService;
+    @Autowired private DocumentTemplateMapper documentTemplateMapper;
+    @Autowired private UserMapper userMapper;
+    @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private PersonMapper personMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private ObjectMapper objectMapper;
+    @Autowired private AiAssistantToolCallReadService toolCallReadService;
+    @Autowired private IdentityMapper identityMapper;
+    @MockitoSpyBean private ReportService reportService;
+
+    /** The tool calls the drift scripts complete before their write: a search and a load. */
+    private static final int CALLS_BEFORE_WRITE = 2;
+
+    /** The durable step the drift scripts write at, one step per call before it. */
+    private static final int WRITE_STEP = CALLS_BEFORE_WRITE + 1;
+
+    /** The skill the routed golden expects the deterministic router to select. */
+    private static final String RELATIONSHIP_BRIEF = "relationship_brief_v1";
+
+    private final List<Integer> extraMembers = new ArrayList<>();
+    private final List<Integer> sharedPeople = new ArrayList<>();
+    private final List<Integer> siblingWorkspaces = new ArrayList<>();
+
+    @AfterEach
+    void removeWorkspaceCreateReferencesBeforeTenantCleanup() {
+        jdbcTemplate.update("DELETE FROM report_definition WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("UPDATE record_creation_template SET current_version_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("UPDATE record_creation_template_set SET default_template_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template_version WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM record_creation_template_set WHERE workspace_id = ?", workspaceId());
+    }
+
+    @Test
+    void aDuplicateCompanyWebsiteRefusesBeforeAnyProposalExists() {
+        Company existing = company("Unrelated Coastal Holdings");
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE company SET website = ? WHERE workspace_id = ? AND id = ?",
+                "cresthaven.example", workspaceId(), existing.getId()));
+        identityMapper.upsertCompanyDomainIdentity(workspaceId(), existing.getId(),
+                "cresthaven.example", "cresthaven.example", "interactive_create", null, LocalDateTime.now());
+        int before = companyCount();
+
+        Trajectory trajectory = run("connex_script_create_company_proposal", "add an organization");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_company"), trajectory.toolNames());
+        AiChatToolCall refused = trajectory.toolCalls().stream()
+                .filter(call -> "create_company".equals(call.getToolName())).findFirst().orElseThrow();
+        assertEquals("failed", refused.getStatus());
+        assertTrue(refused.getResultJson().contains("possible_duplicate"), refused.getResultJson());
+        assertFalse(trajectory.toolCalls().stream().anyMatch(call -> "proposed".equals(call.getStatus())));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = ?"
+                        + " AND tool_name = 'create_company' AND status = 'proposed'",
+                Integer.class, workspaceId()));
+        assertEquals(before, companyCount());
+        assertEquals(0, auditRows("company.create"));
+    }
+
+    @Test
+    void aCompanyIsCreatedOnlyOnApprovalWithItsWorkspaceTargetAndLiveLink() {
+        int before = companyCount();
+        Trajectory trajectory = run("connex_script_create_company_proposal", "add an organization");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_company"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_company");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("workspace", stored.path("target").path("kind").asString());
+        assertEquals(workspaceId(), stored.path("target").path("id").asInt());
+        assertFalse(stored.path("request").has("handle"));
+        assertTrue(stored.path("pinned").path("templateVersion").asInt() > 0);
+        assertEquals(before, companyCount());
+        assertEquals(0, auditRows("company.create"));
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            var target = Objects.requireNonNull(card.target());
+            assertEquals("workspace", target.kind());
+            assertEquals(workspaceId(), target.id());
+            assertEquals(jdbcTemplate.queryForObject("SELECT name FROM workspace WHERE id = ?",
+                    String.class, workspaceId()), target.label());
+            assertTrue(card.changes().stream().allMatch(change -> "ready".equals(change.state())));
+            assertTrue(card.changes().stream().anyMatch(change -> "templateDefaults".equals(change.field())));
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals("executed", approved.status());
+            assertEquals(approved.result(), writeToolService().approve(trajectory.sessionId(), proposal.getId()).result());
+            var created = Objects.requireNonNull(toolCallReadService.get(
+                    trajectory.sessionId(), proposal.getId()).createdRecord());
+            assertEquals("company", created.kind());
+            assertEquals("Cresthaven Labs", jdbcTemplate.queryForObject(
+                    "SELECT name FROM company WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before + 1, companyCount());
+        assertEquals(1, auditRows("company.create"));
+        assertEquals("cresthaven.example", jdbcTemplate.queryForObject(
+                "SELECT website FROM company WHERE workspace_id = ?", String.class, workspaceId()));
+        assertEquals("Research", jdbcTemplate.queryForObject(
+                "SELECT industry FROM company WHERE workspace_id = ?", String.class, workspaceId()));
+    }
+
+    /** The real delegate is observed so its identical permission message cannot satisfy this golden. */
+    @Test
+    void approvingAReportAfterLosingReportCreateIsRefusedBeforeTheDelegate() {
+        int before = reportCount();
+        Trajectory trajectory = run("connex_script_create_report_proposal", "prepare a saved view");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_report"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_report");
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        customRoleWithout(Permission.REPORT_CREATE);
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_role_permission wrp"
+                        + " JOIN workspace_member wm ON wm.role_id = wrp.workspace_role_id"
+                        + " WHERE wm.workspace_id = ? AND wm.user_id = ? AND wrp.permission = ?",
+                Integer.class, workspaceId(), member().getId(), Permission.REPORT_READ.name()));
+        ReportService delegate = AopTestUtils.getUltimateTargetObject(reportService);
+        clearInvocations(delegate);
+        authenticate();
+        try {
+            ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Requires the REPORT_CREATE permission in this workspace", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        verify(delegate, never()).templates();
+        verify(delegate, never()).create(any(ReportDefinitionRequest.class));
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    @Test
+    void aReportIsCreatedOnlyOnApprovalWithLocalizableWidgetsAndNoProviderCall() {
+        int before = reportCount();
+        Trajectory trajectory = run("connex_script_create_report_proposal", "prepare a saved view");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("find_tools", "create_report"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "create_report");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("workspace", stored.path("target").path("kind").asString());
+        assertEquals(workspaceId(), stored.path("target").path("id").asInt());
+        assertFalse(stored.path("request").has("handle"));
+        assertEquals(before, reportCount());
+        assertEquals(0, auditRows("report.create"));
+        int requestsBeforeApproval = journal().recorded().size();
+        int dispatchesBeforeApproval = journal().dispatched().size();
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            assertEquals(List.of("report", "template"), card.changes().stream().map(change -> change.field()).toList());
+            assertTrue(card.changes().stream().allMatch(change -> "ready".equals(change.state())));
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals("executed", approved.status());
+            assertEquals(approved.result(), writeToolService().approve(trajectory.sessionId(), proposal.getId()).result());
+            var created = Objects.requireNonNull(toolCallReadService.get(
+                    trajectory.sessionId(), proposal.getId()).createdRecord());
+            assertEquals("report", created.kind());
+            assertEquals("Pipeline overview", jdbcTemplate.queryForObject(
+                    "SELECT name FROM report_definition WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before + 1, reportCount());
+        assertEquals(1, auditRows("report.create"));
+        assertEquals(member().getId(), jdbcTemplate.queryForObject(
+                "SELECT created_by FROM report_definition WHERE workspace_id = ?", Integer.class, workspaceId()));
+        assertEquals("sales-performance", jdbcTemplate.queryForObject(
+                "SELECT template_key FROM report_definition WHERE workspace_id = ?", String.class, workspaceId()));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT description FROM report_definition WHERE workspace_id = ?", String.class, workspaceId()));
+        ReportConfig config = objectMapper.readValue(Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT config_json FROM report_definition WHERE workspace_id = ?", String.class, workspaceId())),
+                ReportConfig.class);
+        assertFalse(Objects.requireNonNull(config.widgets()).isEmpty());
+        config.widgets().forEach(widget -> assertNull(widget.title()));
+        assertEquals(requestsBeforeApproval, journal().recorded().size());
+        assertEquals(dispatchesBeforeApproval, journal().dispatched().size());
+    }
+
+    private int companyCount() {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM company WHERE workspace_id = ?", Integer.class, workspaceId()));
+    }
+
+    private int reportCount() {
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report_definition WHERE workspace_id = ?", Integer.class, workspaceId()));
+    }
+
+    @AfterEach
+    void removeSharedInContacts() {
+        for (Integer personId : sharedPeople) {
+            jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ? AND person_id = ?",
+                    workspaceId(), personId);
+            jdbcTemplate.update("DELETE FROM person_share WHERE person_id = ?", personId);
+            jdbcTemplate.update("DELETE FROM person WHERE id = ?", personId);
+        }
+        sharedPeople.clear();
+        for (Integer siblingId : siblingWorkspaces) {
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", siblingId);
+        }
+        siblingWorkspaces.clear();
+    }
+
+    @AfterEach
+    void removeDraftDocuments() {
+        jdbcTemplate.update("DELETE FROM deal_document WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update("DELETE FROM document_template WHERE workspace_id = ?", workspaceId());
+    }
+
+    @Test
+    void aDocumentProposalCreatesNothingUntilApprovalThenCreatesDraftVersionOne() {
+        Deal target = documentDeal();
+        int templateId = documentTemplate("Quote");
+        Trajectory trajectory = run("connex_script_draft_document_proposal", "prepare the paperwork");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "draft_document"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "draft_document");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals(templateId, stored.path("resolution").path("id").asInt());
+        assertEquals("template", stored.path("resolution").path("field").asString());
+        assertEquals(0, documentCount(target));
+        assertEquals(0, auditRows("deal_document.generate"));
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+
+        assertEquals(1, documentCount(target));
+        assertEquals("draft", jdbcTemplate.queryForObject(
+                "SELECT status FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                String.class, workspaceId(), target.getId()));
+        assertEquals(Integer.valueOf(1), jdbcTemplate.queryForObject(
+                "SELECT version FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), target.getId()));
+        assertEquals(Integer.valueOf(templateId), jdbcTemplate.queryForObject(
+                "SELECT template_id FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), target.getId()));
+        assertEquals(1, auditRows("deal_document.generate"));
+    }
+
+    @Test
+    void aDocumentProposalRefusesATemplateSwapUnderTheSameName() {
+        Deal target = documentDeal();
+        int reviewed = documentTemplate("Quote");
+        int successor = documentTemplate("Alternate");
+        Trajectory trajectory = run("connex_script_draft_document_proposal", "prepare the paperwork");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "draft_document");
+        assertEquals(reviewed, objectMapper.readTree(proposal.getArgumentsJson())
+                .path("resolution").path("id").asInt());
+        jdbcTemplate.update("UPDATE document_template SET name = ? WHERE workspace_id = ? AND id = ?",
+                "Retired", workspaceId(), reviewed);
+        jdbcTemplate.update("UPDATE document_template SET name = ? WHERE workspace_id = ? AND id = ?",
+                "Quote", workspaceId(), successor);
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(0, documentCount(target));
+        assertEquals(0, auditRows("deal_document.generate"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    private Deal documentDeal() {
+        Company customer = company("Alderwick Shipping");
+        Pipeline pipeline = pipeline("Document pipeline");
+        return deal("Alderwick Expansion", pipeline, stage(pipeline, "Discovery", 0), customer);
+    }
+
+    private int documentTemplate(String name) {
+        DocumentTemplate template = new DocumentTemplate();
+        template.setWorkspaceId(workspaceId());
+        template.setName(name);
+        template.setType("quote");
+        template.setLocale("en");
+        template.setTitle("Quote for {{deal.name}}");
+        documentTemplateMapper.insert(template);
+        return template.getId();
+    }
+
+    private int documentCount(Deal deal) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+                Integer.class, workspaceId(), deal.getId());
+        return Objects.requireNonNull(count);
+    }
+
+    @AfterEach
+    void removeTags() {
+        jdbcTemplate.update("DELETE FROM tag WHERE workspace_id = ?", workspaceId());
+    }
+
+    @AfterEach
+    void removeCustomRoles() {
+        jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = NULL WHERE workspace_id = ?", workspaceId());
+        jdbcTemplate.update(
+                "DELETE wrp FROM workspace_role_permission wrp"
+                        + " JOIN workspace_role wr ON wr.id = wrp.workspace_role_id"
+                        + " WHERE wr.workspace_id = ?",
+                workspaceId());
+        jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId());
+    }
+
+    @AfterEach
+    void removeExtraMembers() {
+        for (Integer userId : extraMembers) {
+            jdbcTemplate.update(
+                    "DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+                    workspaceId(), userId);
+            jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", userId);
+        }
+        extraMembers.clear();
+    }
+
+    /**
+     * One stage renamed away from the reviewed name and another renamed into it: the name now
+     * resolves to a stage the card never named, and the approval refuses rather than moving the
+     * deal there.
+     */
+    @Test
+    void approvingAStageProposalWhoseNameNowNamesAnotherStageIsRefused() {
+        Company customer = company("Marlowe Shipping");
+        Pipeline pipeline = pipeline("Pinned pipeline");
+        Stage discovery = stage(pipeline, "Discovery", 0);
+        Stage negotiation = stage(pipeline, "Negotiation", 1);
+        Stage closing = stage(pipeline, "Closing", 2);
+        Deal expansion = deal("Marlowe Expansion", pipeline, discovery, customer);
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_stage_drift", "move this one along if you can");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "change_deal_stage");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("stage", stored.path("resolution").path("field").asString());
+        assertEquals(negotiation.getId(), stored.path("resolution").path("id").asInt(),
+                "the proposal must pin the stage its card names");
+        assertEquals(0, stored.path("principals").size());
+
+        renameStage(negotiation, "Negotiation (retired)");
+        renameStage(closing, "Negotiation");
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a name that now resolves to another stage must refuse rather than move the "
+                            + "deal to a stage the member never reviewed");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(discovery.getId(), stageOf(expansion.getId()),
+                "the refused approval must leave the deal where it was");
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * Issue 1865 exactly: the card reviewed one member as the owner, that member is offboarded, and
+     * another active member takes the same display name. The name now resolves uniquely to an
+     * active member and the company is unchanged, so only the pin can refuse.
+     */
+    @Test
+    void approvingAnOwnerProposalWhoseMemberWasReplacedUnderTheSameNameIsRefused() {
+        User reviewed = extraMember("Grace Hopper");
+        User successor = extraMember("Gregory Hale");
+        Company customer = company("Wexley Cartage");
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_owner_drift", "hand this company to Grace");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "assign_owner");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals(
+                objectMapper.createArrayNode().add(reviewed.getId()), stored.path("principals"),
+                "the proposal must pin the member its card names");
+        assertTrue(stored.path("resolution").isMissingNode());
+
+        assertEquals(1, workspaceMapper.removeMember(workspaceId(), reviewed.getId()));
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE app_user SET display_name = ? WHERE id = ?",
+                "Grace Hopper", successor.getId()));
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a name that now resolves to another member must refuse rather than hand the "
+                            + "company to someone the approver never saw");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertNull(jdbcTemplate.queryForObject(
+                        "SELECT owner_id FROM company WHERE workspace_id = ? AND id = ?",
+                        Integer.class, workspaceId(), customer.getId()),
+                "the refused approval must write no owner at all");
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The write step is reached again after its proposal was stored, and meanwhile the reviewed
+     * stage was renamed away and another stage renamed into its name. Resolving the name again
+     * would pin the other stage and refuse the step as a reused key.
+     */
+    @Test
+    void aStoredStageProposalIsReplayedWithItsPinAfterItsNameMoved() {
+        Company customer = company("Marlowe Shipping");
+        Pipeline pipeline = pipeline("Pinned pipeline");
+        Stage discovery = stage(pipeline, "Discovery", 0);
+        Stage negotiation = stage(pipeline, "Negotiation", 1);
+        Stage closing = stage(pipeline, "Closing", 2);
+        Deal expansion = deal("Marlowe Expansion", pipeline, discovery, customer);
+        AtomicInteger stored = new AtomicInteger();
+        onScriptedStep((scriptId, completedToolCalls) -> {
+            if (completedToolCalls == CALLS_BEFORE_WRITE && stored.get() == 0) {
+                stored.set(storeWriteProposal(
+                        WRITE_STEP, "change_deal_stage",
+                        "{\"handle\":\"r1\",\"stage\":\"Negotiation\"}",
+                        "deal", expansion.getId()));
+                renameStage(negotiation, "Negotiation (retired)");
+                renameStage(closing, "Negotiation");
+            }
+        });
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_stage_drift", "move this one along if you can");
+
+        JsonNode pinned = replayed(trajectory, "change_deal_stage", stored.get());
+        assertEquals(negotiation.getId(), pinned.path("resolution").path("id").asInt(),
+                "the replayed proposal must keep the stage its card was reviewed against");
+        assertEquals(discovery.getId(), stageOf(expansion.getId()));
+    }
+
+    /**
+     * Issue 1865's drift, between storing a proposal and reaching its step again: the reviewed
+     * member is offboarded and another member takes the same name. Resolving the name again would
+     * pin the other member and refuse the step as a reused key.
+     */
+    @Test
+    void aStoredOwnerProposalIsReplayedWithItsPinAfterItsMemberWasReplaced() {
+        User reviewed = extraMember("Grace Hopper");
+        User successor = extraMember("Gregory Hale");
+        Company customer = company("Wexley Cartage");
+        AtomicInteger stored = new AtomicInteger();
+        onScriptedStep((scriptId, completedToolCalls) -> {
+            if (completedToolCalls == CALLS_BEFORE_WRITE && stored.get() == 0) {
+                stored.set(storeOwnerProposal(customer, "Grace Hopper"));
+                offboard(reviewed);
+                assertEquals(1, jdbcTemplate.update(
+                        "UPDATE app_user SET display_name = ? WHERE id = ?",
+                        "Grace Hopper", successor.getId()));
+            }
+        });
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_owner_drift", "hand this company to Grace");
+
+        assertEquals(
+                objectMapper.createArrayNode().add(reviewed.getId()),
+                replayed(trajectory, "assign_owner", stored.get()).path("principals"),
+                "the replayed proposal must keep the member its card was reviewed against");
+    }
+
+    /**
+     * The reviewed member is offboarded between storing the proposal and reaching its step again,
+     * so the name now resolves to nobody. Resolving it again would refuse the call and write the
+     * refusal under the key the stored proposal already holds.
+     */
+    @Test
+    void aStoredOwnerProposalIsReplayedRatherThanRefusedAfterItsMemberLeft() {
+        User reviewed = extraMember("Grace Hopper");
+        Company customer = company("Wexley Cartage");
+        AtomicInteger stored = new AtomicInteger();
+        onScriptedStep((scriptId, completedToolCalls) -> {
+            if (completedToolCalls == CALLS_BEFORE_WRITE && stored.get() == 0) {
+                stored.set(storeOwnerProposal(customer, "Grace Hopper"));
+                offboard(reviewed);
+            }
+        });
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_owner_drift", "hand this company to Grace");
+
+        assertEquals(
+                objectMapper.createArrayNode().add(reviewed.getId()),
+                replayed(trajectory, "assign_owner", stored.get()).path("principals"),
+                "the replayed proposal must keep the member its card was reviewed against");
+    }
+
+    /**
+     * Replay compares what the model asked for: a call whose request differs from the proposal
+     * already holding its step's key is still refused as a reused key, and the stored proposal is
+     * left exactly as it was.
+     */
+    @Test
+    void aStepWhoseRequestDiffersFromItsStoredProposalIsStillRefused() {
+        extraMember("Grace Hopper");
+        User successor = extraMember("Gregory Hale");
+        Company customer = company("Wexley Cartage");
+        AtomicInteger stored = new AtomicInteger();
+        onScriptedStep((scriptId, completedToolCalls) -> {
+            if (completedToolCalls == CALLS_BEFORE_WRITE && stored.get() == 0) {
+                stored.set(storeOwnerProposal(customer, "Gregory Hale"));
+            }
+        });
+
+        Trajectory trajectory = run(
+                "connex_script_pinned_owner_drift", "hand this company to Grace");
+
+        assertEquals("failed", trajectory.status());
+        assertEquals("internal_error", trajectory.terminalReason(),
+                "a reused key is an invariant breach, not a refusal the model may correct");
+        assertEquals(List.of("search_records", "find_tools", "assign_owner"),
+                trajectory.toolNames(), "the refused step must write no second row");
+        AiChatToolCall kept = proposal(trajectory, "assign_owner");
+        assertEquals(stored.get(), kept.getId());
+        JsonNode arguments = objectMapper.readTree(kept.getArgumentsJson());
+        assertEquals("Gregory Hale", arguments.path("request").path("owner").asString());
+        assertEquals(
+                objectMapper.createArrayNode().add(successor.getId()),
+                arguments.path("principals"));
+    }
+
+    /**
+     * A tag removal is only proposed: the association stays until the member approves, and the
+     * approval then removes exactly the reviewed tag, through the company's own service and its
+     * audit row, leaving every other tag in place.
+     */
+    @Test
+    void aTagRemovalLeavesTheTagAttachedUntilApprovedAndThenRemovesOnlyThatTag() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        int priority = tag("Priority");
+        attach(customer, dormant);
+        attach(customer, priority);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "remove_tag"),
+                trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals("tag", stored.path("resolution").path("field").asString());
+        assertEquals(dormant, stored.path("resolution").path("id").asInt(),
+                "the proposal must pin the tag its card names");
+        assertEquals(List.of(dormant, priority), tagsOf(customer),
+                "a confirm-tier removal must leave the tag attached until the member approves");
+        assertEquals(0, auditRows("company.removeTag"));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(List.of(priority), tagsOf(customer));
+        assertEquals(1, auditRows("company.removeTag"));
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals("Dormant", outcome.path("tag").asString());
+        assertTrue(outcome.path("changed").asBoolean());
+    }
+
+    /**
+     * The reviewed tag is deleted and another is created under the same name and attached to the
+     * same company after the proposal. The name now resolves uniquely to a tag the card never
+     * named and the company is unchanged, so only the pin refuses, and the new tag stays attached.
+     */
+    @Test
+    void approvingATagRemovalWhoseTagWasRecreatedUnderTheSameNameIsRefused() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        attach(customer, dormant);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        assertEquals(1, jdbcTemplate.update(
+                "DELETE FROM tag WHERE workspace_id = ? AND id = ?", workspaceId(), dormant));
+        int recreated = tag("Dormant");
+        attach(customer, recreated);
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a name that now resolves to another tag must refuse rather than remove an"
+                            + " association the member never reviewed");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(List.of(recreated), tagsOf(customer),
+                "the refused approval must leave the re-created tag attached");
+        assertEquals(0, auditRows("company.removeTag"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The reviewed tag is removed from the company on the record itself after the proposal. That
+     * leaves the company's own row untouched, so the approval passes and removes nothing: its
+     * outcome says nothing changed, its card says the tag was not on the record, and no audit row
+     * claims a removal that never happened.
+     */
+    @Test
+    void approvingATagRemovalWhoseTagIsAlreadyGoneChangesNothingAndAuditsNothing() {
+        Company customer = company("Halvorsen Freight");
+        int dormant = tag("Dormant");
+        attach(customer, dormant);
+
+        Trajectory trajectory = run(
+                "connex_script_remove_tag_proposal", "this account is active again");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "remove_tag");
+        assertEquals(1, jdbcTemplate.update(
+                "DELETE FROM company_tag WHERE company_id = ? AND tag_id = ?",
+                customer.getId(), dormant));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+            assertEquals("Tag was not on the record",
+                    toolCallReadService.get(trajectory.sessionId(), proposal.getId())
+                            .outcomeSummary());
+        } finally {
+            clearAuthentication();
+        }
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals("Dormant", outcome.path("tag").asString());
+        assertFalse(outcome.path("changed").asBoolean());
+        assertEquals(List.of(), tagsOf(customer));
+        assertEquals(0, auditRows("company.removeTag"),
+                "a removal that removed nothing must not be audited as one");
+    }
+
+    /**
+     * A first-response deadline is only proposed: the contact carries no clock and no audit row
+     * until the member approves, and the approval then starts the clock the reviewed number of
+     * hours out through the lead-response service and its audit row.
+     */
+    @Test
+    void aResponseDeadlineStartsNoClockUntilApprovedAndThenStartsItTheReviewedHoursOut() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", "set_response_due"),
+                trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
+        assertEquals(48, stored.path("request").path("due_in_hours").asInt());
+        assertEquals("person", stored.path("target").path("kind").asString());
+        assertEquals(lead.getId(), stored.path("target").path("id").asInt());
+        assertNull(responseDueAt(lead),
+                "a confirm-tier deadline must start no clock until the member approves");
+        assertEquals(0, auditRows("person.first_response_sla"));
+
+        authenticate();
+        try {
+            assertEquals("executed",
+                    writeToolService().approve(trajectory.sessionId(), proposal.getId()).status());
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(48 * 60, jdbcTemplate.queryForObject(
+                "SELECT TIMESTAMPDIFF(MINUTE, first_response_started_at, first_response_due_at)"
+                        + " FROM person WHERE workspace_id = ? AND id = ?",
+                Integer.class, workspaceId(), lead.getId()));
+        assertEquals(1, auditRows("person.first_response_sla"));
+        JsonNode outcome = objectMapper.readTree(jdbcTemplate.queryForObject(
+                "SELECT result_json FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId())).path("outcome");
+        assertEquals(48, outcome.path("dueInHours").asInt());
+        assertTrue(outcome.path("changed").asBoolean());
+    }
+
+    /**
+     * The contact is edited after the deadline was proposed. Nothing is pinned, so only the
+     * framework's freshness rule can refuse the approval, and it does: no clock starts and the
+     * proposal stays pending.
+     */
+    @Test
+    void approvingAResponseDeadlineOnAContactEditedSinceTheProposalIsRefused() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        touch("person", lead.getId());
+
+        authenticate();
+        try {
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
+                    "a contact written after the proposal must refuse rather than start a clock"
+                            + " the member reviewed against another version of the record");
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertNull(responseDueAt(lead), "the refused approval must start no clock");
+        assertEquals(0, auditRows("person.first_response_sla"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The approver loses the contact update permission after the proposal. The framework refuses
+     * the approval from its locked permission snapshot with its own message, before the clock
+     * service is reached, so no clock starts and no audit row is written.
+     *
+     * <p>The clock service asserts the same permission with the same message, so the contact is
+     * also written after the proposal: the framework's freshness rule refuses any approval that
+     * reaches the contact lock with "Assistant proposal target changed", so only the framework's
+     * pre-lock permission check can answer with the permission message here. Were that check
+     * removed, this golden would see the freshness refusal instead and fail.
+     */
+    @Test
+    void approvingAResponseDeadlineAfterLosingContactUpdateIsRefusedByTheFramework() {
+        Person lead = person("Chidi Okonkwo", "chidi.okonkwo@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "set_response_due");
+        customRoleWithout(Permission.PERSON_UPDATE);
+        touch("person", lead.getId());
+
+        authenticate();
+        try {
+            ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(
+                    "Requires the PERSON_UPDATE permission in this workspace",
+                    refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertNull(responseDueAt(lead), "the refused approval must start no clock");
+        assertEquals(0, auditRows("person.first_response_sla"));
+        assertEquals("proposed", status(proposal));
+    }
+
+    /**
+     * The only contact the search finds is shared in from a sibling workspace of the same
+     * organization, which has a first-response clock running on it. The clock service writes only
+     * a contact this workspace owns, so the proposal is refused recoverably when it is made: no
+     * card is stored that could state "not set" over the owner's masked deadline or offer an
+     * approval that could only fail, and the owner's clock is left exactly as it was.
+     */
+    @Test
+    void aResponseDeadlineOnAContactSharedInFromAnotherWorkspaceIsRefusedWhenProposed() {
+        Workspace owner = siblingWorkspace();
+        Person shared = new Person();
+        shared.setWorkspaceId(owner.getId());
+        shared.setName("Chidi Okonkwo");
+        shared.setEmail("chidi.okonkwo.shared@example.invalid");
+        personMapper.insert(shared);
+        sharedPeople.add(shared.getId());
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE person SET first_response_started_at = '2026-08-11 09:30:00',"
+                        + " first_response_due_at = '2026-08-13 09:30:00' WHERE id = ?",
+                shared.getId()));
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)",
+                shared.getId(), workspaceId()));
+
+        Trajectory trajectory = run(
+                "connex_script_set_response_due_proposal", "make sure someone answers her soon");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        List<AiChatToolCall> deadlines = trajectory.toolCalls().stream()
+                .filter(call -> "set_response_due".equals(call.getToolName()))
+                .toList();
+        assertEquals(1, deadlines.size(), trajectory.toolNames().toString());
+        assertEquals("failed", deadlines.getFirst().getStatus(),
+                "a shared-in contact must never be stored as a proposal a member could approve");
+        assertTrue(deadlines.getFirst().getResultJson().contains("unresolved_reference"),
+                deadlines.getFirst().getResultJson());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_chat_tool_call"
+                        + " WHERE workspace_id = ? AND tool_name = 'set_response_due'"
+                        + " AND status = 'proposed'",
+                Integer.class, workspaceId()));
+        assertEquals("2026-08-13T09:30", jdbcTemplate.queryForObject(
+                "SELECT DATE_FORMAT(first_response_due_at, '%Y-%m-%dT%H:%i')"
+                        + " FROM person WHERE id = ?",
+                String.class, shared.getId()),
+                "the owning workspace's clock must be left exactly as it was");
+        assertEquals(0, auditRows("person.first_response_sla"));
+    }
+
+    private Object responseDueAt(Person person) {
+        return jdbcTemplate.queryForObject(
+                "SELECT first_response_due_at FROM person WHERE workspace_id = ? AND id = ?",
+                Object.class, workspaceId(), person.getId());
+    }
+
+    /** Opens a second workspace in this method's organization, removed after the method. */
+    private Workspace siblingWorkspace() {
+        String unique = UUID.randomUUID().toString().substring(0, 8);
+        Workspace sibling = new Workspace();
+        sibling.setOrgId(organizationId());
+        sibling.setName("Sibling workspace " + unique);
+        sibling.setSlug("sibling-workspace-" + unique);
+        workspaceMapper.insert(sibling);
+        siblingWorkspaces.add(sibling.getId());
+        return sibling;
+    }
+
+    /** Moves the member onto a custom role holding every permission except {@code revoked}. */
+    private void customRoleWithout(Permission revoked) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)",
+                workspaceId(), "Without " + revoked.name()));
+        Integer roleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workspace_role WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId(), "Without " + revoked.name());
+        for (Permission permission : Permission.values()) {
+            if (permission != revoked) {
+                jdbcTemplate.update(
+                        "INSERT INTO workspace_role_permission (workspace_role_id, permission)"
+                                + " VALUES (?, ?)",
+                        roleId, permission.name());
+            }
+        }
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+                roleId, workspaceId(), member().getId()));
+    }
+
+    private int tag(String name) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO tag (workspace_id, name, color) VALUES (?, ?, '#abcdef')",
+                workspaceId(), name));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM tag WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId(), name);
+    }
+
+    private void attach(Company company, int tagId) {
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)",
+                company.getId(), tagId));
+    }
+
+    private List<Integer> tagsOf(Company company) {
+        return jdbcTemplate.queryForList(
+                "SELECT tag_id FROM company_tag WHERE company_id = ? ORDER BY tag_id",
+                Integer.class, company.getId());
+    }
+
+    /**
+     * A read-only routed skill is offered no write family, so a model that asks for one anyway is
+     * refused recoverably and still answers.
+     *
+     * <p>Before the offer matched the authority, the directory advertised every write family, the
+     * load succeeded, and the first write the model then chose ended the turn as a non-closable
+     * {@code tool_outside_skill_authority} with no answer. Removing the offer check turns this red
+     * three ways: the directory lists the write family, the load row settles executed, and the
+     * next request offers its write tools.
+     */
+    @Test
+    void aReadOnlyRoutedSkillIsRefusedAWriteToolsetAndStillAnswers() {
+        Person contact = person(
+                "Ottoline Fairweather", "ottoline.fairweather@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_routed_write_set",
+                "catch me up on this contact",
+                List.of(new AiChatPageContextDto("person", contact.getId())));
+
+        AiChatTurn settled = turnRow(trajectory);
+        assertEquals(RELATIONSHIP_BRIEF, settled.getSkillKey(),
+                "the offer is only narrowed on a turn that actually ran under a skill");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(1, trajectory.answers().size(),
+                "a refused load is recoverable, so the turn keeps its answer");
+        assertTrue(trajectory.answer().contains("nothing was changed"), trajectory.answer());
+
+        List<AiChatToolCall> loads = trajectory.toolCalls().stream()
+                .filter(call -> AiAssistantToolCatalog.FIND_TOOLS.equals(call.getToolName()))
+                .toList();
+        assertEquals(1, loads.size(), trajectory.toolNames().toString());
+        assertEquals("failed", loads.getFirst().getStatus());
+        assertTrue(loads.getFirst().getResultJson().contains("toolset_unavailable_for_skill"),
+                loads.getFirst().getResultJson());
+        assertFalse(trajectory.toolNames().contains("change_deal_stage"),
+                "no write tool of the refused family may be proposed: " + trajectory.toolNames());
+
+        var requests = journal().recorded();
+        assertEquals(2, requests.size());
+        String directory = requests.getFirst().request().systemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertEquals(
+                    AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty(),
+                    directory.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                    "a READ skill's directory lists exactly the read families: " + toolset.key());
+        }
+        List<AiToolExchange> replayed = requests.getLast().request().nativeTools().exchanges();
+        assertEquals(1, replayed.size());
+        assertTrue(replayed.getFirst().maskedResult().contains("toolset_unavailable_for_skill"),
+                "the model is told why the load was refused, so it can answer instead");
+        assertFalse(requests.getLast().request().nativeTools().definitions().stream()
+                        .map(AiToolDefinition::name)
+                        .anyMatch(name -> AiAssistantToolCatalog.writeToolsOf(
+                                AiAssistantToolCatalog.Toolset.WRITE_PIPELINE).contains(name)),
+                "a refused load must leave the offered vocabulary unwidened");
+    }
+
+    @Test
+    void companyFieldApprovalPreservesAllUnrequestedColumns() {
+        Company target = company("Halvorsen Services");
+        jdbcTemplate.update("UPDATE company SET website = ?, phone = ?, address = ?, industry = ?,"
+                        + " updated_at = DATE_SUB(NOW(), INTERVAL 10 SECOND) WHERE id = ?",
+                "halvorsen.example", "+81 03 1234 5678", "Tokyo 100-0001", "Old", target.getId());
+        var before = jdbcTemplate.queryForMap("SELECT name, website, phone, address FROM company WHERE id = ?", target.getId());
+        Trajectory trajectory = run("connex_script_update_record_fields_overlay", "correct its industry",
+                List.of(new AiChatPageContextDto("company", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "update_record_fields");
+        assertEquals("Old", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+        assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
+        authenticate();
+        try {
+            assertEquals("ready", toolCallReadService.get(trajectory.sessionId(), proposal.getId()).change().state());
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(1, fieldAuditRows("company", "company.update", target.getId()));
+            Map<String, Object> settled = jdbcTemplate.queryForMap("SELECT * FROM company WHERE id = ?", target.getId());
+            var replayed = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(approved.result(), replayed.result());
+            assertEquals(settled, jdbcTemplate.queryForMap("SELECT * FROM company WHERE id = ?", target.getId()));
+            assertEquals(1, fieldAuditRows("company", "company.update", target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals(before, jdbcTemplate.queryForMap("SELECT name, website, phone, address FROM company WHERE id = ?", target.getId()));
+        assertEquals("Software", jdbcTemplate.queryForObject("SELECT industry FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    @Test
+    void twoDealFieldsSettleOnceAndRetryPreservesTheRecordAndAudits() {
+        Deal target = documentDeal();
+        Map<String, Object> before = jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId());
+        Trajectory trajectory = run("connex_script_field_edit_deal_pair", "correct its value and close date",
+                List.of(new AiChatPageContextDto("deal", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "update_record_fields");
+        assertEquals(before, jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId()));
+        assertEquals(0, fieldAuditRows("deal", "deal.update", target.getId()));
+        authenticate();
+        try {
+            var card = toolCallReadService.get(trajectory.sessionId(), proposal.getId());
+            assertEquals(List.of("ready", "ready"), card.changes().stream()
+                    .map(change -> change.state()).toList());
+            assertEquals("unresolved", card.change().state());
+            var approved = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Map<String, Object> settled = jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId());
+            assertEquals("1250.50", settled.get("value").toString());
+            assertEquals("2026-10-15", settled.get("expected_close_date").toString());
+            for (String field : List.of("name", "company_id", "currency", "owner_id", "stage_id", "pipeline_id")) {
+                assertEquals(before.get(field), settled.get(field), field);
+            }
+            assertEquals(2, fieldAuditRows("deal", "deal.update", target.getId()));
+            var replayed = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            assertEquals(approved.result(), replayed.result());
+            assertEquals(settled, jdbcTemplate.queryForMap("SELECT * FROM deal WHERE id = ?", target.getId()));
+            assertEquals(2, fieldAuditRows("deal", "deal.update", target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "scripted-native,connex_script_field_edit_embedded_token",
+            "scripted-json,connex_script_field_edit_fullwidth_token"
+    })
+    void embeddedAndFullwidthIdentifiersAreRefusedWithoutAProposal(String capability, String selector) {
+        useCapabilityClass(capability);
+        Company target = company("Halvorsen Services");
+        Company source = company("source.example");
+        Trajectory trajectory = run(selector, "correct the first company's website",
+                List.of(new AiChatPageContextDto("company", target.getId()),
+                        new AiChatPageContextDto("company", source.getId())));
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertFieldRefused(trajectory, "identifier_from_another_record");
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+        assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
+    }
+
+    private int fieldAuditRows(String kind, String action, int recordId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?"
+                        + " AND entity_type = ? AND entity_id = ?",
+                Integer.class, workspaceId(), action, kind, recordId);
+    }
+
+    /** The host is also the source company's display identifier, seeded by real page context. */
+    @Test
+    void aMaskedWebsiteCopiedFromAnotherCompanyPlaceholderCreatesNoProposal() {
+        Company target = company("Halvorsen Services");
+        Company source = company("source.example");
+        jdbcTemplate.update("UPDATE company SET website = ? WHERE id = ?", "source.example", source.getId());
+        Trajectory trajectory = run("connex_script_update_record_fields_masked_identifier", "correct the first company's website",
+                List.of(new AiChatPageContextDto("company", target.getId()), new AiChatPageContextDto("company", source.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertFieldRefused(trajectory, "identifier_from_another_record");
+        assertTrue(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("{{C2}}")));
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    @Test
+    void aMemberUrlIsRedactedBeforeEgressAndTheFaithfulMarkerTranscriptionIsRefused() {
+        Company target = company("Halvorsen Services");
+        Trajectory trajectory = run("connex_script_update_record_fields_redacted_value",
+                "set its website to https://acme.example",
+                List.of(new AiChatPageContextDto("company", target.getId())));
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertTrue(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("set its website to [redacted]")));
+        assertFalse(journal().dispatched().stream().flatMap(request -> request.messages().stream())
+                .anyMatch(message -> message.content().contains("https://acme.example")));
+        assertFieldRefused(trajectory, "redacted_value");
+        assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
+    }
+
+    private void assertFieldRefused(Trajectory trajectory, String reason) {
+        List<AiChatToolCall> calls = trajectory.toolCalls().stream()
+                .filter(call -> "update_record_fields".equals(call.getToolName())).toList();
+        assertEquals(1, calls.size());
+        assertEquals("failed", calls.getFirst().getStatus());
+        assertTrue(calls.getFirst().getResultJson().contains(reason));
+        assertFalse(trajectory.toolCalls().stream().anyMatch(call -> "proposed".equals(call.getStatus())));
+    }
+
+    private int storeOwnerProposal(Company company, String owner) {
+        return storeWriteProposal(
+                WRITE_STEP, "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"" + owner + "\"}",
+                "company", company.getId());
+    }
+
+    private void offboard(User user) {
+        assertEquals(1, workspaceMapper.removeMember(workspaceId(), user.getId()));
+    }
+
+    /**
+     * Asserts that the write step replayed the proposal the hook stored and wrote no row of its
+     * own, and reads that proposal's stored arguments.
+     */
+    private JsonNode replayed(Trajectory trajectory, String tool, int storedId) {
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "find_tools", tool), trajectory.toolNames(),
+                "the replayed step must write no second row");
+        AiChatToolCall replayed = proposal(trajectory, tool);
+        assertEquals(storedId, replayed.getId(),
+                "the step must replay the proposal already stored under its key");
+        assertEquals("turn-" + trajectory.turnId() + "-step-" + WRITE_STEP,
+                replayed.getIdempotencyKey());
+        return objectMapper.readTree(replayed.getArgumentsJson());
+    }
+
+    private AiChatToolCall proposal(Trajectory trajectory, String tool) {
+        AiChatToolCall proposal = trajectory.toolCalls().stream()
+                .filter(call -> tool.equals(call.getToolName()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("proposed", proposal.getStatus(),
+                "a confirm-tier write must wait for the member's decision");
+        return proposal;
+    }
+
+    private String status(AiChatToolCall proposal) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                String.class, workspaceId(), proposal.getId());
+    }
+
+    private void renameStage(Stage stage, String name) {
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE stage SET name = ? WHERE workspace_id = ? AND id = ?",
+                name, workspaceId(), stage.getId()));
+    }
+
+    private User extraMember(String displayName) {
+        String unique = UUID.randomUUID().toString().substring(0, 8);
+        User user = new User();
+        user.setUsername("pinned-member-" + unique);
+        user.setDisplayName(displayName);
+        user.setEmail("pinned-member-" + unique + "@example.com");
+        user.setPasswordHash("hash-" + unique);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        extraMembers.add(user.getId());
+        workspaceMapper.addMember(workspaceId(), user.getId(), "member");
+        return user;
+    }
+    @Test
+    void completeTaskAssigneeProposalRejectsReassignmentButNotSiblingCompaction() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task sibling = task(contact, "Earlier board row", "2026-10-12", 0);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 1);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "list_tasks", "find_tools", "complete_task"), trajectory.toolNames());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        assertFalse(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(0, taskAuditRows("task.complete", target.getId()));
+        authenticate();
+        try {
+            taskService.complete(sibling.getId());
+            assertEquals(0, taskMapper.getTaskById(workspaceId(), target.getId()).getPosition());
+            var card = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertEquals("ready", card.change().state());
+            assertEquals(0, taskAuditRows("task.complete", target.getId()));
+            var settled = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Task completed = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(settled, writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(completed, taskMapper.getTaskById(workspaceId(), target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+        assertTrue(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(1, taskAuditRows("task.complete", target.getId()));
+        assertEquals(2, auditRows("task.complete"));
+    }
+
+    @Test
+    void completeTaskReassignmentFailsTheFrameworkFingerprint() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        User other = extraMember("Task colleague");
+        jdbcTemplate.update("UPDATE task SET assigned_to_id = ? WHERE workspace_id = ? AND id = ?",
+                other.getId(), workspaceId(), target.getId());
+        authenticate();
+        try {
+            assertEquals("recordChanged", toolCallReadService.list(trajectory.sessionId(), true).getFirst().change().state());
+            ConflictException refusal = assertThrows(ConflictException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals("Assistant proposal target changed", refusal.getMessage());
+        } finally {
+            clearAuthentication();
+        }
+        assertFalse(taskMapper.getTaskById(workspaceId(), target.getId()).isCompleted());
+        assertEquals(0, auditRows("task.complete"));
+    }
+
+    @Test
+    void rescheduleTaskProposalLeavesTheDateAloneUntilApproval() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task target = task(contact, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_reschedule_task_proposal", "move the first item to October fifteenth");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "reschedule_task");
+        assertEquals("2026-10-10", taskMapper.getTaskById(workspaceId(), target.getId()).getDueDate());
+        assertEquals(0, taskAuditRows("task.update", target.getId()));
+        authenticate();
+        try {
+            var card = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertEquals("dueDate", card.change().field());
+            assertEquals("ready", card.change().state());
+            var settled = writeToolService().approve(trajectory.sessionId(), proposal.getId());
+            Task rescheduled = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(settled, writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(rescheduled, taskMapper.getTaskById(workspaceId(), target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+        assertEquals("2026-10-15", taskMapper.getTaskById(workspaceId(), target.getId()).getDueDate());
+        assertEquals(1, taskAuditRows("task.update", target.getId()));
+    }
+
+    @Test
+    void taskApprovalAndCardLoseAccessWhenTheLinkedPersonShareIsRevoked() {
+        Workspace owner = siblingWorkspace();
+        Person shared = new Person();
+        shared.setWorkspaceId(owner.getId());
+        shared.setName("Taskhandle Contact");
+        personMapper.insert(shared);
+        sharedPeople.add(shared.getId());
+        assertEquals(1, jdbcTemplate.update(
+                "INSERT INTO person_share (person_id, workspace_id) VALUES (?, ?)",
+                shared.getId(), workspaceId()));
+        Task target = task(shared, "Review the agenda", "2026-10-10", 0);
+        Trajectory trajectory = run("connex_script_complete_task_assignee", "finish the first item");
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        AiChatToolCall proposal = proposal(trajectory, "complete_task");
+        authenticate();
+        try {
+            assertEquals("ready", toolCallReadService.list(trajectory.sessionId(), true)
+                    .getFirst().change().state());
+            Task before = taskMapper.getTaskById(workspaceId(), target.getId());
+            assertEquals(1, jdbcTemplate.update(
+                    "DELETE FROM person_share WHERE person_id = ? AND workspace_id = ?",
+                    shared.getId(), workspaceId()));
+            var hidden = toolCallReadService.list(trajectory.sessionId(), true).getFirst();
+            assertNull(hidden.change());
+            assertNull(hidden.target().id());
+            assertThrows(ResourceNotFoundException.class,
+                    () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()));
+            assertEquals(before, taskMapper.getTaskById(workspaceId(), target.getId()));
+            assertEquals("proposed", jdbcTemplate.queryForObject(
+                    "SELECT status FROM ai_chat_tool_call WHERE workspace_id = ? AND id = ?",
+                    String.class, workspaceId(), proposal.getId()));
+            assertEquals(0, taskAuditRows("task.complete", target.getId()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    /**
+     * Replays the untouched repaired answer after changing task order. Only the first member
+     * message's harness selector is removed: the fixture loader refuses two selectors in history,
+     * so the second turn can then use the completion fixture without changing any model text.
+     */
+    @Test
+    void taskHandleTwoTurnsRepairsTextAndUsesOnlyTheSecondTurnsIssuedTask() {
+        Person contact = person("Taskhandle Contact", "taskhandle@example.invalid", null);
+        Task first = task(contact, "First item", "2026-10-10", 0);
+        Task second = task(contact, "Second item", "2026-10-12", 1);
+        Trajectory initial = run("connex_script_task_handle_two_turns", "review these tasks");
+        assertEquals("resolved", initial.status(), initial.terminalReason());
+        assertEquals("The second task needs attention.", initial.answer());
+        assertFalse(AiAssistantStepGuard.containsTaskHandle(initial.answer()));
+        assertTrue(journal().dispatched().stream().anyMatch(request ->
+                request.nativeTools() != null && request.nativeTools().repairMessage() != null
+                        && request.nativeTools().repairMessage().contains("final_task_handle")));
+        jdbcTemplate.update("UPDATE task SET due_date = '2026-10-09' WHERE workspace_id = ? AND id = ?",
+                workspaceId(), second.getId());
+        jdbcTemplate.update(
+                "UPDATE ai_chat_message SET content = REPLACE(content, ?, '')"
+                        + " WHERE workspace_id = ? AND session_id = ? AND author_kind = 'user'",
+                "connex_script_task_handle_two_turns", workspaceId(), initial.sessionId());
+        journal().clear();
+        Trajectory next = runInSession(initial.sessionId(), "connex_script_complete_task_assignee",
+                "finish the first item in the fresh list", List.of());
+        assertEquals("resolved", next.status(), next.terminalReason());
+        var replayedAnswers = journal().dispatched().getFirst().messages().stream()
+                .filter(message -> "assistant".equals(message.role())).toList();
+        assertTrue(replayedAnswers.stream().anyMatch(message -> message.content().contains(initial.answer())),
+                "turn two must actually replay turn one's repaired answer");
+        assertTrue(replayedAnswers.stream().noneMatch(message ->
+                AiAssistantStepGuard.containsTaskHandle(message.content())));
+        AiChatToolCall proposal = proposal(next, "complete_task");
+        assertEquals(second.getId(), objectMapper.readTree(proposal.getArgumentsJson()).path("target").path("id").asInt());
+        authenticate();
+        try {
+            writeToolService().approve(next.sessionId(), proposal.getId());
+        } finally {
+            clearAuthentication();
+        }
+        assertFalse(taskMapper.getTaskById(workspaceId(), first.getId()).isCompleted());
+        assertTrue(taskMapper.getTaskById(workspaceId(), second.getId()).isCompleted());
+    }
+
+    private int taskAuditRows(String action, int taskId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?"
+                        + " AND entity_type = 'task' AND entity_id = ?",
+                Integer.class, workspaceId(), action, taskId);
+    }
+
+    private Task task(Person person, String description, String dueDate, int position) {
+        Task task = new Task();
+        task.setWorkspaceId(workspaceId());
+        task.setDescription(description);
+        task.setStatus("todo");
+        task.setPosition(position);
+        task.setDueDate(dueDate);
+        task.setPerson(person);
+        task.setAssignedTo(member());
+        taskMapper.insert(task);
+        return task;
+    }
+
+}

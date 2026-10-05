@@ -299,25 +299,6 @@ test.describe('reduced motion and the animated path', () => {
                 const faults = captureFaults(page);
                 const responses = captureResponseFailures(page);
                 const opened = await openRoute(page, route, faults, responses);
-                await page.waitForTimeout(1_200);
-
-                const heading = page.locator('h1').first();
-                const opacity = await heading
-                    .evaluate((el) => window.getComputedStyle(el).opacity)
-                    .catch(() => '1');
-
-                const shellSections = page.locator(CONTENT_SECTIONS);
-                const sections = (await shellSections.count()) > 0 ? shellSections : page.locator('main > *');
-                const settled = await sections.evaluateAll((elements) =>
-                    elements.map((element) => ({
-                        tag: element.tagName.toLowerCase(),
-                        opacity: window.getComputedStyle(element).opacity,
-                        rendered: element.getBoundingClientRect().height > 0,
-                    })),
-                );
-                const stranded = settled.filter(
-                    (section) => section.rendered && Number(section.opacity) < 0.9,
-                );
 
                 await record(page, {
                     routeId: route.id,
@@ -328,23 +309,57 @@ test.describe('reduced motion and the animated path', () => {
                     responseFailures: opened.responses,
                     httpStatus: opened.status,
                     finalPath: opened.landing.finalPath,
-                    notes: `h1 opacity=${opacity} sections=${settled.length} stranded=${stranded.length}`,
+                }, async () => {
+                    const heading = page.locator('h1').first();
+                    await expect(heading).toBeVisible();
+                    await expect.poll(() => heading.evaluate((element) => Number(getComputedStyle(element).opacity)))
+                        .toBeGreaterThan(0.9);
+
+                    const shellSections = page.locator(CONTENT_SECTIONS);
+                    const sections = (await shellSections.count()) > 0 ? shellSections : page.locator('main > *');
+                    await expect.poll(() => sections.count()).toBeGreaterThan(0);
+                    await expect.poll(() => sections.evaluateAll(async (elements) => {
+                        const before = elements.map((element) => element.getBoundingClientRect());
+                        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+                        return elements.every((element, index) => {
+                            const after = element.getBoundingClientRect();
+                            if (after.height === 0) return true;
+                            return Number(getComputedStyle(element).opacity) >= 0.9
+                                && Math.abs(after.x - before[index].x) < 0.5
+                                && Math.abs(after.y - before[index].y) < 0.5
+                                && Math.abs(after.width - before[index].width) < 0.5
+                                && Math.abs(after.height - before[index].height) < 0.5;
+                        });
+                    }), { message: 'content sections must reach their settled opacity and geometry' }).toBe(true);
+                    const opacity = await heading.evaluate((element) => getComputedStyle(element).opacity);
+                    const settled = await sections.evaluateAll((elements) =>
+                        elements.map((element) => ({
+                            tag: element.tagName.toLowerCase(),
+                            opacity: window.getComputedStyle(element).opacity,
+                            rendered: element.getBoundingClientRect().height > 0,
+                        })),
+                    );
+                    const stranded = settled.filter(
+                        (section) => section.rendered && Number(section.opacity) < 0.9,
+                    );
+
+                    await expect(heading, `${route.path} heading must be visible with motion=${motion}`).toBeVisible();
+                    expect(
+                        Number(opacity),
+                        `${route.path} heading is still transparent after animations settle (motion=${motion})`,
+                    ).toBeGreaterThan(0.9);
+                    expect(
+                        settled.length,
+                        `${route.path} exposed no content sections to check for stranded animations`,
+                    ).toBeGreaterThan(0);
+                    expect(
+                        stranded.map((section) => `${section.tag}@${section.opacity}`),
+                        `${route.path} left content sections transparent after animations settle (motion=${motion})`,
+                    ).toEqual([]);
+                    return `h1 opacity=${opacity} sections=${settled.length} stranded=${stranded.length}`;
                 });
 
                 assertClean(opened, route, `motion=${motion}`);
-                await expect(heading, `${route.path} heading must be visible with motion=${motion}`).toBeVisible();
-                expect(
-                    Number(opacity),
-                    `${route.path} heading is still transparent after animations settle (motion=${motion})`,
-                ).toBeGreaterThan(0.9);
-                expect(
-                    settled.length,
-                    `${route.path} exposed no content sections to check for stranded animations`,
-                ).toBeGreaterThan(0);
-                expect(
-                    stranded.map((section) => `${section.tag}@${section.opacity}`),
-                    `${route.path} left content sections transparent after animations settle (motion=${motion})`,
-                ).toEqual([]);
                 await context.close();
             });
         }

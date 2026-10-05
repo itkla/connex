@@ -412,9 +412,9 @@ class SeederStartupConfigurationValidatorTest {
     void requiresEveryPinnedFlywayPropertyFromTheSeederRepositorySource(
             String propertyName,
             Object expectedValue) {
-        Map<String, Object> missingPin = new LinkedHashMap<>(safeRepositoryProperties());
+        Map<String, Object> missingPin = new LinkedHashMap<>(SeederTestSupport.safeRepositoryProperties());
         missingPin.remove(propertyName);
-        Map<String, Object> wrongPin = new LinkedHashMap<>(safeRepositoryProperties());
+        Map<String, Object> wrongPin = new LinkedHashMap<>(SeederTestSupport.safeRepositoryProperties());
         wrongPin.put(propertyName, wrongRepositoryValue(expectedValue));
 
         for (MockEnvironment environment : new MockEnvironment[] {
@@ -932,17 +932,12 @@ class SeederStartupConfigurationValidatorTest {
     }
 
     private static MockEnvironment safeEnvironment() {
-        return safeEnvironment(safeRepositoryProperties());
+        return safeEnvironment(SeederTestSupport.safeRepositoryProperties());
     }
 
     private static MockEnvironment safeEnvironment(
             Map<String, Object> repositoryProperties) {
-        MockEnvironment environment = new MockEnvironment()
-            .withProperty("connex.seeder.enabled", "true")
-            .withProperty("connex.maintenance.mode", "seeder")
-            .withProperty("spring.main.web-application-type", "none")
-            .withProperty("connex.tenancy.routing.mode", "single-database")
-            .withProperty("connex.object-storage.legacy-migration.mode", "off")
+        return SeederTestSupport.seederEnvironment(repositoryProperties)
             .withProperty(
                 "spring.datasource.url",
                 "jdbc:mysql://127.0.0.1/Connex_Seeder?sslMode=DISABLED"
@@ -959,33 +954,6 @@ class SeederStartupConfigurationValidatorTest {
                 "spring.flyway.driver-class-name",
                 SeederStartupConfigurationValidator.PROJECT_DRIVER
             );
-        environment.getPropertySources().addLast(new MapPropertySource(
-            "Config resource 'class path resource [application-seeder.yml]'",
-            repositoryProperties
-        ));
-        environment.setActiveProfiles("seeder");
-        return environment;
-    }
-
-    static Map<String, Object> safeRepositoryProperties() {
-        Map<String, Object> properties = new LinkedHashMap<>(
-            SeederStartupConfigurationValidator.REPOSITORY_FLYWAY_PROPERTIES
-        );
-        properties.put("spring.sql.init.mode", "never");
-        properties.put(
-            "spring.sql.init.data-locations",
-            SeederStartupConfigurationValidator.PROJECT_SQL_INIT_DATA_LOCATION
-        );
-        properties.put(
-            "mybatis.mapper-locations",
-            SeederStartupConfigurationValidator.PROJECT_MYBATIS_MAPPER_LOCATIONS
-        );
-        properties.put(
-            "mybatis.type-aliases-package",
-            SeederStartupConfigurationValidator.PROJECT_MYBATIS_TYPE_ALIASES_PACKAGE
-        );
-        properties.put("mybatis.configuration.map-underscore-to-camel-case", true);
-        return Map.copyOf(properties);
     }
 
     private static Stream<Arguments> pinnedFlywayProperties() {

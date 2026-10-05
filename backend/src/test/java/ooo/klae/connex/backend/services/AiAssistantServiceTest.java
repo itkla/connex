@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 
@@ -389,18 +390,62 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
     @Test
     void authorRejoiningDuringTheReadFailsClosedRatherThanDisclosingTheTranscript() {
+        workspace = newWorkspace();
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
         User author = newUser();
         AiChatSession session = privateSession(author, "Rejoin race");
         workspaceMapper.removeMember(workspace.getId(), author.getId());
         assertEquals(session.getId(), service.getRetained(session.getId(), 1, 50).session().getId());
+        int readsBefore = auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", session.getId(), 10, 0).size();
+        assertEquals(1, readsBefore);
+        List<User> departedMembers = workspaceService.getMembers(workspace.getId());
 
         workspaceMapper.addMember(workspace.getId(), author.getId(), "member");
+        List<User> rejoinedMembers = workspaceService.getMembers(workspace.getId());
+        doReturn(departedMembers).doReturn(rejoinedMembers)
+            .when(workspaceService).getMembers(workspace.getId());
 
         ForbiddenException raced = assertThrows(
             ForbiddenException.class,
             () -> service.getRetained(session.getId(), 1, 50));
         assertEquals(INACCESSIBLE, raced.getMessage());
+        assertEquals(readsBefore, auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", session.getId(), 10, 0).size());
         assertEquals(0, service.pageRetained(1, 25).total());
+    }
+
+    @Test
+    void authorRejoiningDuringListingIsExcludedWhileDepartedSessionsRemainAudited() {
+        workspace = newWorkspace();
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+        User rejoiningAuthor = newUser();
+        User departedAuthor = newUser();
+        AiChatSession rejoining = privateSession(rejoiningAuthor, "Rejoining during listing");
+        AiChatSession retained = privateSession(departedAuthor, "Still retained");
+        workspaceMapper.removeMember(workspace.getId(), rejoiningAuthor.getId());
+        workspaceMapper.removeMember(workspace.getId(), departedAuthor.getId());
+        List<User> departedMembers = workspaceService.getMembers(workspace.getId());
+
+        workspaceMapper.addMember(workspace.getId(), rejoiningAuthor.getId(), "member");
+        List<User> rejoinedMembers = workspaceService.getMembers(workspace.getId());
+        doReturn(departedMembers).doReturn(rejoinedMembers)
+            .when(workspaceService).getMembers(workspace.getId());
+
+        var page = service.pageRetained(1, 25);
+
+        assertEquals(List.of(retained.getId()),
+            page.items().stream().map(AiChatSessionDto::getId).toList());
+        assertEquals(1, page.total());
+        assertTrue(auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", rejoining.getId(), 10, 0).isEmpty());
+        List<AuditLog> retainedReads = auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", retained.getId(), 10, 0);
+        assertEquals(1, retainedReads.size());
+        assertEquals("ai.assistant.session.read", retainedReads.getFirst().getAction());
+        assertEquals("{\"scope\": \"retained\"}", retainedReads.getFirst().getChanges());
     }
 
     @Test

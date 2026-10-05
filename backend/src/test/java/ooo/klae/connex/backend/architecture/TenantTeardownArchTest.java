@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.architecture;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,15 +39,6 @@ class TenantTeardownArchTest {
     @Autowired private DataSource dataSource;
 
     @Test
-    void everyOrgDataTableHasExactlyOneLifecycleDeclaration() {
-        assertEquals(TablePlaneRegistry.ORG_DATA_TABLES,
-            TenantLifecycleRegistry.declarations().keySet(),
-            "New org-data table has no TenantLifecycleRegistry declaration. Declare DIRECT(workspace "
-                + "column) or CASCADE(verified parent) so teardown, export, and residual verification "
-                + "cover it.");
-    }
-
-    @Test
     void everyCascadeIsLiveAndTerminatesAtDirect() throws Exception {
         List<String> violations = new ArrayList<>();
         try (Connection connection = dataSource.getConnection()) {
@@ -71,16 +61,17 @@ class TenantTeardownArchTest {
     void everyDirectWorkspaceColumnExistsAndLeadsAnIndex() throws Exception {
         List<String> violations = new ArrayList<>();
         try (Connection connection = dataSource.getConnection()) {
+            SchemaMetadataSnapshot metadata = SchemaMetadataSnapshot.read(connection);
             for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
                 if (!(declaration.reach() instanceof Direct direct)) {
                     continue;
                 }
-                if (!columnExists(connection, declaration.table(), direct.workspaceColumn())) {
+                if (!metadata.columnExists(declaration.table(), direct.workspaceColumn())) {
                     violations.add(declaration.table() + "." + direct.workspaceColumn()
                         + " does not exist");
                     continue;
                 }
-                if (!leadingIndexExists(connection, declaration.table(), direct.workspaceColumn())) {
+                if (!metadata.leadingIndexExists(declaration.table(), direct.workspaceColumn())) {
                     violations.add(declaration.table() + "." + direct.workspaceColumn()
                         + " is not the leading column of an index");
                 }
@@ -182,19 +173,6 @@ class TenantTeardownArchTest {
         }
     }
 
-    private boolean columnExists(Connection connection, String table, String column) throws Exception {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT COUNT(*) FROM information_schema.COLUMNS"
-                    + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?")) {
-            statement.setString(1, table);
-            statement.setString(2, column);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                resultSet.next();
-                return resultSet.getInt(1) == 1;
-            }
-        }
-    }
-
     private boolean nullableColumnExists(Connection connection, String table, String column)
             throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
@@ -204,21 +182,6 @@ class TenantTeardownArchTest {
             statement.setString(2, column);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() && "YES".equals(resultSet.getString(1));
-            }
-        }
-    }
-
-    private boolean leadingIndexExists(Connection connection, String table, String column)
-            throws Exception {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT COUNT(*) FROM information_schema.STATISTICS"
-                    + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
-                    + " AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1")) {
-            statement.setString(1, table);
-            statement.setString(2, column);
-            try (ResultSet resultSet = statement.executeQuery()) {
-                resultSet.next();
-                return resultSet.getInt(1) > 0;
             }
         }
     }

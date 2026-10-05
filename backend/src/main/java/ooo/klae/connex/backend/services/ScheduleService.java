@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -28,9 +29,13 @@ import ooo.klae.connex.backend.dto.ReportScheduleRecipientDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -45,11 +50,15 @@ public class ScheduleService {
 
     private final ScheduleMapper scheduleMapper;
     private final ReportMapper reportMapper;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
     private final TenantWorkScope tenantWorkScope;
     private final ReportPermissionPolicy reportPermissionPolicy;
+    private final PrivilegedAccountService privilegedAccountService;
+    private final SessionSecurityService sessionSecurityService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -61,14 +70,25 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Creates the single delivery schedule for a report. */
-    @Transactional
+    /**
+     * Creates the single delivery schedule for a report.
+     *
+     * <p>A privileged account must carry a fresh WebAuthn step-up; see
+     * {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the report to schedule
+     * @param request the validated schedule payload
+     * @return the stored schedule
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto create(int reportDefinitionId, ReportScheduleRequest request) {
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
-        int currentUserId = authService.getCurrentUser().getId();
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
         ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
@@ -88,15 +108,27 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Replaces a report's delivery schedule and transfers run-as to the updater. */
-    @Transactional
+    /**
+     * Replaces a report's delivery schedule and transfers run-as to the updater.
+     *
+     * <p>The payload is a whole-schedule replacement, so this is the endpoint that moves recipients,
+     * cadence, and the enabled flag. A privileged account must therefore carry a fresh WebAuthn
+     * step-up; see {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the scheduled report
+     * @param request the validated replacement payload
+     * @return the stored schedule
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public ReportScheduleDto update(int reportDefinitionId, ReportScheduleRequest request) {
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(currentUserId, workspaceId, auditService::deferExportStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
-        int currentUserId = authService.getCurrentUser().getId();
         requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
         ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
@@ -114,11 +146,25 @@ public class ScheduleService {
         return toDto(requireSchedule(workspaceId, reportDefinitionId), activeMembers(workspaceId));
     }
 
-    /** Deletes a report's delivery schedule. */
-    @Transactional
+    /**
+     * Deletes a report's delivery schedule and the scheduled snapshots it left behind.
+     *
+     * <p>Gated like {@link #create} and {@link #update}: leaving it open would make the gate on the
+     * enabled flag pointless, since deleting is a strict superset of disabling, and it also hard
+     * deletes the report's retained scheduled snapshots. A privileged account must therefore carry a
+     * fresh WebAuthn step-up; see {@link #requireScheduleStepUp(int)}.
+     *
+     * @param reportDefinitionId the scheduled report
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.REPORT_UPDATE)
     public void delete(int reportDefinitionId) {
+        int currentUserId = authService.getCurrentUser().getId();
+        requireScheduleStepUp(currentUserId,
+                auditService::recordScheduleDeleteStepUpRefused);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockAndRecheckScheduleStepUp(
+                currentUserId, workspaceId, auditService::deferScheduleDeleteStepUpRefusal);
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
         if (scheduleMapper.deleteByReport(workspaceId, reportDefinitionId) == 0) {
@@ -258,6 +304,85 @@ public class ScheduleService {
             return null;
         }
         return current;
+    }
+
+    /**
+     * Requires a fresh WebAuthn step-up before a privileged account may open or redirect a scheduled
+     * delivery channel.
+     *
+     * <p>A schedule is the one export surface that keeps emitting tenant data with no session to
+     * step up, so the control sits on the mutation that decides where a report goes rather than on
+     * the unattended send. Gating the send is unimplementable and gating it would strand every
+     * already-approved schedule, so {@code ReportDeliveryScheduler} deliberately passes through
+     * {@link #claimDue}, {@link #deliveryAccess} and the recipient re-derivation untouched.
+     *
+     * <p>Accounts that administer no other principal are unaffected. A schedule may only name
+     * active members who already hold the report's own read permissions, so an ordinary member
+     * reaches nobody new by scheduling. Admitting a new member is itself step-up gated upstream, so
+     * what this refuses on a single factor is redirecting a standing channel to an existing member
+     * the report's owner never chose, and the transfer of run-as that comes with it. The check is
+     * independent of {@code CONNEX_PRIVILEGED_MFA_ENFORCED}, matching the other high-risk service
+     * boundaries rather than the staged-rollout export filter.
+     *
+     * <p>Deletion is gated too, and so is {@code ReportService.delete}: {@code report_schedule}
+     * cascades from {@code report_definition}, so deleting the parent report would otherwise remove
+     * the schedule and its snapshots without a step-up and make this gate bypassable.
+     *
+     * <p>The refusal audit commits in an independent transaction that re-takes the actor's
+     * {@code app_user} row {@code FOR SHARE}, so this runs before the mutation takes any lock.
+     *
+     * @param userId the account attempting the mutation
+     */
+    private void requireScheduleStepUp(int userId) {
+        requireScheduleStepUp(userId, auditService::recordExportStepUpRefused);
+    }
+
+    /**
+     * Applies the step-up, recording the refusal with the summary that matches what was attempted.
+     *
+     * <p>Opening or redirecting a schedule is what makes it an export channel, so those keep the
+     * export summary. Deleting one destroys the channel and its retained snapshots and exports
+     * nothing, so it passes the deletion recorder instead; the persisted text is part of the audit
+     * trail operators and alert rules read.
+     *
+     * @param userId the account whose assertion freshness is checked
+     * @param recordRefusal writes the refusal appropriate to the attempted mutation
+     */
+    private void requireScheduleStepUp(int userId, Runnable recordRefusal) {
+        if (!privilegedAccountService.isPrivileged(userId)) {
+            return;
+        }
+        try {
+            sessionSecurityService.requireRecentAuthentication(userId);
+        } catch (RecentAuthenticationRequiredException exception) {
+            recordRefusal.run();
+            throw exception;
+        }
+    }
+
+    /**
+     * Decides the privileged step-up again against committed state (#1897). It takes the actor's
+     * account row and the workspace row shared, then the actor's assigned custom-role rows shared,
+     * which also flushes the session cache so the unlocked check's cached answer is not reused, and
+     * applies the step-up again. A shared account root conflicts with every activation that can
+     * promote the account, each of which locks it for update, without blocking report writers that
+     * audit as the same user; see LOCKING.md. A refusal here must be recorded through a deferred
+     * recorder: an immediate independent audit re-takes the account row on another connection and
+     * would queue behind any writer already waiting on this transaction's shared lock (#1986).
+     *
+     * @param userId the account attempting the mutation
+     * @param workspaceId the workspace the schedule belongs to
+     * @param recordRefusal defers the refusal appropriate to the attempted mutation until completion
+     */
+    private void lockAndRecheckScheduleStepUp(int userId, int workspaceId, Runnable recordRefusal) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            throw new ForbiddenException("Authenticated user is unavailable");
+        }
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        userMapper.lockAssignedCustomRoleRowsForShare(userId);
+        requireScheduleStepUp(userId, recordRefusal);
     }
 
     private ValidatedSchedule validate(

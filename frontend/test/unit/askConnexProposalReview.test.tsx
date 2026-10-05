@@ -1,3 +1,4 @@
+import { createTranslator } from "next-intl";
 import { type AnchorHTMLAttributes, type PropsWithChildren, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import AskConnexProposalReview, {
     AskConnexProposalReviewSummary,
 } from "@/app/components/ask-connex/AskConnexProposalReview";
-import AskConnexToolCard from "@/app/components/ask-connex/AskConnexToolCard";
+import AskConnexToolCard, {
+    type AskConnexToolCardLabels,
+} from "@/app/components/ask-connex/AskConnexToolCard";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     askConnexChangeApplicable,
@@ -14,10 +17,16 @@ import {
     askConnexProposalGroups,
     askConnexToolCardAffordances,
     askConnexUndoWindow,
+    mergeAskConnexToolCalls,
+    reduceAskConnexToolCards,
     toggleAskConnexProposalExclusion,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
 import type { AiAssistantToolCallChangeState } from "@/app/lib/types";
+import enCommon from "@/messages/en/common.json";
+import jaCommon from "@/messages/ja/common.json";
+import enReports from "@/messages/en/reports.json";
+import jaReports from "@/messages/ja/reports.json";
 import {
     askConnexCard as card,
     askConnexCardLabels as cardLabels,
@@ -36,16 +45,29 @@ vi.mock("next/link", async () => {
 
 const NOW = Date.parse("2026-08-22T12:00:00Z");
 
+/** The markup React writes for `text`, so copy with an apostrophe matches as it renders. */
+function escaped(text: string | undefined): string {
+    if (text === undefined) throw new Error("Missing card copy");
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;");
+}
+
 
 function render(node: ReactNode): string {
     return renderToStaticMarkup(<NowProvider value={NOW}>{node}</NowProvider>);
 }
 
-function renderCard(state: AskConnexToolCardState): string {
+function renderCard(
+    state: AskConnexToolCardState, labels: AskConnexToolCardLabels = cardLabels,
+): string {
     return render(
         <AskConnexToolCard
             card={state}
-            labels={cardLabels}
+            labels={labels}
             actionsDisabled={false}
             onAction={() => {}}
             formatDeadline={(instant) => `deadline(${instant})`}
@@ -55,6 +77,341 @@ function renderCard(state: AskConnexToolCardState): string {
 }
 
 describe("assistant proposal review", () => {
+    it.each([
+        { locale: "en", messages: enCommon, reports: enReports },
+        { locale: "ja", messages: jaCommon, reports: jaReports },
+    ])("reviews a report and its localized template in $locale on both surfaces", ({ locale, messages, reports }) => {
+        const t = createTranslator({ locale, messages, namespace: "AskConnex.toolCards" });
+        const tReports = createTranslator({ locale, messages: reports, namespace: "Reports.templates" });
+        const labels: AskConnexToolCardLabels = {
+            ...cardLabels,
+            changeField: { ...cardLabels.changeField, report: t("change.fieldReport") },
+            changeValue: (field, value, side, toolName) => toolName === "create_report"
+                && field === "template" && value === "sales-performance"
+                ? tReports("sales-performance.name") : cardLabels.changeValue(field, value, side, toolName),
+            outcomeValue: (field, value, toolName) => toolName === "create_report"
+                && field === "template" && value === "sales-performance"
+                ? tReports("sales-performance.name") : value,
+            openCreatedRecord: (kind) => t(`openCreated.${kind}`),
+            openCreatedRecordAria: (kind) => t(`openCreatedAria.${kind}`),
+            summaries: {
+                ...cardLabels.summaries,
+                createReport: t("summaries.createReport"),
+                reportCreated: t("summaries.reportCreated"),
+            },
+        };
+        const report = change({ field: "report", currentValue: null, proposedValue: "Monthly review" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "sales-performance" });
+        const proposal = card({
+            toolName: "create_report",
+            target: { kind: "workspace", id: 42, label: "Japan sales" },
+            change: report,
+            changes: [report, template],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        if (group === undefined) throw new Error("Missing proposal group");
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={labels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal, labels), review]) {
+            expect(markup).toContain("Japan sales");
+            expect(markup).toContain("Monthly review");
+            expect(markup).toContain(escaped(t("change.fieldReport")));
+            expect(markup).toContain(escaped(tReports("sales-performance.name")));
+            expect(markup).not.toContain("sales-performance");
+            expect(markup).not.toContain('href="/records/deals/42"');
+            expect(markup).not.toContain('href="/records/companies/42"');
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(askConnexToolCardAffordances(card({
+            ...proposal,
+            changes: [{ ...report, proposedValue: null, state: "withheld" }, template],
+        }), NOW)).not.toContain("approve");
+        const executed = renderCard(card({
+            ...proposal,
+            status: "executed",
+            outcomeSummary: "Report created",
+            outcomeValues: [{ field: "name", value: "Monthly review" }, { field: "template", value: "sales-performance" }],
+            createdRecord: { kind: "report", id: 74 },
+        }), labels);
+        expect(executed).toContain('href="/insights/reports/74"');
+        expect(executed).toContain(escaped(t("summaries.reportCreated")));
+        expect(executed).toContain(escaped(t("openCreated.report")));
+        expect(executed).toContain(escaped(tReports("sales-performance.name")));
+        expect(executed).not.toContain("sales-performance");
+    });
+
+    it("reviews company fields and template defaults against an unlinked workspace", () => {
+        const name = change({ field: "name", currentValue: null, proposedValue: "Acme" });
+        const website = change({ field: "website", currentValue: null, proposedValue: "acme.example" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "sales-performance" });
+        const defaults = change({ field: "templateDefaults", currentValue: null, proposedValue: '{"tags":""}' });
+        const changes = [name, website, template, defaults];
+        const proposal = card({
+            toolName: "create_company",
+            target: { kind: "workspace", id: 42, label: "Japan sales" },
+            change: name,
+            changes,
+        });
+        const markup = renderCard(proposal);
+        expect(markup).toContain("Japan sales");
+        expect(markup).toContain("acme.example");
+        expect(markup).toContain("sales-performance");
+        expect(markup).toContain("Filled by the template");
+        expect(markup).not.toContain(escaped(cardLabels.restrictedTarget));
+        expect(markup).not.toContain("href=");
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(changes.length);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(renderCard(card({
+            ...proposal,
+            status: "executed",
+            outcomeSummary: "Company created",
+            createdRecord: { kind: "company", id: 74 },
+        }))).toContain('href="/records/companies/74"');
+    });
+
+    it.each(["create_person", "create_deal"])("reviews every %s field and template default on both surfaces", (toolName) => {
+        const name = change({ field: "name", currentValue: null, proposedValue: "New record" });
+        const template = change({ field: "template", currentValue: null, proposedValue: "Referral template" });
+        const defaults = change({
+            field: "templateDefaults",
+            currentValue: null,
+            proposedValue: '{"leadSource":"REFERRAL","tags":"","customFields":""}',
+        });
+        const changes = [name, template, defaults];
+        const proposal = card({
+            toolName,
+            target: { kind: "company", id: 42, label: "Acme" },
+            change: { ...name, state: "unresolved" },
+            changes,
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup).toContain("New record");
+            expect(markup).toContain("Creation template");
+            expect(markup).toContain("Referral template");
+            expect(markup).toContain("Filled by the template");
+            expect(markup).toContain("Source: Referral, Tags, and Custom fields");
+            expect(markup).not.toContain("leadSource");
+            expect(markup).toContain('href="/records/companies/42"');
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(changes.length);
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        expect(askConnexProposalAppliable(card({
+            ...proposal, changes: [name, template, { ...defaults, state: "withheld", proposedValue: null }],
+        }))).toBe(false);
+    });
+
+    it.each([
+        "withheld", "unresolved", "permissionLost", "recordChanged", "unchanged",
+    ] as const)("shows each field's notice and blocks an inapplicable %s proposal on both surfaces", (state) => {
+        const industry = change({ field: "industry", state: "unchanged" });
+        const address = change({ field: "address", state });
+        const website = change({ field: "website", state: state === "unchanged" ? "unchanged" : "ready" });
+        const proposal = card({
+            toolName: "update_record_fields",
+            change: industry,
+            changes: [industry, address, website],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(3);
+            expect(markup).toContain(escaped(cardLabels.changeState.unchanged));
+            expect(markup).toContain(escaped(cardLabels.changeState[state]));
+            if (state === "unchanged") {
+                expect(markup.split(escaped(cardLabels.changeState.unchanged))).toHaveLength(4);
+            }
+        }
+        expect(askConnexToolCardAffordances(proposal, NOW)).toEqual(["reject"]);
+        expect(askConnexProposalAppliable(proposal)).toBe(false);
+        expect(group.selected).toBe(0);
+        expect(group.applicable).toBe(0);
+        expect(review).toMatch(/<button[^>]*disabled=""[^>]*>Apply 0 changes<\/button>/);
+    });
+
+    it("renders and applies a legacy proposal without changes on both review surfaces", () => {
+        const legacy = card({ change: change({ currentValue: "Discovery", proposedValue: "Proposal" }) });
+        delete legacy.changes;
+        expect(legacy).not.toHaveProperty("changes");
+        expect(askConnexToolCardAffordances(legacy, NOW)).toContain("approve");
+        const [group] = askConnexProposalGroups(
+            [legacy, card({ id: 32 }), card({ id: 33 })], new Set([legacy.id, 32, 33]), new Set(),
+        );
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(legacy), review]) {
+            expect(markup).toContain("Discovery");
+            expect(markup).toContain("Proposal");
+            expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(1);
+        }
+        expect(group.selected).toBe(1);
+    });
+
+    it("does not arm Apply or render rows when neither response shape has a change", () => {
+        const legacy = card({ change: null });
+        delete legacy.changes;
+        expect(renderCard(legacy)).not.toContain("space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border");
+        expect(askConnexToolCardAffordances(legacy, NOW)).not.toContain("approve");
+        expect(askConnexProposalAppliable(legacy)).toBe(false);
+    });
+
+    it("uses modern rows when the legacy projection disarms older clients", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({
+            toolName: "update_record_fields",
+            change: { ...industry, state: "unresolved" },
+            changes: [industry, address],
+        });
+        expect(askConnexChangeApplicable(proposal.change)).toBe(false);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+        const [group] = askConnexProposalGroups(
+            [proposal, card({ id: 32 }), card({ id: 33 })], new Set([proposal.id, 32, 33]), new Set(),
+        );
+        expect(group.selected).toBe(1);
+        const review = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+        for (const markup of [renderCard(proposal), review]) {
+            expect(markup).toContain("Software");
+            expect(markup).toContain("Osaka");
+            expect(markup).not.toContain(escaped(cardLabels.changeState.unresolved));
+        }
+        expect(askConnexProposalAppliable(card({ ...proposal, changes: [] }))).toBe(false);
+        expect(askConnexProposalAppliable(card({
+            ...proposal, changes: [{ ...industry, state: "unchanged" }, address],
+        }))).toBe(true);
+        expect(askConnexProposalAppliable(card({
+            ...proposal,
+            changes: [{ ...industry, state: "unchanged" }, { ...address, state: "unchanged" }],
+        }))).toBe(false);
+    });
+
+    it("refreshes later rows even when the legacy projection and timestamp stay the same", () => {
+        const industry = change({ field: "industry" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ toolName: "update_record_fields", change: { ...industry, state: "unresolved" }, changes: [industry, address] });
+        const incoming = { ...proposal, changes: [industry, { ...address, state: "permissionLost" as const }] };
+        const [merged] = reduceAskConnexToolCards([proposal], {
+            type: "replace",
+            toolCalls: mergeAskConnexToolCalls([proposal], [incoming]),
+        });
+        expect(merged.changes).toEqual(incoming.changes);
+        expect(askConnexProposalAppliable(merged)).toBe(false);
+    });
+
+    it("renders every field in the existing row markup and withholds the whole proposal", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ toolName: "update_record_fields", change: industry, changes: [industry, address] });
+        const markup = renderCard(proposal);
+        expect(markup).toContain("Consulting");
+        expect(markup).toContain("Software");
+        expect(markup).toContain("Tokyo");
+        expect(markup).toContain("Osaka");
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(2);
+        expect(askConnexToolCardAffordances(proposal, NOW)).toContain("approve");
+
+        const withheld = change({ ...address, proposedValue: null, state: "withheld" });
+        const blocked = card({ ...proposal, change: { ...industry, state: "withheld" }, changes: [industry, withheld] });
+        const blockedMarkup = renderCard(blocked);
+        expect(blockedMarkup).toContain("Withheld");
+        expect(blockedMarkup).toContain(escaped(cardLabels.changeState.withheld));
+        expect(askConnexToolCardAffordances(blocked, NOW)).not.toContain("approve");
+        expect(askConnexProposalAppliable(blocked)).toBe(false);
+    });
+
+    it("renders all fields in the full review while excluding withheld proposals from Apply", () => {
+        const industry = change({ field: "industry", currentValue: "Consulting", proposedValue: "Software" });
+        const address = change({ field: "address", currentValue: "Tokyo", proposedValue: "Osaka" });
+        const proposal = card({ id: 51, toolName: "update_record_fields", change: industry, changes: [industry, address] });
+        const withheld = change({ ...address, proposedValue: null, state: "withheld" });
+        const blocked = card({
+            ...proposal,
+            id: 52,
+            change: { ...industry, state: "withheld" },
+            changes: [industry, withheld],
+        });
+        const [group] = askConnexProposalGroups(
+            [proposal, blocked, card({ id: 53, change: change() })], new Set([51, 52, 53]), new Set(),
+        );
+        const markup = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+
+        expect(markup).toContain("Consulting");
+        expect(markup).toContain("Software");
+        expect(markup).toContain("Tokyo");
+        expect(markup).toContain("Osaka");
+        expect(markup).toContain("Withheld");
+        expect(markup).toContain(escaped(cardLabels.changeState.withheld));
+        expect(markup.match(/space-y-1.5 rounded-xl px-3 py-2.5 ring-1 ring-border/g)).toHaveLength(5);
+        expect(group.selected).toBe(2);
+        expect(group.applicable).toBe(2);
+        expect(markup).toContain("Apply 2 changes");
+    });
+
     it("states the exact current and proposed values before anything is applied", () => {
         const markup = renderCard(card({ change: change() }));
 
@@ -83,6 +440,208 @@ describe("assistant proposal review", () => {
         expect(clearing).toContain("Ada Owner");
         expect(clearing).toContain("—");
         expect(clearing).toContain("Not set");
+    });
+
+    it("shows a document template before approval and disarms a withheld draft", () => {
+        const draft = card({
+            toolName: "draft_document",
+            requestSummary: "Draft document from: Quote",
+            change: change({ field: "document", currentValue: null, proposedValue: "Quote" }),
+        });
+        const markup = renderCard(draft);
+
+        expect(markup).toContain("Add a draft document from: Quote");
+        expect(markup).toContain(cardLabels.changeField.document);
+        expect(markup).not.toContain("Not set");
+        expect(markup).not.toContain(`>${cardLabels.diffBefore}<`);
+        expect(markup).toContain("Apply the proposed change to Acme renewal");
+
+        const withheld = { ...draft, requestSummary: "Draft a deal document", change: null };
+        expect(askConnexToolCardAffordances(withheld, NOW)).toEqual(["reject"]);
+        expect(renderCard(withheld)).not.toContain("Quote");
+        expect(renderCard(withheld)).not.toContain("Apply the proposed change to");
+    });
+
+    it.each([
+        ["en", enCommon, "Additional draft", "latest version 3"],
+        ["ja", jaCommon, "追加する書類の下書き", "最新バージョン 3"],
+    ] as const)("describes an additional draft and existing template version in %s", (locale, messages, label, version) => {
+        const t = createTranslator({ locale, messages, namespace: "AskConnex" });
+        const labels: AskConnexToolCardLabels = {
+            ...cardLabels,
+            changeField: { ...cardLabels.changeField, document: t("toolCards.change.fieldDocument") },
+            changeNotSet: t("toolCards.change.notSet"),
+            diffBefore: t("toolCards.change.before"),
+            changeStateForField: {
+                ...cardLabels.changeStateForField,
+                document: {
+                    ready: (value) => value === null ? null
+                        : t("toolCards.change.existingDocument", { version: value }),
+                },
+            },
+            summaries: {
+                ...cardLabels.summaries,
+                draftDocument: t("toolCards.summaries.draftDocument"),
+                draftDocumentFrom: (value) => t("toolCards.summaries.draftDocumentFrom", { value }),
+            },
+        };
+        const draft = card({
+            toolName: "draft_document",
+            requestSummary: "Draft document from: Quote",
+            change: change({ field: "document", currentValue: null, proposedValue: "Quote" }),
+        });
+        const existing = { ...draft, change: change({ ...draft.change, currentValue: "3" }) };
+        const firstMarkup = renderCard(draft, labels);
+        const existingMarkup = renderCard(existing, labels);
+        for (const markup of [firstMarkup, existingMarkup]) {
+            expect(markup).toContain(label);
+            expect(markup).toContain(escaped(t("toolCards.summaries.draftDocumentFrom", { value: "Quote" })));
+            expect(markup).not.toContain(labels.changeNotSet);
+            expect(markup).not.toContain(`>${labels.diffBefore}<`);
+        }
+        expect(firstMarkup).not.toContain(version);
+        expect(existingMarkup).toContain(version);
+        expect(existingMarkup).toContain(escaped(t("toolCards.change.existingDocument", { version: "3" })));
+        expect(askConnexToolCardAffordances(existing, NOW)).toContain("approve");
+        const drafts = [existing, { ...draft, id: 32 }, { ...draft, id: 33 }];
+        const [group] = askConnexProposalGroups(
+            drafts, new Set(drafts.map((entry) => entry.id)), new Set(),
+        );
+        const grouped = render(<AskConnexProposalReview
+            group={group}
+            labels={reviewLabels}
+            cardLabels={labels}
+            actionsDisabled={false}
+            onToggleInclusion={() => {}}
+            onAction={() => {}}
+            onApplySelected={() => {}}
+        />);
+        expect(grouped).toContain(version);
+        expect(grouped).not.toContain(labels.changeNotSet);
+    });
+
+    it("states a tag removal as the tag the record holds now and nothing after", () => {
+        const markup = renderCard(card({
+            toolName: "remove_tag",
+            requestSummary: "Remove tag: Dormant",
+            change: change({ field: "tag", currentValue: "Dormant", proposedValue: null }),
+        }));
+
+        expect(markup).toContain("Remove tag: Dormant");
+        expect(markup).toContain(cardLabels.changeField.tag);
+        expect(markup).toContain("Dormant");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain("Apply the proposed change to Acme renewal");
+    });
+
+    it("reviews task completion without fabricating a task target link", () => {
+        const task = card({
+            target: { kind: "task", id: 19, label: "Call Ada" },
+            toolName: "complete_task",
+            requestSummary: "Complete the task",
+            change: change({ field: "taskStatus", currentValue: "open", proposedValue: "done" }),
+        });
+        const markup = renderCard(task);
+        expect(markup).toContain("Complete the task");
+        expect(markup).toContain("Status");
+        expect(markup).toContain(">Open<");
+        expect(markup).toContain(">Done<");
+        expect(markup).toContain("Apply the proposed change to Call Ada");
+        expect(markup).not.toContain('href=');
+        expect(markup).not.toContain("Change it on the record");
+
+        const completed = renderCard({
+            ...task,
+            change: change({
+                field: "taskStatus", currentValue: "done", proposedValue: "done", state: "unchanged",
+            }),
+        });
+        expect(completed).toContain(cardLabels.changeState.unchanged);
+        expect(completed).not.toContain("Apply the proposed change to Call Ada");
+    });
+
+    it("reviews the task due date and blocks approval after a target change", () => {
+        const task = card({
+            target: { kind: "task", id: 19, label: "Call Ada" },
+            toolName: "reschedule_task",
+            requestSummary: "Reschedule the task",
+            change: change({ field: "dueDate", currentValue: null, proposedValue: "2026-10-03" }),
+        });
+        const markup = renderCard(task);
+        expect(markup).toContain("Reschedule the task");
+        expect(markup).toContain("Due date");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain("October 3, 2026");
+        expect(markup).toContain("Apply the proposed change to Call Ada");
+        expect(markup).not.toContain('href=');
+
+        const changed = renderCard({
+            ...task,
+            change: change({
+                field: "dueDate", currentValue: null, proposedValue: "2026-10-03", state: "recordChanged",
+            }),
+        });
+        expect(changed).toContain(cardLabels.changeState.recordChanged);
+        expect(changed).not.toContain("Apply the proposed change to Call Ada");
+    });
+
+    it("states a response deadline in the reader's words rather than the stored tokens", () => {
+        const first = renderCard(card({
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({ field: "responseDue", currentValue: null, proposedValue: "48" }),
+        }));
+        const running = renderCard(card({
+            id: 33,
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({
+                field: "responseDue",
+                currentValue: "2026-08-13T09:30",
+                proposedValue: "48",
+                state: "unchanged",
+            }),
+        }));
+
+        expect(first).toContain("Set a first-response deadline 48 hours out");
+        expect(first).toContain(cardLabels.changeField.responseDue);
+        expect(first).toContain("Not set");
+        expect(first).toContain("48 hours after it&#x27;s applied");
+        expect(first).toContain("Apply the proposed change to Ada Lovelace");
+        expect(running).toContain(new Intl.DateTimeFormat("en", {
+            dateStyle: "medium",
+            timeStyle: "short",
+        }).format(Date.UTC(2026, 7, 13, 9, 30)));
+        expect(running).not.toContain("2026-08-13T09:30");
+        expect(running).toContain("48 hours after it&#x27;s applied");
+        expect(running).toContain(escaped(cardLabels.changeStateForField.responseDue?.unchanged));
+        expect(running).not.toContain(escaped(cardLabels.changeState.unchanged));
+        expect(running).not.toContain("Apply the proposed change to Ada Lovelace");
+    });
+
+    it("says a shared-in contact takes no deadline here rather than calling the value gone", () => {
+        const sharedIn = renderCard(card({
+            id: 34,
+            target: { kind: "person", id: 31, label: "Ada Lovelace" },
+            toolName: "set_response_due",
+            requestSummary: "Set first-response deadline in hours: 48",
+            change: change({
+                field: "responseDue",
+                currentValue: null,
+                currentValueUnresolved: true,
+                proposedValue: "48",
+                state: "unresolved",
+            }),
+        }));
+
+        expect(sharedIn).toContain(escaped(cardLabels.changeCurrentUnresolved.responseDue));
+        expect(sharedIn).toContain("48 hours after it&#x27;s applied");
+        expect(sharedIn).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(sharedIn).toContain(escaped(cardLabels.changeStateForField.responseDue?.unresolved));
+        expect(sharedIn).not.toContain(escaped(cardLabels.changeState.unresolved));
+        expect(sharedIn).not.toContain("Apply the proposed change to Ada Lovelace");
     });
 
     it("reads without colour: every review state carries its own sentence", () => {
@@ -173,6 +732,26 @@ describe("assistant proposal review", () => {
 
         expect(markup).toContain("No longer exists");
         expect(markup).toContain("The proposed value no longer exists in this workspace.");
+        expect(markup).not.toContain("Apply the proposed change to Acme renewal");
+    });
+
+    it("writes an unresolved tag removal as the removal it proposed, not as a value that is gone", () => {
+        const markup = renderCard(card({
+            toolName: "remove_tag",
+            requestSummary: "Remove a tag",
+            change: change({
+                field: "tag",
+                currentValue: "Urgent",
+                proposedValue: null,
+                state: "unresolved",
+            }),
+        }));
+
+        expect(markup).toContain("Urgent");
+        expect(markup).toContain("Not set");
+        expect(markup).toContain(cardLabels.changeStateUnresolvedRemoval);
+        expect(markup).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(markup).not.toContain(cardLabels.changeState.unresolved);
         expect(markup).not.toContain("Apply the proposed change to Acme renewal");
     });
 });
@@ -392,7 +971,8 @@ describe("grouped proposal review", () => {
     });
 
     it("leaves a proposal whose record moved out of the batch the button commits to", () => {
-        const moved = { ...second, change: change({ field: "stage", state: "recordChanged" }) };
+        const movedChange = change({ field: "stage", state: "recordChanged" });
+        const moved = { ...second, change: movedChange, changes: [movedChange] };
         const [group] = askConnexProposalGroups([first, moved, blocked], actionable, new Set());
         const markup = render(
             <AskConnexProposalReview
@@ -411,6 +991,41 @@ describe("grouped proposal review", () => {
         expect(markup).toContain("1 of 3 can be applied now.");
         expect(markup).toContain("Apply 1 changes");
         expect(markup).toContain(cardLabels.changeState.recordChanged);
+    });
+
+    it("gives an unresolved tag removal in the full review its own reason", () => {
+        const removal = card({
+            id: 54,
+            target: { kind: "deal", id: 10, label: "Umbrella renewal" },
+            toolName: "remove_tag",
+            requestSummary: "Remove a tag",
+            change: change({
+                field: "tag",
+                currentValue: "Urgent",
+                proposedValue: null,
+                state: "unresolved",
+            }),
+        });
+        const [group] = askConnexProposalGroups(
+            [first, second, removal], new Set([51, 52, 54]), new Set(),
+        );
+        const markup = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+
+        expect(group.applicable).toBe(2);
+        expect(markup).toContain("Umbrella renewal");
+        expect(markup).toContain(cardLabels.changeStateUnresolvedRemoval);
+        expect(markup).not.toContain(cardLabels.changeProposedUnresolved);
+        expect(markup).not.toContain(cardLabels.changeState.unresolved);
     });
 
     it("shows every record, value, and reason in the full review", () => {
@@ -443,11 +1058,13 @@ describe("grouped proposal review", () => {
     });
 
     it("says so plainly when nothing in the batch can be applied", () => {
+        const unresolved = change({ state: "unresolved" });
+        const unchanged = change({ field: "stage", state: "unchanged" });
         const [group] = askConnexProposalGroups(
             [
                 blocked,
-                { ...first, change: change({ state: "unresolved" }) },
-                { ...second, change: change({ field: "stage", state: "unchanged" }) },
+                { ...first, change: unresolved, changes: [unresolved] },
+                { ...second, change: unchanged, changes: [unchanged] },
             ],
             actionable,
             new Set(),

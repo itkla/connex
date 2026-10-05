@@ -1,11 +1,15 @@
 package ooo.klae.connex.backend.businesscard;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
+import static org.springframework.test.web.client.ExpectedCount.manyTimes;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -16,11 +20,15 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -129,6 +137,45 @@ class BusinessCardOcrClientTest {
         server.verify(Duration.ofSeconds(2));
     }
 
+    /**
+     * A probe publishes a ready result before it releases its in-flight slot, so a scan-readiness
+     * check that read the state just before then can win the empty slot just after. That is the
+     * second {@code /ready} request that
+     * {@code scanReadinessAwaitsTheBoundedInitialProbeBeforeExternalFallback} occasionally saw on a
+     * busy runner (#1834). The window is reproduced directly: the first probe has completed and
+     * released the slot, and a caller then asks for a probe. It must reuse the fresh result instead
+     * of probing again.
+     */
+    @Test
+    void probeRequestedJustAfterAReadyResultReusesItInsteadOfProbingAgain() throws Exception {
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE + "/ready"))
+                .andRespond(request -> {
+                    try {
+                        if (!releaseProbe.await(5, TimeUnit.SECONDS)) {
+                            throw new IOException("Readiness probe test timed out");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Readiness probe test was interrupted", exception);
+                    }
+                    return withSuccess("{\"ready\":true}", MediaType.APPLICATION_JSON)
+                            .createResponse(request);
+                });
+        BusinessCardOcrClient client = client(builder);
+        CompletableFuture<?> initialProbe = inFlightProbe(client);
+        releaseProbe.countDown();
+        assertEquals(Boolean.TRUE, initialProbe.get(5, TimeUnit.SECONDS));
+
+        CompletableFuture<?> requested = ReflectionTestUtils.invokeMethod(client, "refreshReadiness");
+
+        assertNotNull(requested);
+        assertEquals(Boolean.TRUE, requested.get(5, TimeUnit.SECONDS));
+        server.verify(Duration.ofSeconds(2));
+    }
+
     @Test
     void oneScanReadinessDecisionUsesTheRemainingWindowToObserveRecovery() throws Exception {
         CountDownLatch firstProbeStarted = new CountDownLatch(1);
@@ -226,6 +273,12 @@ class BusinessCardOcrClientTest {
         server.verify(Duration.ofSeconds(2));
     }
 
+    /**
+     * With a 1 ms readiness cache every {@code isReady()} call after the cache expires starts a new
+     * probe, so the test's own polling after the recovery probe, and its final {@code isReady()}, send
+     * further {@code /ready} requests. Every one is answered the same way instead of exactly once:
+     * an exact count raced that polling and failed the final verify on a busy runner (#1834).
+     */
     @Test
     void staleProbeCannotReopenReadinessAfterWorkerFailure() throws Exception {
         CountDownLatch staleProbeStarted = new CountDownLatch(1);
@@ -253,7 +306,7 @@ class BusinessCardOcrClientTest {
                 });
         server.expect(requestTo(BASE + "/v1/ocr"))
                 .andRespond(withServiceUnavailable());
-        server.expect(requestTo(BASE + "/ready"))
+        server.expect(manyTimes(), requestTo(BASE + "/ready"))
                 .andRespond(request -> {
                     recoveryProbeStarted.countDown();
                     return withServiceUnavailable().createResponse(request);
@@ -281,6 +334,87 @@ class BusinessCardOcrClientTest {
         assertTrue(recoveryProbeStarted.await(5, TimeUnit.SECONDS));
         assertFalse(client.isReady());
         server.verify(Duration.ofSeconds(2));
+    }
+
+    /**
+     * A worker failure must not interleave with a probe's publication. The generation check and the
+     * writes share one monitor with {@code markUnavailable}, so an invalidation waits for a
+     * publication in progress and then overwrites it, rather than landing between its check and its
+     * writes and being overwritten by a stale ready result (#1987). Once it has run, a publication
+     * from the earlier generation is refused.
+     */
+    @Test
+    void anInvalidationWaitsForAPublicationInProgressAndThenWins() throws Exception {
+        BusinessCardOcrClient client = new BusinessCardOcrClient(RestClient.builder().build(),
+                new ObjectMapper(), properties(Duration.ofMinutes(1)), BASE, false);
+        Object monitor = Objects.requireNonNull(ReflectionTestUtils.getField(client, "readinessPublication"));
+        AtomicLong generation = assertInstanceOf(AtomicLong.class,
+                ReflectionTestUtils.getField(client, "readinessGeneration"));
+        long started = generation.get();
+        long expiresAt = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+        CountDownLatch invalidated = new CountDownLatch(1);
+        Thread invalidation;
+        synchronized (monitor) {
+            assertEquals(Boolean.TRUE,
+                    ReflectionTestUtils.invokeMethod(client, "publishReadiness", started, true, expiresAt));
+            invalidation = Thread.ofPlatform().start(() -> {
+                ReflectionTestUtils.invokeMethod(client, "markUnavailable");
+                invalidated.countDown();
+            });
+            awaitBlocked(invalidation);
+            assertTrue(client.isReadyCached());
+        }
+
+        assertTrue(invalidated.await(5, TimeUnit.SECONDS));
+        invalidation.join(5_000);
+        assertFalse(client.isReadyCached());
+        assertEquals(Boolean.FALSE,
+                ReflectionTestUtils.invokeMethod(client, "publishReadiness", started, true, expiresAt));
+        assertFalse(client.isReadyCached());
+    }
+
+    /**
+     * The reciprocal case: a probe's publication takes the same monitor, so one that arrives while an
+     * invalidation holds it waits, then sees the new generation and publishes nothing (#1987).
+     */
+    @Test
+    void aPublicationWaitsForAnInvalidationInProgressAndIsThenRefused() throws Exception {
+        BusinessCardOcrClient client = new BusinessCardOcrClient(RestClient.builder().build(),
+                new ObjectMapper(), properties(Duration.ofMinutes(1)), BASE, false);
+        Object monitor = Objects.requireNonNull(ReflectionTestUtils.getField(client, "readinessPublication"));
+        AtomicLong generation = assertInstanceOf(AtomicLong.class,
+                ReflectionTestUtils.getField(client, "readinessGeneration"));
+        long started = generation.get();
+        long expiresAt = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+        AtomicReference<Object> published = new AtomicReference<>();
+        Thread publication;
+        synchronized (monitor) {
+            publication = Thread.ofPlatform().start(() -> published.set(
+                    ReflectionTestUtils.invokeMethod(client, "publishReadiness", started, true, expiresAt)));
+            awaitBlocked(publication);
+            ReflectionTestUtils.invokeMethod(client, "markUnavailable");
+        }
+
+        publication.join(5_000);
+        assertFalse(publication.isAlive());
+        assertEquals(Boolean.FALSE, published.get());
+        assertFalse(client.isReadyCached());
+    }
+
+    private static void awaitBlocked(Thread thread) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (thread.getState() != Thread.State.BLOCKED) {
+            if (System.nanoTime() > deadline || !thread.isAlive()) {
+                throw new AssertionError("The thread never waited for the readiness monitor");
+            }
+            Thread.sleep(5);
+        }
+    }
+
+    private static CompletableFuture<?> inFlightProbe(BusinessCardOcrClient client) {
+        AtomicReference<?> slot = assertInstanceOf(AtomicReference.class,
+                ReflectionTestUtils.getField(client, "readinessProbe"));
+        return assertInstanceOf(CompletableFuture.class, slot.get());
     }
 
     private static BusinessCardOcrClient client(RestClient.Builder builder) {

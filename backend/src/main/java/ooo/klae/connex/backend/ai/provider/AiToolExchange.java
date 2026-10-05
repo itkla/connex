@@ -24,8 +24,10 @@ public record AiToolExchange(AiToolCall call, String maskedResult, int step, int
         if (step <= 0) {
             throw new IllegalArgumentException("AI tool exchange step must be positive");
         }
-        if (callOrdinal < 0) {
-            throw new IllegalArgumentException("AI tool exchange call ordinal must not be negative");
+        if (callOrdinal < 0 || callOrdinal > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
+            throw new IllegalArgumentException(
+                    "AI tool exchange call ordinal must be between 0 and "
+                            + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
         }
     }
 

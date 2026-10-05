@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -14,9 +13,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
@@ -165,26 +161,21 @@ class RbacEnforcementArchTest {
 
     @Test
     void controllers_do_not_inject_mappers_directly() {
-        ClassPathScanningCandidateComponentProvider scanner =
-            new ClassPathScanningCandidateComponentProvider(false);
-        scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
-        Set<BeanDefinition> controllers = scanner.findCandidateComponents(BASE + ".controllers");
+        List<Class<?>> controllers = ControllerDiscovery.scanAllControllers(
+            BASE + ".controllers", RestController.class);
 
         assertTrue(controllers.size() >= 10,
             "Expected to scan the REST controllers but found " + controllers.size()
                 + " — the scan is misconfigured and this guard would pass vacuously.");
+        assertTrue(controllers.contains(ooo.klae.connex.backend.controllers.SequenceController.class));
+        assertTrue(controllers.contains(ooo.klae.connex.backend.controllers.GuidedRecordCreationController.class));
 
         List<String> violations = new ArrayList<>();
-        for (BeanDefinition definition : controllers) {
-            try {
-                Class<?> controller = Class.forName(definition.getBeanClassName());
-                for (Field field : controller.getDeclaredFields()) {
-                    if (field.getType().getName().contains(".mappers.")) {
-                        violations.add(controller.getSimpleName() + "." + field.getName());
-                    }
+        for (Class<?> controller : controllers) {
+            for (Field field : controller.getDeclaredFields()) {
+                if (field.getType().getName().contains(".mappers.")) {
+                    violations.add(controller.getSimpleName() + "." + field.getName());
                 }
-            } catch (ClassNotFoundException e) {
-                fail("Could not load controller " + definition.getBeanClassName() + ": " + e.getMessage());
             }
         }
         assertTrue(violations.isEmpty(),

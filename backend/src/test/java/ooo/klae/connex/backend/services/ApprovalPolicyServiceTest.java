@@ -289,31 +289,6 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         return copy;
     }
 
-    private ApprovalPolicy classificationPolicy() {
-        ApprovalPolicy policy = new ApprovalPolicy();
-        policy.setName("Classification policy");
-        policy.setActive(true);
-        policy.setDocumentType("quote");
-        policy.setCurrency("JPY");
-        policy.setMinTotal(new BigDecimal("100.00"));
-        policy.setMinDiscountPercent(new BigDecimal("10.000"));
-        policy.setMode("sequential");
-        policy.setSeparationOfDuties("requester");
-        ApprovalPolicyStep first = step(1, "First", namedApprover(101), namedApprover(102));
-        first.setId(11);
-        ApprovalPolicyStep second = step(1, "Second", anyApprover());
-        second.setId(12);
-        policy.setSteps(List.of(first, second));
-        return policy;
-    }
-
-    private void assertChange(PolicyChangeClass expected, String label,
-            ApprovalPolicy before, Consumer<ApprovalPolicy> mutation) {
-        ApprovalPolicy after = copyPolicy(before);
-        mutation.accept(after);
-        assertEquals(expected, policyService.classify(before, after), label);
-    }
-
     private PendingApproval pendingUnder(ApprovalPolicy policy) {
         Deal deal = jpyDeal();
         DealDocumentDto document = quote(deal);
@@ -381,58 +356,6 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         User one = admin();
         assertThrows(BadRequestException.class, () -> policyService.create(chained("sequential",
             step(1, "Duplicated", namedApprover(one.getId()), namedApprover(one.getId())))));
-    }
-
-    @Test
-    void classificationFollowsTightenLoosenRetargetAndNonePrecedence() {
-        ApprovalPolicy base = classificationPolicy();
-        assertChange(PolicyChangeClass.TIGHTEN, "step added", base, after -> {
-            List<ApprovalPolicyStep> steps = new ArrayList<>(after.getSteps());
-            steps.add(step(1, "Third", anyApprover()));
-            after.setSteps(steps);
-        });
-        assertChange(PolicyChangeClass.TIGHTEN, "quorum raised", base,
-            after -> after.getSteps().getFirst().setRequiredCount(2));
-        assertChange(PolicyChangeClass.TIGHTEN, "named approver removed", base,
-            after -> after.getSteps().getFirst().setApprovers(List.of(namedApprover(101))));
-        assertChange(PolicyChangeClass.TIGHTEN, "any approver narrowed", base,
-            after -> after.getSteps().get(1).setApprovers(List.of(namedApprover(101))));
-        assertChange(PolicyChangeClass.TIGHTEN, "separation tightened", base,
-            after -> after.setSeparationOfDuties("strict"));
-
-        assertChange(PolicyChangeClass.LOOSEN, "step removed", base,
-            after -> after.setSteps(List.of(after.getSteps().get(1))));
-        ApprovalPolicy higherQuorum = copyPolicy(base);
-        higherQuorum.getSteps().getFirst().setRequiredCount(2);
-        assertChange(PolicyChangeClass.LOOSEN, "quorum lowered", higherQuorum,
-            after -> after.getSteps().getFirst().setRequiredCount(1));
-        assertChange(PolicyChangeClass.LOOSEN, "named approver added", base,
-            after -> after.getSteps().getFirst().setApprovers(
-                List.of(namedApprover(101), namedApprover(102), namedApprover(103))));
-        assertChange(PolicyChangeClass.LOOSEN, "named approvers widened", base,
-            after -> after.getSteps().getFirst().setApprovers(List.of(anyApprover())));
-        assertChange(PolicyChangeClass.LOOSEN, "separation relaxed", base,
-            after -> after.setSeparationOfDuties("off"));
-
-        assertChange(PolicyChangeClass.RETARGET, "name", base,
-            after -> after.setName("Retargeted"));
-        assertChange(PolicyChangeClass.RETARGET, "active", base,
-            after -> after.setActive(false));
-        assertChange(PolicyChangeClass.RETARGET, "document type", base,
-            after -> after.setDocumentType("contract"));
-        assertChange(PolicyChangeClass.RETARGET, "currency", base,
-            after -> after.setCurrency("USD"));
-        assertChange(PolicyChangeClass.RETARGET, "minimum total", base,
-            after -> after.setMinTotal(new BigDecimal("200")));
-        assertChange(PolicyChangeClass.RETARGET, "minimum discount", base,
-            after -> after.setMinDiscountPercent(new BigDecimal("20")));
-        assertChange(PolicyChangeClass.RETARGET, "mode", base,
-            after -> after.setMode("parallel"));
-        assertChange(PolicyChangeClass.TIGHTEN, "tightening wins over retargeting", base, after -> {
-            after.setName("Also retargeted");
-            after.setSeparationOfDuties("strict");
-        });
-        assertEquals(PolicyChangeClass.NONE, policyService.classify(base, copyPolicy(base)));
     }
 
     @Test

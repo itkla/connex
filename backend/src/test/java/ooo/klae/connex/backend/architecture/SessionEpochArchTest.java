@@ -3,11 +3,10 @@ package ooo.klae.connex.backend.architecture;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Stream;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -21,6 +20,12 @@ import org.junit.jupiter.api.Test;
 class SessionEpochArchTest {
 
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
+    private static ArchitectureSourceIndex sourceIndex;
+
+    @BeforeAll
+    static void readSourceSnapshot() throws IOException {
+        sourceIndex = ArchitectureSourceIndex.read(SOURCE_ROOT);
+    }
 
     @Test
     void theEpochIsStampedFromExactlyOnePlace() throws IOException {
@@ -50,22 +55,7 @@ class SessionEpochArchTest {
         assertEquals(List.of(), sourcesContaining("stampSessionEpoch(httpRequest, refreshedUser"));
     }
 
-    private static List<Path> sourcesContaining(String needle) throws IOException {
-        try (Stream<Path> files = Files.walk(SOURCE_ROOT)) {
-            return files
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> contains(path, needle))
-                    .map(SOURCE_ROOT::relativize)
-                    .sorted()
-                    .toList();
-        }
-    }
-
-    private static boolean contains(Path path, String needle) {
-        try {
-            return Files.readString(path).contains(needle);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Could not inspect the session epoch boundary");
-        }
+    private static List<Path> sourcesContaining(String token) {
+        return sourceIndex.containing(token).stream().map(SOURCE_ROOT::relativize).toList();
     }
 }

@@ -36,13 +36,21 @@ set -Eeuo pipefail
 STAGING_DIR="${CONNEX_STAGING_DIR:-/opt/connex-staging}"
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
+# Every scratch shape connex-staging-deploy.sh creates under STATE_DIR with mktemp -d. A killed
+# build strands whichever one it held, and all three are most of a build tree, so the reaper has to
+# know all of them: .target-release-* (the target build), and .previous-release-* /
+# .previous-frontend-* (rollback bundles reconstructed by ensure_previous_release). .smoke.* is also
+# created there but is a few kilobytes, and .release-* lives under RELEASES_DIR, which the release
+# pruning below already reasons about.
+SCRATCH_GLOBS=(".target-release-*" ".previous-release-*" ".previous-frontend-*")
 MARKER="$STATE_DIR/deployed-sha"
 ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
 FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 LOG_TAG="connex-staging-prune"
 
-# A tree must sit unclaimed for this long before it is a candidate.
-MIN_AGE_SECONDS="${CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS:-86400}"
+# A tree must sit unclaimed for this long before it is a candidate. A deploy takes roughly ten
+# minutes, so this is a wide margin on settling, not the primary safety property.
+MIN_AGE_SECONDS="${CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS:-14400}"
 
 # Entries to keep even when they are old enough, newest first, for post-mortems.
 KEEP_RECENT="${CONNEX_STAGING_PRUNE_KEEP_RECENT:-2}"
@@ -62,6 +70,14 @@ done
 log() { printf '[%s] %s\n' "$LOG_TAG" "$*"; }
 
 is_git_sha() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
+
+# A name the deploy script actually creates: one of its mktemp templates, a 40-character sha, and
+# the six characters mktemp substitutes for XXXXXX. The globs alone match any directory sharing a
+# prefix -- `.target-release-manual-backup` would qualify -- and scratch reclamation now runs before
+# every marker and quarantine check, so a mistaken match would be deleted with nothing to stop it.
+is_deploy_scratch() {
+    [[ "$1" =~ ^\.(target-release|previous-release|previous-frontend)-[0-9a-f]{40}\.[A-Za-z0-9]{6}$ ]]
+}
 
 read_sha_file() {
     local file="$1" value
@@ -125,6 +141,70 @@ frontend_started_at() {
     stat -c %Y -- "$proc_dir"
 }
 
+# A build writes into $STATE_DIR/.target-release-<sha>.XXXXXX and removes it on both the success and
+# failure paths. A killed build never gets there, and the scratch — most of a full frontend and
+# backend build — is stranded. Nothing else reclaims it.
+#
+# This only runs while the deploy lock is held, so no live build owns a scratch directory here.
+# The age floor is belt and braces on that.
+reap_orphaned_scratch() {
+    local now="$1" path age created freed=0 size failures=0 glob
+    local -a scratch_find_args=()
+    for glob in "${SCRATCH_GLOBS[@]}"; do
+        if [ "${#scratch_find_args[@]}" -gt 0 ]; then
+            scratch_find_args+=(-o)
+        fi
+        scratch_find_args+=(-name "$glob")
+    done
+    scratch_find_args=('(' "${scratch_find_args[@]}" ')')
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        if [ ! -d "$path" ] || [ -L "$path" ]; then
+            continue
+        fi
+        if ! is_deploy_scratch "$(basename -- "$path")"; then
+            log "Skipped $(basename -- "$path"): not a name the deploy script creates"
+            continue
+        fi
+        # A candidate that cannot even be inspected was never assessed, so treating it as "skip"
+        # would let the service exit 0 while the space stays occupied — the silent success this
+        # reaper exists to stop.
+        if ! created="$(stat -c %Z -- "$path")"; then
+            log "Refused: could not inspect orphaned scratch $(basename -- "$path")"
+            failures=$((failures + 1))
+            continue
+        fi
+        age=$((now - created))
+        if [ "$age" -lt "$MIN_AGE_SECONDS" ]; then
+            log "Skipped scratch $(basename -- "$path"): ${age}s old, below the ${MIN_AGE_SECONDS}s minimum"
+            continue
+        fi
+        if path_referenced_by_any_process "$path"; then
+            log "Skipped scratch $(basename -- "$path"): a live process still references it"
+            continue
+        fi
+        size="$(du -s -B1 -- "$path" | awk 'NR == 1 { print $1 }')" || size=0
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "Would remove orphaned scratch $(basename -- "$path") (${size} bytes)"
+            continue
+        fi
+        if rm -rf -- "$path"; then
+            freed=$((freed + size))
+            log "Removed orphaned scratch $(basename -- "$path") (${size} bytes)"
+        else
+            log "Refused: could not remove orphaned scratch $(basename -- "$path")"
+            failures=$((failures + 1))
+        fi
+    done < <(find "$STATE_DIR" -mindepth 1 -maxdepth 1 "${scratch_find_args[@]}" -print 2>/dev/null)
+    [ "$freed" -eq 0 ] || log "Reclaimed $freed bytes of orphaned build scratch"
+    # A reclamation that could not delete must not exit successfully: systemd is the only thing
+    # watching, and a silently failing reaper is how the volume filled in the first place.
+    if [ "$failures" -gt 0 ]; then
+        log "Refused: $failures orphaned scratch directory(ies) could not be removed"
+        return 1
+    fi
+}
+
 main() {
     # Never race a deploy: it is the thing performing the renames this program reasons about.
     if [ -e "$LOCK_FILE" ]; then
@@ -135,12 +215,22 @@ main() {
         fi
     fi
 
+    local deployed rollback running_sha started now scratch_status=0
+    now="$(date +%s)"
+
+    # Orphaned build scratch is reclaimed FIRST, before every quarantine-specific precondition.
+    # Its own gates — the deploy lock above, the age floor, and the live-process reference check —
+    # are all it needs, and the preconditions below are exactly the ones that fail when the disk is
+    # already full: a failed deploy leaves the frontend marker stale, so gating scratch behind it
+    # would refuse to reclaim the space whose absence caused the failure, and no later deploy could
+    # recover either.
+    reap_orphaned_scratch "$now" || scratch_status=1
+
     if [ ! -d "$RELEASE_QUARANTINE_DIR" ]; then
-        log "No quarantine directory at $RELEASE_QUARANTINE_DIR; nothing to do"
-        return 0
+        log "No quarantine directory at $RELEASE_QUARANTINE_DIR; nothing more to do"
+        return "$scratch_status"
     fi
 
-    local deployed rollback running_sha started now
     deployed="$(read_sha_file "$MARKER")" || { log "Refused: committed release marker is unreadable"; return 1; }
     rollback="$(read_sha_file "$ROLLBACK_MARKER")" || { log "Refused: rollback marker is unreadable"; return 1; }
     running_sha="$(head -n 1 -- "$FRONTEND_RUNNING_MARKER" 2>/dev/null | cut -f1)" || running_sha=""
@@ -149,12 +239,11 @@ main() {
         log "Refused: cannot establish when the running frontend started"
         return 1
     fi
-    now="$(date +%s)"
 
     local entries path sha age index=0 pruned=0 freed=0 size
     entries="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' 2>/dev/null \
         | sort -rn | cut -d' ' -f2-)" || return 1
-    [ -n "$entries" ] || { log "Quarantine is empty; nothing to do"; return 0; }
+    [ -n "$entries" ] || { log "Quarantine is empty; nothing more to do"; return "$scratch_status"; }
 
     while IFS= read -r path; do
         [ -n "$path" ] || continue
@@ -210,6 +299,7 @@ main() {
     done <<< "$entries"
 
     log "Done — pruned $pruned entries, reclaimed $freed bytes; $(df --output=avail -B1 "$STATE_DIR" | awk 'NR == 2 { print $1 }') bytes now available"
+    return "$scratch_status"
 }
 
 main "$@"

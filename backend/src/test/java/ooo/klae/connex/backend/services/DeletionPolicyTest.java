@@ -38,7 +38,7 @@ class DeletionPolicyTest {
     }
 
     @Test
-    void nonCreatorMemberIsDenied() {
+    void nonCreatorIsDeniedWhenAdministratorCheckRejects() {
         currentUserIs(CURRENT_USER_ID);
         denyAdminRole();
 
@@ -46,16 +46,7 @@ class DeletionPolicyTest {
     }
 
     @Test
-    void nonCreatorAdminIsAllowed() {
-        currentUserIs(CURRENT_USER_ID);
-
-        assertDoesNotThrow(() -> deletionPolicy.requireDeletable(22));
-
-        verify(workspaceService).requireBuiltInAdministrator();
-    }
-
-    @Test
-    void nonCreatorOwnerIsAllowed() {
+    void nonCreatorIsAllowedWhenAdministratorCheckAccepts() {
         currentUserIs(CURRENT_USER_ID);
 
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(22));
@@ -75,14 +66,6 @@ class DeletionPolicyTest {
         assertDoesNotThrow(() -> deletionPolicy.requireDeletable(null));
 
         verify(workspaceService).requireBuiltInAdministrator();
-    }
-
-    @Test
-    void nonCreatorWithNullOrAbsentMembershipRoleIsDenied() {
-        currentUserIs(CURRENT_USER_ID);
-        denyAdminRole();
-
-        assertThrows(ForbiddenException.class, () -> deletionPolicy.requireDeletable(22));
     }
 
     private void currentUserIs(int userId) {

@@ -1235,7 +1235,10 @@ public class DealService {
      * Changes only a deal's expected close date, leaving name, value, pipeline, stage, outcome and
      * every other field untouched. Unlike {@link #update(int, Deal)} this cannot clobber other
      * fields — or reopen a concurrently-closed deal — from a stale client payload: it writes a
-     * single column after confirming the deal belongs to the caller's workspace.
+     * single column after confirming the deal belongs to the caller's workspace. The audited old
+     * date comes from the deal row locked before the write, and the deal returned is re-read under
+     * that lock after it, not from the unlocked existence check that opens this transaction's read
+     * view; a deal deleted since that check is refused before anything is written (#1958).
      * @param id the deal to reschedule
      * @param expectedCloseDate the target expected close date as a {@code YYYY-MM-DD} calendar day
      * @return the rescheduled deal
@@ -1249,10 +1252,10 @@ public class DealService {
             throw new BadRequestException("Invalid deal expected close date: " + expectedCloseDate);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found");
+        if (dealMapper.getDealById(workspaceId, id) == null) throw new ResourceNotFoundException("Deal not found");
+        Deal before = requireDealByPrimaryKeyForUpdate(workspaceId, id);
         dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
-        Deal after = dealMapper.getDealById(workspaceId, id);
+        Deal after = requireDealByPrimaryKeyForUpdate(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
             "Rescheduled deal " + after.getName(),
             auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
@@ -1450,20 +1453,26 @@ public class DealService {
 
     /**
      * Removes a tag from a deal.
+     * Records the audit row only when this invocation removed the association, so a removal of
+     * a tag the record no longer holds leaves no trace of a change that never happened.
      * @param dealId
      * @param tagId
+     * @return whether this invocation removed the tag association
      */
     @RequirePermission(Permission.DEAL_UPDATE)
-    public void removeTag(int dealId, int tagId) {
+    public boolean removeTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        dealMapper.removeTag(workspaceId, dealId, tagId);
+        if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
+            return false;
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
             "Removed tag " + tagName + " from " + deal.getName(),
             auditService.singleChange("tag", tagName, null));
+        return true;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */
@@ -1567,18 +1576,23 @@ public class DealService {
     }
 
     /**
-     * Replaces the tags associated with a deal.
-     * @param dealId
-     * @param tagIds
-     * @return
+     * Replaces the tags associated with a deal. The deal row is locked first through its primary key,
+     * and a deleted deal is refused under that lock; the audited previous tags are then read under
+     * locks on the association rows. A concurrent {@link #addTag} waits on the deal row at its
+     * foreign-key check and a concurrent {@link #removeTag} waits on the association row, so the audit
+     * names exactly the tags this replacement removed (#1980). It runs at {@code READ_COMMITTED}, so
+     * the tags returned are a fresh read.
+     * @param dealId the deal in the current workspace
+     * @param tagIds the complete set of tags the deal should carry
+     * @return the deal's tags after the replacement
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        List<String> before = tagMapper.getTagsByDealId(workspaceId, dealId).stream().map(Tag::getName).toList();
+        Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
+        List<String> before = tagMapper.getTagsByDealIdForUpdate(workspaceId, dealId).stream()
+            .map(Tag::getName).toList();
         dealMapper.clearTags(workspaceId, dealId);
         if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(workspaceId, dealId, tagIds);
         List<Tag> after = tagMapper.getTagsByDealId(workspaceId, dealId);
@@ -1847,13 +1861,26 @@ public class DealService {
         }
     }
 
+    /**
+     * Assigns or clears a deal's owner. The audited old owner and the {@code deal.owner_changed}
+     * decision come from the deal row locked after the new owner's membership, if any, not from the
+     * unlocked existence check, which opens this transaction's read view before any lock is held. A
+     * deal deleted since that check is refused under the lock, before anything is written, and the
+     * deal returned is read under the same lock, since an unchanged owner leaves no newer row version
+     * for the snapshot to show (#1948). The lock goes through the primary key alone, the record the
+     * {@code UPDATE} locks anyway.
+     *
+     * @param dealId the deal in the current workspace
+     * @param ownerId the new owner, or {@code null} to unassign
+     * @return the updated deal
+     */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);
@@ -1865,26 +1892,37 @@ public class DealService {
         if (!Objects.equals(deal.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
         }
-        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
+        return hydrateReferences(workspaceId, requireDealByPrimaryKeyForUpdate(workspaceId, dealId));
+    }
+
+    private Deal requireDealByPrimaryKeyForUpdate(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByPrimaryKeyForUpdate(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found");
+        }
+        return deal;
     }
 
     /**
      * Sets the deal's risk-evaluation opt-out (issue #358): an excluded deal is skipped by the
      * deal-risk engine and its existing deal.risk notifications resolve on the next scheduled
-     * sweep. Plain close-date reminders are unaffected.
+     * sweep. Plain close-date reminders are unaffected. The audited old value comes from the deal
+     * row locked before the write, and the deal returned is re-read under that lock after it, not
+     * from the unlocked existence check that opens this transaction's read view; a deal deleted
+     * since that check is refused before anything is written (#1958).
      */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateRiskExcluded(int dealId, boolean riskExcluded) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
+        Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
         dealMapper.updateRiskExcluded(workspaceId, dealId, riskExcluded);
         auditService.record("deal.updateEvaluation", "deal", dealId, deal.getName(),
             (riskExcluded ? "Excluded " + deal.getName() + " from" : "Included " + deal.getName() + " in")
                 + " risk evaluation",
             auditService.singleChange("riskExcluded", deal.isRiskExcluded(), riskExcluded));
-        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
+        return hydrateReferences(workspaceId, requireDealByPrimaryKeyForUpdate(workspaceId, dealId));
     }
 
     /**
@@ -1911,6 +1949,17 @@ public class DealService {
      * Replaces a deal's collaborators with the given workspace members, excluding the owner. The
      * audit entry records the raw collaborator ids before and after the change.
      *
+     * <p>Every requested member's active membership row is locked {@code FOR UPDATE} in ascending id
+     * order, then the deal row, before the collaborator rows are replaced: the order {@link #updateOwner}
+     * uses. The membership locks run on this transaction's connection through the control-catalog scope
+     * and are held until it commits, so a member offboarded concurrently either waits for this write or
+     * is refused by it, and the tenant-only insert never needs to join the control plane (#1793).
+     *
+     * <p>The audited and returned lists both come from locking reads taken after the deal lock. The
+     * unlocked existence check opens this transaction's read view before any lock is held, so a plain
+     * read would still list a collaborator row that a concurrent owner change, replacement or
+     * offboarding deleted (#1942).
+     *
      * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
      * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
      * transaction and borrow a second pooled connection while the deal's collaborator row locks and
@@ -1933,22 +1982,24 @@ public class DealService {
     }
 
     private List<Integer> replaceCollaboratorIds(int workspaceId, int dealId, List<Integer> userIds) {
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        List<Integer> normalized = userIds == null ? List.of() : userIds.stream().distinct().toList();
-        for (Integer userId : normalized) {
-            if (userId == null) throw new BadRequestException("Collaborator IDs cannot be null");
-            workspaceService.requireMember(workspaceId, userId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found");
         }
-        normalized = normalized.stream()
+        List<Integer> requested = userIds == null ? List.of() : userIds.stream().distinct().toList();
+        if (requested.stream().anyMatch(Objects::isNull)) {
+            throw new BadRequestException("Collaborator IDs cannot be null");
+        }
+        workspaceService.lockAndRequireMembers(workspaceId, requested);
+        Deal deal = requireDealForUpdate(workspaceId, dealId);
+        List<Integer> normalized = requested.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
-        List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);
+        List<Integer> before = dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
         dealMapper.clearCollaborators(workspaceId, dealId);
         if (!normalized.isEmpty()) {
             dealMapper.insertCollaborators(workspaceId, dealId, normalized);
         }
-        List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, dealId);
+        List<Integer> after = dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
         auditService.record("deal.updateCollaborators", "deal", dealId, deal.getName(),
             "Updated collaborators on " + deal.getName(),
             auditService.singleChange("collaboratorIds", before, after));

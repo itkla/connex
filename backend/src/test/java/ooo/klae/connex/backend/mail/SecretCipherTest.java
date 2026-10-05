@@ -5,7 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Base64;
@@ -13,6 +17,7 @@ import java.util.Base64;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.secrets.SecretPurpose;
 import ooo.klae.connex.backend.secrets.SecretStore;
 
 /**
@@ -33,6 +38,31 @@ class SecretCipherTest {
         SecretStore secretStore = mock(SecretStore.class);
         when(secretStore.isAvailable()).thenReturn(false);
         return new SecretCipher(new MailProperties(), secretStore);
+    }
+
+    /**
+     * Readiness asks whether a stored password could be decrypted. For a secret-store reference that is
+     * the store's non-decrypting check on this workspace's SMTP slot, never a decrypt, so it writes no
+     * secret-use audit.
+     */
+    @Test
+    void canResolveForWorkspaceChecksAReferenceWithoutDecryptingIt() {
+        SecretStore secretStore = mock(SecretStore.class);
+        SecretCipher cipher = new SecretCipher(new MailProperties(), secretStore);
+        when(secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:5")).thenReturn(true);
+        when(secretStore.canDecrypt(SecretPurpose.WORKSPACE_SMTP_PASSWORD, 7, "secret:v1:6")).thenReturn(false);
+
+        assertTrue(cipher.canResolveForWorkspace(7, "secret:v1:5"));
+        assertFalse(cipher.canResolveForWorkspace(7, "secret:v1:6"));
+        verify(secretStore, never()).get(any(), anyInt(), any());
+    }
+
+    @Test
+    void canResolveForWorkspaceNeedsTheLegacyKeyForALegacyBlob() {
+        String legacyBlob = withKey().encryptLegacy("smtp-password");
+
+        assertTrue(withKey().canResolveForWorkspace(7, legacyBlob));
+        assertFalse(withoutKey().canResolveForWorkspace(7, legacyBlob));
     }
 
     @Test

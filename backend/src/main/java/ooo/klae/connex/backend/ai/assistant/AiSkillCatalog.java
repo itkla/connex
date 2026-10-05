@@ -142,7 +142,8 @@ public class AiSkillCatalog {
      * then refuses with {@code tool_outside_skill_authority}. That refusal is raised outside every
      * recoverable branch of the agent loop and its reason is not closable, so the turn would settle
      * as a hard failure, with no answer, on a tool the server itself offered. The compact
-     * constructor therefore refuses the declaration rather than letting a seed arm it.
+     * constructor therefore refuses the declaration rather than letting a seed arm it, by
+     * {@link AiSkillCatalog#mayHold}, the same rule the agent loop offers a routed turn by.
      *
      * @param key stable additive catalog key
      * @param version semantic version of this declaration
@@ -221,13 +222,11 @@ public class AiSkillCatalog {
                     throw new IllegalArgumentException(
                             "Skill " + key + " declares an unknown toolset " + toolset);
                 }
-                for (String writeTool : AiAssistantToolCatalog.writeToolsOf(loadable)) {
-                    if (authority == Authority.READ || !allowedTools.contains(writeTool)) {
-                        throw new IllegalArgumentException(
-                                "Skill " + key + " seeds toolset " + toolset
-                                        + " but its authority and allowedTools cannot call "
-                                        + writeTool);
-                    }
+                if (!mayHold(authority, allowedTools, loadable)) {
+                    throw new IllegalArgumentException(
+                            "Skill " + key + " seeds toolset " + toolset
+                                    + " but its authority and allowedTools cannot call every"
+                                    + " write tool it holds");
                 }
             }
             requiredMetrics = Set.copyOf(requiredMetrics);
@@ -282,6 +281,45 @@ public class AiSkillCatalog {
     /** @return the maximum serialized size a per-turn skill directive may reach */
     public static int maxDirectiveBytes() {
         return MAX_DIRECTIVE_BYTES;
+    }
+
+    /**
+     * Whether a declaration with this authority and these allowed tools may hold a toolset.
+     *
+     * <p>Holding a family is all-or-nothing, while write authority is per tool plus a tier, so a
+     * family is holdable only when every write tool in it is one {@code requireSkillAuthority}
+     * would let the declaration call: a tier above {@code READ} and a key {@code allowedTools}
+     * names. A family with no write tool is always holdable, because reads carry no authority.
+     *
+     * <p>This is the one rule for both sides of the offer. {@link SkillSpec} refuses a declaration
+     * that seeds a family failing it, and the agent loop offers a routed turn only the families
+     * passing it, so a model is never listed or loaded a toolset whose use the authority gate
+     * then refuses with a turn-terminal {@code tool_outside_skill_authority}. It narrows what is
+     * offered and grants nothing: {@code requireSkillAuthority} stays the binding gate for every
+     * write.
+     *
+     * <p>Requiring every write, rather than any, deliberately narrows #1808's "allowedTools
+     * intersects it" direction: a family is held whole, so a skill allowed only some of its writes
+     * would otherwise hold write tools it may not call. A write skill must therefore be allowed
+     * every write in a family to be offered it, and a family that grows drops out of every skill
+     * not widened to match; {@code AiSkillCatalogTest} fails the build on a shipped skill left
+     * allowed a write tool no family it may hold contains.
+     *
+     * @param authority the most the declaration may do
+     * @param allowedTools every tool key the declaration may cause to run
+     * @param toolset a declared toolset
+     * @return whether every write tool of the toolset is callable under that authority
+     */
+    public static boolean mayHold(
+            Authority authority,
+            Set<String> allowedTools,
+            AiAssistantToolCatalog.Toolset toolset) {
+        for (String writeTool : AiAssistantToolCatalog.writeToolsOf(toolset)) {
+            if (authority == Authority.READ || !allowedTools.contains(writeTool)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Map<String, SkillSpec> buildSkills() {

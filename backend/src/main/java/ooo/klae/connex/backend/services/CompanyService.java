@@ -5,13 +5,6 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import ooo.klae.connex.backend.mappers.CompanyMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.mappers.ActivityMapper;
-import ooo.klae.connex.backend.mappers.NoteMapper;
-import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -19,29 +12,36 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
-import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
-import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
-import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
-import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
-import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -373,6 +373,11 @@ public class CompanyService {
         return company;
     }
 
+    /** Whether the current workspace owns the active company rather than seeing a shared row. */
+    public boolean isOwnedByCurrentWorkspace(int id) {
+        return companyMapper.existsOwned(workspaceService.getCurrentWorkspaceId(), id);
+    }
+
     /** Locks one writable company for a mutation that retains a later commit fence. */
     @Transactional(propagation = Propagation.MANDATORY)
     public Company lockOwnedCompanyForUpdate(int id) {
@@ -537,12 +542,30 @@ public class CompanyService {
         return after;
     }
 
-    @Transactional
+    /**
+     * Assigns or clears a company's owner. The audited old owner and the
+     * {@code company.owner_changed} decision come from the company row locked after the new owner's
+     * membership, if any, not from the unlocked existence check, which opens this transaction's read
+     * view before any lock is held. A company archived or deleted since that check is refused under
+     * the lock, before anything is written (#1948). It runs at {@code READ_COMMITTED}, so the company
+     * returned is a fresh read: when a concurrent change already set the same owner, this write
+     * leaves no newer row version, and a repeatable-read snapshot would show the owner from before
+     * that change (#1961).
+     *
+     * @param companyId the company in the current workspace
+     * @param ownerId the new owner, or {@code null} to unassign
+     * @return the updated company
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = requireOwnedCompany(workspaceId, companyId);
+        requireOwnedCompany(workspaceId, companyId);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        Company before = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Company not found");
+        }
         companyMapper.updateOwner(workspaceId, companyId, ownerId);
         auditService.record("company.updateOwner", "company", companyId, before.getName(),
             "Updated owner on " + before.getName(),
@@ -681,17 +704,23 @@ public class CompanyService {
 
     /**
      * Removes a tag from a company in the active workspace.
+     * Records the audit row only when this invocation removed the association, so a removal of
+     * a tag the record no longer holds leaves no trace of a change that never happened.
+     * @return whether this invocation removed the tag association
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
-    public void removeTag(int companyId, int tagId) {
+    public boolean removeTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        companyMapper.removeTag(workspaceId, companyId, tagId);
+        if (companyMapper.removeTag(workspaceId, companyId, tagId) != 1) {
+            return false;
+        }
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("company.removeTag", "company", companyId, company.getName(),
             "Removed tag " + tagName + " from " + company.getName(),
             auditService.singleChange("tag", tagName, null));
+        return true;
     }
 
     /** Removes a tag only when the association still exists at the inverse write. */
@@ -711,14 +740,23 @@ public class CompanyService {
     }
 
     /**
-     * Replaces the tags associated with a company in the active workspace.
+     * Replaces the tags associated with a company in the active workspace. The company row is locked
+     * first and an archived company is refused under that lock; the audited previous tags are then
+     * read under locks on the association rows. A concurrent {@link #addTag} waits on the company row
+     * at its foreign-key check and a concurrent {@link #removeTag} waits on the association row, so
+     * the audit names exactly the tags this replacement removed (#1968). It runs at
+     * {@code READ_COMMITTED}, so the tags returned are a fresh read.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireOwnedCompany(workspaceId, companyId);
-        List<String> before = tagMapper.getTagsByCompanyId(workspaceId, companyId).stream().map(Tag::getName).toList();
+        Company company = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
+        if (company == null || company.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Company not found");
+        }
+        List<String> before = tagMapper.getTagsByCompanyIdForUpdate(workspaceId, companyId).stream()
+            .map(Tag::getName).toList();
         companyMapper.clearTags(workspaceId, companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceId, companyId, tagIds);
         List<Tag> after = tagMapper.getTagsByCompanyId(workspaceId, companyId);

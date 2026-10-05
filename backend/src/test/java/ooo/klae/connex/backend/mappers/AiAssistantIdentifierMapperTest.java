@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -321,9 +322,11 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         sharedPerson.setCompany(sharedCompany);
         personMapper.insert(sharedPerson);
         assertTrue(shareMapper.shareCompany(
-                sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+                sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, sibling.getId())) > 0);
         assertTrue(shareMapper.sharePerson(
-                sharedPerson.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+                sharedPerson.getId(), sibling.getId(), workspace.getId(), actor.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, sibling.getId())) > 0);
         String text = sharedPerson.getName() + " at " + sharedCompany.getName();
         String completeScope = "[" + workspace.getId() + "," + sibling.getId() + "]";
 

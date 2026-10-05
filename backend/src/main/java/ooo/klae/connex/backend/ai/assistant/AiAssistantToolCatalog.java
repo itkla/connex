@@ -22,6 +22,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class AiAssistantToolCatalog {
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
+    private static final Pattern TASK_HANDLE = Pattern.compile("t[1-9][0-9]*");
     /** Longest single free-text list entry, sized for one plan step rather than prose. */
     static final int MAX_TEXT_LIST_ITEM_CHARS = 120;
 
@@ -39,14 +40,18 @@ public class AiAssistantToolCatalog {
     /** Safety tier controlling whether a declared tool may execute without human approval. */
     public enum ToolTier { READ, AUTO, CONFIRM }
 
-    /** One closed tool argument definition. */
+    /**
+     * One closed argument definition. The nullable pattern validates strings and list items only
+     * on the server; neither provider schema nor catalog prose serializes it.
+     */
     public record ArgumentSpec(
             String name,
             ArgumentKind kind,
             boolean required,
             int minimum,
             int maximum,
-            Set<String> values) {
+            Set<String> values,
+            Pattern pattern) {
 
         public ArgumentSpec {
             values = Set.copyOf(values);
@@ -65,8 +70,12 @@ public class AiAssistantToolCatalog {
         ANALYTICS("analytics", "Workspace pipeline, activity, and warmth metric aggregates"),
         SCHEDULE("schedule", "Meeting conflict and availability reads for one record"),
         WRITE_ACTIVITY("write_activity", "Log activities and create tasks on one record"),
-        WRITE_CONTENT("write_content", "Write notes and add tags to one record"),
-        WRITE_PIPELINE("write_pipeline", "Propose deal stage changes and owner assignments");
+        WRITE_CONTENT("write_content", "Write notes and add or remove tags"),
+        WRITE_PIPELINE("write_pipeline", "Propose stages, owners, and deal documents"),
+        WRITE_FOLLOWUP("write_followup", "Response deadlines and tasks"),
+        WRITE_FIELDS("write_fields", "Correct record fields"),
+        WRITE_CREATE("write_create", "Create contacts and deals"),
+        WRITE_WORKSPACE("write_workspace", "Create reports and draft workflows");
 
         private final String key;
         private final String summary;
@@ -216,6 +225,21 @@ public class AiAssistantToolCatalog {
     public static List<String> writeToolsOf(Toolset toolset) {
         return TOOLS.values().stream()
                 .filter(spec -> spec.toolset() == toolset)
+                .filter(spec -> spec.tier() != ToolTier.READ)
+                .map(ToolSpec::name)
+                .toList();
+    }
+
+    /**
+     * Names every declared write-tier tool, the set {@link AiAssistantWriteToolRegistry} must cover.
+     *
+     * <p>The registry orders its index by this list rather than by bean discovery, so the order a
+     * write tool is reached in is the catalog's and never depends on how Spring found its bean.
+     *
+     * @return the declared non-read tool keys, in stable catalog order
+     */
+    public static List<String> writeToolNames() {
+        return TOOLS.values().stream()
                 .filter(spec -> spec.tier() != ToolTier.READ)
                 .map(ToolSpec::name)
                 .toList();
@@ -400,7 +424,7 @@ public class AiAssistantToolCatalog {
         if (text.length() < argument.minimum() || text.length() > argument.maximum()) {
             return false;
         }
-        if ("handle".equals(argument.name()) && !HANDLE.matcher(text).matches()) {
+        if (argument.pattern() != null && !argument.pattern().matcher(text).matches()) {
             return false;
         }
         return argument.values().isEmpty() || argument.values().contains(text);
@@ -428,14 +452,10 @@ public class AiAssistantToolCatalog {
             if (!item.isString()) {
                 return false;
             }
-            if (argument.values().isEmpty()) {
-                if (!"handles".equals(argument.name())
-                        || !HANDLE.matcher(item.asString()).matches()) {
-                    return false;
-                }
-                continue;
+            if (argument.pattern() != null && !argument.pattern().matcher(item.asString()).matches()) {
+                return false;
             }
-            if (!argument.values().contains(item.asString())) {
+            if (!argument.values().isEmpty() && !argument.values().contains(item.asString())) {
                 return false;
             }
         }
@@ -449,7 +469,7 @@ public class AiAssistantToolCatalog {
                 stringList("kinds", false, 1, 3, Set.of("person", "company", "deal"))));
         add(tools, executable(Toolset.CORE, "get_record", handle()));
         add(tools, executable(Toolset.CORE, "get_records",
-                stringList("handles", true, 1, 12, Set.of())));
+                handles(HANDLE)));
         add(tools, executable(Toolset.CORE, "set_todos",
                 textList("items", true, 1, 12),
                 stringList("statuses", false, 1, 12,
@@ -495,12 +515,44 @@ public class AiAssistantToolCatalog {
         add(tools, auto(Toolset.WRITE_CONTENT, "add_tag",
                 handle(),
                 string("tag", true, 1, 64, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CONTENT, "remove_tag",
+                handle(),
+                string("tag", true, 1, 64, Set.of())));
         add(tools, confirm(Toolset.WRITE_PIPELINE, "change_deal_stage",
                 handle(),
                 string("stage", true, 1, 128, Set.of())));
         add(tools, confirm(Toolset.WRITE_PIPELINE, "assign_owner",
                 handle(),
                 string("owner", true, 1, 255, Set.of())));
+        add(tools, confirm(Toolset.WRITE_PIPELINE, "draft_document",
+                handle(),
+                string("template", true, 1, 128, Set.of())));
+        add(tools, confirm(Toolset.WRITE_FOLLOWUP, "set_response_due",
+                handle(),
+                integer("due_in_hours", true, 1, 8_760)));
+        add(tools, confirm(Toolset.WRITE_FOLLOWUP, "complete_task", taskHandle()));
+        add(tools, confirm(Toolset.WRITE_FOLLOWUP, "reschedule_task", taskHandle(),
+                new ArgumentSpec("due_date", ArgumentKind.STRING, true, 10, 10, Set.of(),
+                        Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}"))));
+        add(tools, confirm(Toolset.WRITE_FIELDS, "update_record_fields", handle(),
+                string("title", false, 1, 128, Set.of()),
+                string("website", false, 1, 255, Set.of()),
+                string("industry", false, 1, 128, Set.of()),
+                string("address", false, 1, 512, Set.of()),
+                string("value", false, 1, 16, Set.of()),
+                string("expected_close_date", false, 10, 10, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CREATE, "create_person", handle(),
+                string("name", true, 1, 255, Set.of()), string("title", false, 1, 128, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CREATE, "create_deal", handle(),
+                string("name", true, 1, 255, Set.of()), string("stage", true, 1, 128, Set.of()),
+                string("value", true, 1, 16, Set.of()), string("currency", true, 3, 3, Set.of()),
+                string("expected_close_date", false, 10, 10, Set.of())));
+        add(tools, confirm(Toolset.WRITE_CREATE, "create_company",
+                string("name", true, 1, 255, Set.of()), string("website", false, 1, 255, Set.of()),
+                string("industry", false, 1, 128, Set.of())));
+        add(tools, confirm(Toolset.WRITE_WORKSPACE, "create_report",
+                string("template", true, 1, 32, AiAssistantCreateReportWriteTool.TEMPLATE_KEYS),
+                string("name", true, 1, 128, Set.of())));
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
@@ -532,7 +584,7 @@ public class AiAssistantToolCatalog {
                     + "in order, statuses gives each one pending, active, or done. Call it again "
                     + "with the whole updated list as you work.";
             case "list_activities" -> "List recent visible activities for one record handle.";
-            case "list_tasks" -> "List visible tasks for one record handle.";
+            case "list_tasks" -> "List tasks for a record. Task handles are for tool arguments only, never text.";
             case "list_scope_activities" -> "List recent activity across a bounded set of records "
                     + "in one call instead of asking record by record.";
             case FIND_TOOLS -> "Load one more named set of tools when the loaded sets cannot do "
@@ -543,8 +595,19 @@ public class AiAssistantToolCatalog {
             case "create_task" -> "Create an immediately executed, undoable task for one record.";
             case "create_note" -> "Create an immediately executed, undoable note for one record.";
             case "add_tag" -> "Add a tag immediately to one record.";
+            case "remove_tag" -> "Propose a tag removal that requires human confirmation.";
+            case "draft_document" -> "Propose a deal document draft from a named template.";
             case "change_deal_stage" -> "Propose a deal-stage change that requires human confirmation.";
             case "assign_owner" -> "Propose an owner assignment that requires human confirmation.";
+            case "complete_task" -> "Complete assigned task";
+            case "reschedule_task" -> "Reschedule task: YYYY-MM-DD";
+            case "create_person" -> "Propose a contact at a company.";
+            case "create_deal" -> "Propose a deal at a company.";
+            case "create_company" -> "Create company; website: bare host";
+            case "create_report" -> "Create report; name in user language";
+            case "update_record_fields" -> "Propose correcting record fields.";
+            case "set_response_due" -> "Propose a contact's first-response deadline, in hours "
+                    + "from approval, that requires human confirmation.";
             default -> throw new IllegalStateException("Assistant native tool description is missing");
         };
     }
@@ -664,16 +727,24 @@ public class AiAssistantToolCatalog {
     }
 
     private static ArgumentSpec handle() {
-        return string("handle", true, 2, 16, Set.of());
+        return new ArgumentSpec("handle", ArgumentKind.STRING, true, 2, 16, Set.of(), HANDLE);
+    }
+
+    private static ArgumentSpec taskHandle() {
+        return new ArgumentSpec("handle", ArgumentKind.STRING, true, 2, 16, Set.of(), TASK_HANDLE);
+    }
+
+    private static ArgumentSpec handles(Pattern pattern) {
+        return new ArgumentSpec("handles", ArgumentKind.STRING_LIST, true, 1, 12, Set.of(), pattern);
     }
 
     private static ArgumentSpec string(
             String name, boolean required, int minimum, int maximum, Set<String> values) {
-        return new ArgumentSpec(name, ArgumentKind.STRING, required, minimum, maximum, values);
+        return new ArgumentSpec(name, ArgumentKind.STRING, required, minimum, maximum, values, null);
     }
 
     private static ArgumentSpec integer(String name, boolean required, int minimum, int maximum) {
-        return new ArgumentSpec(name, ArgumentKind.INTEGER, required, minimum, maximum, Set.of());
+        return new ArgumentSpec(name, ArgumentKind.INTEGER, required, minimum, maximum, Set.of(), null);
     }
 
     private static ArgumentSpec integer(
@@ -682,12 +753,12 @@ public class AiAssistantToolCatalog {
             int minimum,
             int maximum,
             Set<String> values) {
-        return new ArgumentSpec(name, ArgumentKind.INTEGER, required, minimum, maximum, values);
+        return new ArgumentSpec(name, ArgumentKind.INTEGER, required, minimum, maximum, values, null);
     }
 
     private static ArgumentSpec stringList(
             String name, boolean required, int minimum, int maximum, Set<String> values) {
-        return new ArgumentSpec(name, ArgumentKind.STRING_LIST, required, minimum, maximum, values);
+        return new ArgumentSpec(name, ArgumentKind.STRING_LIST, required, minimum, maximum, values, null);
     }
 
     /**
@@ -699,6 +770,6 @@ public class AiAssistantToolCatalog {
      */
     private static ArgumentSpec textList(
             String name, boolean required, int minimum, int maximum) {
-        return new ArgumentSpec(name, ArgumentKind.TEXT_LIST, required, minimum, maximum, Set.of());
+        return new ArgumentSpec(name, ArgumentKind.TEXT_LIST, required, minimum, maximum, Set.of(), null);
     }
 }

@@ -31,6 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.servlet.Filter;
 
@@ -89,6 +90,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.support.MySqlLockWaitTestSupport;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -302,6 +304,7 @@ class DealMoneySecurityIntegrationTest {
         CountDownLatch releaseReopen = new CountDownLatch(1);
         CountDownLatch currencyLockAttempt = new CountDownLatch(1);
         CountDownLatch currencyLockAcquired = new CountDownLatch(1);
+        AtomicLong currencyConnectionId = new AtomicLong();
         AtomicBoolean pause = new AtomicBoolean(true);
         DealMapper realMapper = sqlSessionTemplate.getMapper(DealMapper.class);
         doAnswer(invocation -> {
@@ -313,7 +316,10 @@ class DealMoneySecurityIntegrationTest {
             return found;
         }).when(dealMapper).getDealById(workspace.getId(), deal.getId());
         doAnswer(invocation -> {
-            if ("currency".equals(operation.get())) currencyLockAttempt.countDown();
+            if ("currency".equals(operation.get())) {
+                currencyConnectionId.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                currencyLockAttempt.countDown();
+            }
             Deal found = realMapper.getDealByIdForUpdate(workspace.getId(), deal.getId());
             if ("currency".equals(operation.get())) currencyLockAcquired.countDown();
             if ("reopen".equals(operation.get()) && pause.compareAndSet(true, false)) {
@@ -352,7 +358,9 @@ class DealMoneySecurityIntegrationTest {
                 }
             });
             assertTrue(currencyLockAttempt.await(15, TimeUnit.SECONDS));
-            assertFalse(currencyLockAcquired.await(5, TimeUnit.SECONDS), "Currency writer must wait on the parent deal");
+            MySqlLockWaitTestSupport.awaitDealRowWait(
+                jdbcTemplate, currencyConnectionId.get(), workspace.getId(), deal.getId());
+            assertEquals(1L, currencyLockAcquired.getCount(), "Currency writer must still wait on the parent deal");
             releaseReopen.countDown();
             reopening.get(30, TimeUnit.SECONDS);
             changingCurrency.get(30, TimeUnit.SECONDS);
@@ -528,10 +536,12 @@ class DealMoneySecurityIntegrationTest {
         CountDownLatch releaseWriter = new CountDownLatch(1);
         CountDownLatch closeLockAttempt = new CountDownLatch(1);
         CountDownLatch closeLockAcquired = new CountDownLatch(1);
+        AtomicLong closeConnectionId = new AtomicLong();
         DealMapper realMapper = sqlSessionTemplate.getMapper(DealMapper.class);
         doAnswer(invocation -> {
             if ("close".equals(operation.get())) {
                 assertEquals(0, lineItemMapper.countByDealId(workspace.getId(), deal.getId()));
+                closeConnectionId.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
                 closeLockAttempt.countDown();
             }
             Deal found = realMapper.getDealByIdForUpdate(workspace.getId(), deal.getId());
@@ -570,7 +580,9 @@ class DealMoneySecurityIntegrationTest {
                 }
             });
             assertTrue(closeLockAttempt.await(15, TimeUnit.SECONDS));
-            assertFalse(closeLockAcquired.await(5, TimeUnit.SECONDS), "Close must wait on the parent deal");
+            MySqlLockWaitTestSupport.awaitDealRowWait(
+                jdbcTemplate, closeConnectionId.get(), workspace.getId(), deal.getId());
+            assertEquals(1L, closeLockAcquired.getCount(), "Close must still wait on the parent deal");
             releaseWriter.countDown();
             writingLine.get(30, TimeUnit.SECONDS);
             closing.get(30, TimeUnit.SECONDS);
@@ -603,6 +615,7 @@ class DealMoneySecurityIntegrationTest {
         CountDownLatch releaseWriter = new CountDownLatch(1);
         CountDownLatch generationLockAttempt = new CountDownLatch(1);
         CountDownLatch generationLockAcquired = new CountDownLatch(1);
+        AtomicLong generationConnectionId = new AtomicLong();
         AtomicBoolean firstRead = new AtomicBoolean(true);
         DealMapper realMapper = sqlSessionTemplate.getMapper(DealMapper.class);
         doAnswer(invocation -> {
@@ -615,7 +628,10 @@ class DealMoneySecurityIntegrationTest {
             return found;
         }).when(dealMapper).getDealById(workspace.getId(), deal.getId());
         doAnswer(invocation -> {
-            if ("generate".equals(operation.get())) generationLockAttempt.countDown();
+            if ("generate".equals(operation.get())) {
+                generationConnectionId.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                generationLockAttempt.countDown();
+            }
             Deal found = realMapper.getDealByIdForUpdate(workspace.getId(), deal.getId());
             if ("generate".equals(operation.get())) generationLockAcquired.countDown();
             return found;
@@ -659,8 +675,9 @@ class DealMoneySecurityIntegrationTest {
             assertTrue(lineWritten.await(15, TimeUnit.SECONDS));
             resumeGeneration.countDown();
             assertTrue(generationLockAttempt.await(15, TimeUnit.SECONDS));
-            assertFalse(generationLockAcquired.await(5, TimeUnit.SECONDS),
-                "Generation must wait at the parent deal's locked statement");
+            MySqlLockWaitTestSupport.awaitDealRowWait(
+                jdbcTemplate, generationConnectionId.get(), workspace.getId(), deal.getId());
+            assertEquals(1L, generationLockAcquired.getCount(), "Generation must still wait on the parent deal");
             releaseWriter.countDown();
             writing.get(30, TimeUnit.SECONDS);
             JsonNode document = generating.get(30, TimeUnit.SECONDS);

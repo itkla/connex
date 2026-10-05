@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.lease;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
@@ -23,7 +26,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 /**
  * Instances racing to claim one lease.
  *
- * <p>The latch keys on the contention point the claim actually has: the {@code FOR UPDATE} taken by
+ * <p>The database probe keys on the contention point the claim actually has: the {@code FOR UPDATE} taken by
  * {@link AiRunLeaseService#acquireInCurrentTransaction}. The winner holds that row lock until it
  * commits, so the loser's own lock attempt blocks, then observes a live lease at a bumped epoch and
  * is refused.
@@ -60,10 +63,14 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
                         return claimed;
                     })));
             assertTrue(locked.await(30, TimeUnit.SECONDS), "The winner never took the row lock");
+            CompletableFuture<Long> contenderConnection = new CompletableFuture<>();
             Future<AiRunLease> loser = claimants.submit(() -> inTenant(() ->
-                    transactions.execute(status ->
-                            leaseService.acquireInCurrentTransaction(key, freshGuard()))));
-            Thread.sleep(500L);
+                    transactions.execute(status -> {
+                        contenderConnection.complete(
+                                jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        return leaseService.acquireInCurrentTransaction(key, freshGuard());
+                    })));
+            awaitLeaseRowLock(contenderConnection.get(30, TimeUnit.SECONDS), key, loser);
             commit.countDown();
 
             AiRunLease claimed = winner.get(60, TimeUnit.SECONDS);
@@ -75,6 +82,8 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
         } finally {
             commit.countDown();
             claimants.shutdownNow();
+            assertTrue(claimants.awaitTermination(10, TimeUnit.SECONDS),
+                    "Lease claimants did not terminate after barrier release");
         }
 
         Map<String, Object> row = leaseRow(key);
@@ -109,10 +118,14 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
                         return null;
                     })));
             assertTrue(cycled.await(30, TimeUnit.SECONDS), "The competitor never claimed the row");
+            CompletableFuture<Long> contenderConnection = new CompletableFuture<>();
             Future<AiRunLease> late = claimants.submit(() -> inTenant(() ->
-                    transactions.execute(status ->
-                            leaseService.acquireInCurrentTransaction(key, freshGuard()))));
-            Thread.sleep(500L);
+                    transactions.execute(status -> {
+                        contenderConnection.complete(
+                                jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        return leaseService.acquireInCurrentTransaction(key, freshGuard());
+                    })));
+            awaitLeaseRowLock(contenderConnection.get(30, TimeUnit.SECONDS), key, late);
             commit.countDown();
             competitor.get(60, TimeUnit.SECONDS);
 
@@ -124,6 +137,8 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
         } finally {
             commit.countDown();
             claimants.shutdownNow();
+            assertTrue(claimants.awaitTermination(10, TimeUnit.SECONDS),
+                    "Lease claimants did not terminate after barrier release");
         }
     }
 
@@ -175,7 +190,51 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
             }
         } finally {
             claimants.shutdownNow();
+            assertTrue(claimants.awaitTermination(10, TimeUnit.SECONDS),
+                    "Lease claimants did not terminate after barrier release");
         }
+    }
+
+    private void awaitLeaseRowLock(long connectionId, AiRunLeaseKey key, Future<?> contender) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        String primaryKey = key.workspaceId() + ", '" + key.subject().wireKey() + "', " + key.subjectId();
+        while (System.nanoTime() < deadline) {
+            assertFalse(contender.isDone(), "Claimant completed before contending on the lease read");
+            Integer waiting = jdbcTemplate.queryForObject(
+                    """
+                    SELECT COUNT(*)
+                    FROM performance_schema.data_lock_waits lock_wait
+                    JOIN performance_schema.data_locks requested_lock
+                      ON requested_lock.ENGINE = lock_wait.ENGINE
+                     AND requested_lock.ENGINE_LOCK_ID = lock_wait.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.data_locks blocking_lock
+                      ON blocking_lock.ENGINE = lock_wait.ENGINE
+                     AND blocking_lock.ENGINE_LOCK_ID = lock_wait.BLOCKING_ENGINE_LOCK_ID
+                    JOIN performance_schema.threads waiting_thread
+                      ON waiting_thread.THREAD_ID = lock_wait.REQUESTING_THREAD_ID
+                    WHERE waiting_thread.PROCESSLIST_ID = ?
+                      AND waiting_thread.PROCESSLIST_INFO LIKE '%FOR UPDATE%'
+                      AND requested_lock.OBJECT_SCHEMA = DATABASE()
+                      AND requested_lock.OBJECT_NAME = 'ai_run_lease'
+                      AND requested_lock.INDEX_NAME = 'PRIMARY'
+                      AND requested_lock.LOCK_TYPE = 'RECORD'
+                      AND requested_lock.LOCK_MODE LIKE 'X%'
+                      AND requested_lock.LOCK_STATUS = 'WAITING'
+                      AND requested_lock.LOCK_DATA = ?
+                      AND blocking_lock.OBJECT_SCHEMA = requested_lock.OBJECT_SCHEMA
+                      AND blocking_lock.OBJECT_NAME = requested_lock.OBJECT_NAME
+                      AND blocking_lock.INDEX_NAME = requested_lock.INDEX_NAME
+                      AND blocking_lock.LOCK_TYPE = requested_lock.LOCK_TYPE
+                      AND blocking_lock.LOCK_STATUS = 'GRANTED'
+                      AND blocking_lock.LOCK_DATA = requested_lock.LOCK_DATA
+                    """,
+                    Integer.class, connectionId, primaryKey);
+            if (waiting != null && waiting > 0) {
+                return;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+        }
+        throw new AssertionError("Claimant never waited on the lease PRIMARY key " + primaryKey);
     }
 
     private <T> T inTenant(Supplier<T> work) {

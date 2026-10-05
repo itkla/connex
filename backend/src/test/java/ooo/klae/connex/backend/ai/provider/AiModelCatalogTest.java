@@ -292,4 +292,70 @@ class AiModelCatalogTest {
         assertTrue(Family.fromProviderId("not_a_provider").isEmpty());
         assertTrue(Family.fromProviderId(null).isEmpty());
     }
+
+    /**
+     * A programmatic declaration outside the ceiling enables nothing.
+     *
+     * <p>Bean validation refuses these values when configuration binds, but an override can also be
+     * built in code. Zero, a negative value and one past the ceiling must all read as the single
+     * call an undeclared endpoint gets — never as the ceiling, which would be the widest batch on a
+     * target whose declaration was a mistake.
+     */
+    @Test
+    void aParallelCallDeclarationOutsideTheCeilingReadsAsOneCall() {
+        for (int declared : List.of(
+                0, -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1, Integer.MAX_VALUE)) {
+            assertEquals(
+                    1,
+                    AiModelCatalog.parallelReadCalls(
+                            Family.OPENAI_COMPATIBLE,
+                            parallelTarget("gemini-3.6-flash"),
+                            List.of(parallelOverride("gemini-3.6-flash", declared))),
+                    "declared " + declared + " must read as one call");
+        }
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                AiModelCatalog.parallelReadCalls(
+                        Family.OPENAI_COMPATIBLE,
+                        parallelTarget("gemini-3.6-flash"),
+                        List.of(parallelOverride(
+                                "gemini-3.6-flash",
+                                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS))));
+    }
+
+    /**
+     * A later override that says nothing about parallel calls leaves an earlier declaration intact.
+     *
+     * <p>Overrides compose field by field: a later entry for the same endpoint that only patches,
+     * say, streaming must not silently reset a probed parallel-call declaration to one.
+     */
+    @Test
+    void aLaterOverrideSilentOnParallelCallsKeepsTheEarlierDeclaration() {
+        AiProperties.ModelOverride streamingOnly = parallelOverride("gemini-3.6-flash", null);
+        streamingOnly.setStreaming(true);
+
+        assertEquals(
+                3,
+                AiModelCatalog.parallelReadCalls(
+                        Family.OPENAI_COMPATIBLE,
+                        parallelTarget("gemini-3.6-flash"),
+                        List.of(parallelOverride("gemini-3.6-flash", 3), streamingOnly)));
+    }
+
+    private static final String PARALLEL_ENDPOINT = "https://api.example.test/v1";
+
+    private static AiProviderTarget parallelTarget(String modelId) {
+        return new AiProviderTarget(
+                "openai_compatible", null, modelId, PARALLEL_ENDPOINT, null, null, null, false);
+    }
+
+    private static AiProperties.ModelOverride parallelOverride(
+            String modelId, Integer parallelReadCalls) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId(modelId);
+        override.setEndpoint(PARALLEL_ENDPOINT);
+        override.setParallelReadCalls(parallelReadCalls);
+        return override;
+    }
 }

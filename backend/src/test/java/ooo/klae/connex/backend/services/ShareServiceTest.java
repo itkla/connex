@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Note;
@@ -19,6 +21,7 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -35,6 +38,7 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
     @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     @AfterEach
     void clearContext() {
@@ -175,6 +179,83 @@ class ShareServiceTest extends AbstractServiceTest {
             () -> shareService.share("company", company.getId(), otherOrgWs.getId(), false));
     }
 
+    /**
+     * Workspace names and their ordering are control-plane data the tenant listing no longer
+     * carries, so the service hydrates both from its organization snapshot. The siblings are
+     * created in reverse alphabetical order, so an id-ordered listing would fail this. The
+     * assertion on the raw tenant rows is what makes this a regression test rather than a
+     * behaviour-preservation one: the name-ordered, named response is identical to what the
+     * removed {@code JOIN workspace} returned, so only the absence of a workspace name on the
+     * tenant side distinguishes the two implementations.
+     */
+    @Test
+    void listSharesHydratesWorkspaceNamesFromTheControlSnapshotAndOrdersThemByName() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Hydration Owner", currentUser.getId());
+        WorkspaceMembershipDto zulu = createSiblingWorkspace(owner, "Zulu Grantee");
+        WorkspaceMembershipDto alpha = createSiblingWorkspace(owner, "Alpha Grantee");
+        Company company = companyIn(owner.getId());
+
+        authenticateAs(currentUser, owner.getId());
+        shareService.share("company", company.getId(), zulu.getId(), false);
+        shareService.share("company", company.getId(), alpha.getId(), true);
+
+        assertTrue(shareMapper.listCompanyShares(owner.getId(), company.getId()).stream()
+                .allMatch(row -> row.getWorkspaceName() == null),
+            "the tenant listing must carry no workspace name; the name is control data the "
+                + "service hydrates, so a listing statement that names workspaces itself cannot "
+                + "run in a dedicated organization catalog. This has to be read before the "
+                + "service call: hydration mutates the rows MyBatis caches for this transaction");
+
+        List<ShareDto> shares = shareService.listShares("company", company.getId());
+
+        assertTrue(zulu.getId() < alpha.getId(),
+            "the fixture must create the alphabetically-first sibling last for this to bite");
+        assertEquals(List.of(alpha.getId(), zulu.getId()),
+            shares.stream().map(ShareDto::getWorkspaceId).toList());
+        assertEquals(List.of("Alpha Grantee", "Zulu Grantee"),
+            shares.stream().map(ShareDto::getWorkspaceName).toList());
+        assertTrue(shares.getFirst().isCanEdit());
+        assertNotNull(shares.getFirst().getCreatedAt());
+    }
+
+    /**
+     * A share row whose target workspace is absent from the control snapshot is omitted, not a
+     * hard failure. The row this test plants targets a workspace in ANOTHER organization, which
+     * is the case that narrows: the removed {@code JOIN workspace} carried no organization
+     * predicate, so it listed such a row under the foreign workspace's name, and only the grant
+     * statements ever refused a cross-organization target. The row is now omitted, and therefore
+     * no longer revocable through the UI. The other omitted case — a target workspace row that no
+     * longer exists at all, possible since V65 dropped the foreign key — behaves exactly as the
+     * old join did.
+     */
+    @Test
+    void listSharesOmitsCrossOrganizationTargetsTheRemovedJoinWouldHaveNamed() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Stale Owner", currentUser.getId());
+        WorkspaceMembershipDto sibling = createSiblingWorkspace(owner, "Stale Sibling");
+        Company company = companyIn(owner.getId());
+        Organization otherOrg = new Organization();
+        otherOrg.setName("Stale Other Org");
+        otherOrg.setSlug("stale-other-org-" + unique());
+        organizationMapper.insert(otherOrg);
+        Workspace outside = new Workspace();
+        outside.setOrgId(otherOrg.getId());
+        outside.setName("Absent From Snapshot");
+        outside.setSlug("absent-" + unique());
+        workspaceMapper.insert(outside);
+
+        authenticateAs(currentUser, owner.getId());
+        shareService.share("company", company.getId(), sibling.getId(), false);
+        jdbcTemplate.update(
+            "INSERT INTO company_share (company_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
+            company.getId(), outside.getId(), currentUser.getId(), false);
+
+        List<ShareDto> shares = shareService.listShares("company", company.getId());
+
+        assertEquals(List.of(sibling.getId()),
+            shares.stream().map(ShareDto::getWorkspaceId).toList());
+        assertEquals("Stale Sibling", shares.getFirst().getWorkspaceName());
+    }
+
     @Test
     void provisionCeasedPersonBlocksNewShareButStillAllowsUnshare() {
         WorkspaceMembershipDto owner = workspaceService.createWorkspace("Person Owner WS", currentUser.getId());
@@ -189,7 +270,8 @@ class ShareServiceTest extends AbstractServiceTest {
         personMapper.updateProcessingRestrictions(owner.getId(), person.getId(), false, true);
 
         assertEquals(0, shareMapper.sharePerson(
-            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false));
+            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         ShareBlockedPrivacyHoldException blocked = assertThrows(
             ShareBlockedPrivacyHoldException.class,
             () -> shareService.share("person", person.getId(), blockedTarget.getId(), false));

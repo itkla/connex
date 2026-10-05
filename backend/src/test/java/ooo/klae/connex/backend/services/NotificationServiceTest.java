@@ -20,6 +20,8 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -425,11 +427,16 @@ class NotificationServiceTest {
         verify(stateVersionService).bumpNow(42);
     }
 
-    @Test
-    void snoozingDismissedOrResolvedNotificationConflicts() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void snoozingDismissedOrResolvedNotificationConflicts(boolean resolved) {
         Notification dismissed = new Notification();
         dismissed.setId(99);
-        dismissed.setDismissedAt("2026-07-19 00:00:00");
+        if (resolved) {
+            dismissed.setResolvedAt("2026-07-19 00:00:00");
+        } else {
+            dismissed.setDismissedAt("2026-07-19 00:00:00");
+        }
         when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(dismissed);
 
         assertThrows(ConflictException.class,

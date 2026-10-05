@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.architecture;
 
-import java.io.ByteArrayInputStream;
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.collectSql;
+import static ooo.klae.connex.backend.architecture.ArchitectureMapperXml.resolve;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -11,7 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -25,15 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-
 import org.junit.jupiter.api.Test;
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.dto.DealDto;
@@ -44,11 +40,6 @@ import ooo.klae.connex.backend.dto.DealSummaryDto;
 /** Enforces the canonical BigDecimal deal-value write and reporting boundary. */
 class DealValueContractArchTest {
 
-    private static final String INCLUDE_MARK = String.valueOf((char) 1);
-    private static final Pattern INCLUDE_REF = Pattern.compile(
-        Pattern.quote(INCLUDE_MARK) + "([^" + Pattern.quote(INCLUDE_MARK) + "]*)"
-            + Pattern.quote(INCLUDE_MARK));
-    private static final Pattern DOCTYPE = Pattern.compile("(?s)<!DOCTYPE.*?>");
     private static final Pattern MONEY_ASSIGNMENT = Pattern.compile(
         "\\b(?:value|actual_value|value_source)\\s*=", Pattern.CASE_INSENSITIVE);
     private static final Pattern DEAL_MAPPER_REFERENCE =
@@ -57,7 +48,6 @@ class DealValueContractArchTest {
         Pattern.compile("getMapper\\s*\\(\\s*DealMapper\\.class\\s*\\)");
     private static final List<String> DEAL_ROW_WRITE_CALLS =
         List.of(".update(", ".updateOutcome(", ".insert(", ".insertBatch(");
-    private static final Set<String> STATEMENT_TAGS = Set.of("select", "insert", "update", "delete");
     private static final Set<String> DEAL_ROW_WRITERS =
         Set.of("DealMapper.java", "DealOutcomeWriter.java", "SeederBatchWriter.java");
 
@@ -235,30 +225,9 @@ class DealValueContractArchTest {
     }
 
     private static MapperXml parse(String xml) throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        builder.setEntityResolver((publicId, systemId) ->
-            new InputSource(new ByteArrayInputStream(new byte[0])));
-        String withoutDoctype = DOCTYPE.matcher(xml).replaceFirst("");
-        Document document = builder.parse(
-            new InputSource(new ByteArrayInputStream(withoutDoctype.getBytes(StandardCharsets.UTF_8))));
-
-        Map<String, String> fragments = new LinkedHashMap<>();
-        List<Element> statementElements = new ArrayList<>();
-        NodeList children = document.getDocumentElement().getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() != Node.ELEMENT_NODE) {
-                continue;
-            }
-            Element element = (Element) node;
-            if ("sql".equals(element.getTagName())) {
-                fragments.put(element.getAttribute("id"), collectSql(element));
-            } else if (STATEMENT_TAGS.contains(element.getTagName())) {
-                statementElements.add(element);
-            }
-        }
+        ArchitectureMapperXml.Parsed parsed = ArchitectureMapperXml.parse(xml);
+        Map<String, String> fragments = parsed.fragments();
+        List<Element> statementElements = parsed.statements();
 
         List<Statement> statements = new ArrayList<>();
         for (Element element : statementElements) {
@@ -284,40 +253,6 @@ class DealValueContractArchTest {
             }
         }
         return false;
-    }
-
-    private static String collectSql(Element element) {
-        StringBuilder sql = new StringBuilder();
-        NodeList children = element.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE) {
-                sql.append(node.getNodeValue());
-            } else if (node.getNodeType() == Node.ELEMENT_NODE) {
-                Element child = (Element) node;
-                if ("include".equals(child.getTagName())) {
-                    sql.append(INCLUDE_MARK).append(child.getAttribute("refid")).append(INCLUDE_MARK);
-                } else {
-                    sql.append(' ').append(collectSql(child)).append(' ');
-                }
-            }
-        }
-        return sql.toString();
-    }
-
-    private static String resolve(String sql, Map<String, String> fragments, int depth) {
-        if (depth > 16 || !sql.contains(INCLUDE_MARK)) {
-            return sql;
-        }
-        Matcher matcher = INCLUDE_REF.matcher(sql);
-        StringBuilder resolved = new StringBuilder();
-        while (matcher.find()) {
-            String body = fragments.getOrDefault(matcher.group(1), "");
-            matcher.appendReplacement(
-                resolved, Matcher.quoteReplacement(" " + resolve(body, fragments, depth + 1) + " "));
-        }
-        matcher.appendTail(resolved);
-        return resolved.toString();
     }
 
     private static Path repoRoot() {

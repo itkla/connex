@@ -1,0 +1,39 @@
+{
+  "id": "e2e_send_tools_answer",
+  "selector": "connex_script_browser_send_tools_answer",
+  "capabilityClass": "scripted-native-stream",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Quillfeather\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I read [the contact](record:r1) and nothing is waiting on you there.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}",
+        "deltas": [
+          "{\"text\":\"I read [the con",
+          "tact](record:r1) and nothing is ",
+          "waiting on you there.\",\"citations\":[\"r1\"],",
+          "\"suggestions\":[],\"title\":null}"
+        ]
+      }
+    }
+  ]
+}

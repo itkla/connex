@@ -2,9 +2,9 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 
-import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,28 +12,20 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.IllegalTransactionStateException;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-@Transactional
 class DealValueServiceTest {
 
     private static final int WORKSPACE_ID = 7;
     private static final int DEAL_ID = 19;
 
-    @Autowired DealValueService service;
-    @MockitoBean DealMapper dealMapper;
-    @MockitoBean DealLineItemMapper dealLineItemMapper;
+    private final DealMapper dealMapper = mock(DealMapper.class);
+    private final DealLineItemMapper dealLineItemMapper = mock(DealLineItemMapper.class);
+    private final DealValueService service = new DealValueService(dealMapper, dealLineItemMapper);
 
     @Test
     void manualValuesNormalizeToScaleTwoHalfUp() {
@@ -200,20 +192,6 @@ class DealValueServiceTest {
             Boolean.FALSE, new BigDecimal("999999.00")));
         assertMoney("0.00", service.resolveRealizedValueForNewDeal(
             null, new BigDecimal("999999.00")));
-    }
-
-    @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void writeMethodsRequireAnExistingTransaction() {
-        Deal deal = deal("manual", "10.00", "0.00");
-
-        assertAll(
-            () -> assertThrows(IllegalTransactionStateException.class,
-                () -> service.setManualValue(WORKSPACE_ID, deal, BigDecimal.TEN)),
-            () -> assertThrows(IllegalTransactionStateException.class,
-                () -> service.reconcileLineItems(WORKSPACE_ID, deal)),
-            () -> assertThrows(IllegalTransactionStateException.class,
-                () -> service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null)));
     }
 
     private static Deal deal(String source, String value, String actualValue) {

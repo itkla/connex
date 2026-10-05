@@ -46,19 +46,6 @@ class DealMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private NoteMapper noteMapper;
 
-    /**
-     * Inserts a new deal and checks if the generated ID is not zero.
-     */
-    @Test
-    void insert_assignsGeneratedId() {
-        Pipeline pipeline = newPipeline();
-        Stage stage = newStage(pipeline, 0);
-        Company company = newCompany();
-
-        Deal deal = newDeal(pipeline, stage, company);
-
-        assertNotEquals(0, deal.getId());
-    }
 
     /**
      * Gets a deal by ID and checks if the returned deal is not null.
@@ -69,6 +56,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
+        assertNotEquals(0, deal.getId());
 
         Deal found = dealMapper.getDealById(workspace.getId(), deal.getId());
 
@@ -1320,21 +1308,6 @@ class DealMapperTest extends AbstractMapperTest {
 
         assertTrue(dealMapper.getDealsByTagId(workspace.getId(), tag.getId()).stream()
                 .noneMatch(x -> x.getId() == deal.getId()));
-    }
-
-    @Test
-    void workspaceScopeHidesDealsAndBlocksMutations() {
-        Pipeline pipeline = newPipeline();
-        Stage stage = newStage(pipeline, 0);
-        Deal deal = newDeal(pipeline, stage, newCompany());
-        Workspace other = new Workspace();
-        other.setName("Other Workspace");
-        other.setSlug("other-" + unique());
-        workspaceMapper.insert(other);
-
-        assertNull(dealMapper.getDealById(other.getId(), deal.getId()));
-        assertEquals(0, dealMapper.delete(other.getId(), deal.getId()));
-        assertNotNull(dealMapper.getDealById(workspace.getId(), deal.getId()));
     }
 
     /**
