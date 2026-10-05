@@ -792,6 +792,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatToolCall toolCall(
             AiChatMessage message, AiAssistantPreparedWrite write) {
         AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setServerProposal(true);
         toolCall.setWorkspaceId(workspace.getId());
         toolCall.setMessageId(message.getId());
         toolCall.setToolName(write.toolName());

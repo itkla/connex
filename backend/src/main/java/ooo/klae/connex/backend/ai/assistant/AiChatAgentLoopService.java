@@ -921,7 +921,7 @@ public class AiChatAgentLoopService {
                         new AiAssistantToolCallRef(stepNumber, call.ordinal()),
                         call.providerCall());
             }
-            String argumentsJson = serialize(call.tool().args());
+            String argumentsJson = refusedArgumentsJson(call);
             int refusedCallId = call.thoughtSignature() == null
                     ? persistenceService.proposeTool(
                             turn, stepNumber, call.ordinal(), toolName, argumentsJson)
@@ -1391,7 +1391,7 @@ public class AiChatAgentLoopService {
             boolean replayable) {
         AiChatQueuedTurn turn = context.turn();
         String toolName = call.tool().name();
-        String argumentsJson = serialize(call.tool().args());
+        String argumentsJson = refusedArgumentsJson(call);
         String thoughtSignature = call.thoughtSignature();
         int refusedCallId = thoughtSignature == null
                 ? persistenceService.proposeTool(
@@ -1780,6 +1780,14 @@ public class AiChatAgentLoopService {
                 realtimeDispatcher.userAfterCommit(turn.userId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stepNumber, "thinking", null, null, null, null, text)));
+    }
+
+    /**
+     * The durable form of a refused call's arguments: the model's own arguments, wrapped so they can
+     * never be read back as a proposal envelope the server wrote (#1867).
+     */
+    private String refusedArgumentsJson(AiAssistantStepCalls.Call call) {
+        return serialize(Collections.singletonMap("refusedArguments", call.tool().args()));
     }
 
     private void failTool(AiChatQueuedTurn turn, int toolCallId, String reason) {

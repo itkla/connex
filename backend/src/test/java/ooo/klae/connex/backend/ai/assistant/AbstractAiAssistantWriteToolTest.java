@@ -159,6 +159,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setServerProposal(true);
         storedToolCall.setId(TOOL_CALL_ID);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());

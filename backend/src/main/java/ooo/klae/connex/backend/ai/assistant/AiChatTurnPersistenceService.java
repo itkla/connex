@@ -587,6 +587,7 @@ public class AiChatTurnPersistenceService {
         toolCall.setArgumentsJson(write.argumentsJson());
         toolCall.setThoughtSignature(thoughtSignature);
         toolCall.setIdempotencyKey(idempotencyKey);
+        toolCall.setServerProposal(true);
         chatMapper.insertToolCall(toolCall);
         return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);
     }

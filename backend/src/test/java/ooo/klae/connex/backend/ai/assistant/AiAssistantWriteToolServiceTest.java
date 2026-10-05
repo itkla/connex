@@ -219,6 +219,7 @@ class AiAssistantWriteToolServiceTest {
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setServerProposal(true);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());
         storedToolCall.setSessionId(TURN.sessionId());
@@ -915,6 +916,7 @@ class AiAssistantWriteToolServiceTest {
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());
         secondStoredTurn.setStatus("running");
         AiChatToolCall secondToolCall = new AiChatToolCall();
+        secondToolCall.setServerProposal(true);
         secondToolCall.setId(30);
         secondToolCall.setWorkspaceId(secondTurn.workspaceId());
         secondToolCall.setMessageId(secondTurn.userMessageId());
@@ -1077,6 +1079,56 @@ class AiAssistantWriteToolServiceTest {
         assertEquals("rejected", service.reject(TURN.sessionId(), 29).status());
         assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
         verify(governanceService, times(2)).isEnabled(TURN.workspaceId());
+    }
+
+    /**
+     * A pending row the server did not prepare, such as a refusal an interrupted run stranded as
+     * {@code proposed}, can be neither approved nor rejected: nothing is locked, written or
+     * executed. An executed row the server did not flag can still be undone, because it was already
+     * acted on (#1867).
+     */
+    @Test
+    void aPendingRowTheServerDidNotPrepareCanBeNeitherApprovedNorRejectedButExecutedOnesStillUndo()
+            throws Exception {
+        AiAssistantPreparedWrite proposal = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(proposal, 29);
+        storedToolCall.setServerProposal(false);
+
+        ConflictException approval = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+        ConflictException rejection = assertThrows(
+                ConflictException.class, () -> service.reject(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool proposal was not prepared by the server", approval.getMessage());
+        assertEquals("Assistant tool proposal was not prepared by the server", rejection.getMessage());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setServerProposal(true);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(capturedResultJson());
+        storedToolCall.setServerProposal(false);
+        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+
+        assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
     }
 
     /**
