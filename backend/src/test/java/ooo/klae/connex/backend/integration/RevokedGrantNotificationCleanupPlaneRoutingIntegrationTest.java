@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +30,6 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.RevokedGrantNotificationCleanup;
-import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -38,11 +38,20 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * Proves under placement routing that the email change's revoked-grant cleanup deletes each
  * revoked workspace's notifications and baselines in that workspace's own catalog, across the
  * default catalog and two dedicated ones, and keeps them where the account holds a membership
- * again (#1708).
+ * again. A workspace already tearing down, which ordinary placement routing refuses, is still
+ * cleaned in its catalog, and a workspace whose cleanup fails keeps all of its rows without
+ * stopping the next one (#1708).
  */
 @SpringBootTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
+
+    /**
+     * The only tenant tables a cleanup unit may touch. Each dedicated catalog holds nothing else, so
+     * any other tenant statement in a unit fails instead of passing unnoticed.
+     */
+    private static final List<String> CLEANED_TABLES =
+        List.of("historical_notification_baseline", "notification");
 
     @Autowired private RevokedGrantNotificationCleanup cleanup;
     @Autowired private OrganizationMapper organizationMapper;
@@ -133,6 +142,44 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
             reinvitedCatalog, "historical_notification_baseline", reinvited.getId(), user.getId()));
     }
 
+    @Test
+    void aTearingDownWorkspaceIsStillCleanedInItsOwnCatalog() {
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        String catalog = dedicatedCatalog(organization, "cnx_revoked_t_");
+        User user = newUser();
+        seed(catalog, workspace.getId(), user.getId());
+        jdbcTemplate.update(
+            "UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?", workspace.getId());
+        assertThrows(IllegalStateException.class, () -> tenantWorkScope.withWorkspacePlacement(
+            workspace.getId(), (orgId, scopeCatalog) -> null));
+
+        cleanup.cleanUp(user.getId(), List.of(revoked(workspace)));
+
+        assertEquals(0, rows(catalog, "notification", workspace.getId(), user.getId()));
+        assertEquals(0, rows(catalog, "historical_notification_baseline", workspace.getId(), user.getId()));
+    }
+
+    @Test
+    void aFailingWorkspaceRollsBackItsOwnDeletesWithoutStoppingTheOthers() {
+        Organization brokenOrganization = newOrganization();
+        Workspace broken = newWorkspace(brokenOrganization);
+        String brokenCatalog = dedicatedCatalog(brokenOrganization, "cnx_revoked_f_");
+        Workspace shared = newWorkspace(newOrganization());
+        User user = newUser();
+        seed(brokenCatalog, broken.getId(), user.getId());
+        seed(defaultCatalog(), shared.getId(), user.getId());
+        jdbcTemplate.execute("DROP TABLE `" + identifier(brokenCatalog) + "`.`notification`");
+
+        cleanup.cleanUp(user.getId(), List.of(revoked(shared), revoked(broken)));
+
+        assertEquals(1, rows(
+            brokenCatalog, "historical_notification_baseline", broken.getId(), user.getId()));
+        assertEquals(0, rows(defaultCatalog(), "notification", shared.getId(), user.getId()));
+        assertEquals(0, rows(
+            defaultCatalog(), "historical_notification_baseline", shared.getId(), user.getId()));
+    }
+
     private static RevokedInvitationDto revoked(Workspace workspace) {
         return new RevokedInvitationDto(workspace.getId(), workspace.getOrgId(), workspace.getName());
     }
@@ -168,10 +215,10 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
         scratchCatalogs.add(scratch);
         jdbcTemplate.execute("CREATE DATABASE `" + scratch
             + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci");
-        for (String table : TablePlaneRegistry.ORG_DATA_TABLES.stream().sorted().toList()) {
+        for (String table : CLEANED_TABLES) {
             jdbcTemplate.execute(
-                "CREATE TABLE `" + scratch + "`.`" + identifier(table)
-                    + "` LIKE `" + source + "`.`" + identifier(table) + "`");
+                "CREATE TABLE `" + scratch + "`.`" + table
+                    + "` LIKE `" + source + "`.`" + table + "`");
         }
         OrgPlacement placement = OrgPlacement.sharedDefault(organization.getId());
         placement.setPlacementMode("dedicated_database");
