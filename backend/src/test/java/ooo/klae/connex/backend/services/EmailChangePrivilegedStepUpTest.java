@@ -54,6 +54,8 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
  * actor's {@code app_user} row shared, so they may only run before this transaction locks it.
  */
 class EmailChangePrivilegedStepUpTest {
+    private static final int SIMULATED_STEP_UP_PASSKEY_ROW_ID = 0;
+
     private static final int USER_ID = 7;
     private static final int SESSION_EPOCH = 3;
     private static final String PASSWORD = "current-password";
@@ -136,7 +138,7 @@ class EmailChangePrivilegedStepUpTest {
         when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
         when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
         new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
-                userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID);
+                userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         assertDoesNotThrow(() -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,6 +32,7 @@ class OrgMemberServiceLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private RegistrationVerificationService registrationVerificationService;
+    @Mock private PrivilegedCredentialAttestationMapper attestationMapper;
 
     @InjectMocks private OrgMemberService service;
 
@@ -52,7 +55,38 @@ class OrgMemberServiceLockOrderTest {
         order.verify(organizationMapper).lockById(7);
         order.verify(userMapper).getUserByIdForShare(1);
         order.verify(orgMemberMapper).lockOwnerIds(7);
-        order.verify(orgMemberMapper).addMember(7, 1, "admin");
+        order.verify(orgMemberMapper).addMemberClearingFounder(7, 1, "admin");
+        verify(orgMemberMapper, never()).addMember(7, 1, "admin");
+    }
+
+    /** An owner re-roling themselves keeps any founder attribution they hold (#1534). */
+    @Test
+    void anOwnerChangingTheirOwnRoleKeepsTheirFounderAttribution() {
+        User self = targetUser(9);
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(userMapper.getUserByIdForShare(9)).thenReturn(self);
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn("owner");
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2, 9));
+
+        service.setMember(7, 9, 9, "admin");
+
+        verify(orgMemberMapper).addMember(7, 9, "admin");
+        verify(orgMemberMapper, never()).addMemberClearingFounder(7, 9, "admin");
+    }
+
+    /** Founding flags the owner as founder before covering the owner's existing passkeys (#1534). */
+    @Test
+    void foundingAnOrganizationFlagsTheFounderAndCoversTheirExistingPasskeys() {
+        when(attestationMapper.insertFoundingCoverage(7, 9)).thenReturn(2);
+
+        assertEquals(2, service.addFoundingOwner(7, 9));
+
+        InOrder order = inOrder(orgMemberMapper, attestationMapper);
+        order.verify(orgMemberMapper).addFoundingMember(7, 9);
+        order.verify(attestationMapper).insertFoundingCoverage(7, 9);
+        verify(orgMemberMapper, never()).addMember(7, 9, "owner");
     }
 
     @Test
@@ -88,6 +122,7 @@ class OrgMemberServiceLockOrderTest {
         assertThrows(ForbiddenException.class, () -> service.setMember(7, 1, 9, "admin"));
 
         verify(orgMemberMapper, never()).addMember(7, 9, "admin");
+        verify(orgMemberMapper, never()).addMemberClearingFounder(7, 9, "admin");
         verifyNoInteractions(auditService);
     }
 

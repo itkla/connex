@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -28,14 +29,22 @@ import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
+import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
+import ooo.klae.connex.backend.session.StepUpProof;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.User;
 
 import java.util.List;
 
 class WebAuthnServiceTest {
+    private static final EnrollmentEvidence NO_EVIDENCE = new EnrollmentEvidence(null, null);
+    private static final int NEW_PASSKEY_ROW_ID = 55;
+    private static final int STEP_UP_PASSKEY_ROW_ID = 41;
 
     @Test
     void passkeyPresenceUsesExistenceQueryWithoutLoadingCredentialMaterial() {
@@ -45,6 +54,8 @@ class WebAuthnServiceTest {
                 mock(UserCredentialRepository.class),
                 mock(WebauthnUserEntityMapper.class),
                 credentialMapper,
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 mock(UserMapper.class),
                 mock(PrivilegedAccountService.class),
                 mock(PasskeyBootstrapConfirmationPolicy.class),
@@ -74,6 +85,8 @@ class WebAuthnServiceTest {
                 mock(UserCredentialRepository.class),
                 mock(WebauthnUserEntityMapper.class),
                 mock(WebauthnCredentialMapper.class),
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 mock(PasskeyBootstrapConfirmationPolicy.class),
@@ -93,7 +106,7 @@ class WebAuthnServiceTest {
         PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
         WebAuthnService service = new WebAuthnService(
                 mock(WebAuthnRelyingPartyOperations.class), credentials, userEntities,
-                credentialMapper, userMapper, privilegedAccounts,
+                credentialMapper, mock(PrivilegedCredentialAttestationMapper.class), mock(SessionSecurityService.class), userMapper, privilegedAccounts,
                 mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
         Bytes credentialId = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
@@ -121,6 +134,8 @@ class WebAuthnServiceTest {
                 mock(UserCredentialRepository.class),
                 userEntities,
                 mock(WebauthnCredentialMapper.class),
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 mock(PasskeyBootstrapConfirmationPolicy.class),
@@ -142,6 +157,8 @@ class WebAuthnServiceTest {
                 credentials,
                 userEntities,
                 credentialMapper,
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 mock(PasskeyBootstrapConfirmationPolicy.class),
@@ -166,7 +183,7 @@ class WebAuthnServiceTest {
         UserMapper userMapper = mock(UserMapper.class);
         WebAuthnService service = new WebAuthnService(
             relyingParty, credentials, userEntities,
-            mock(WebauthnCredentialMapper.class), userMapper,
+            mock(WebauthnCredentialMapper.class), mock(PrivilegedCredentialAttestationMapper.class), mock(SessionSecurityService.class), userMapper,
             mock(PrivilegedAccountService.class),
             mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
         PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
@@ -179,7 +196,7 @@ class WebAuthnServiceTest {
         when(userMapper.currentSessionEpoch(8)).thenReturn(0);
 
         assertThrows(BadCredentialsException.class, () -> service.finishRegistration(
-            8, 0, true, options, null, "work key"));
+            8, 0, true, NO_EVIDENCE, options, null, "work key"));
 
         verify(relyingParty, never()).registerCredential(org.mockito.ArgumentMatchers.any());
         verify(credentials, never()).save(org.mockito.ArgumentMatchers.any());
@@ -187,43 +204,149 @@ class WebAuthnServiceTest {
 
     @Test
     void finishRegistrationPersistsOnlyWithStrictEnrollmentAudit() {
-        WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
-        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
-        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
-        UserMapper userMapper = mock(UserMapper.class);
-        AuditService auditService = mock(AuditService.class);
-        WebAuthnService service = new WebAuthnService(
-                relyingParty, credentials, userEntities, mock(WebauthnCredentialMapper.class),
-                userMapper, mock(PrivilegedAccountService.class),
-                mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
-        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
-        PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
-        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
-        CredentialRecord record = mock(CredentialRecord.class);
-        Bytes handle = Bytes.random();
-        User user = new User();
-        user.setId(7);
-        user.setDisplayName("Admin");
-        when(options.getUser()).thenReturn(optionUser);
-        when(optionUser.getId()).thenReturn(handle);
-        when(userEntities.findUserIdByHandle(handle.toBase64UrlString())).thenReturn(7);
-        when(relyingParty.registerCredential(any())).thenReturn(record);
-        when(userMapper.lockById(7)).thenReturn(7);
-        when(userMapper.currentSessionEpoch(7)).thenReturn(3);
-        when(userMapper.getUserById(7)).thenReturn(user);
+        RegistrationFixture fixture = successfulRegistration();
 
-        service.finishRegistration(7, 3, true, options, credential, "Work key");
+        RegisteredPasskey registered = fixture.service().finishRegistration(
+                7, 3, true, NO_EVIDENCE, fixture.options(), fixture.credential(), "Work key");
 
-        verify(relyingParty).registerCredential(any());
-        verify(credentials, never()).save(any());
-        verify(userMapper).clearEpochRestampGrant(7);
-        verify(auditService).recordStrict(
+        assertEquals(NEW_PASSKEY_ROW_ID, registered.credentialRowId());
+        verify(fixture.relyingParty()).registerCredential(any());
+        verify(fixture.credentials(), never()).save(any());
+        verify(fixture.userMapper()).clearEpochRestampGrant(7);
+        verify(fixture.auditService()).recordStrict(
                 org.mockito.ArgumentMatchers.eq("auth.passkey.register"),
                 org.mockito.ArgumentMatchers.eq("user"),
                 org.mockito.ArgumentMatchers.eq(7),
                 org.mockito.ArgumentMatchers.eq("Admin"),
                 org.mockito.ArgumentMatchers.eq("Passkey registered"),
                 any());
+    }
+
+    /**
+     * A new passkey takes its founder coverage first and only then inherits the coverage and
+     * assurance of the passkey whose fresh step-up authorized it, so a direct source wins (#1534).
+     */
+    @Test
+    void finishRegistrationRecordsFounderCoverageBeforeInheritingFromAFreshOwnedStepUp() {
+        RegistrationFixture fixture = successfulRegistration();
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        when(fixture.sessionSecurity().isFresh(proof)).thenReturn(true);
+        when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7))
+                .thenReturn(STEP_UP_PASSKEY_ROW_ID);
+
+        fixture.service().finishRegistration(7, 3, false, new EnrollmentEvidence("session-a", proof),
+                fixture.options(), fixture.credential(), "Work key");
+
+        InOrder order = inOrder(fixture.userMapper(), fixture.attestationMapper(), fixture.credentialMapper());
+        order.verify(fixture.userMapper()).lockById(7);
+        order.verify(fixture.userMapper()).lockAssignedCustomRoleIds(7);
+        order.verify(fixture.attestationMapper()).insertFounderCoverage(NEW_PASSKEY_ROW_ID, 7);
+        order.verify(fixture.attestationMapper())
+                .insertInheritedCoverage(NEW_PASSKEY_ROW_ID, STEP_UP_PASSKEY_ROW_ID);
+        order.verify(fixture.credentialMapper())
+                .copyPrivilegedAssurance(NEW_PASSKEY_ROW_ID, STEP_UP_PASSKEY_ROW_ID);
+        verify(fixture.credentialMapper(), never()).markBreakGlassAssurance(NEW_PASSKEY_ROW_ID);
+    }
+
+    @Test
+    void finishRegistrationInheritsNothingFromAStaleStepUp() {
+        RegistrationFixture fixture = successfulRegistration();
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        when(fixture.sessionSecurity().isFresh(proof)).thenReturn(false);
+        when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7))
+                .thenReturn(STEP_UP_PASSKEY_ROW_ID);
+
+        fixture.service().finishRegistration(7, 3, false, new EnrollmentEvidence("session-a", proof),
+                fixture.options(), fixture.credential(), "Work key");
+
+        verify(fixture.attestationMapper()).insertFounderCoverage(NEW_PASSKEY_ROW_ID, 7);
+        verify(fixture.attestationMapper(), never()).insertInheritedCoverage(anyInt(), anyInt());
+        verify(fixture.credentialMapper(), never()).copyPrivilegedAssurance(anyInt(), anyInt());
+    }
+
+    @Test
+    void finishRegistrationInheritsNothingFromAStepUpPasskeyThatIsGoneOrAnotherAccounts() {
+        RegistrationFixture fixture = successfulRegistration();
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        when(fixture.sessionSecurity().isFresh(proof)).thenReturn(true);
+        when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7)).thenReturn(null);
+
+        fixture.service().finishRegistration(7, 3, false, new EnrollmentEvidence("session-a", proof),
+                fixture.options(), fixture.credential(), "Work key");
+
+        verify(fixture.attestationMapper(), never()).insertInheritedCoverage(anyInt(), anyInt());
+        verify(fixture.credentialMapper(), never()).copyPrivilegedAssurance(anyInt(), anyInt());
+    }
+
+    /**
+     * Only the session the operator recovery granted the restamp to, at the epoch that recovery
+     * committed, earns break-glass assurance. Another password session of the same account racing
+     * the owner's re-enrollment does not (#1534).
+     */
+    @Test
+    void finishRegistrationGrantsBreakGlassOnlyToTheRecoverySessionAtItsEpoch() {
+        RegistrationFixture recovering = successfulRegistration();
+        when(recovering.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
+        recovering.service().finishRegistration(7, 3, true, new EnrollmentEvidence("session-a", null),
+                recovering.options(), recovering.credential(), "Work key");
+        verify(recovering.credentialMapper()).markBreakGlassAssurance(NEW_PASSKEY_ROW_ID);
+        InOrder order = inOrder(recovering.userMapper());
+        order.verify(recovering.userMapper()).epochRestampGrant(7);
+        order.verify(recovering.userMapper()).clearEpochRestampGrant(7);
+
+        RegistrationFixture racing = successfulRegistration();
+        when(racing.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
+        racing.service().finishRegistration(7, 3, true, new EnrollmentEvidence("session-b", null),
+                racing.options(), racing.credential(), "Work key");
+        verify(racing.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
+
+        RegistrationFixture staleEpoch = successfulRegistration();
+        when(staleEpoch.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 2));
+        staleEpoch.service().finishRegistration(7, 3, true, new EnrollmentEvidence("session-a", null),
+                staleEpoch.options(), staleEpoch.credential(), "Work key");
+        verify(staleEpoch.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
+    }
+
+    /**
+     * An enrollment that cannot name its session while a recovery grant is outstanding is refused
+     * before anything is registered, so the grant survives for the retry instead of being spent
+     * without the assurance it carries (#1534).
+     */
+    @Test
+    void finishRegistrationRefusesAnUnnamedSessionWhileARecoveryGrantIsOutstanding() {
+        RegistrationFixture fixture = successfulRegistration();
+        when(fixture.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
+
+        assertThrows(ConflictException.class, () -> fixture.service().finishRegistration(
+                7, 3, true, NO_EVIDENCE, fixture.options(), fixture.credential(), "Work key"));
+
+        verify(fixture.relyingParty(), never()).registerCredential(any());
+        verify(fixture.userMapper(), never()).clearEpochRestampGrant(7);
+        verify(fixture.credentialMapper(), never()).markBreakGlassAssurance(anyInt());
+    }
+
+    /** Break-glass assurance takes precedence over assurance the step-up passkey would pass on. */
+    @Test
+    void finishRegistrationPrefersBreakGlassOverInheritedAssurance() {
+        RegistrationFixture fixture = successfulRegistration();
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        when(fixture.sessionSecurity().isFresh(proof)).thenReturn(true);
+        when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7))
+                .thenReturn(STEP_UP_PASSKEY_ROW_ID);
+        when(fixture.userMapper().epochRestampGrant(7))
+                .thenReturn(new SessionEpochRestampGrant("session-a", 3));
+
+        fixture.service().finishRegistration(7, 3, true, new EnrollmentEvidence("session-a", proof),
+                fixture.options(), fixture.credential(), "Work key");
+
+        verify(fixture.attestationMapper())
+                .insertInheritedCoverage(NEW_PASSKEY_ROW_ID, STEP_UP_PASSKEY_ROW_ID);
+        verify(fixture.credentialMapper(), never()).copyPrivilegedAssurance(anyInt(), anyInt());
+        verify(fixture.credentialMapper()).markBreakGlassAssurance(NEW_PASSKEY_ROW_ID);
     }
 
     /**
@@ -243,6 +366,8 @@ class WebAuthnServiceTest {
                 credentials,
                 mock(WebauthnUserEntityMapper.class),
                 mock(WebauthnCredentialMapper.class),
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 policy,
@@ -256,7 +381,7 @@ class WebAuthnServiceTest {
         when(policy.requiresConfirmation(7)).thenReturn(true);
 
         assertThrows(ForbiddenException.class, () -> service.finishRegistration(
-                7, 3, false, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+                7, 3, false, NO_EVIDENCE, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
 
         InOrder order = inOrder(userMapper, policy, auditService);
         order.verify(userMapper).lockById(7);
@@ -293,6 +418,8 @@ class WebAuthnServiceTest {
                 mock(UserCredentialRepository.class),
                 mock(WebauthnUserEntityMapper.class),
                 mock(WebauthnCredentialMapper.class),
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 policy,
@@ -304,7 +431,7 @@ class WebAuthnServiceTest {
 
         ForbiddenException refusal = assertThrows(ForbiddenException.class,
                 () -> service.finishRegistration(
-                        7, 3, false, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+                        7, 3, false, NO_EVIDENCE, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
 
         assertEquals("Confirm the emailed enrollment link before adding the first passkey",
                 refusal.getMessage());
@@ -329,6 +456,8 @@ class WebAuthnServiceTest {
                 credentials,
                 mock(WebauthnUserEntityMapper.class),
                 mock(WebauthnCredentialMapper.class),
+                mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
                 mock(PasskeyBootstrapConfirmationPolicy.class),
@@ -337,7 +466,7 @@ class WebAuthnServiceTest {
         when(userMapper.currentSessionEpoch(7)).thenReturn(4);
 
         assertThrows(ForbiddenException.class, () -> service.finishRegistration(
-                7, 3, true, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+                7, 3, true, NO_EVIDENCE, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
 
         verify(relyingParty, never()).registerCredential(any());
         verify(credentials, never()).save(any());
@@ -353,7 +482,7 @@ class WebAuthnServiceTest {
         UserMapper userMapper = mock(UserMapper.class);
         PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
         WebAuthnService service = new WebAuthnService(
-                relyingParty, credentials, userEntities, credentialMapper, userMapper, privilegedAccounts,
+                relyingParty, credentials, userEntities, credentialMapper, mock(PrivilegedCredentialAttestationMapper.class), mock(SessionSecurityService.class), userMapper, privilegedAccounts,
                 mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
         Bytes credentialId = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
@@ -386,7 +515,7 @@ class WebAuthnServiceTest {
         AuditService auditService = mock(AuditService.class);
         WebAuthnService service = new WebAuthnService(
                 mock(WebAuthnRelyingPartyOperations.class), credentials, userEntities,
-                credentialMapper, userMapper, privilegedAccounts,
+                credentialMapper, mock(PrivilegedCredentialAttestationMapper.class), mock(SessionSecurityService.class), userMapper, privilegedAccounts,
                 mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
         Bytes credentialId = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
@@ -416,5 +545,54 @@ class WebAuthnServiceTest {
                 org.mockito.ArgumentMatchers.eq("Admin"),
                 org.mockito.ArgumentMatchers.eq("Passkey removed"),
                 any());
+    }
+
+    private record RegistrationFixture(
+            WebAuthnService service,
+            WebAuthnRelyingPartyOperations relyingParty,
+            UserCredentialRepository credentials,
+            WebauthnCredentialMapper credentialMapper,
+            PrivilegedCredentialAttestationMapper attestationMapper,
+            SessionSecurityService sessionSecurity,
+            UserMapper userMapper,
+            AuditService auditService,
+            PublicKeyCredentialCreationOptions options,
+            PublicKeyCredential<AuthenticatorAttestationResponse> credential) {
+    }
+
+    private static RegistrationFixture successfulRegistration() {
+        WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        PrivilegedCredentialAttestationMapper attestationMapper = mock(PrivilegedCredentialAttestationMapper.class);
+        SessionSecurityService sessionSecurity = mock(SessionSecurityService.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        AuditService auditService = mock(AuditService.class);
+        WebAuthnService service = new WebAuthnService(
+                relyingParty, credentials, userEntities, credentialMapper, attestationMapper,
+                sessionSecurity, userMapper, mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        CredentialRecord record = mock(CredentialRecord.class);
+        Bytes handle = Bytes.random();
+        WebauthnCredentialRow stored = new WebauthnCredentialRow();
+        stored.setId(NEW_PASSKEY_ROW_ID);
+        User user = new User();
+        user.setId(7);
+        user.setDisplayName("Admin");
+        when(options.getUser()).thenReturn(optionUser);
+        when(optionUser.getId()).thenReturn(handle);
+        when(userEntities.findUserIdByHandle(handle.toBase64UrlString())).thenReturn(7);
+        when(relyingParty.registerCredential(any())).thenReturn(record);
+        when(record.getCredentialId()).thenReturn(Bytes.random());
+        when(credentialMapper.findByCredentialId(any())).thenReturn(stored);
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userMapper.currentSessionEpoch(7)).thenReturn(3);
+        when(userMapper.getUserById(7)).thenReturn(user);
+        return new RegistrationFixture(service, relyingParty, credentials, credentialMapper,
+                attestationMapper, sessionSecurity, userMapper, auditService, options, credential);
     }
 }

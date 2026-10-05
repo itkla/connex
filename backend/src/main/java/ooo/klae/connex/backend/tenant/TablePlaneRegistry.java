@@ -67,6 +67,7 @@ public final class TablePlaneRegistry {
         "organization_duplicate_decision_lock",
         "passkey_bootstrap_confirmation_token",
         "password_reset_token",
+        "privileged_credential_attestation",
         "privileged_mfa_recovery_redemption",
         "registration_verification_token",
         "provider_connection",

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -42,15 +43,26 @@ public class OrgMemberService {
     }
 
     private final OrgMemberMapper orgMemberMapper;
+    private final PrivilegedCredentialAttestationMapper attestationMapper;
     private final OrganizationMapper organizationMapper;
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
     private final RegistrationVerificationService registrationVerificationService;
 
-    /** Records a user as the founding owner of a freshly created organization. */
-    public void addFoundingOwner(int orgId, int userId) {
-        orgMemberMapper.addMember(orgId, userId, OrgRole.OWNER.name().toLowerCase());
+    /**
+     * Records a user as the founding owner of a freshly created organization and covers the
+     * owner's existing passkeys in it (#1534). Callers hold the owner's {@code app_user} row
+     * {@code FOR SHARE}, which passkey registration takes exclusively, so a passkey registered
+     * concurrently is either covered here or picks up the founder coverage when it commits.
+     *
+     * @param orgId the organization just created
+     * @param userId the founding owner
+     * @return the number of the owner's passkeys now covered in the organization
+     */
+    public int addFoundingOwner(int orgId, int userId) {
+        orgMemberMapper.addFoundingMember(orgId, userId);
+        return attestationMapper.insertFoundingCoverage(orgId, userId);
     }
 
     /**
@@ -171,6 +183,10 @@ public class OrgMemberService {
      * authority, whichever endpoint addressed it. The check is scoped to that grant — an account
      * that already holds an {@code org_member} row keeps being manageable, so a legacy unverified
      * member can still be re-roled or removed rather than being frozen at its current authority.
+     *
+     * <p>A role set on behalf of another account ends that member's founder attribution, so the
+     * passkeys it enrolls afterwards are no longer covered as the founder's (#1534). An owner
+     * changing their own role keeps it.
      */
     @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
@@ -193,7 +209,11 @@ public class OrgMemberService {
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }
-        orgMemberMapper.addMember(orgId, targetUserId, role.name().toLowerCase());
+        if (actorId == targetUserId) {
+            orgMemberMapper.addMember(orgId, targetUserId, role.name().toLowerCase());
+        } else {
+            orgMemberMapper.addMemberClearingFounder(orgId, targetUserId, role.name().toLowerCase());
+        }
         auditService.record("org.member.set", "organization", orgId, target.getDisplayName(),
                 "Set " + target.getDisplayName() + " to org " + role.name().toLowerCase(), null);
     }
