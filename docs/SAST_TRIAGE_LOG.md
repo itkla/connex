@@ -1205,10 +1205,21 @@ Their alerts need no fresh disposition, because the results behind them no longe
 **Record defect found by this re-evaluation: #120 and its predecessor #41.** Their dismissal comment
 says the disclosure audit "is written by the separate recording path, not this GET". It is not.
 `DataSubjectRequestService.disclosure` writes the strict `appi.subject_request.disclosure` audit
-itself, through `unrouted` at `:137`, after assembling the disclosure. It has done so since
-`34f8dbd6e` (2026-07-22, #810), so the comment was wrong when written; the call sat at `:133` on the
-dismissal-day `main` (`b7b552a39`). The GET therefore genuinely writes one access-audit row,
-fail-closed. That is the audited-read class dispositioned `won't fix` above, not a false positive.
+itself, through `unrouted` at `:137`, after assembling the disclosure. If that audit can't be
+written, the request fails with 503. The write predates `34f8dbd6e` (2026-07-22, #810), which only
+moved it into `recordDisclosureAudit`, so the comment was wrong when written: the call sat at `:133`
+on the dismissal-day `main` (`b7b552a39`). The GET therefore genuinely writes its access audit, both
+the row and the audit-integrity head. That is the audited-read class dispositioned `won't fix`
+above, not a false positive.
 
-Re-disposition follows the procedure in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) and is tracked on
-[#2004](https://github.com/itkla/connex/issues/2004).
+**Re-disposition, 2026-10-05**, per [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md), tracked on
+[#2004](https://github.com/itkla/connex/issues/2004):
+- An independent read-only context reproduced the evidence on `e175aa331`. It also found that the
+  path is gated on an organization admin or owner with a fresh WebAuthn step-up
+  (`requireMutationAccess`).
+- #41, which carries the live result, was reopened and re-dismissed as `won't fix`, with expiry
+  2027-04-05 and re-review 2027-03-05.
+- #120 is left `fixed`. On reopen it recomputed to `fixed`, because its `src/…` path lineage is no
+  longer reported, so it has no live finding to suppress. That matches the 2026-09-01 handling of
+  stale records above. It was briefly re-dismissed in error and then reopened back to `fixed`.
+- Moving disclosure assembly to `POST` remains open as an alternative for the Security Owner.
