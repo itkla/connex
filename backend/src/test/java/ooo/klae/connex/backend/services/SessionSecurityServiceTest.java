@@ -33,8 +33,11 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.session.StepUpProof;
 
 class SessionSecurityServiceTest {
+    private static final int PASSKEY_ROW_ID = 41;
+
     private MutableClock clock;
     private SessionSecurityProperties properties;
     private PrivilegedMfaProperties privilegedMfaProperties;
@@ -72,9 +75,9 @@ class SessionSecurityServiceTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
-        service.markStepUp(request, 8);
+        service.markStepUp(request, 8, PASSKEY_ROW_ID);
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
-        service.markStepUp(request, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
         assertDoesNotThrow(() -> service.requireExportStepUp());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
                 clock.millis() - Duration.ofMinutes(11).toMillis());
@@ -92,15 +95,14 @@ class SessionSecurityServiceTest {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         assertDoesNotThrow(() -> service.requireExportStepUp());
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
-        service.markStepUp(request, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
         assertDoesNotThrow(() -> service.requireRecentAuthentication(7));
     }
 
     @Test
     void markAuthenticatedStartsAbsoluteLifetimeAndClearsWebAuthnStepUp() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, clock.millis());
-        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
 
         service.markAuthenticated(request, 7);
 
@@ -108,6 +110,76 @@ class SessionSecurityServiceTest {
         assertEquals(7, request.getSession().getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR));
+        assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR));
+    }
+
+    @Test
+    void aStepUpBindsThePasskeyThatSignedItToTheSameAccount() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+
+        StepUpProof proof = service.recentStepUpProof(request.getSession(false), 7);
+
+        assertNotNull(proof);
+        assertEquals(PASSKEY_ROW_ID, proof.credentialRowId());
+        assertEquals(clock.millis(), proof.stampedAtMillis());
+        assertTrue(service.isFresh(proof));
+        assertNull(service.recentStepUpProof(request.getSession(false), 8));
+        assertNull(service.recentStepUpProof(null, 7));
+    }
+
+    @Test
+    void aStampRefreshedWithoutRebindingOrphansTheEarlierPasskey() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        clock.advance(Duration.ofSeconds(5));
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, clock.millis());
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, 7);
+
+        assertTrue(service.hasFreshRecentAuthentication(request.getSession(false), 7));
+        assertNull(service.recentStepUpProof(request.getSession(false), 7));
+    }
+
+    @Test
+    void aStaleStepUpYieldsNoProofAndAStaleProofIsNotFresh() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        StepUpProof proof = service.recentStepUpProof(request.getSession(false), 7);
+
+        clock.advance(Duration.ofMinutes(11));
+
+        assertFalse(service.isFresh(proof));
+        assertNull(service.recentStepUpProof(request.getSession(false), 7));
+    }
+
+    @Test
+    void clearingRecentAuthenticationDropsTheBoundPasskey() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+
+        service.clearRecentAuthentication(request);
+
+        assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR));
+        assertNull(service.recentStepUpProof(request.getSession(false), 7));
+    }
+
+    @Test
+    void clearingAuthenticationStateDropsTheBoundPasskey() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+
+        service.clearAuthenticationState(request);
+
+        assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR));
+    }
+
+    @Test
+    void aMalformedBindingYieldsNoProof() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR, "7:not-a-time:41");
+
+        assertNull(service.recentStepUpProof(request.getSession(false), 7));
     }
 
     @Test
@@ -244,7 +316,7 @@ class SessionSecurityServiceTest {
     @Test
     void requireRecentAuthenticationAllowsFreshWebAuthnStepUpForSameUser() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        service.markStepUp(request, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 
         assertDoesNotThrow(() -> service.requireRecentAuthentication(7));
@@ -253,7 +325,7 @@ class SessionSecurityServiceTest {
     @Test
     void requireRecentAuthenticationRejectsDifferentUserStepUp() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        service.markStepUp(request, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 
         assertThrows(RecentAuthenticationRequiredException.class,
@@ -263,7 +335,7 @@ class SessionSecurityServiceTest {
     @Test
     void invalidRecentAuthenticationWindowFailsClosed() {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        service.markStepUp(request, 7);
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
         properties.setRecentAuthenticationWindow(Duration.ZERO);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 

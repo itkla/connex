@@ -386,3 +386,51 @@ can produce a `token_already_redeemed` event, so investigate one unless the acco
 retried a completed ceremony. The client response is the same in both cases. A privileged user is immediately confined to
 enrollment after recovery. Normal passkey removal requires recent WebAuthn proof and refuses removal
 of a privileged account's last credential.
+
+## Passkey provenance (#1534)
+
+A passkey enrolled while an account held no privilege must not, on its own, satisfy this policy after
+a later promotion: an attacker holding only the password of an ordinary account could enroll one and
+wait. The remedy is grantor-mediated attestation per organization, delivered in slices. The first
+slice only records each passkey's provenance. **Nothing reads it for authorization yet**, so it
+changes no account's access.
+
+### What a passkey can carry
+
+**Account-wide assurance** sits on `webauthn_credential` and comes only from operator-trusted
+sources:
+- `BREAK_GLASS` is recorded when the operator recovery session itself enrolls the replacement
+  passkey. The enrolling session's `SPRING_SESSION.PRIMARY_ID` and epoch must match the restamp grant
+  that recovery issued, so another session of the same account cannot claim it by enrolling first.
+- `GRANDFATHERED` is reserved for the cutover that switches enforcement on.
+
+**Per-organization coverage** sits in `privileged_credential_attestation`:
+- **`FOUNDER`** covers the passkeys of an organization's founding owner.
+  - Founding covers the owner's existing passkeys.
+  - A passkey enrolled later is covered while `org_member.founder` is set and the account still owns
+    the organization.
+  - A role change that another account makes clears the flag. That is not revocation: existing
+    rows remain.
+- **`INHERITED`** applies when a passkey is enrolled after a fresh step-up. The new passkey copies the
+  coverage and assurance of the passkey that signed the step-up, provided that passkey still belongs
+  to the account. The step-up stamp names its passkey in a binding tied to the stamp's account and
+  time, so a stamp refreshed without that binding yields no inheritance.
+- **`GRANTOR`** will be written by the attestation redemption of a later slice.
+
+**Rules:**
+- A direct source (`FOUNDER`, `GRANTOR`) is never replaced by `INHERITED`.
+- An organization already being torn down receives no new coverage.
+- Coverage is deleted with its passkey or its organization.
+
+### Rollback and the cutover
+
+Provenance is additive evidence, not a complete history. An older backend serving after a rollback
+records none of it. It:
+- clears a recovery grant without recording break-glass assurance;
+- refreshes step-up stamps without naming their passkey;
+- changes org roles without clearing the founder flag.
+
+The first two only leave coverage unrecorded, which fails safe. The stale founder flag is narrowed
+because founder coverage also requires the account to still own the organization. The cutover that
+switches enforcement on must recompute founder flags from current owner rows, not trust the flags
+written before it.
