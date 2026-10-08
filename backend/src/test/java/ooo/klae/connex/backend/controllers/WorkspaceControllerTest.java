@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +39,7 @@ class WorkspaceControllerTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private InviteService inviteService;
     @Mock private InviteLinkService inviteLinkService;
+    @Mock private PrivilegedMfaAttestationService attestationService;
     @Mock private AllowedDomainService allowedDomainService;
     @Mock private AuthService authService;
     @Mock private WorkspaceCookie workspaceCookie;
@@ -48,6 +50,7 @@ class WorkspaceControllerTest {
     void setUp() {
         controller = new WorkspaceController(
             workspaceService,
+            attestationService,
             inviteService,
             inviteLinkService,
             allowedDomainService,

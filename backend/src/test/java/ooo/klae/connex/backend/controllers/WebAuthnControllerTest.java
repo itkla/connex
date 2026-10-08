@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -85,10 +86,13 @@ class WebAuthnControllerTest {
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final MfaRecoveryService mfaRecoveryService = mock(MfaRecoveryService.class);
+    private final PrivilegedMfaAttestationRedemption attestationRedemption =
+        mock(PrivilegedMfaAttestationRedemption.class);
     private final PasskeyBootstrapConfirmationService bootstrapConfirmationService =
         mock(PasskeyBootstrapConfirmationService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
+        attestationRedemption,
         authService,
         json,
         creationOptions,
@@ -832,6 +836,7 @@ class WebAuthnControllerTest {
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {
         return new WebAuthnController(
             webAuthnService,
+            attestationRedemption,
             authService,
             mapper,
             creationOptions,
