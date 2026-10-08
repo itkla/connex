@@ -39,6 +39,12 @@
     ON DUPLICATE KEY UPDATE org_role = #{orgRole}
   </insert>
 
+  <select id="lockExactRole" resultType="string" flushCache="true">
+    SELECT org_role FROM org_member
+    WHERE org_id = #{orgId} AND user_id = #{userId}
+    FOR UPDATE
+  </select>
+
   <insert id="addFoundingMember">
     INSERT INTO org_member (org_id, user_id, org_role, founder)
     VALUES (#{orgId}, #{userId}, 'owner', TRUE)

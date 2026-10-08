@@ -26,12 +26,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionDto;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionRequest;
+import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
-import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
-import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -45,6 +47,7 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -80,7 +83,10 @@ public class WebAuthnController {
         new TypeReference<>() {};
     private static final TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>> ASSERTION_TYPE =
         new TypeReference<>() {};
+    private static final TypeReference<MfaAttestationRedemptionRequest> ATTESTATION_REDEMPTION_TYPE =
+            new TypeReference<>() { };
     private final WebAuthnService webAuthnService;
+    private final PrivilegedMfaAttestationRedemption attestationRedemption;
     private final AuthService authService;
     private final WebAuthnJsonMapper json;
     private final PublicKeyCredentialCreationOptionsRepository creationOptions;
@@ -317,6 +323,40 @@ public class WebAuthnController {
     }
 
     /**
+     * Issues passkey assertion options for redeeming a privileged MFA attestation code (#1534).
+     */
+    @PostMapping(value = "/attestation/options", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> attestationOptions(HttpServletRequest req, HttpServletResponse res) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        PublicKeyCredentialRequestOptions options = webAuthnService.createStepUpOptions(auth);
+        requestOptions.save(req, res, options);
+        return ResponseEntity.ok(json.write(options));
+    }
+
+    /**
+     * Redeems a privileged MFA attestation code with the passkey that signs the assertion (#1534).
+     * Every reason the code itself cannot be used answers with the same refusal; a failed
+     * assertion fails as the ceremony's own error.
+     */
+    @PostMapping(value = "/attestation", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public MfaAttestationRedemptionDto redeemAttestation(@RequestBody String body, HttpServletRequest req,
+            HttpServletResponse res) {
+        User user = authService.getCurrentUser();
+        PublicKeyCredentialRequestOptions options = requestOptions.load(req);
+        if (options == null) {
+            throw new BadCredentialsException("No passkey attestation in progress");
+        }
+        try {
+            MfaAttestationRedemptionRequest request = readAttestationRedemption(body);
+            return attestationRedemption.redeem(
+                    req, SecurityContextHolder.getContext().getAuthentication(), user, options,
+                    request.credential(), request.code());
+        } finally {
+            requestOptions.save(req, res, null);
+        }
+    }
+
+    /**
      * Lists the authenticated user's enrolled passkeys.
      */
     @GetMapping("/credentials")
@@ -403,6 +443,21 @@ public class WebAuthnController {
                 user.getDisplayName(),
                 "Failed passkey step-up attempt",
                 reason);
+    }
+
+    private MfaAttestationRedemptionRequest readAttestationRedemption(String body) {
+        MfaAttestationRedemptionRequest request;
+        try {
+            request = json.read(body, ATTESTATION_REDEMPTION_TYPE);
+        } catch (RequestBodyTooLargeException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new BadRequestException("The attestation request could not be read");
+        }
+        if (request == null || request.credential() == null) {
+            throw new BadRequestException("A passkey assertion is required");
+        }
+        return request;
     }
 
     private boolean authorizePasskeyRegistrationOptions(User user, PasskeyRegistrationOptionsRequest request,

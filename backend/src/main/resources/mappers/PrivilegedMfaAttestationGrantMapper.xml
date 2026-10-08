@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.PrivilegedMfaAttestationGrantMapper">
+
+  <sql id="columns">
+    id, org_id, workspace_id, grantor_user_id, grantee_user_id, code_digest, expires_at,
+    failed_attempts, redeemed_at, redeemed_credential_row_id, revoked_at, revoked_by_user_id,
+    created_at
+  </sql>
+
+  <sql id="redeemable">
+    redeemed_at IS NULL
+    AND revoked_at IS NULL
+    AND expires_at &gt; UTC_TIMESTAMP(6)
+    AND failed_attempts &lt; 5
+  </sql>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO privileged_mfa_attestation_grant
+      (org_id, workspace_id, grantor_user_id, grantee_user_id, code_digest, expires_at, created_at)
+    VALUES (#{orgId}, #{workspaceId}, #{grantorUserId}, #{granteeUserId}, #{codeDigest},
+            DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 24 HOUR), UTC_TIMESTAMP(6))
+  </insert>
+
+  <select id="findById" resultType="PrivilegedMfaAttestationGrant" flushCache="true">
+    SELECT <include refid="columns"/>
+    FROM privileged_mfa_attestation_grant
+    WHERE id = #{id}
+  </select>
+
+  <select id="findByDigest" resultType="PrivilegedMfaAttestationGrant" flushCache="true">
+    SELECT <include refid="columns"/>
+    FROM privileged_mfa_attestation_grant
+    WHERE code_digest = #{codeDigest}
+  </select>
+
+  <update id="revokeOpen">
+    UPDATE privileged_mfa_attestation_grant
+    SET revoked_at = UTC_TIMESTAMP(6),
+        revoked_by_user_id = #{revokedByUserId}
+    WHERE grantee_user_id = #{granteeUserId}
+      AND org_id = #{orgId}
+      AND redeemed_at IS NULL
+      AND revoked_at IS NULL
+  </update>
+
+  <update id="claim">
+    UPDATE privileged_mfa_attestation_grant
+    SET redeemed_at = UTC_TIMESTAMP(6),
+        redeemed_credential_row_id = #{credentialRowId}
+    WHERE id = #{id}
+      AND grantee_user_id = #{granteeUserId}
+      AND <include refid="redeemable"/>
+  </update>
+
+  <update id="burnOpen">
+    UPDATE privileged_mfa_attestation_grant
+    SET failed_attempts = LEAST(failed_attempts + 1, 5)
+    WHERE grantee_user_id = #{granteeUserId}
+      AND <include refid="redeemable"/>
+  </update>
+</mapper>

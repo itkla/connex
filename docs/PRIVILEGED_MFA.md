@@ -415,12 +415,71 @@ sources:
   coverage and assurance of the passkey that signed the step-up, provided that passkey still belongs
   to the account. The step-up stamp names its passkey in a binding tied to the stamp's account and
   time, so a stamp refreshed without that binding yields no inheritance.
-- **`GRANTOR`** will be written by the attestation redemption of a later slice.
+- **`GRANTOR`** is written when the account redeems an attestation code with that passkey (below).
 
 **Rules:**
-- A direct source (`FOUNDER`, `GRANTOR`) is never replaced by `INHERITED`.
+- A direct source (`FOUNDER`, `GRANTOR`) is never replaced by `INHERITED`. A `GRANTOR` redemption
+  replaces an `INHERITED` row and leaves an existing direct row exactly as it was.
 - An organization already being torn down receives no new coverage.
 - Coverage is deleted with its passkey or its organization.
+
+### Attestation codes
+
+A grantor issues a one-time code, and the member redeems it with a passkey assertion. The passkey
+that signs the redemption gains `GRANTOR` coverage in the code's organization.
+
+**Who may issue or revoke a code:**
+- **Through a workspace**
+  (`POST`/`DELETE /api/workspaces/{id}/members/{userId}/mfa-attestations`): someone who could grant
+  the member's *current* role there.
+  - A built-in role needs `MEMBER_MANAGE`, and a custom role `ROLE_MANAGE`.
+  - Each is held under the grant ceiling: the grantor must hold every permission the role confers.
+  - Only an owner may attest an owner.
+- **As an organization owner**
+  (`POST`/`DELETE /api/orgs/{orgId}/members/{userId}/mfa-attestations`), for a member holding an org
+  role.
+
+Both need a fresh step-up, and nobody can issue a code to themselves. The authority is the member's
+*local* role: a delegate who could grant that role there can attest the member, and the coverage
+then counts wherever the member is privileged in that organization.
+
+**The code:**
+- It is 80 random bits, shown to the grantor once as four groups of Crockford base32. It is never
+  stored, logged or audited, only a SHA-256 digest bound to the grantee, so it can't match anyone
+  else.
+- It expires after 24 hours.
+- A new code for the same member and organization supersedes the open one.
+- Revoking removes the open code. It never removes coverage already redeemed.
+
+**Redemption** (`POST /api/auth/webauthn/attestation/options`, then
+`POST /api/auth/webauthn/attestation` with `{code, credential}`) runs in separate committed steps:
+1. The passkey assertion is verified on its own, advancing the passkey's counter.
+2. A redemption transaction takes the grant's authority locks and re-checks, under them, that:
+   - the grantor still holds the authority;
+   - the member is still a member;
+   - the session's epoch is current;
+   - the passkey is still the member's.
+
+   It then claims the grant and records the coverage.
+3. On success, the session's step-up is stamped with the attested passkey.
+
+**Refusals:**
+- Every reason the code can't be used answers one `403 MFA_ATTESTATION_REFUSED`: wrong, expired,
+  revoked, used, exhausted, authority lost, or member gone.
+- After the refused redemption has rolled back, one refusal is counted against each of the member's
+  redeemable codes. A code that reaches five refusals can't be redeemed.
+- The denial is audited at account scope with its reason.
+- Not part of that contract:
+  - a failed assertion, which fails as the ceremony's own error and counts nothing;
+  - a crash between the rollback and the count, which is an accounting gap.
+- Responses are uniform; timing is not made uniform.
+
+**Confinement:** the two redemption routes are reachable by a confined account. Issuing and revoking
+are not.
+
+**History** lives in the strict `auth.mfa.attestation.issued`, `.revoked`, `.redeemed` and `.denied`
+audits. A grant row goes with its organization, workspace, grantor or grantee, and coverage it
+produced keeps a null `grant_id`.
 
 ### Rollback and the cutover
 
@@ -434,3 +493,9 @@ The first two only leave coverage unrecorded, which fails safe. The stale founde
 because founder coverage also requires the account to still own the organization. The cutover that
 switches enforcement on must recompute founder flags from current owner rows, not trust the flags
 written before it.
+
+The cutover must also:
+1. fence issuance and redemption with a maintenance barrier, so no pre-cutover instance serves them;
+2. revoke every attestation code still open, since those codes were issued before "sufficient" was
+   enforced;
+3. only then switch enforcement on.

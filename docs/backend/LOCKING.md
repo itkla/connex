@@ -1287,6 +1287,37 @@ account root.
   other order, the registration waits on the shared account row, then reads the committed founder
   flag. `PrivilegedCredentialProvenanceIntegrationTest` drives both commit orders against real lock
   waits.
+- Attestation codes (#1534) take the authority locks of the role they attest before they touch a
+  grant. Issuing, revoking, redeeming and burning one member's codes therefore serialize on that
+  member's account row.
+  - **Workspace grants** reuse the role-mutation order (`WorkspaceService.lockAttestationAuthority`
+    over `lockRoleMutation`):
+    1. accounts ascending, `FOR UPDATE`;
+    2. the workspace row exclusively;
+    3. both memberships;
+    4. the custom-role roots involved, ascending, then their permission sets;
+    5. the workspace's organization, shared and after the workspace, as teardown takes them.
+  - **Org grants** reuse `setMember`'s order (`OrgMemberService.lockAttestationAuthority`):
+    1. accounts shared, ascending;
+    2. the organization exclusively, before the owner rows, so nothing upgrades a shared lock.
+       It is locked only while active (`lockActiveById`), so a teardown fence that commits while
+       the request waits refuses it;
+    3. the owner rows;
+    4. exactly the member's own `org_member` row (`lockExactRole`, with no join).
+  - **Deletion reservations** of both accounts are read with locking reads once the accounts are
+    locked. Issuing and revoking run at `REPEATABLE READ`, and an ordinary read would answer from
+    the snapshot taken before the request waited, missing a reservation committed meanwhile.
+  - **After the authority locks**, the grant row (supersede, claim), then the coverage insert, whose
+    foreign-key checks take the passkey and organization rows shared. The scoped audit comes last.
+  - **Redemption** runs the passkey assertion in its own earlier transaction. Verifying advances the
+    passkey's counter, and inside the redemption it would take the credential before the account
+    root, against deletion and recovery's account-then-credential order.
+  - **The refusal count** runs in a third transaction once the redemption has rolled back:
+    1. the member's account row, `FOR UPDATE`;
+    2. their redeemable grants.
+
+    It takes no tenant parent. Its denial audit is appended afterwards at account scope, so it can
+    neither wait on the redemption it follows nor invert teardown.
 
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`

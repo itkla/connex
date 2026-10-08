@@ -1397,6 +1397,61 @@ public class WorkspaceService {
         return workspaceMapper.getMember(workspaceId, targetUserId);
     }
 
+    /**
+     * Locks the authority to attest a member's passkeys for privileged MFA (#1534): the grantor
+     * must be able to grant the member's current role. A built-in role needs {@code MEMBER_MANAGE}
+     * and a custom role {@code ROLE_MANAGE}, each under the grant ceiling, and only an owner may
+     * attest an owner. It takes the role-mutation lock order (accounts ascending, the workspace
+     * root, both memberships, then the custom roles involved and their permission sets) and then
+     * the workspace's organization shared, after the workspace as teardown does. Both accounts'
+     * deletion reservations are read under their locks, so one that commits while this waits is
+     * never missed.
+     *
+     * @param workspaceId the workspace the grant is issued through
+     * @param grantorId the account holding the authority
+     * @param granteeId the member whose passkeys are attested
+     * @return the workspace's organization id
+     */
+    int lockAttestationAuthority(int workspaceId, int grantorId, int granteeId) {
+        WorkspaceMember current = workspaceMapper.getAuthorizationMembership(workspaceId, granteeId);
+        Integer granteeRoleId = current == null ? null : current.getRoleId();
+        Permission required = granteeRoleId == null ? Permission.MEMBER_MANAGE : Permission.ROLE_MANAGE;
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId,
+            grantorId,
+            granteeId,
+            required,
+            granteeRoleId,
+            "Role not found in this workspace");
+        Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
+        if (workspace == null
+                || organizationMapper.lockActiveByIdForShare(workspace.getOrgId()) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(grantorId))) {
+            throw new ForbiddenException("Requires the " + required + " permission in this workspace");
+        }
+        WorkspaceMember target = locks.targetMembership();
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(granteeId))
+                || !"active".equals(target.getStatus())) {
+            throw roleMutationTargetNotFound();
+        }
+        if (!Objects.equals(target.getRoleId(), granteeRoleId)) {
+            throw new ConflictException("The member's role changed; refresh and try again");
+        }
+        if ("owner".equals(target.getRole())) {
+            requireLockedRole(locks.actorMembership(), Role.OWNER);
+        }
+        Role builtInRole = Role.of(target.getRole());
+        if (granteeRoleId == null && builtInRole == null) {
+            throw roleMutationTargetNotFound();
+        }
+        requireGrantable(
+            locks.actorPermissions(),
+            granteeRoleId == null ? builtInPermissions(builtInRole) : locks.permissionsForRole(granteeRoleId));
+        return workspace.getOrgId();
+    }
+
     /** Locks current authorization and the exact custom-role root before deletion. */
     public void lockRoleDeletionAuthorization(int workspaceId, int actorId, int roleId) {
         LockedRoleMutation locks = lockRoleMutation(

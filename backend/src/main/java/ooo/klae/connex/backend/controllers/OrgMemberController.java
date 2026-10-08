@@ -17,11 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.AddOrgMemberRequest;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.OrgMemberRequest;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.OrgMemberService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 
 /**
  * Organization membership administration (#316). Listing an org's members
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.services.OrgMemberService;
 public class OrgMemberController {
 
     private final OrgMemberService orgMemberService;
+    private final PrivilegedMfaAttestationService attestationService;
     private final AuthService authService;
 
     @GetMapping
@@ -64,5 +67,23 @@ public class OrgMemberController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable int orgId, @PathVariable int userId) {
         orgMemberService.removeMember(orgId, authService.getCurrentUser().getId(), userId);
+    }
+
+    /**
+     * Issues a one-time code attesting an org member's passkey for privileged MFA in this
+     * organization (#1534). Owners only. The code is returned once and must reach the member out
+     * of band.
+     */
+    @PostMapping("/{orgId}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public MfaAttestationCodeDto issueMfaAttestation(@PathVariable int orgId, @PathVariable int userId) {
+        return attestationService.issueForOrganization(orgId, authService.getCurrentUser().getId(), userId);
+    }
+
+    /** Revokes an org member's open attestation code for this organization (#1534). Owners only. */
+    @DeleteMapping("/{orgId}/members/{userId}/mfa-attestations")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeMfaAttestation(@PathVariable int orgId, @PathVariable int userId) {
+        attestationService.revokeForOrganization(orgId, authService.getCurrentUser().getId(), userId);
     }
 }

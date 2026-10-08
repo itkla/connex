@@ -17,6 +17,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -24,6 +25,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -42,20 +44,24 @@ import org.springframework.security.web.webauthn.registration.PublicKeyCredentia
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionDto;
+import ooo.klae.connex.backend.dto.MfaAttestationRedemptionRequest;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
+import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
-import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.MfaAttestationRefusedException;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -85,10 +91,13 @@ class WebAuthnControllerTest {
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final MfaRecoveryService mfaRecoveryService = mock(MfaRecoveryService.class);
+    private final PrivilegedMfaAttestationRedemption attestationRedemption =
+        mock(PrivilegedMfaAttestationRedemption.class);
     private final PasskeyBootstrapConfirmationService bootstrapConfirmationService =
         mock(PasskeyBootstrapConfirmationService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
+        attestationRedemption,
         authService,
         json,
         creationOptions,
@@ -246,6 +255,80 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).sessionEpoch(request.getSession(false));
         verify(webAuthnService).finishRegistration(7, 6, false, NO_EVIDENCE, options, credential, "work key");
+    }
+
+    @Test
+    void attestationOptionsAreStashedForTheRedemption() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        when(webAuthnService.createStepUpOptions(any())).thenReturn(options);
+        when(mapper.write(options)).thenReturn("{\"challenge\":\"c\"}");
+
+        ResponseEntity<String> result = controller(mapper).attestationOptions(request, response);
+
+        assertEquals("{\"challenge\":\"c\"}", result.getBody());
+        verify(requestOptions).save(request, response, options);
+    }
+
+    /**
+     * The redemption hands the orchestrator the entered code and the assertion, and always clears
+     * the stashed options, including when the code is refused (#1534).
+     */
+    @Test
+    void attestationRedemptionDelegatesAndAlwaysClearsTheStashedOptions() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController redemptionController = controller(mapper);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<MfaAttestationRedemptionRequest>>any()))
+                .thenReturn(new MfaAttestationRedemptionRequest("0123-4567-89AB-CDEF", assertion));
+        when(attestationRedemption.redeem(eq(request), any(), eq(user), eq(options), eq(assertion),
+                eq("0123-4567-89AB-CDEF")))
+                .thenReturn(new MfaAttestationRedemptionDto(3))
+                .thenThrow(new MfaAttestationRefusedException());
+
+        assertEquals(3, redemptionController.redeemAttestation("{}", request, response).orgId());
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redemptionController.redeemAttestation("{}", request, response));
+
+        verify(requestOptions, times(2)).save(request, response, null);
+    }
+
+    @Test
+    void anUnreadableAttestationRedemptionIsABadRequestThatStillClearsTheOptions() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        when(authService.getCurrentUser()).thenReturn(user(7));
+        when(requestOptions.load(request)).thenReturn(mock(PublicKeyCredentialRequestOptions.class));
+        when(mapper.read(eq("not json"), org.mockito.ArgumentMatchers
+                .<TypeReference<MfaAttestationRedemptionRequest>>any()))
+                .thenThrow(new IllegalArgumentException("unreadable"));
+
+        assertThrows(BadRequestException.class,
+            () -> controller(mapper).redeemAttestation("not json", request, response));
+
+        verify(requestOptions).save(request, response, null);
+        verifyNoInteractions(attestationRedemption);
+    }
+
+    @Test
+    void anAttestationRedemptionWithoutAStashedChallengeIsRefusedBeforeAnything() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        when(authService.getCurrentUser()).thenReturn(user(7));
+
+        assertThrows(BadCredentialsException.class,
+            () -> controller.redeemAttestation("{}", request, new MockHttpServletResponse()));
+
+        verifyNoInteractions(attestationRedemption);
     }
 
     /**
@@ -832,6 +915,7 @@ class WebAuthnControllerTest {
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {
         return new WebAuthnController(
             webAuthnService,
+            attestationRedemption,
             authService,
             mapper,
             creationOptions,

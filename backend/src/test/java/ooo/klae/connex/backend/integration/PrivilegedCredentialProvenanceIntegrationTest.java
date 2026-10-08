@@ -25,35 +25,20 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.webauthn.api.AuthenticatorAssertionResponse;
-import org.springframework.security.web.webauthn.api.AuthenticatorAttestationResponse;
-import org.springframework.security.web.webauthn.api.AuthenticatorTransport;
 import org.springframework.security.web.webauthn.api.Bytes;
-import org.springframework.security.web.webauthn.api.ImmutableAuthenticationExtensionsClientOutputs;
-import org.springframework.security.web.webauthn.api.PublicKeyCredential;
-import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
-import org.springframework.security.web.webauthn.api.PublicKeyCredentialType;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.webauthn4j.converter.util.ObjectConverter;
-import com.webauthn4j.data.attestation.authenticator.AAGUID;
-import com.webauthn4j.data.client.Origin;
-import com.webauthn4j.data.client.challenge.DefaultChallenge;
-import com.webauthn4j.test.authenticator.webauthn.NoneAttestationAuthenticator;
-import com.webauthn4j.test.authenticator.webauthn.WebAuthnAuthenticatorAdaptor;
-import com.webauthn4j.test.client.ClientPlatform;
-
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.integration.SoftwarePasskeys.SoftwarePasskey;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
@@ -65,7 +50,6 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.session.StepUpProof;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
-import ooo.klae.connex.backend.webauthn.RegisteredPasskey;
 import ooo.klae.connex.backend.webauthn.VerifiedPasskey;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import ooo.klae.connex.backend.webauthn.WebauthnCredentialRow;
@@ -80,8 +64,6 @@ import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
 @SpringBootTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PrivilegedCredentialProvenanceIntegrationTest {
-    private static final String RP_ID = "localhost";
-    private static final String ORIGIN = "http://localhost:3000";
     private static final EnrollmentEvidence NO_EVIDENCE = new EnrollmentEvidence(null, null);
 
     @Autowired private WebAuthnService webAuthnService;
@@ -433,77 +415,14 @@ class PrivilegedCredentialProvenanceIntegrationTest {
     private record Coverage(int orgId, String source) {
     }
 
-    private record SoftwarePasskey(ClientPlatform client, int rowId) {
-    }
-
     private SoftwarePasskey register(User user, EnrollmentEvidence evidence) {
-        Authentication auth = authenticate(user);
-        PublicKeyCredentialCreationOptions creation = webAuthnService.createRegistrationOptions(auth);
-        NoneAttestationAuthenticator authenticator = new NoneAttestationAuthenticator(
-            AAGUID.ZERO, 0, true, new ObjectConverter());
-        authenticator.setCountUpEnabled(false);
-        ClientPlatform client = new ClientPlatform(
-            new Origin(ORIGIN), new WebAuthnAuthenticatorAdaptor(authenticator));
-        com.webauthn4j.data.PublicKeyCredentialCreationOptions request =
-            new com.webauthn4j.data.PublicKeyCredentialCreationOptions(
-                new com.webauthn4j.data.PublicKeyCredentialRpEntity(RP_ID, "Connex"),
-                new com.webauthn4j.data.PublicKeyCredentialUserEntity(
-                    creation.getUser().getId().getBytes(), user.getUsername(), user.getDisplayName()),
-                new DefaultChallenge(creation.getChallenge().getBytes()),
-                List.of(new com.webauthn4j.data.PublicKeyCredentialParameters(
-                    com.webauthn4j.data.PublicKeyCredentialType.PUBLIC_KEY,
-                    com.webauthn4j.data.attestation.statement.COSEAlgorithmIdentifier.ES256)),
-                null,
-                null,
-                new com.webauthn4j.data.AuthenticatorSelectionCriteria(
-                    null,
-                    com.webauthn4j.data.ResidentKeyRequirement.REQUIRED,
-                    com.webauthn4j.data.UserVerificationRequirement.PREFERRED),
-                null,
-                null);
-        com.webauthn4j.data.PublicKeyCredential<com.webauthn4j.data.AuthenticatorAttestationResponse,
-            com.webauthn4j.data.extension.client.RegistrationExtensionClientOutput> made = client.create(request);
-        PublicKeyCredential<AuthenticatorAttestationResponse> attestation =
-            PublicKeyCredential.<AuthenticatorAttestationResponse>builder()
-                .id(made.getId())
-                .rawId(new Bytes(made.getRawId()))
-                .type(PublicKeyCredentialType.PUBLIC_KEY)
-                .response(AuthenticatorAttestationResponse.builder()
-                    .attestationObject(new Bytes(made.getResponse().getAttestationObject()))
-                    .clientDataJSON(new Bytes(made.getResponse().getClientDataJSON()))
-                    .transports(AuthenticatorTransport.INTERNAL)
-                    .build())
-                .clientExtensionResults(new ImmutableAuthenticationExtensionsClientOutputs())
-                .build();
-        RegisteredPasskey registered = webAuthnService.finishRegistration(
-            user.getId(), userMapper.currentSessionEpoch(user.getId()), true, evidence,
-            creation, attestation, "Provenance " + made.getId().substring(0, 6));
-        authenticator.setCountUpEnabled(true);
-        return new SoftwarePasskey(client, registered.credentialRowId());
+        return SoftwarePasskeys.register(webAuthnService, userMapper, user, evidence, "Provenance");
     }
 
     private VerifiedPasskey stepUp(User user, SoftwarePasskey passkey) {
-        Authentication auth = authenticate(user);
+        Authentication auth = SoftwarePasskeys.authenticate(user);
         PublicKeyCredentialRequestOptions options = webAuthnService.createStepUpOptions(auth);
-        com.webauthn4j.data.PublicKeyCredential<com.webauthn4j.data.AuthenticatorAssertionResponse,
-            com.webauthn4j.data.extension.client.AuthenticationExtensionClientOutput> got =
-            passkey.client().get(new com.webauthn4j.data.PublicKeyCredentialRequestOptions(
-                new DefaultChallenge(options.getChallenge().getBytes()), null, RP_ID, null,
-                com.webauthn4j.data.UserVerificationRequirement.PREFERRED, null));
-        PublicKeyCredential<AuthenticatorAssertionResponse> assertion =
-            PublicKeyCredential.<AuthenticatorAssertionResponse>builder()
-                .id(got.getId())
-                .rawId(new Bytes(got.getRawId()))
-                .type(PublicKeyCredentialType.PUBLIC_KEY)
-                .response(AuthenticatorAssertionResponse.builder()
-                    .authenticatorData(new Bytes(got.getResponse().getAuthenticatorData()))
-                    .clientDataJSON(new Bytes(got.getResponse().getClientDataJSON()))
-                    .signature(new Bytes(got.getResponse().getSignature()))
-                    .userHandle(new Bytes(got.getResponse().getUserHandle()))
-                    .build())
-                .clientExtensionResults(new ImmutableAuthenticationExtensionsClientOutputs())
-                .build();
-        return webAuthnService.finishStepUp(auth, options, assertion);
+        return webAuthnService.finishStepUp(auth, options, SoftwarePasskeys.sign(passkey, options));
     }
 
     private StepUpProof stampedProof(User user, VerifiedPasskey signed) {
@@ -512,12 +431,6 @@ class PrivilegedCredentialProvenanceIntegrationTest {
         StepUpProof proof = sessionSecurityService.recentStepUpProof(request.getSession(false), user.getId());
         assertNotNull(proof);
         return proof;
-    }
-
-    private Authentication authenticate(User user) {
-        Authentication auth = new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-        SecurityContextHolder.getContext().setAuthentication(auth);
-        return auth;
     }
 
     private int found(User founder) {

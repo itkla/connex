@@ -49,4 +49,18 @@ public interface PrivilegedCredentialAttestationMapper {
     int insertFoundingCoverage(
             @Param("orgId") int orgId,
             @Param("userId") int userId);
+
+    /**
+     * Records the coverage a redeemed grant gives the passkey that signed its redemption. It replaces
+     * an inherited row for that organization and leaves a direct one, founder or grantor, as it was.
+     *
+     * @param credentialRowId the attested passkey
+     * @param orgId the grant's organization
+     * @param grantId the redeemed grant
+     * @return the MySQL affected-row count
+     */
+    int upsertGrantorCoverage(
+            @Param("credentialRowId") int credentialRowId,
+            @Param("orgId") int orgId,
+            @Param("grantId") long grantId);
 }
