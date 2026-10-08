@@ -14,7 +14,7 @@ import {
 import { formatPasskeyApprovalCode, isCompletePasskeyApprovalCode } from "@/app/lib/passkeyApprovalCode";
 import { isWebAuthnCancellation } from "@/app/lib/webauthnCancellation";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
-import { toastInfo } from "@/app/lib/toast";
+import { toastError, toastInfo } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,7 +38,9 @@ const CODE_ERROR_ID = "passkey-approval-code-error";
  * Every reason a code can't be used reads the same, because the server answers them alike: the
  * dialog never tells someone guessing whether a code was wrong, already used, turned off or expired.
  * Each attempt asks the server for a fresh passkey challenge, since a refused attempt spends the
- * last one.
+ * last one. The server answers a passkey it could not verify with a 401, which elsewhere means the
+ * session ended; once the prompt has been answered, that 401 is reported as a failed passkey check
+ * and the dialog stays open for another try, rather than sending a signed-in member to sign in.
  *
  * @param open whether the dialog is showing
  * @param onOpenChange called when the dialog asks to open or close; ignored while a step is running
@@ -54,6 +56,7 @@ export default function PasskeyApprovalDialog({
     onApproved: (orgId: number) => void;
 }) {
     const t = useTranslations("AccountSecurity");
+    const tStepUp = useTranslations("PasskeyStepUp");
     const showApiError = useApiErrorToast("AccountSecurity");
     const [code, setCode] = useState("");
     const [refused, setRefused] = useState(false);
@@ -69,9 +72,11 @@ export default function PasskeyApprovalDialog({
         if (busy || !complete) return;
         setBusy(true);
         setRefused(false);
+        let answered = false;
         try {
             const optionsJSON = await beginMfaAttestation();
             const credential = await startAuthentication({ optionsJSON });
+            answered = true;
             const redeemed = await redeemMfaAttestation(code, credential);
             reset();
             onOpenChange(false);
@@ -81,6 +86,8 @@ export default function PasskeyApprovalDialog({
                 toastInfo(t("stepUpCanceled"));
             } else if (err instanceof ApiError && err.code === MFA_ATTESTATION_REFUSED_CODE) {
                 setRefused(true);
+            } else if (answered && err instanceof ApiError && err.status === 401) {
+                toastError(tStepUp("failed"));
             } else {
                 showApiError(err, "approvalFailed");
             }

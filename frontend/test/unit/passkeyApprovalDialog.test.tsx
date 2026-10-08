@@ -146,6 +146,20 @@ describe.each([
         expect(toastErrorMock).not.toHaveBeenCalled();
     });
 
+    it("reports a passkey the server could not verify as a failed check, not an ended session", async () => {
+        beginMfaAttestationMock.mockResolvedValueOnce({ challenge: "challenge" });
+        startAuthenticationMock.mockResolvedValueOnce(CREDENTIAL);
+        redeemMfaAttestationMock.mockRejectedValueOnce(new ApiError("Authentication failed", 401));
+
+        const { onApproved, onOpenChange, alertText } = await redeemWith("ABCD-EFGH-JKMN-PQRS");
+
+        expect(toastErrorMock).toHaveBeenCalledOnce();
+        expect(toastErrorMock).toHaveBeenCalledWith(messages.PasskeyStepUp.failed);
+        expect(onApproved).not.toHaveBeenCalled();
+        expect(onOpenChange).not.toHaveBeenCalled();
+        expect(alertText).toBeNull();
+    });
+
     it("reports any other failure in the shared error voice", async () => {
         beginMfaAttestationMock.mockRejectedValueOnce(new ApiError("unavailable", 503));
 
