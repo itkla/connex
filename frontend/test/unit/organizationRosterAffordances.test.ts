@@ -6,9 +6,10 @@ import { describe, expect, it } from "vitest";
  * Gate over the organization roster's write affordances (#1340 PR 6).
  *
  * The manifest records `orgWrite: "owner"` on the administrator roster, and every mutation behind it
- * — adding an administrator, changing a role, removing one — is `requireOrgOwner` on the backend.
- * §6's rule is to prefer no entry point over a locked door, so an organization administrator who is
- * not an owner must be offered none of the three.
+ * — adding an administrator, changing a role, removing one, creating or turning off a passkey
+ * approval code (#1534) — is `requireOrgOwner` on the backend. §6's rule is to prefer no entry point
+ * over a locked door, so an organization administrator who is not an owner must be offered none of
+ * them.
  *
  * **What this suite is, and what it is not.** It reads structure, not strings: each affordance is
  * located inside the brace-matched extent of the guard that controls it, so the check fails if a
@@ -48,7 +49,21 @@ type Affordance = {
 
 const AFFORDANCES: readonly Affordance[] = [
     { name: "change role", marker: 'aria-label={t("changeRole")}', guard: "{editable ? (" },
-    { name: "remove administrator", marker: 'aria-label={t("remove")}', guard: "{removable && (" },
+    {
+        name: "administrator actions menu",
+        marker: 'aria-label={t("memberActions")}',
+        guard: "{(removable || attestable) && (",
+    },
+    {
+        name: "passkey approval code",
+        marker: "onSelect={() => setApprovalTarget(member)}",
+        guard: "{attestable && (",
+    },
+    {
+        name: "remove administrator",
+        marker: "onSelect={() => setRemoveTarget(member)}",
+        guard: "{removable && (",
+    },
     { name: "add administrator", marker: 'aria-label={t("addEmailLabel")}', guard: "{isOwner && (" },
 ];
 
@@ -93,9 +108,10 @@ describe("the administrator roster keeps its owner-only controls behind an owner
         ).toContain('const isOwner = activeWorkspace?.orgRole === "owner";');
         expect(text).toContain("const editable = isOwner && !lockedSoleOwner;");
         expect(text).toContain("const removable = isOwner && !lockedSoleOwner;");
+        expect(text).toContain("const attestable = isOwner && !isSelf;");
     });
 
-    it("renders each of the three owner-only controls inside its guard", () => {
+    it("renders each owner-only control inside its guard", () => {
         const text = source();
 
         for (const affordance of AFFORDANCES) {

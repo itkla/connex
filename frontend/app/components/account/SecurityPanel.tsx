@@ -12,7 +12,7 @@ import {
     TrashIcon,
 } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
-import { startRegistration, WebAuthnError } from "@simplewebauthn/browser";
+import { startRegistration } from "@simplewebauthn/browser";
 
 import type { Passkey } from "@/app/lib/types";
 import {
@@ -29,6 +29,8 @@ import {
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { isWebAuthnCancellation } from "@/app/lib/webauthnCancellation";
 import { toastError, toastInfo, toastSuccess } from "@/app/lib/toast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { formatRelativeTime } from "@/app/lib/utils";
@@ -52,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
@@ -101,18 +104,12 @@ function deviceLabel(): string {
     return os ?? "Passkey";
 }
 
-function isCancellation(err: unknown): boolean {
-    if (err instanceof WebAuthnError && err.cause instanceof Error && err.cause.name === "NotAllowedError") {
-        return true;
-    }
-    return err instanceof Error && err.name === "NotAllowedError";
-}
-
 export default function SecurityPanel() {
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
     const now = useLiveNow();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const { workspaces } = useWorkspace();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
     const [loading, setLoading] = useState(true);
@@ -134,6 +131,7 @@ export default function SecurityPanel() {
     const [isRenaming, setIsRenaming] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Passkey | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [approvalOpen, setApprovalOpen] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -210,7 +208,7 @@ export default function SecurityPanel() {
             registrationStarted = true;
             await finishRegistration(optionsJSON);
         } catch (err) {
-            if (isCancellation(err)) {
+            if (isWebAuthnCancellation(err)) {
                 toastInfo(t(registrationStarted ? "canceled" : "stepUpCanceled"));
             } else if (handlePasskeyStepUpError(err)) {
                 return;
@@ -239,7 +237,7 @@ export default function SecurityPanel() {
             setPasswordOpen(false);
         } catch (err) {
             setCurrentPassword("");
-            if (isCancellation(err)) {
+            if (isWebAuthnCancellation(err)) {
                 toastInfo(t("canceled"));
                 setPasswordOpen(false);
             } else if (err instanceof ApiError && err.status === 401) {
@@ -273,7 +271,7 @@ export default function SecurityPanel() {
             if (handlePasskeyStepUpError(err)) {
                 return;
             }
-            if (isCancellation(err)) {
+            if (isWebAuthnCancellation(err)) {
                 toastInfo(t("stepUpCanceled"));
             } else {
                 toastError(t("renameFailed"));
@@ -295,7 +293,7 @@ export default function SecurityPanel() {
             if (handlePasskeyStepUpError(err)) {
                 return;
             }
-            if (isCancellation(err)) {
+            if (isWebAuthnCancellation(err)) {
                 toastInfo(t("stepUpCanceled"));
             } else {
                 toastError(t("removeFailed"));
@@ -303,6 +301,15 @@ export default function SecurityPanel() {
         } finally {
             setIsRemoving(false);
         }
+    };
+
+    const announceApproval = (orgId: number) => {
+        const organization = workspaces.find((workspace) => workspace.orgId === orgId)?.orgName;
+        toastSuccess(t("approvalDone"), {
+            description: organization
+                ? t("approvalDoneDescription", { organization })
+                : t("approvalDoneDescriptionGeneric"),
+        });
     };
 
     const addButton = (
@@ -433,7 +440,31 @@ export default function SecurityPanel() {
                             ))}
                         </ul>
                     ))}
+
+                {supported && !loading && !error && passkeys.length > 0 && (
+                    <div className="rounded-2xl border border-border bg-card px-5 py-4">
+                        <h3 className="text-sm font-medium text-foreground">{t("approvalTitle")}</h3>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                            {t("approvalDescription")}
+                        </p>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="inline"
+                            onClick={() => setApprovalOpen(true)}
+                            className="mt-3"
+                        >
+                            {t("approvalEnter")}
+                        </Button>
+                    </div>
+                )}
             </Rise>
+
+            <PasskeyApprovalDialog
+                open={approvalOpen}
+                onOpenChange={setApprovalOpen}
+                onApproved={announceApproval}
+            />
 
             <Dialog
                 open={passwordOpen}
