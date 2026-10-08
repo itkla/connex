@@ -9,6 +9,7 @@ import {
     EllipsisHorizontalIcon,
     EnvelopeIcon,
     GlobeAltIcon,
+    KeyIcon,
     LinkIcon,
     MagnifyingGlassIcon,
     TrashIcon,
@@ -30,9 +31,11 @@ import {
     getWorkspaceInvites,
     getWorkspaceMembers,
     getWorkspaceRoles,
+    issueWorkspaceMfaAttestation,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
+    revokeWorkspaceMfaAttestation,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -67,6 +70,7 @@ import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
 import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
+import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import {
@@ -213,6 +217,7 @@ function MembersWorkspacePanel({
     const [busyMemberId, setBusyMemberId] = useState<number | null>(null);
     const [removeTarget, setRemoveTarget] = useState<WorkspaceMember | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [approvalTarget, setApprovalTarget] = useState<WorkspaceMember | null>(null);
     const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
 
     const [inviteLinks, setInviteLinks] = useState<WorkspaceInviteLink[]>([]);
@@ -560,6 +565,11 @@ function MembersWorkspacePanel({
                                     : null;
                                 const currentBuiltInRoleIsGrantable = currentBuiltInRole != null
                                     && grantableBuiltInRoleSet.has(currentBuiltInRole);
+                                const attestable = !isSelf && !pending && !protectedOwner && (
+                                    member.roleId != null
+                                        ? canManageRoles && currentCustomRoleIsGrantable
+                                        : canManageMembers && currentBuiltInRoleIsGrantable
+                                );
                                 return (
                                     <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                         <Avatar>
@@ -646,7 +656,7 @@ function MembersWorkspacePanel({
                                             ) : null}
                                         </div>
 
-                                        {removable && (
+                                        {(removable || attestable) && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -657,14 +667,22 @@ function MembersWorkspacePanel({
                                                         <EllipsisHorizontalIcon className="size-5" />
                                                     </button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" className="w-40">
-                                                    <DropdownMenuItem
-                                                        variant="destructive"
-                                                        onSelect={() => setRemoveTarget(member)}
-                                                    >
-                                                        <TrashIcon className="size-4" />
-                                                        {t("remove")}
-                                                    </DropdownMenuItem>
+                                                <DropdownMenuContent align="end" className="w-56">
+                                                    {attestable && (
+                                                        <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
+                                                            <KeyIcon className="size-4" />
+                                                            {t("approvalCode")}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {removable && (
+                                                        <DropdownMenuItem
+                                                            variant="destructive"
+                                                            onSelect={() => setRemoveTarget(member)}
+                                                        >
+                                                            <TrashIcon className="size-4" />
+                                                            {t("remove")}
+                                                        </DropdownMenuItem>
+                                                    )}
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         )}
@@ -1042,6 +1060,14 @@ function MembersWorkspacePanel({
                 getDisplayName={(m) => m.displayName}
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
+            />
+
+            <PasskeyApprovalCodeDialog
+                target={approvalTarget}
+                organizationName={activeWorkspace?.orgName ?? ""}
+                onClose={() => setApprovalTarget(null)}
+                issue={(userId) => issueWorkspaceMfaAttestation(workspaceId, userId)}
+                revoke={(userId) => revokeWorkspaceMfaAttestation(workspaceId, userId)}
             />
         </div>
     );

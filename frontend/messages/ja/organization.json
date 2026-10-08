@@ -195,7 +195,9 @@
     "addButton": "管理者を追加",
     "addedToast": "管理者を追加しました",
     "roleUpdatedToast": "権限を更新しました",
-    "removedToast": "管理者を削除しました"
+    "removedToast": "管理者を削除しました",
+    "approvalCode": "パスキー承認コード",
+    "memberActions": "管理者の操作"
   },
   "OrgDomains": {
     "title": "許可ドメイン",
@@ -292,6 +294,15 @@
         },
         "workspace": {
           "teardown": "ワークスペースを削除しました"
+        }
+      },
+      "auth": {
+        "mfa": {
+          "attestation": {
+            "issued": "パスキー承認コードを発行しました",
+            "revoked": "パスキー承認コードを無効にしました",
+            "redeemed": "コードでパスキーを承認しました"
+          }
         }
       }
     },

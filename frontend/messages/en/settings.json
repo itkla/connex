@@ -134,5 +134,25 @@
         "description": "What has happened above {organization}'s workspaces, and whether the services behind them are healthy.",
         "metaDescription": "Review the organization audit log and check the health of the services behind it.",
         "diagnosticsDescription": "The state of this organization's background jobs, stored credentials, and provider readiness, with the deployment settings behind them."
+    },
+    "PasskeyApprovalCode": {
+        "title": "Passkey approval code",
+        "description": "{name} enters this code and confirms with one of their passkeys. That passkey then counts for administrator access in {organization}.",
+        "guidance": "Give the code to them yourself, in person or on a call you made. It works once and expires after 24 hours. A new code replaces the one before it.",
+        "revokePrompt": "Gave a code to the wrong person?",
+        "revoke": "Turn off the open code",
+        "revokedToast": "{name}'s open code no longer works",
+        "create": "Create code",
+        "cancel": "Cancel",
+        "createFailed": "Couldn't create the code",
+        "revokeFailed": "Couldn't turn off the code",
+        "issuedTitle": "Approval code for {name}",
+        "issuedDescription": "This is the only time the code is shown. If it's lost, create a new one.",
+        "copy": "Copy code",
+        "copied": "Copied",
+        "copyFailed": "Couldn't copy the code",
+        "copyFailedDescription": "Select the code and copy it yourself.",
+        "expires": "Expires {date}.",
+        "done": "Done"
     }
 }
