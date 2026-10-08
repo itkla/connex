@@ -8,6 +8,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import {
     ApiError,
     beginMfaAttestation,
+    completePrivilegedMfaEnrollment,
     MFA_ATTESTATION_REFUSED_CODE,
     redeemMfaAttestation,
 } from "@/app/lib/api";
@@ -41,6 +42,8 @@ const CODE_ERROR_ID = "passkey-approval-code-error";
  * last one. The server answers a passkey it could not verify with a 401, which elsewhere means the
  * session ended; once the prompt has been answered, that 401 is reported as a failed passkey check
  * and the dialog stays open for another try, rather than sending a signed-in member to sign in.
+ * A redemption that succeeds releases the browser's privileged-MFA confinement, as enrolling a
+ * passkey does; the server stays the authority and confines the browser again if it still must.
  *
  * @param open whether the dialog is showing
  * @param onOpenChange called when the dialog asks to open or close; ignored while a step is running
@@ -78,6 +81,7 @@ export default function PasskeyApprovalDialog({
             const credential = await startAuthentication({ optionsJSON });
             answered = true;
             const redeemed = await redeemMfaAttestation(code, credential);
+            completePrivilegedMfaEnrollment();
             reset();
             onOpenChange(false);
             onApproved(redeemed.orgId);

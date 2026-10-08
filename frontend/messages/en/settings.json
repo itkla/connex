@@ -148,6 +148,7 @@
         "revokeFailed": "Couldn't turn off the code",
         "issuedTitle": "Approval code for {name}",
         "issuedDescription": "This is the only time the code is shown. If it's lost, create a new one.",
+        "codeLabel": "Approval code",
         "copy": "Copy code",
         "copied": "Copied",
         "copyFailed": "Couldn't copy the code",

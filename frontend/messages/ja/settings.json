@@ -148,6 +148,7 @@
         "revokeFailed": "コードを無効にできませんでした",
         "issuedTitle": "{name} の承認コード",
         "issuedDescription": "このコードが表示されるのは今回だけです。紛失した場合は、新しいコードを発行してください。",
+        "codeLabel": "承認コード",
         "copy": "コードをコピー",
         "copied": "コピーしました",
         "copyFailed": "コードをコピーできませんでした",

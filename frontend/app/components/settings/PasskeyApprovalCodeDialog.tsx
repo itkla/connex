@@ -11,6 +11,7 @@ import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError"
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDateTime } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
     Dialog,
     DialogClose,
@@ -31,10 +32,11 @@ export type PasskeyApprovalCodeTarget = {
  * Creates or turns off a member's passkey approval code (#1534), for the workspace member list and the
  * organization administrator list alike; the caller supplies the scope's own create and turn-off
  * requests. The dialog explains what a code does before creating one, then shows the new code exactly
- * once with its expiry. While a code is showing, a click outside does not close the dialog, because a
- * code lost that way can never be shown again. Focus opens on Create code rather than on the first
- * focusable control, which is the link that turns off the open code, and moves to Copy code once a
- * code is showing.
+ * once with its expiry, in a read-only field that selects itself on focus, so it can be copied by
+ * keyboard when the clipboard is unavailable. While a code is showing, a click outside does not close
+ * the dialog, because a code lost that way can never be shown again. Focus opens on Create code
+ * rather than on the first focusable control, which is the link that turns off the open code, and
+ * moves to Copy code once a code is showing.
  *
  * Creating and turning off both need a fresh passkey check, which the API client runs and retries on
  * its own; a canceled or failed check is reported the way every other step-up reports it.
@@ -139,10 +141,14 @@ export default function PasskeyApprovalCodeDialog({
                             <DialogTitle>{t("issuedTitle", { name })}</DialogTitle>
                             <DialogDescription>{t("issuedDescription", { name })}</DialogDescription>
                         </DialogHeader>
-                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3">
-                            <code className="select-all font-mono text-lg font-medium tracking-widest text-foreground">
-                                {issued.code}
-                            </code>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Input
+                                readOnly
+                                value={issued.code}
+                                aria-label={t("codeLabel")}
+                                onFocus={(event) => event.currentTarget.select()}
+                                className="h-10 min-w-0 flex-1 font-mono text-lg font-medium tracking-widest md:text-lg"
+                            />
                             <Button
                                 type="button"
                                 variant="outline"
