@@ -865,6 +865,17 @@ export type Passkey = {
     lastUsedAt: string | null;
 };
 
+/** A passkey approval code, shown to the administrator who created it exactly once (#1534). */
+export type MfaAttestationCode = {
+    code: string;
+    expiresAt: string;
+};
+
+/** The organization whose administrator access a redeemed passkey approval code now covers (#1534). */
+export type MfaAttestationRedemption = {
+    orgId: number;
+};
+
 export type ForgotPasswordPayload = {
     email: string;
 };
