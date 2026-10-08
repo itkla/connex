@@ -9,11 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,8 +27,11 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -36,6 +41,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.MfaAttestationRefusedException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.integration.SoftwarePasskeys.SoftwarePasskey;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -44,6 +50,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -68,6 +75,7 @@ class PrivilegedMfaAttestationIntegrationTest {
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     private final List<Integer> workspaceIds = new ArrayList<>();
     private final List<Integer> organizationIds = new ArrayList<>();
@@ -154,6 +162,40 @@ class PrivilegedMfaAttestationIntegrationTest {
             () -> redeem(member, passkey, sessionOf(member), issued.code()));
         assertEquals(5, failedAttempts(member));
         assertEquals(List.of(), coverage(passkey.rowId()));
+    }
+
+    @Test
+    void revokingAnOpenCodeRecordsTheRevokerAndNoRedemptionCanUseItAfterwards() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
+        steppedUp(owner);
+        attestationService.revokeForWorkspace(workspace.getId(), owner.getId(), member.getId());
+
+        assertEquals(owner.getId(), jdbcTemplate.queryForObject(
+            "SELECT revoked_by_user_id FROM privileged_mfa_attestation_grant"
+                + " WHERE grantee_user_id = ? AND revoked_at IS NOT NULL",
+            Integer.class, member.getId()));
+        assertEquals("grant_unusable", refusalOf(member, passkey, issued.code()));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(List.of(0), attemptsOnEveryGrant(member));
+    }
+
+    @Test
+    void anExpiredCodeIsRefusedWithoutCoverageAndItsRefusalsAreNeverCounted() {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
+        jdbcTemplate.update(
+            "UPDATE privileged_mfa_attestation_grant SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)"
+                + " WHERE grantee_user_id = ?", member.getId());
+
+        assertEquals("grant_unusable", refusalOf(member, passkey, issued.code()));
+        assertThrows(MfaAttestationRefusedException.class,
+            () -> redeem(member, passkey, sessionOf(member), issued.code()));
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(List.of(0), attemptsOnEveryGrant(member));
+        assertEquals(1, openGrants(member));
     }
 
     @Test
@@ -247,57 +289,193 @@ class PrivilegedMfaAttestationIntegrationTest {
     }
 
     @Test
-    void twoConcurrentRedemptionsOfOneCodeClaimItExactlyOnce() throws Exception {
+    void aDeletionReservationCommittedWhileIssuanceWaitsOnTheAccountRefusesTheCode() throws Exception {
+        List<String> outcomes = commitWhileBlocked(
+            () -> userMapper.reserveAccountDeletion(member.getId(), UUID.randomUUID().toString()),
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_DEFAULT,
+            List.of(issuanceAs(owner, () -> attestationService.issueForWorkspace(
+                workspace.getId(), owner.getId(), member.getId()))));
+
+        assertEquals(List.of("User is not a member of this workspace"), outcomes);
+        assertEquals(0, openGrants(member));
+    }
+
+    @Test
+    void aTeardownFenceCommittedWhileAnOrganizationIssuanceWaitsRefusesTheCode() throws Exception {
+        User orgAdmin = newUser();
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), orgAdmin.getId(), "admin");
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> jdbcTemplate.update(
+                "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", organization.getId()),
+            "organization", organization.getId(), TransactionDefinition.ISOLATION_DEFAULT,
+            List.of(issuanceAs(owner, () -> attestationService.issueForOrganization(
+                organization.getId(), owner.getId(), orgAdmin.getId()))));
+
+        assertEquals(List.of("Requires the organization owner role"), outcomes);
+        assertEquals(0, openGrants(orgAdmin));
+    }
+
+    @Test
+    void twoRedemptionsBlockedOnTheSameAuthorityLocksClaimTheCodeExactlyOnce() throws Exception {
         SoftwarePasskey passkey = register(member);
         MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
         int epoch = userMapper.currentSessionEpoch(member.getId());
-        Callable<String> attempt = () -> {
-            SoftwarePasskeys.authenticate(member);
-            try {
-                attestationService.redeem(member.getId(), epoch, passkey.rowId(), issued.code());
-                return "claimed";
-            } catch (PrivilegedMfaAttestationService.AttestationRefusal refusal) {
-                return refusal.reason();
-            } finally {
-                SecurityContextHolder.clearContext();
-            }
-        };
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
-            Future<String> first = executor.submit(attempt);
-            Future<String> second = executor.submit(attempt);
-            List<String> outcomes = new ArrayList<>(List.of(
-                first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS)));
-            outcomes.sort(String::compareTo);
+        int firstAccount = Math.min(owner.getId(), member.getId());
+        Supplier<String> attempt = redemptionAs(member, epoch, passkey, issued.code());
 
-            assertEquals(List.of("claimed", "grant_unusable"), outcomes);
-            assertEquals(1, coverage(passkey.rowId()).size());
+        List<String> outcomes = new ArrayList<>(commitWhileBlocked(
+            () -> userMapper.lockById(firstAccount),
+            "app_user", firstAccount, TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(attempt, attempt)));
+        outcomes.sort(String::compareTo);
+
+        assertEquals(List.of("claimed", "grant_unusable"), outcomes);
+        assertEquals(1, coverage(passkey.rowId()).size());
+    }
+
+    @Test
+    void aSessionRevokedWhileARedemptionWaitsOnTheAccountIsRefusedUnderTheLocks() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> userMapper.bumpSessionEpoch(member.getId()),
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(redemptionAs(member, epoch, passkey, issued.code())));
+
+        assertEquals(List.of("session_not_current"), outcomes);
+        assertEquals(List.of(), coverage(passkey.rowId()));
+        assertEquals(1, openGrants(member));
+    }
+
+    @Test
+    void aPasskeyRemovedWhileARedemptionWaitsOnTheAccountIsNeverAttested() throws Exception {
+        SoftwarePasskey passkey = register(member);
+        MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
+        int epoch = userMapper.currentSessionEpoch(member.getId());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> {
+                userMapper.lockById(member.getId());
+                jdbcTemplate.update("DELETE FROM webauthn_credential WHERE id = ?", passkey.rowId());
+            },
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
+            List.of(redemptionAs(member, epoch, passkey, issued.code())));
+
+        assertEquals(List.of("credential_not_owned"), outcomes);
+        assertEquals(1, openGrants(member));
+    }
+
+    private record Coverage(int orgId, String source, Long grantId) {
+    }
+
+    /**
+     * Holds {@code change} uncommitted in a transaction of its own, then starts each contender in
+     * its own transaction of {@code isolation} and waits until MySQL reports it blocked on the held
+     * {@code table} row. Only then does the change commit. Returns each contender's outcome in
+     * order: what it returned, or the reason or message it was refused with.
+     */
+    private List<String> commitWhileBlocked(
+            Runnable change,
+            String table,
+            int heldRowId,
+            int isolation,
+            List<Supplier<String>> contenders) throws Exception {
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(contenders.size() + 1);
+        try {
+            Future<?> holder = executor.submit(() -> new TransactionTemplate(transactionManager)
+                .executeWithoutResult(status -> {
+                    change.run();
+                    held.countDown();
+                    await(release);
+                }));
+            assertTrue(held.await(30, TimeUnit.SECONDS), "the change was never held");
+            List<Future<String>> pending = new ArrayList<>();
+            for (Supplier<String> contender : contenders) {
+                AtomicLong connection = new AtomicLong();
+                CountDownLatch started = new CountDownLatch(1);
+                pending.add(executor.submit(() -> contend(isolation, connection, started, contender)));
+                assertTrue(started.await(30, TimeUnit.SECONDS), "a contender never started");
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(
+                    jdbcTemplate, connection.get(), table, Integer.toString(heldRowId));
+            }
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            List<String> outcomes = new ArrayList<>();
+            for (Future<String> outcome : pending) {
+                outcomes.add(outcome.get(30, TimeUnit.SECONDS));
+            }
+            return outcomes;
         } finally {
+            release.countDown();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
         }
     }
 
-    @Test
-    void aRedemptionReChecksTheSessionAndThePasskeyUnderItsLocks() {
-        SoftwarePasskey passkey = register(member);
-        MfaAttestationCodeDto issued = issueThroughWorkspace(owner, member);
-        int epoch = userMapper.currentSessionEpoch(member.getId());
-
-        PrivilegedMfaAttestationService.AttestationRefusal stale = assertThrows(
-            PrivilegedMfaAttestationService.AttestationRefusal.class,
-            () -> attestationService.redeem(member.getId(), epoch - 1, passkey.rowId(), issued.code()));
-        jdbcTemplate.update("DELETE FROM webauthn_credential WHERE id = ?", passkey.rowId());
-        PrivilegedMfaAttestationService.AttestationRefusal gone = assertThrows(
-            PrivilegedMfaAttestationService.AttestationRefusal.class,
-            () -> attestationService.redeem(member.getId(), epoch, passkey.rowId(), issued.code()));
-
-        assertEquals("session_not_current", stale.reason());
-        assertEquals("credential_not_owned", gone.reason());
-        assertEquals(1, openGrants(member));
+    private String contend(
+            int isolation, AtomicLong connection, CountDownLatch started, Supplier<String> contender) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(isolation);
+        try {
+            return transaction.execute(status -> {
+                connection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                started.countDown();
+                return contender.get();
+            });
+        } catch (PrivilegedMfaAttestationService.AttestationRefusal refusal) {
+            return refusal.reason();
+        } catch (ResourceNotFoundException | ForbiddenException refused) {
+            return refused.getMessage();
+        }
     }
 
-    private record Coverage(int orgId, String source, Long grantId) {
+    private Supplier<String> issuanceAs(User grantor, Supplier<MfaAttestationCodeDto> issue) {
+        return () -> {
+            steppedUp(grantor);
+            try {
+                issue.get();
+                return "issued";
+            } finally {
+                SecurityContextHolder.clearContext();
+                RequestContextHolder.resetRequestAttributes();
+            }
+        };
+    }
+
+    private Supplier<String> redemptionAs(User grantee, int epoch, SoftwarePasskey passkey, String code) {
+        return () -> {
+            SoftwarePasskeys.authenticate(grantee);
+            try {
+                attestationService.redeem(grantee.getId(), epoch, passkey.rowId(), code);
+                return "claimed";
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
+    }
+
+    private String refusalOf(User grantee, SoftwarePasskey passkey, String code) {
+        SoftwarePasskeys.authenticate(grantee);
+        int epoch = userMapper.currentSessionEpoch(grantee.getId());
+        return assertThrows(PrivilegedMfaAttestationService.AttestationRefusal.class,
+            () -> attestationService.redeem(grantee.getId(), epoch, passkey.rowId(), code)).reason();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(30, TimeUnit.SECONDS)) {
+                throw new AssertionError("the held change was never released");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while holding the change", interrupted);
+        }
     }
 
     private MfaAttestationCodeDto issueThroughWorkspace(User grantor, User grantee) {
@@ -354,6 +532,12 @@ class PrivilegedMfaAttestationIntegrationTest {
                 + " WHERE grantee_user_id = ? AND revoked_at IS NULL",
             Integer.class, grantee.getId());
         return attempts == null ? 0 : attempts;
+    }
+
+    private List<Integer> attemptsOnEveryGrant(User grantee) {
+        return jdbcTemplate.queryForList(
+            "SELECT failed_attempts FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ? ORDER BY id",
+            Integer.class, grantee.getId());
     }
 
     private int openGrants(User grantee) {
