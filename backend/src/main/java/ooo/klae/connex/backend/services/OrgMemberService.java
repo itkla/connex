@@ -243,14 +243,11 @@ public class OrgMemberService {
     }
 
     /**
-     * Locks the organization's owner rows and verifies the actor's current owner
-     * authority. The lock makes authorization, the last-owner check, and the
-     * subsequent mutation one serialized step inside the surrounding transaction.
-     */
-    /**
      * Locks an organization owner's authority to attest an org member's passkeys for privileged
      * MFA (#1534), in {@link #setMember}'s order: both accounts shared and ascending, the
-     * organization exclusive, the owner rows, then exactly the member's own row.
+     * organization exclusive and only while it is active, the owner rows, then exactly the
+     * member's own row. Both accounts' deletion reservations are read under their locks, so a
+     * reservation or teardown that commits while this waits is never missed.
      *
      * @param orgId the organization
      * @param grantorId the owner issuing, revoking or standing behind a redeemed grant
@@ -259,17 +256,22 @@ public class OrgMemberService {
     void lockAttestationAuthority(int orgId, int grantorId, int granteeId) {
         requireOrgOwner(orgId, grantorId);
         lockMembershipUserRoots(grantorId, granteeId);
-        if (organizationMapper.lockById(orgId) == null
-                || userMapper.isAccountDeletionReserved(grantorId)) {
+        if (organizationMapper.lockActiveById(orgId) == null
+                || !Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(grantorId))) {
             throw new ForbiddenException("Requires the organization owner role");
         }
         lockCurrentOwnerIds(orgId, grantorId);
-        if (userMapper.isAccountDeletionReserved(granteeId)
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(granteeId))
                 || orgMemberMapper.lockExactRole(orgId, granteeId) == null) {
             throw new ResourceNotFoundException("User is not a member of this organization");
         }
     }
 
+    /**
+     * Locks the organization's owner rows and verifies the actor's current owner
+     * authority. The lock makes authorization, the last-owner check, and the
+     * subsequent mutation one serialized step inside the surrounding transaction.
+     */
     private List<Integer> lockCurrentOwnerIds(int orgId, int actorId) {
         List<Integer> ownerIds = orgMemberMapper.lockOwnerIds(orgId);
         if (!ownerIds.contains(actorId)) {

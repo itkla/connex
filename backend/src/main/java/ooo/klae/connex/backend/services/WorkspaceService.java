@@ -1403,7 +1403,9 @@ public class WorkspaceService {
      * and a custom role {@code ROLE_MANAGE}, each under the grant ceiling, and only an owner may
      * attest an owner. It takes the role-mutation lock order (accounts ascending, the workspace
      * root, both memberships, then the custom roles involved and their permission sets) and then
-     * the workspace's organization shared, after the workspace as teardown does.
+     * the workspace's organization shared, after the workspace as teardown does. Both accounts'
+     * deletion reservations are read under their locks, so one that commits while this waits is
+     * never missed.
      *
      * @param workspaceId the workspace the grant is issued through
      * @param grantorId the account holding the authority
@@ -1426,11 +1428,12 @@ public class WorkspaceService {
                 || organizationMapper.lockActiveByIdForShare(workspace.getOrgId()) == null) {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
         }
-        if (userMapper.isAccountDeletionReserved(grantorId)) {
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(grantorId))) {
             throw new ForbiddenException("Requires the " + required + " permission in this workspace");
         }
         WorkspaceMember target = locks.targetMembership();
-        if (userMapper.isAccountDeletionReserved(granteeId) || !"active".equals(target.getStatus())) {
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(granteeId))
+                || !"active".equals(target.getStatus())) {
             throw roleMutationTargetNotFound();
         }
         if (!Objects.equals(target.getRoleId(), granteeRoleId)) {

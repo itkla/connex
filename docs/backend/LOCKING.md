@@ -1299,9 +1299,14 @@ account root.
     5. the workspace's organization, shared and after the workspace, as teardown takes them.
   - **Org grants** reuse `setMember`'s order (`OrgMemberService.lockAttestationAuthority`):
     1. accounts shared, ascending;
-    2. the organization exclusively, before the owner rows, so nothing upgrades a shared lock;
+    2. the organization exclusively, before the owner rows, so nothing upgrades a shared lock.
+       It is locked only while active (`lockActiveById`), so a teardown fence that commits while
+       the request waits refuses it;
     3. the owner rows;
     4. exactly the member's own `org_member` row (`lockExactRole`, with no join).
+  - **Deletion reservations** of both accounts are read with locking reads once the accounts are
+    locked. Issuing and revoking run at `REPEATABLE READ`, and an ordinary read would answer from
+    the snapshot taken before the request waited, missing a reservation committed meanwhile.
   - **After the authority locks**, the grant row (supersede, claim), then the coverage insert, whose
     foreign-key checks take the passkey and organization rows shared. The scoped audit comes last.
   - **Redemption** runs the passkey assertion in its own earlier transaction. Verifying advances the
