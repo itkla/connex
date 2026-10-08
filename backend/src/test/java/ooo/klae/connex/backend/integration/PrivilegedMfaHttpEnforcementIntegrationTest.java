@@ -1,11 +1,16 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -112,5 +117,35 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 "Unenrolled Privileged Integration",
                 "Privileged account confined pending MFA enrollment",
                 "enrollment_required");
+    }
+
+    /**
+     * Through the real filter chain, a confined account still reaches the two attestation
+     * redemption routes (#1534), and CSRF still guards them. Their neighbours stay confined. This
+     * proves only that the routes are reachable; confining an enrolled account whose passkey lacks
+     * coverage belongs to enforcement.
+     */
+    @Test
+    void aConfinedAccountReachesOnlyTheAttestationRedemptionRoutesAndOnlyWithCsrf() throws Exception {
+        mockMvc.perform(post("/api/auth/webauthn/attestation/options")
+                        .session(stampedSession()).with(authentication(authentication)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(not(containsString("PRIVILEGED_MFA"))));
+        mockMvc.perform(post("/api/auth/webauthn/attestation/options")
+                        .session(stampedSession()).with(authentication(authentication)).with(csrf().asHeader()))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/auth/webauthn/attestation")
+                        .session(stampedSession()).with(authentication(authentication)).with(csrf().asHeader())
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/auth/webauthn/attestation")
+                        .session(stampedSession()).with(authentication(authentication)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
+        mockMvc.perform(post("/api/workspaces/3/members/9/mfa-attestations")
+                        .session(stampedSession()).with(authentication(authentication)).with(csrf().asHeader()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
     }
 }
