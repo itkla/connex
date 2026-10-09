@@ -14,6 +14,14 @@ overrides:
   # wrangler/miniflare pull undici below 7.29.1 (GHSA-rfgv-xxqx-mfg5 and
   # GHSA-w293-vg96-wgc3, both high). Caret keeps the 7.x line.
   undici: ^7.29.1
+  # GHSA-wq5f-xc86-pv6w (high, librsvg CVE-2026-96889): next's optional sharp below 0.35.5.
+  sharp: 0.35.5
+  # GHSA-6qxp-vccf-f47h (high): shadcn's MCP SDK below 1.31.0 could send OAuth credentials elsewhere.
+  '@modelcontextprotocol/sdk': ^1.31.0
+  # GHSA-68fv-2mgg-jv7q (high): next > postcss > source-map-js below 1.2.2.
+  source-map-js: ^1.2.2
+  # GHSA-jqcg-44mw-7w3h (critical): shadcn > MCP SDK > express > proxy-addr below 2.0.8.
+  proxy-addr: ^2.0.8
 # Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
 # than one day and versions without registry publish time are refused, and a
 # package whose trust evidence (staged publish, trusted publisher, provenance)
@@ -34,3 +42,15 @@ trustPolicyExclude:
   # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
   # Remove once nothing in the lockfile resolves semver@6.
   - semver@6.3.1
+# Advisories pnpm audit tolerates. Each has no patched release and cannot be reached
+# from runtime code or user input; each entry is owner-approved and commented with the
+# reason, the approver, and the removal condition (frontend/AGENTS.md has the procedure).
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion from deeply nested patterns (CVE-2026-93687), high,
+    # with no patched release. Reached only through shadcn's CLI, which expands
+    # developer-written globs; the app imports only shadcn/tailwind.css (#1969).
+    # Approved: Hunter Nakagawa, 2026-10-09.
+    # Remove once braces ships a fix and pnpm audit passes without this entry, or
+    # re-review it as soon as anything other than shadcn depends on braces.
+    - GHSA-vfj7-8cjw-p6xm

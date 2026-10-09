@@ -4,7 +4,8 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
 overrides:
-  sharp: 0.35.4
+  # GHSA-wq5f-xc86-pv6w (high, librsvg CVE-2026-96889): sharp below 0.35.5.
+  sharp: 0.35.5
   fast-uri: ^3.1.8
   undici: ^7.29.1
   ip-address: ^10.3.1
@@ -12,7 +13,8 @@ overrides:
   postcss: '>=8.5.25'
   'nanoid@3': '^3.3.18'
   hono: 4.13.5
-  '@modelcontextprotocol/sdk': ^1.30.0
+  # GHSA-6qxp-vccf-f47h (high): shadcn's MCP SDK below 1.31.0 could send OAuth credentials elsewhere.
+  '@modelcontextprotocol/sdk': ^1.31.0
   '@hono/node-server': ^2.0.5
   # GHSA-6j4f-fj2g-mc7p (<1.1.19) and GHSA-qhr7-859c-m2p7 (<1.1.20), both high.
   'brace-expansion@1': 1.1.21
@@ -20,6 +22,12 @@ overrides:
   # floor, so a future major cannot be pulled in the way >= did for fast-uri (#1873).
   'brace-expansion@>=3': ^5.0.11
   'qs@<6.16.0': 6.16.0
+  # GHSA-c8x8-7fp4-3x9w (high, XSS): the editor's prosemirror-view, pulled by @tiptap/pm, below 1.42.3.
+  prosemirror-view: ^1.42.3
+  # GHSA-68fv-2mgg-jv7q (high): next > postcss > source-map-js below 1.2.2.
+  source-map-js: ^1.2.2
+  # GHSA-jqcg-44mw-7w3h (critical): shadcn > MCP SDK > express > proxy-addr below 2.0.8.
+  proxy-addr: ^2.0.8
   'baseline-browser-mapping@<2.11.0': 2.11.0
   # React's optional menu ranges otherwise select releases with newer exact core/PM peers.
   '@tiptap/extension-bubble-menu': 3.30.5
@@ -49,3 +57,15 @@ trustPolicyExclude:
   # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
   # Remove once nothing in the lockfile resolves semver@6.
   - semver@6.3.1
+# Advisories pnpm audit tolerates. Each has no patched release and cannot be reached
+# from runtime code or user input; each entry is owner-approved and commented with the
+# reason, the approver, and the removal condition (frontend/AGENTS.md has the procedure).
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion from deeply nested patterns (CVE-2026-93687), high,
+    # with no patched release. Reached only through shadcn's CLI and eslint-config-next,
+    # which expand developer-written globs; no app code imports either (#1969).
+    # Approved: Hunter Nakagawa, 2026-10-09.
+    # Remove once braces ships a fix and pnpm audit passes without this entry, or
+    # re-review it as soon as anything other than shadcn and eslint-config-next depends on braces.
+    - GHSA-vfj7-8cjw-p6xm
