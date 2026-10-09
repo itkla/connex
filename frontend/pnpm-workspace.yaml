@@ -57,3 +57,14 @@ trustPolicyExclude:
   # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
   # Remove once nothing in the lockfile resolves semver@6.
   - semver@6.3.1
+# Advisories pnpm audit tolerates. Each has no patched release and cannot be reached
+# from runtime code or user input; each entry is owner-approved and commented with the
+# reason, the approver, and the removal condition (frontend/AGENTS.md has the procedure).
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion from deeply nested patterns (CVE-2026-93687), high,
+    # with no patched release. Reached only through shadcn's CLI and eslint-config-next,
+    # which expand developer-written globs; no app code imports either (#1969).
+    # Remove once braces ships a fix and pnpm audit passes without this entry, or
+    # re-review it as soon as anything other than shadcn and eslint-config-next depends on braces.
+    - GHSA-vfj7-8cjw-p6xm
