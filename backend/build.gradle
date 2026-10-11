@@ -1,12 +1,13 @@
 buildscript {
-	// The Spring Boot Gradle plugin pulls spring-boot-buildpack-platform, whose POM pins
-	// httpclient5 5.6.1 -> httpcore5 5.4 onto the PLUGIN classpath. Project-level
-	// dependencyManagement (ext overrides below) cannot reach that configuration, so the
-	// dependency-submission graph kept reporting the vulnerable declared nodes and Dependabot
-	// alerts #113/#114/#117 stayed open after PR #1552. Build-time tooling only - never shipped -
-	// but constrained here so the submitted graph carries no vulnerable node at all. The same
-	// plugin puts tools.jackson 3.1.4 on that classpath (#1971); keep the Jackson pins equal to
-	// ext['jackson-bom.version'] below, which this block cannot read.
+	// The Spring Boot Gradle plugin pulls spring-boot-buildpack-platform onto the PLUGIN
+	// classpath; under Boot 4.1.0 its POM pinned httpclient5 5.6.1 -> httpcore5 5.4 there.
+	// Project-level dependencyManagement (the ext overrides below) cannot reach that
+	// configuration, so the dependency-submission graph kept reporting the vulnerable declared
+	// nodes and Dependabot alerts #113/#114/#117 stayed open after PR #1552. Build-time tooling
+	// only - never shipped - but constrained here so the submitted graph carries no vulnerable
+	// node, whatever a later plugin release declares. The same plugin put tools.jackson 3.1.4
+	// on that classpath (#1971); keep the Jackson pins equal to ext['jackson-bom.version']
+	// below, which this block cannot read.
 	configurations.classpath {
 		resolutionStrategy {
 			force 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
@@ -21,7 +22,7 @@ buildscript {
 plugins {
 	id 'java'
 	id 'war'
-	id 'org.springframework.boot' version '4.1.0'
+	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -69,16 +70,6 @@ repositories {
 ext['tomcat.version'] = '11.0.26'
 ext['jackson-2-bom.version'] = '2.21.7'
 ext['jackson-bom.version'] = '3.1.7'
-ext['logback.version'] = '1.5.35'
-
-// Spring Boot 4.1.0 manages these below their patched versions (netty 4.2.15.Final,
-// log4j2 2.25.4, httpcore5 5.4.2, httpclient5 5.6.1) and pins httpclient5 downward from
-// what the AWS SDK requests. These overrides raise them past the advisories tracked in #1379;
-// removing one silently reintroduces a known CVE.
-ext['netty.version'] = '4.2.17.Final'
-ext['log4j2.version'] = '2.25.5'
-ext['httpcore5.version'] = '5.4.3'
-ext['httpclient5.version'] = '5.6.4'
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -99,7 +90,7 @@ dependencies {
 	implementation 'com.twelvemonkeys.imageio:imageio-webp:3.14.0'
 	implementation 'org.springframework.boot:spring-boot-flyway'
 	implementation 'org.flywaydb:flyway-mysql'
-	implementation("org.springframework.data:spring-data-commons:4.1.0")
+	implementation("org.springframework.data:spring-data-commons:4.1.1")
 	implementation 'org.springframework.security:spring-security-webauthn'
 	implementation 'org.springframework.security:spring-security-messaging'
 	implementation platform('software.amazon.awssdk:bom:2.55.10')
