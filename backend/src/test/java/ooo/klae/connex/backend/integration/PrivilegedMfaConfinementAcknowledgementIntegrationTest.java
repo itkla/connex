@@ -366,18 +366,35 @@ class PrivilegedMfaConfinementAcknowledgementIntegrationTest {
         setOrganizationRole(administrator, Map.of("orgRole", "admin")).andExpect(status().isNoContent());
     }
 
-    /** A {@code null} acknowledgement is no acknowledgement, and is accepted whatever the switch. */
+    /**
+     * A {@code null} acknowledgement is no acknowledgement on every edit, and is accepted whatever
+     * the switch.
+     */
     @Test
     void aNullAcknowledgementAcknowledgesNothing() throws Exception {
-        Map<String, Object> body = new HashMap<>();
-        body.put("role", "admin");
-        body.put("acknowledgeConfinement", null);
         User member = workspaceMember();
+        User addedByEmail = workspaceMember();
+        User addedById = workspaceMember();
+        int role = customRole(List.of(UNPRIVILEGED));
+        User assignee = workspaceMember();
+        workspaceMapper.setMemberCustomRole(workspace.getId(), assignee.getId(), role);
+        Map<String, Object> promotion = withNullAcknowledgement(Map.of("role", "admin"));
+        Map<String, Object> byEmail = withNullAcknowledgement(
+                Map.of("email", addedByEmail.getEmail(), "orgRole", "admin"));
+        Map<String, Object> byId = withNullAcknowledgement(Map.of("orgRole", "admin"));
+        Map<String, Object> widening = withNullAcknowledgement(
+                Map.of("name", "Taggers", "permissions", List.of(UNPRIVILEGED, PRIVILEGED)));
 
-        changeRole(member, body).andExpect(status().isConflict());
+        changeRole(member, promotion).andExpect(status().isConflict());
+        addToOrganization(byEmail).andExpect(status().isConflict());
+        setOrganizationRole(addedById, byId).andExpect(status().isConflict());
+        updateRole(role, widening).andExpect(status().isConflict());
 
         privilegedMfaProperties.setAttestationEnforced("false");
-        changeRole(member, body).andExpect(status().isOk());
+        changeRole(member, promotion).andExpect(status().isOk());
+        addToOrganization(byEmail).andExpect(status().isNoContent());
+        setOrganizationRole(addedById, byId).andExpect(status().isNoContent());
+        updateRole(role, widening).andExpect(status().isOk());
         assertEquals("admin", workspaceRole(member));
     }
 
@@ -448,6 +465,12 @@ class PrivilegedMfaConfinementAcknowledgementIntegrationTest {
         return mockMvc.perform(put("/api/orgs/{id}/members/{userId}", organization.getId(), member.getId())
                 .session(ownerSession).with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));
+    }
+
+    private static Map<String, Object> withNullAcknowledgement(Map<String, ?> fields) {
+        Map<String, Object> body = new HashMap<>(fields);
+        body.put("acknowledgeConfinement", null);
+        return body;
     }
 
     private JsonNode refusalOf(User member) throws Exception {
