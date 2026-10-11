@@ -183,6 +183,35 @@ describe("passkey approval code requests", () => {
         expect(requests.some(({ url }) => url.endsWith("/mfa-attestations"))).toBe(false);
     });
 
+    it("lets a confined account leave a workspace or an organization, and nothing else new", async () => {
+        stubBrowser({ pathname: settingsDestination("personal.security").href, search: "?mfa=enroll" });
+        const requests = stubBackend((url) => {
+            if (url.endsWith("/api/orgs/3/leave")) return new Response(null, { status: 204 });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+
+        await expect(api.leaveOrganization(3)).resolves.toBeUndefined();
+        await expect(api.addOrgMemberByEmail(3, "someone@example.com", "admin")).rejects.toMatchObject({
+            status: 403,
+            code: api.PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+        });
+
+        expect(requests.filter(({ method }) => method === "POST").map(({ url }) => url))
+            .toEqual(["/api/orgs/3/leave"]);
+    });
+
+    it("keeps the client's safe exits exactly the server filter's", () => {
+        const filter = readFileSync(FILTER_SOURCE, "utf8");
+        const client = readFileSync(CLIENT_SOURCE, "utf8");
+        const server = filter.match(/SAFE_EXIT_PATH = Pattern\.compile\("([^"]+)"\)/);
+        const browser = client.match(/PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = \/\^(.+)\$\/;/);
+
+        expect(server).not.toBeNull();
+        expect(browser).not.toBeNull();
+        expect(browser?.[1].replaceAll("\\/", "/")).toBe(server?.[1].replaceAll("\\\\", "\\"));
+    });
+
     it("keeps the client's confinement allowlist exactly the server filter's", () => {
         const filter = readFileSync(FILTER_SOURCE, "utf8");
         const client = readFileSync(CLIENT_SOURCE, "utf8");

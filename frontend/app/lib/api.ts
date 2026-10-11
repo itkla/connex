@@ -410,6 +410,11 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/webauthn/attestation/options",
     "/api/auth/webauthn/attestation",
 ]);
+/**
+ * The safe exits (#1534): leaving the workspace or organization whose membership confines the
+ * account. Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
+ */
+const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^\/api\/(?:workspaces|orgs)\/\d+\/leave$/;
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
@@ -479,7 +484,8 @@ function shouldSuppressDuringPrivilegedMfaEnrollment(path: string, method?: stri
     const pathname = path.split("?")[0];
     const normalizedMethod = (method ?? "GET").toUpperCase();
     return !(normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
-        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname));
+        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname))
+        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_SAFE_EXIT_POST_PATH.test(pathname));
 }
 
 function isCsrfRetryExemptMutation(path: string): boolean {
@@ -4831,6 +4837,14 @@ export function setOrgMemberRole(orgId: number, userId: number, orgRole: Types.O
 
 export function removeOrgMember(orgId: number, userId: number) {
     return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}`);
+}
+
+/**
+ * Leaves the organization, removing the caller's own org membership (#1534). It stays available
+ * while privileged MFA confines the caller; the last owner cannot leave.
+ */
+export function leaveOrganization(orgId: number) {
+    return postJson<void>(`/api/orgs/${orgId}/leave`);
 }
 
 /** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
