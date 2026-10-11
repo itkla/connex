@@ -33,6 +33,18 @@
     )
   </select>
 
+  <select id="isActiveWorkspaceTenant" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id
+      WHERE w.org_id = #{orgId}
+        AND w.lifecycle_state = 'active'
+        AND wm.user_id = #{userId}
+        AND wm.status = 'active'
+    )
+  </select>
+
   <insert id="addMember">
     INSERT INTO org_member (org_id, user_id, org_role)
     VALUES (#{orgId}, #{userId}, #{orgRole})

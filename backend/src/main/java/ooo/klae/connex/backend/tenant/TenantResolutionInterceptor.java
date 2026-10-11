@@ -124,7 +124,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         "/api/orgs/\\d+");
     private static final Set<String> WORKSPACE_RECOVERY_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final Pattern SELECTION_PATH = Pattern.compile(
-        "/api/workspaces|/api/workspaces/\\d+/(?:switch|accept|decline|leave)"
+        "/api/workspaces|/api/workspaces/\\d+/(?:switch|accept|decline|leave)|/api/orgs/\\d+/leave"
             + "|/api/invites/(?:exchange|accept)|/api/invite-links/(?:exchange|accept)"
             + "|/api/delivery/unsubscribe/exchange|/api/document-acceptance/exchange");
     private static final Set<String> JOURNAL_METHODS = Set.of(

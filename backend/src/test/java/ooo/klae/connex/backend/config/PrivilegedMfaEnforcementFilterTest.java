@@ -249,6 +249,31 @@ class PrivilegedMfaEnforcementFilterTest {
         verifyNoInteractions(auditService);
     }
 
+    /**
+     * A confined account can always leave the workspace or organization whose membership confines
+     * it (#1534), whichever standing confines it. Only those exact POSTs pass: other methods on the
+     * same paths, and identifiers that are not canonical decimals, stay confined.
+     */
+    @Test
+    void aConfinedAccountCanAlwaysLeaveTheWorkspaceOrOrganizationThatConfinesIt() throws Exception {
+        for (PrivilegedMfaStanding standing : List.of(
+                PrivilegedMfaStanding.ENROLLMENT_REQUIRED, PrivilegedMfaStanding.ATTESTATION_REQUIRED)) {
+            org.mockito.Mockito.reset(filterChain);
+            when(privilegedAccountService.enforcedStanding(7)).thenReturn(standing);
+
+            execute("POST", "/api/workspaces/3/leave");
+            execute("POST", "/api/orgs/5/leave");
+            verify(filterChain, org.mockito.Mockito.times(2)).doFilter(any(), any());
+
+            assertEquals(403, execute("GET", "/api/orgs/5/leave").getStatus());
+            assertEquals(403, execute("DELETE", "/api/workspaces/3/leave").getStatus());
+            assertEquals(403, execute("POST", "/api/orgs/0x5/leave").getStatus());
+            assertEquals(403, execute("POST", "/api/orgs/5/leave/extra").getStatus());
+            assertEquals(403, execute("POST", "/api/orgs/5/members").getStatus());
+            verify(filterChain, org.mockito.Mockito.times(2)).doFilter(any(), any());
+        }
+    }
+
     @Test
     void allowlistedRequestsNeverReadStanding() throws Exception {
         execute("GET", "/api/auth/me");

@@ -58,6 +58,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/recover",
             "/api/auth/webauthn/attestation/options",
             "/api/auth/webauthn/attestation");
+    private static final Pattern SAFE_EXIT_PATH = Pattern.compile("/api/(?:workspaces|orgs)/\\d+/leave");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
     private static final Set<String> LINK_FLOW_PATHS = Set.of(
@@ -105,6 +106,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
         String path = RequestPathNormalizer.apiPath(request);
         if (properties.isEnforced()
                 && !isEnrollmentPath(request.getMethod(), path)
+                && !isSafeExitPath(request.getMethod(), path)
                 && !isLinkFlowPath(path)) {
             PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(user.getId());
             if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
@@ -201,6 +203,14 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     static boolean isLinkFlowPath(String path) {
         return LINK_FLOW_PATHS.stream()
                 .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
+    }
+
+    /**
+     * The safe exits (#1534): leaving the workspace or organization whose membership confines the
+     * account. Leaving only gives up authority, so a confined account can always do it.
+     */
+    private static boolean isSafeExitPath(String method, String path) {
+        return "POST".equals(method) && SAFE_EXIT_PATH.matcher(path).matches();
     }
 
     private static boolean isEnrollmentPath(String method, String path) {

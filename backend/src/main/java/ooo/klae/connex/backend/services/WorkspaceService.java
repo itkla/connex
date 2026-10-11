@@ -1943,7 +1943,12 @@ public class WorkspaceService {
             null, "Declined invitation", null);
     }
 
-    /** The user leaves a workspace they belong to, unassigning their tasks and clearing deal ownership. */
+    /**
+     * The user leaves a workspace they belong to, unassigning their tasks and clearing deal
+     * ownership. This is also the safe exit for an account the membership confines under
+     * privileged MFA (#1534), so the audit is strict: an exit that cannot be recorded does not
+     * happen.
+     */
     public void leaveWorkspace(int workspaceId, int userId) {
         membershipRemovalTransaction.execute(
             workspaceId,
@@ -1972,7 +1977,7 @@ public class WorkspaceService {
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
-        auditService.recordScoped(
+        auditService.recordStrictScoped(
             "workspace.member.leave", "workspace", workspaceId, workspaceId, orgId,
             null, "Left the workspace", null);
     }

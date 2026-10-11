@@ -16,6 +16,16 @@ import ooo.klae.connex.backend.dto.OrganizationLayoutAuthorityMemberDto;
 public interface OrgMemberMapper {
     String getRole(@Param("orgId") int orgId, @Param("userId") int userId);
     String getRoleForUpdate(@Param("orgId") int orgId, @Param("userId") int userId);
+
+    /**
+     * Whether the account is an active member of an active workspace in the organization, which
+     * is what an account must be before it can be given an organization membership (#1534).
+     *
+     * @param orgId the organization
+     * @param userId the account
+     * @return true for an existing tenant of the organization
+     */
+    boolean isActiveWorkspaceTenant(@Param("orgId") int orgId, @Param("userId") int userId);
     boolean isMember(@Param("orgId") int orgId, @Param("userId") int userId);
     int addMember(@Param("orgId") int orgId, @Param("userId") int userId, @Param("orgRole") String orgRole);
 

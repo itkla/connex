@@ -401,6 +401,10 @@ class AiProviderConfigConcurrencyIntegrationTest {
             return realOrganizationMapper.lockById(organization.getId());
         }).when(organizationMapper).lockById(organization.getId());
         doAnswer(invocation -> {
+            organizationLockCalls.incrementAndGet();
+            return realOrganizationMapper.lockActiveById(organization.getId());
+        }).when(organizationMapper).lockActiveById(organization.getId());
+        doAnswer(invocation -> {
             List<Integer> ownerIds = realOrgMemberMapper.lockOwnerIds(organization.getId());
             ownerRowsLocked.countDown();
             if (!releaseRoleChange.await(10, TimeUnit.SECONDS)) {
