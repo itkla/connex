@@ -80,7 +80,19 @@
     "confirmationFailed": "Could not send the confirmation email",
     "confirmationUnavailable": "This instance cannot send email. Ask an administrator to configure it.",
     "confirmationRequired": "Confirm the emailed link before adding your first passkey",
-    "confirmationSatisfied": "Confirmed. You can add your passkey now."
+    "confirmationSatisfied": "Confirmed. You can add your passkey now.",
+    "approvalTitle": "Passkey approval code",
+    "approvalDescription": "If an administrator gave you a code, enter it and confirm with the passkey you want approved.",
+    "approvalEnter": "Enter code",
+    "approvalDialogTitle": "Enter your approval code",
+    "approvalDialogDescription": "Next, confirm with the passkey you want approved. It will then count for administrator access in that administrator's organization.",
+    "approvalCodeLabel": "Approval code",
+    "approvalCodePlaceholder": "XXXX-XXXX-XXXX-XXXX",
+    "approvalRefused": "That code can't be used. Check it with the administrator who gave it to you, or ask them for a new one.",
+    "approvalFailed": "Couldn't approve the passkey",
+    "approvalDone": "Passkey approved",
+    "approvalDoneDescription": "It now counts for administrator access in {organization}.",
+    "approvalDoneDescriptionGeneric": "It now counts for administrator access in that organization."
   },
   "AccountConnections": {
     "title": "Connected accounts",

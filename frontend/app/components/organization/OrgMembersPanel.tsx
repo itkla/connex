@@ -3,14 +3,16 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { EllipsisHorizontalIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 
 import type { OrgMember, OrgRole } from "@/app/lib/types";
 import {
     addOrgMemberByEmail,
     ApiError,
     getOrgMembers,
+    issueOrgMfaAttestation,
     removeOrgMember,
+    revokeOrgMfaAttestation,
     setOrgMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -51,6 +53,7 @@ import {
     type SettingsPanelPresentation,
 } from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
+import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
@@ -59,11 +62,12 @@ function initial(name: string) {
 /**
  * The organization's administrators, and — for an owner — the controls that change them.
  *
- * Every mutation here is owner-only on the backend: adding an administrator, changing a role, and
- * removing one all pass `requireOrgOwner`. So an administrator who is not an owner reads the roster
- * and is offered nothing, rather than being shown controls that would come back refused. §6's rule
- * is to prefer no entry point over a locked door, and the manifest records the same fact as this
- * destination's `orgWrite: "owner"`.
+ * Every mutation here is owner-only on the backend: adding an administrator, changing a role,
+ * removing one, and creating or turning off a passkey approval code (#1534) all pass
+ * `requireOrgOwner`. So an administrator who is not an owner reads the roster and is offered
+ * nothing, rather than being shown controls that would come back refused. §6's rule is to prefer no
+ * entry point over a locked door, and the manifest records the same fact as this destination's
+ * `orgWrite: "owner"`.
  *
  * @param currentUserId - the viewer, so the roster can mark their own row
  * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
@@ -89,6 +93,7 @@ export default function OrgMembersPanel({
     const [busy, setBusy] = useState<number | null>(null);
     const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
+    const [approvalTarget, setApprovalTarget] = useState<OrgMember | null>(null);
     const [email, setEmail] = useState("");
     const [addRole, setAddRole] = useState<OrgRole>("admin");
     const [adding, setAdding] = useState(false);
@@ -200,6 +205,7 @@ export default function OrgMembersPanel({
                             const lockedSoleOwner = member.orgRole === "owner" && ownerCount <= 1;
                             const editable = isOwner && !lockedSoleOwner;
                             const removable = isOwner && !lockedSoleOwner;
+                            const attestable = isOwner && !isSelf;
                             return (
                                 <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                     <Avatar>
@@ -247,18 +253,30 @@ export default function OrgMembersPanel({
                                         <Badge variant="secondary">{roleLabel(member.orgRole)}</Badge>
                                     )}
 
-                                    {removable && (
+                                    {(removable || attestable) && (
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
-                                                <button type="button" aria-label={t("remove")} className={rowActionTrigger}>
+                                                <button
+                                                    type="button"
+                                                    aria-label={t("memberActions")}
+                                                    className={rowActionTrigger}
+                                                >
                                                     <EllipsisHorizontalIcon className="size-5" />
                                                 </button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-40">
-                                                <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(member)}>
-                                                    <TrashIcon className="size-4" />
-                                                    {t("remove")}
-                                                </DropdownMenuItem>
+                                            <DropdownMenuContent align="end" className="w-56">
+                                                {attestable && (
+                                                    <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
+                                                        <KeyIcon className="size-4" />
+                                                        {t("approvalCode")}
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {removable && (
+                                                    <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(member)}>
+                                                        <TrashIcon className="size-4" />
+                                                        {t("remove")}
+                                                    </DropdownMenuItem>
+                                                )}
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     )}
@@ -349,6 +367,16 @@ export default function OrgMembersPanel({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {orgId !== null && (
+                <PasskeyApprovalCodeDialog
+                    target={approvalTarget}
+                    organizationName={activeWorkspace?.orgName ?? ""}
+                    onClose={() => setApprovalTarget(null)}
+                    issue={(userId) => issueOrgMfaAttestation(orgId, userId)}
+                    revoke={(userId) => revokeOrgMfaAttestation(orgId, userId)}
+                />
+            )}
         </div>
     );
 }

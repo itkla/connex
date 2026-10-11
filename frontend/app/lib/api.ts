@@ -388,6 +388,8 @@ export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMEN
 export const MAIL_TRANSPORT_UNAVAILABLE_CODE = "MAIL_TRANSPORT_UNAVAILABLE";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
+/** The one refusal for every reason a passkey approval code cannot be used (#1534). */
+export const MFA_ATTESTATION_REFUSED_CODE = "MFA_ATTESTATION_REFUSED";
 const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
 const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = `${PRIVILEGED_MFA_ENROLLMENT_ROUTE}?mfa=enroll`;
 const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
@@ -405,6 +407,8 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/webauthn/register/confirmation",
     "/api/auth/webauthn/register/confirmation/exchange",
     "/api/auth/webauthn/recover",
+    "/api/auth/webauthn/attestation/options",
+    "/api/auth/webauthn/attestation",
 ]);
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
@@ -1924,6 +1928,19 @@ export function beginPasskeyStepUp() {
 
 export function finishPasskeyStepUp(credential: AuthenticationResponseJSON) {
     return postJson<Types.AuthResponse>("/api/auth/webauthn/step-up", credential);
+}
+
+/** Starts redeeming a passkey approval code: assertion options for the passkey to approve (#1534). */
+export function beginMfaAttestation() {
+    return postJson<PublicKeyCredentialRequestOptionsJSON>("/api/auth/webauthn/attestation/options");
+}
+
+/**
+ * Redeems a passkey approval code with the assertion of the passkey it approves (#1534). Every
+ * reason the code itself cannot be used is refused alike, with {@link MFA_ATTESTATION_REFUSED_CODE}.
+ */
+export function redeemMfaAttestation(code: string, credential: AuthenticationResponseJSON) {
+    return postJson<Types.MfaAttestationRedemption>("/api/auth/webauthn/attestation", { code, credential });
 }
 
 export function renamePasskey(credentialId: string, label: string) {
@@ -4816,6 +4833,16 @@ export function removeOrgMember(orgId: number, userId: number) {
     return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}`);
 }
 
+/** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
+export function issueOrgMfaAttestation(orgId: number, userId: number) {
+    return postJson<Types.MfaAttestationCode>(`/api/orgs/${orgId}/members/${userId}/mfa-attestations`);
+}
+
+/** Turns off an organization administrator's open passkey approval code, if there is one (#1534). */
+export function revokeOrgMfaAttestation(orgId: number, userId: number) {
+    return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}/mfa-attestations`);
+}
+
 export function getOrgAllowedDomains(orgId: number, init: RequestInit = {}) {
     return getJson<string[]>(`/api/orgs/${orgId}/allowed-domains`, { cache: "no-store", ...init });
 }
@@ -5082,6 +5109,18 @@ export function updateMemberRole(workspaceId: number, userId: number, role: Type
 
 export function assignMemberCustomRole(workspaceId: number, userId: number, roleId: number) {
     return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { roleId });
+}
+
+/** Creates a passkey approval code for a workspace member, replacing any open one (#1534). */
+export function issueWorkspaceMfaAttestation(workspaceId: number, userId: number) {
+    return postJson<Types.MfaAttestationCode>(
+        `/api/workspaces/${workspaceId}/members/${userId}/mfa-attestations`,
+    );
+}
+
+/** Turns off a workspace member's open passkey approval code, if there is one (#1534). */
+export function revokeWorkspaceMfaAttestation(workspaceId: number, userId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/members/${userId}/mfa-attestations`);
 }
 
 export function getWorkspaceRoles(workspaceId: number, init: RequestInit = {}) {

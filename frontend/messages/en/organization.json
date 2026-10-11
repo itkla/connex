@@ -195,7 +195,9 @@
     "addButton": "Add administrator",
     "addedToast": "Administrator added",
     "roleUpdatedToast": "Role updated",
-    "removedToast": "Administrator removed"
+    "removedToast": "Administrator removed",
+    "approvalCode": "Passkey approval code",
+    "memberActions": "Administrator actions"
   },
   "OrgDomains": {
     "title": "Allowed domains",
@@ -292,6 +294,15 @@
         },
         "workspace": {
           "teardown": "Workspace deleted"
+        }
+      },
+      "auth": {
+        "mfa": {
+          "attestation": {
+            "issued": "Passkey approval code created",
+            "revoked": "Passkey approval code turned off",
+            "redeemed": "Passkey approved with a code"
+          }
         }
       }
     },
