@@ -117,6 +117,8 @@ import tools.jackson.databind.ObjectMapper;
 @Transactional
 @UnenrolledPrivilegedFixture
 class ReportIntegrationTest {
+    private static final int SIMULATED_STEP_UP_PASSKEY_ROW_ID = 0;
+
 
     private static final String PASSWORD = "Report-Test-Pw1!";
     private static final Instant FIXED_NOW = Instant.parse("2026-07-12T12:00:00Z");
@@ -1093,7 +1095,7 @@ class ReportIntegrationTest {
         MockHttpServletRequest stepUpRequest =
             new MockHttpServletRequest(context.getServletContext());
         stepUpRequest.setSession(adminSession);
-        sessionSecurityService.markStepUp(stepUpRequest, admin.getId());
+        sessionSecurityService.markStepUp(stepUpRequest, admin.getId(), SIMULATED_STEP_UP_PASSKEY_ROW_ID);
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)

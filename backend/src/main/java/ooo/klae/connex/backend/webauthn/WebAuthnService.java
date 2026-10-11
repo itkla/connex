@@ -3,6 +3,9 @@ package ooo.klae.connex.backend.webauthn;
 import java.security.MessageDigest;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
@@ -27,16 +30,21 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
+import ooo.klae.connex.backend.session.StepUpProof;
 
 import lombok.RequiredArgsConstructor;
 
@@ -51,11 +59,14 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class WebAuthnService {
+    private static final Logger log = LoggerFactory.getLogger(WebAuthnService.class);
 
     private final WebAuthnRelyingPartyOperations rpOperations;
     private final UserCredentialRepository userCredentials;
     private final WebauthnUserEntityMapper userEntityMapper;
     private final WebauthnCredentialMapper credentialMapper;
+    private final PrivilegedCredentialAttestationMapper attestationMapper;
+    private final SessionSecurityService sessionSecurityService;
     private final UserMapper userMapper;
     private final PrivilegedAccountService privilegedAccountService;
     private final PasskeyBootstrapConfirmationPolicy bootstrapConfirmationPolicy;
@@ -93,21 +104,25 @@ public class WebAuthnService {
      * stamp the session as stepped-up without the out-of-band proof ever being required.
      * Privilege can also arrive through a custom role the account already holds, which no
      * account-row lock serialises, so the assigned role rows are locked here too and the
-     * transaction reads committed state rather than a snapshot taken before the promotion.
+     * transaction reads committed state rather than a snapshot taken before the promotion. A
+     * refusal here is audited like the controller's, but only once the transaction completes: an
+     * immediate independent append would wait on this transaction's own account lock (#1995).
      *
      * @param expectedSessionEpoch the epoch stamped into the request's authenticated session
      * @param bootstrapConfirmationSatisfied whether the session carries a redeemed out-of-band
      *     first-passkey confirmation
+     * @param evidence what the enrolling session proves about the new passkey's provenance
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
      * @param label the user-supplied nickname
-     * @return the stored credential record
+     * @return the stored credential and its row id
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public CredentialRecord finishRegistration(
+    public RegisteredPasskey finishRegistration(
             int expectedUserId,
             Integer expectedSessionEpoch,
             boolean bootstrapConfirmationSatisfied,
+            EnrollmentEvidence evidence,
             PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential,
             String label) {
@@ -121,9 +136,15 @@ public class WebAuthnService {
             throw new ForbiddenException("Authenticated session is no longer current");
         }
         userMapper.lockAssignedCustomRoleIds(expectedUserId);
+        SessionEpochRestampGrant restampGrant = userMapper.epochRestampGrant(expectedUserId);
+        if (restampGrant != null && evidence.sessionPrimaryId() == null) {
+            throw new ConflictException(
+                    "The session changed while the passkey was being registered; try again");
+        }
         if (!hasPasskey(expectedUserId)
                 && !bootstrapConfirmationSatisfied
                 && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {
+            deferBootstrapConfirmationRefusalAudit(expectedUserId);
             throw new ForbiddenException(
                     "Confirm the emailed enrollment link before adding the first passkey");
         }
@@ -137,13 +158,54 @@ public class WebAuthnService {
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         userMapper.clearEpochRestampGrant(expectedUserId);
+        WebauthnCredentialRow registered = credentialMapper.findByCredentialId(record.getCredentialId().getBytes());
+        if (registered == null || registered.getId() == null) {
+            throw new IllegalStateException("The registered passkey was not stored");
+        }
+        recordProvenance(expectedUserId, currentSessionEpoch, evidence, restampGrant, registered.getId());
         User user = userMapper.getUserById(expectedUserId);
         if (user == null) {
             throw new BadCredentialsException("Passkey registration is not bound to the current account");
         }
         auditService.recordStrict("auth.passkey.register", "user", expectedUserId, user.getDisplayName(),
                 "Passkey registered", auditService.singleChange("label", null, label));
-        return record;
+        return new RegisteredPasskey(record, registered.getId());
+    }
+
+    /**
+     * Records where a new passkey's privileged coverage comes from (#1534), under the account
+     * lock {@link #finishRegistration} holds. Founder coverage is written first, so the direct
+     * source wins over an inherited row for the same organization. A passkey inherits coverage only
+     * from the credential behind a step-up that is still fresh and still the account's. It gets
+     * break-glass assurance only when this session is the one the operator recovery granted the
+     * restamp to, at the epoch that recovery committed. {@link #finishRegistration} refuses, before
+     * registering anything, an enrollment that cannot name its session while such a grant is
+     * outstanding, so a rotated session id retries instead of spending the grant without the
+     * assurance.
+     */
+    private void recordProvenance(
+            int userId,
+            int sessionEpoch,
+            EnrollmentEvidence evidence,
+            SessionEpochRestampGrant restampGrant,
+            int credentialRowId) {
+        attestationMapper.insertFounderCoverage(credentialRowId, userId);
+        boolean breakGlass = restampGrant != null
+            && restampGrant.epoch() == sessionEpoch
+            && evidence.sessionPrimaryId() != null
+            && evidence.sessionPrimaryId().equals(restampGrant.sessionPrimaryId());
+        StepUpProof proof = evidence.stepUpProof();
+        if (proof != null
+                && sessionSecurityService.isFresh(proof)
+                && credentialMapper.findOwnedRowId(proof.credentialRowId(), userId) != null) {
+            attestationMapper.insertInheritedCoverage(credentialRowId, proof.credentialRowId());
+            if (!breakGlass) {
+                credentialMapper.copyPrivilegedAssurance(credentialRowId, proof.credentialRowId());
+            }
+        }
+        if (breakGlass) {
+            credentialMapper.markBreakGlassAssurance(credentialRowId);
+        }
     }
 
     /**
@@ -175,14 +237,15 @@ public class WebAuthnService {
      * Does not establish a session — the controller runs the shared login ceremony.
      * @param options the options issued in {@link #createLoginOptions}
      * @param assertion the client's assertion response
-     * @return the authenticated user
+     * @return the authenticated user and the passkey that signed the assertion
      */
     @Transactional
-    public User finishLogin(PublicKeyCredentialRequestOptions options,
+    public VerifiedPasskey finishLogin(PublicKeyCredentialRequestOptions options,
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion) {
         PublicKeyCredentialUserEntity entity =
             rpOperations.authenticate(new RelyingPartyAuthenticationRequest(options, assertion));
-        Integer userId = userEntityMapper.findUserIdByHandle(entity.getId().toBase64UrlString());
+        String userHandle = entity.getId().toBase64UrlString();
+        Integer userId = userEntityMapper.findUserIdByHandle(userHandle);
         if (userId == null) {
             throw new BadCredentialsException("Unknown passkey");
         }
@@ -190,7 +253,11 @@ public class WebAuthnService {
         if (user == null) {
             throw new BadCredentialsException("Unknown passkey");
         }
-        return user;
+        WebauthnCredentialRow signer = credentialMapper.findByCredentialId(assertion.getRawId().getBytes());
+        if (signer == null || signer.getId() == null || !userHandle.equals(signer.getUserEntityUserId())) {
+            throw new BadCredentialsException("Unknown passkey");
+        }
+        return new VerifiedPasskey(user, signer.getId());
     }
 
     /**
@@ -198,15 +265,17 @@ public class WebAuthnService {
      * @param auth the current authenticated principal
      * @param options the options issued in {@link #createStepUpOptions}
      * @param assertion the client's assertion response
+     * @return the current account and the passkey that signed the step-up
      */
     @Transactional
-    public void finishStepUp(Authentication auth, PublicKeyCredentialRequestOptions options,
+    public VerifiedPasskey finishStepUp(Authentication auth, PublicKeyCredentialRequestOptions options,
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion) {
         User currentUser = (User) auth.getPrincipal();
-        User assertedUser = finishLogin(options, assertion);
-        if (assertedUser.getId() != currentUser.getId()) {
+        VerifiedPasskey verified = finishLogin(options, assertion);
+        if (verified.user().getId() != currentUser.getId()) {
             throw new BadCredentialsException("Passkey authentication failed");
         }
+        return verified;
     }
 
     /**
@@ -357,5 +426,34 @@ public class WebAuthnService {
             transports,
             row.getCreatedAt(),
             row.getLastUsedAt());
+    }
+
+    /**
+     * Records the refused first-passkey enrollment as the controller does at the ceremony phases,
+     * deferred until this transaction completes because it holds the account row exclusively. The
+     * target label is the account's display name, read under that lock as the confirmation policy
+     * reads it. A failed read leaves the label empty rather than changing the refusal the caller
+     * receives.
+     *
+     * @param userId the account whose enrollment was refused
+     */
+    private void deferBootstrapConfirmationRefusalAudit(int userId) {
+        String label = null;
+        try {
+            User user = userMapper.getUserById(userId);
+            label = user == null ? null : user.getDisplayName();
+        } catch (DataAccessException unavailable) {
+            log.warn("Could not read the refused account's label for its audit: {}",
+                    unavailable.getClass().getSimpleName());
+        }
+        auditService.deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION,
+                "user",
+                userId,
+                null,
+                null,
+                label,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
     }
 }

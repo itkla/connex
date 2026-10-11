@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Attachment;
@@ -153,22 +154,28 @@ public class AttachmentService {
     }
 
     /**
-     * Replaces the tags associated with an attachment.
-     * @param attachmentId
-     * @param tagIds
-     * @return
+     * Replaces the tags associated with an attachment. The attachment row is locked first and its type
+     * and note-target visibility are checked under that lock; the audited previous tags are then read
+     * under locks on the association rows. A concurrent {@link #addTag} waits on the attachment row at
+     * its foreign-key check and a concurrent {@link #removeTag} waits on the association row, so the
+     * audit names exactly the tags this replacement removed (#1980). It runs at
+     * {@code READ_COMMITTED}, so the tags returned are a fresh read.
+     * @param attachmentId the attachment in the current workspace
+     * @param tagIds the complete set of tags the attachment should carry
+     * @return the attachment's tags after the replacement
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Attachment attachment = attachmentMapper.getMetadataById(workspaceId, attachmentId);
+        Attachment attachment = attachmentMapper.getMetadataByIdForUpdate(workspaceId, attachmentId);
         if (attachment == null) {
             throw new ResourceNotFoundException("Attachment not found with id: " + attachmentId);
         }
         requireGenericAttachmentType(attachment.getEntityType());
         requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
-        List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
+        List<String> before = tagMapper.getTagsByAttachmentIdForUpdate(workspaceId, attachmentId).stream()
+            .map(Tag::getName).toList();
         attachmentMapper.clearTags(workspaceId, attachmentId);
         if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceId, attachmentId, tagIds);
         List<Tag> after = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId);

@@ -22,6 +22,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.bind.annotation.ResponseStatus;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
@@ -29,6 +30,7 @@ import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
+import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +40,7 @@ class WorkspaceControllerTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private InviteService inviteService;
     @Mock private InviteLinkService inviteLinkService;
+    @Mock private PrivilegedMfaAttestationService attestationService;
     @Mock private AllowedDomainService allowedDomainService;
     @Mock private AuthService authService;
     @Mock private WorkspaceCookie workspaceCookie;
@@ -48,6 +51,7 @@ class WorkspaceControllerTest {
     void setUp() {
         controller = new WorkspaceController(
             workspaceService,
+            attestationService,
             inviteService,
             inviteLinkService,
             allowedDomainService,
@@ -114,5 +118,16 @@ class WorkspaceControllerTest {
         assertSame(expected, actual);
         verify(workspaceService).updateIdentity(
             9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L);
+    }
+
+    @Test
+    void attestationCodesAreIssuedAndRevokedAsTheCurrentUser() {
+        MfaAttestationCodeDto issued = new MfaAttestationCodeDto("0123-4567-89AB-CDEF", "2026-10-09T00:00:00Z");
+        when(attestationService.issueForWorkspace(3, 7, 9)).thenReturn(issued);
+
+        assertEquals(issued, controller.issueMfaAttestation(3, 9));
+        controller.revokeMfaAttestation(3, 9);
+
+        verify(attestationService).revokeForWorkspace(3, 7, 9);
     }
 }

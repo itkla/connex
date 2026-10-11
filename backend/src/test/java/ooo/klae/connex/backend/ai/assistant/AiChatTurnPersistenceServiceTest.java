@@ -895,6 +895,29 @@ class AiChatTurnPersistenceServiceTest {
                 persisted.getAllValues().getLast().getThoughtSignature());
     }
 
+    /**
+     * Only a write proposal the server prepared is flagged as server-proposed. A read call or a
+     * refusal, which stores what the model sent, never is, so the card projection can tell them
+     * apart (#1867).
+     */
+    @Test
+    void onlyAServerPreparedWriteProposalIsFlaggedAsServerProposed() {
+        service.proposeTool(TURN, 1, 0, "change_deal_stage",
+                "{\"refusedArguments\":{\"tool\":\"change_deal_stage\"}}");
+        service.proposeWriteTool(TURN, 2, new AiAssistantPreparedWrite(
+                "create_note",
+                AiAssistantToolCatalog.ToolTier.AUTO,
+                "person",
+                31,
+                "{\"tool\":\"create_note\",\"target\":{\"kind\":\"person\",\"id\":31}}"));
+
+        ArgumentCaptor<AiChatToolCall> persisted =
+                ArgumentCaptor.forClass(AiChatToolCall.class);
+        verify(chatMapper, times(2)).insertToolCall(persisted.capture());
+        assertFalse(persisted.getAllValues().getFirst().isServerProposal());
+        assertTrue(persisted.getAllValues().getLast().isServerProposal());
+    }
+
     @Test
     void queuedTurnSnapshotsSessionAttachmentsAndEnforcesCombinedContextCap() {
         Attachment first = attachment(31);

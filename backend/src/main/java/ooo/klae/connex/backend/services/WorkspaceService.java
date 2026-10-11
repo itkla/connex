@@ -332,8 +332,11 @@ public class WorkspaceService {
 
     /**
      * Creates a workspace owned by the given user. Used by registration (when
-     * self-service creation is enabled) and the create endpoint.
+     * self-service creation is enabled) and the create endpoint. The whole provisioning,
+     * including any new organization and its founding owner, is one transaction (#1982):
+     * a failure part-way leaves nothing behind.
      */
+    @Transactional
     public WorkspaceMembershipDto createWorkspace(String name, int ownerUserId) {
         if (!selfServiceCreationAllowed) {
             throw new ForbiddenException("Workspace creation is disabled on this instance");
@@ -344,13 +347,20 @@ public class WorkspaceService {
     /**
      * Creates the first owner's workspace during instance bootstrap, bypassing the
      * self-service-creation flag (the bootstrap actor is the trusted operator, not a
-     * self-service user). Only {@code BootstrapRunner} should call this.
+     * self-service user). Only {@code BootstrapRunner} should call this. Like
+     * {@link #createWorkspace}, it provisions in one transaction.
      */
+    @Transactional
     WorkspaceMembershipDto createWorkspaceForBootstrap(String name, int ownerUserId) {
         return provisionWorkspace(name, ownerUserId);
     }
 
-    @Transactional
+    /**
+     * Provisions the workspace, and a new organization when the owner has no administrative
+     * active one. It is only ever called on {@code this}, so it carries no transaction of its own
+     * and relies on its callers': the owner's account row stays shared-locked from before the
+     * organization is resolved through the membership insert and the audits.
+     */
     WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
         if (userMapper.lockByIdForShare(ownerUserId) == null) {
             throw new ResourceNotFoundException("User not found: " + ownerUserId);
@@ -402,11 +412,12 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
-        orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
+        int foundingPasskeys = orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         auditService.record("org.create", "organization", organization.getId(), organization.getName(),
                 "Organization created", Map.of("ownerUserId", ownerUserId));
         auditService.record("org.member.founding_owner", "organization", organization.getId(), organization.getName(),
-                "Founding organization owner granted", Map.of("userId", ownerUserId));
+                "Founding organization owner granted",
+                Map.of("userId", ownerUserId, "foundingPasskeys", foundingPasskeys));
         return organization.getId();
     }
 
@@ -1384,6 +1395,61 @@ public class WorkspaceService {
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Changed " + target.getDisplayName() + " to " + newRole.name().toLowerCase(), null);
         return workspaceMapper.getMember(workspaceId, targetUserId);
+    }
+
+    /**
+     * Locks the authority to attest a member's passkeys for privileged MFA (#1534): the grantor
+     * must be able to grant the member's current role. A built-in role needs {@code MEMBER_MANAGE}
+     * and a custom role {@code ROLE_MANAGE}, each under the grant ceiling, and only an owner may
+     * attest an owner. It takes the role-mutation lock order (accounts ascending, the workspace
+     * root, both memberships, then the custom roles involved and their permission sets) and then
+     * the workspace's organization shared, after the workspace as teardown does. Both accounts'
+     * deletion reservations are read under their locks, so one that commits while this waits is
+     * never missed.
+     *
+     * @param workspaceId the workspace the grant is issued through
+     * @param grantorId the account holding the authority
+     * @param granteeId the member whose passkeys are attested
+     * @return the workspace's organization id
+     */
+    int lockAttestationAuthority(int workspaceId, int grantorId, int granteeId) {
+        WorkspaceMember current = workspaceMapper.getAuthorizationMembership(workspaceId, granteeId);
+        Integer granteeRoleId = current == null ? null : current.getRoleId();
+        Permission required = granteeRoleId == null ? Permission.MEMBER_MANAGE : Permission.ROLE_MANAGE;
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId,
+            grantorId,
+            granteeId,
+            required,
+            granteeRoleId,
+            "Role not found in this workspace");
+        Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
+        if (workspace == null
+                || organizationMapper.lockActiveByIdForShare(workspace.getOrgId()) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(grantorId))) {
+            throw new ForbiddenException("Requires the " + required + " permission in this workspace");
+        }
+        WorkspaceMember target = locks.targetMembership();
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(granteeId))
+                || !"active".equals(target.getStatus())) {
+            throw roleMutationTargetNotFound();
+        }
+        if (!Objects.equals(target.getRoleId(), granteeRoleId)) {
+            throw new ConflictException("The member's role changed; refresh and try again");
+        }
+        if ("owner".equals(target.getRole())) {
+            requireLockedRole(locks.actorMembership(), Role.OWNER);
+        }
+        Role builtInRole = Role.of(target.getRole());
+        if (granteeRoleId == null && builtInRole == null) {
+            throw roleMutationTargetNotFound();
+        }
+        requireGrantable(
+            locks.actorPermissions(),
+            granteeRoleId == null ? builtInPermissions(builtInRole) : locks.permissionsForRole(granteeRoleId));
+        return workspace.getOrgId();
     }
 
     /** Locks current authorization and the exact custom-role root before deletion. */

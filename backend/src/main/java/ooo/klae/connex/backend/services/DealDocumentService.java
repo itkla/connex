@@ -158,6 +158,10 @@ public class DealDocumentService {
     /**
      * Generates an immutable version from one parent-and-lines snapshot. After preliminary existence
      * discovery, authorization roots precede the deal lock; only the locked parent supplies content.
+     *
+     * <p>A deactivated template is refused with a conflict before anything is written, so deactivating
+     * a template retires it for direct API calls as well as for the picker that hides it (#1927).
+     * Templates are not locked, so a deactivation racing this call is not excluded.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
@@ -171,6 +175,9 @@ public class DealDocumentService {
         Deal deal = lockDeal(workspaceId, dealId);
         permissions.revalidate();
         DocumentTemplate template = templateService.require(workspaceId, templateId);
+        if (!template.isActive()) {
+            throw new ConflictException("Document template is inactive");
+        }
         String currency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
 
         Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, deal.getCompanyId());

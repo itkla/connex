@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.dto.EmailChangeRequestDto;
 import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.RevokedInvitationDto;
+import ooo.klae.connex.backend.services.EmailChangeConfirmationService;
 import ooo.klae.connex.backend.services.EmailChangeService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
@@ -38,6 +39,7 @@ public class EmailChangeController {
     private final EmailChangeService emailChangeService;
     private final ClientIpResolver clientIpResolver;
     private final OneTimeLinkFlowService oneTimeLinkFlowService;
+    private final EmailChangeConfirmationService emailChangeConfirmationService;
     private final OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
 
     @PostMapping("/api/users/me/email-change")
@@ -83,8 +85,8 @@ public class EmailChangeController {
             @CookieValue(name = OneTimeLinkFlowCookie.EMAIL_CHANGE, required = false) String grant,
             HttpServletRequest request,
             HttpServletResponse response) {
-        List<RevokedInvitationDto> revoked = oneTimeLinkFlowService.consumeEmailChange(
-            request, grant, emailChangeService::confirmChangeByHash);
+        List<RevokedInvitationDto> revoked =
+            emailChangeConfirmationService.confirmFromBrowserFlow(request, grant);
         oneTimeLinkFlowCookie.clear(response, Purpose.EMAIL_CHANGE);
         return Map.of(
             "message", "Your email address has been updated",

@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -11,6 +10,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -52,13 +52,13 @@ public class OrganizationWorkspaceScopeControlAccess {
         return scope;
     }
 
-    private <T> T execute(Supplier<T> work) {
+    private <T> T execute(ControlPlaneRead<T> read) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
-            return tenantWorkScope.unrouted(work);
+            return tenantWorkScope.unroutedRead(read);
         }
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
-        return transaction.execute(status -> tenantWorkScope.unrouted(work));
+        return transaction.execute(status -> tenantWorkScope.unroutedRead(read));
     }
 
 }

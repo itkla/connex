@@ -122,6 +122,20 @@ public class DeliveryProperties {
         return providerCallLeaseDuration().minus(providerCallDeadline());
     }
 
+    /**
+     * Returns how long an audience attempt claimed by an older version, which wrote no lease, must have
+     * been idle before a recovery sweep treats it as abandoned (#1773). It is three times the maximum
+     * lease. That is a heuristic rather than proof the older worker is gone, since older code bounds
+     * only its provider call: a person row swept under a stalled worker can no longer be reserved or
+     * sent, while a person-less row's stalled worker may still reach the provider and then cannot
+     * attach its correlation to the reconcilable row. Neither can happen while a restart deploy runs
+     * one backend version at a time.
+     * @return the idle time after which a lease-less audience attempt is abandoned
+     */
+    public Duration legacyUnleasedAudienceIdle() {
+        return MAX_AUDIENCE_EXPORT_LEASE.multipliedBy(3);
+    }
+
     @PostConstruct
     void validateAudienceExportTransportBounds() {
         audienceExportLeaseDuration();

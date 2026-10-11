@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -258,8 +259,8 @@ class CampaignDispatchServiceTest {
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         when(providerRouter.adapterFor(current.providerId())).thenReturn(dispatcher);
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(13), anyString(),
@@ -281,6 +282,7 @@ class CampaignDispatchServiceTest {
 
         assertTrue(service.processSend(7, 11));
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(13), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()));
@@ -300,13 +302,14 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(current);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, providerConfigService, gate);
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).recoverExpiredTriggeredClaim(
                 7, expired.getId(), current.attemptTargetFingerprint());
         verify(deliveryMapper, never()).markExpiredTriggeredClaimAmbiguous(
@@ -324,8 +327,8 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(current);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(current);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(current));
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token())))
@@ -335,6 +338,7 @@ class CampaignDispatchServiceTest {
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()));
@@ -355,8 +359,8 @@ class CampaignDispatchServiceTest {
         CampaignDelivery expired = expiredClaim(attempted);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
-        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
-                .thenReturn(fallback);
+        when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
+                .thenReturn(claimTarget(fallback));
         when(deliveryMapper.markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token())))
@@ -366,6 +370,7 @@ class CampaignDispatchServiceTest {
 
         service.processSend(7, 11);
 
+        verify(providerConfigService, never()).resolveForWorkspace(anyInt(), any());
         verify(deliveryMapper).markExpiredTriggeredClaimAmbiguous(
                 eq(7), eq(expired.getId()), anyString(),
                 eq(CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()));
@@ -457,6 +462,31 @@ class CampaignDispatchServiceTest {
         verify(deliveryMapper, never()).markTriggeredFailed(
                 anyInt(), anyInt(), anyString(), anyString(), anyString());
         verifyNoInteractions(dispatcher);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void anAudienceAttemptWhoseRenewalFindsItsRowSweptNeverReservesOrEgresses(boolean personless) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDelivery attempt = delivery();
+        if (personless) {
+            attempt.setPersonId(null);
+        }
+        CampaignDispatchService service = audienceDispatch(deliveryMapper, dispatcher, admission, attempt);
+        when(deliveryMapper.renewAudienceClaim(eq(7), eq(13), anyLong())).thenReturn(0);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper).claim(eq(7), eq(13), anyLong());
+        verify(deliveryMapper).renewAudienceClaim(eq(7), eq(13), anyLong());
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        verifyNoInteractions(dispatcher);
+        verify(deliveryMapper, never()).markDispatched(anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).markFailed(anyInt(), anyInt(), anyString(), any());
+        verify(deliveryMapper, never()).markSkipped(anyInt(), anyInt(), anyString());
+        verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), any());
     }
 
     @ParameterizedTest
@@ -571,7 +601,7 @@ class CampaignDispatchServiceTest {
         }
         verify(sendMapper, times(1)).refreshCounters(7, 11);
         verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), anyString());
-        verify(deliveryMapper, never()).claim(anyInt(), anyInt());
+        verify(deliveryMapper, never()).claim(anyInt(), anyInt(), anyLong());
     }
 
     @Test
@@ -673,25 +703,70 @@ class CampaignDispatchServiceTest {
         verify(sendMapper).getSend(7, 11);
     }
 
-    @Test
-    void aSendAwaitingRecoverySettlementIsCompletedBeforeItsCountersAreRefreshed() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aSendAwaitingRecoverySettlementIsRefreshedBeforeItsCompletionAndAgainOnlyAfterOne(boolean completes) {
         CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
         WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
+        when(sendMapper.markSettledAudienceSendCompleted(7, 11)).thenReturn(completes ? 1 : 0);
         CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
 
         assertEquals(0, service.processWorkspace(7));
 
         InOrder settlement = inOrder(sendMapper);
-        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
         settlement.verify(sendMapper).refreshCounters(7, 11);
-        verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
+        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
+        if (completes) {
+            settlement.verify(sendMapper).refreshCounters(7, 11);
+        }
+        verify(sendMapper, times(completes ? 2 : 1)).refreshCounters(7, 11);
         verify(sendMapper, never()).getSend(7, 11);
         verify(deliveryMapper, never()).countPending(anyInt(), anyInt());
         verifyNoInteractions(providerConfigService);
+    }
+
+    @Test
+    void aRunningAudienceSendWithNothingPendingSettlesWithoutResolvingItsProvider() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(0);
+        when(sendMapper.markSettledAudienceSendCompleted(7, 11)).thenReturn(1);
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertTrue(service.processSend(7, 11));
+
+        InOrder settlement = inOrder(sendMapper);
+        settlement.verify(sendMapper).refreshCounters(7, 11);
+        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
+        settlement.verify(sendMapper).refreshCounters(7, 11);
+        verify(sendMapper, never()).assignProvider(anyInt(), anyInt(), anyString());
+        verify(deliveryMapper, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
+        verifyNoInteractions(providerConfigService);
+    }
+
+    @Test
+    void aSendWithPendingWorkStillReportsItsUnusableProvider() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(1);
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL))
+                .thenThrow(new DeliveryProviderException("Email provider is disabled"));
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertFalse(service.processSend(7, 11));
+
+        verify(sendMapper, never()).markSettledAudienceSendCompleted(anyInt(), anyInt());
+        verify(deliveryMapper, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
     }
 
     private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
@@ -739,6 +814,35 @@ class CampaignDispatchServiceTest {
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
     }
 
+    private static CampaignDispatchService audienceDispatch(
+            CampaignDeliveryMapper deliveryMapper,
+            MessageDispatcher dispatcher,
+            CampaignFrequencyAdmissionService admission,
+            CampaignDelivery attempt) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.getSend(7, 11)).thenReturn(runningAudienceSend());
+        when(deliveryMapper.countPending(7, 11)).thenReturn(1);
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(
+                ResolvedDeliveryProvider.of("smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.none()));
+        when(providerRouter.dispatcherFor("smtp")).thenReturn(dispatcher);
+        when(deliveryMapper.pendingDeliveryIdsPage(7, 11, 200)).thenReturn(List.of(13));
+        when(deliveryMapper.claim(eq(7), eq(13), anyLong())).thenReturn(1);
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+        when(deliveryMapper.getDelivery(7, 13)).thenReturn(attempt);
+        return new CampaignDispatchService(
+                sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
+                providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+    }
+
     private static CampaignFrequencyAdmissionService admittedFrequency() {
         CampaignFrequencyAdmissionService admission = mock(CampaignFrequencyAdmissionService.class);
         when(admission.reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt()))
@@ -769,6 +873,13 @@ class CampaignDispatchServiceTest {
         return revision;
     }
 
+    private static CampaignSend runningAudienceSend() {
+        CampaignSend send = triggeredSend();
+        send.setOrigin("audience");
+        send.setStatus("running");
+        return send;
+    }
+
     private static CampaignDelivery delivery() {
         CampaignDelivery delivery = new CampaignDelivery();
         delivery.setId(13);
@@ -797,6 +908,11 @@ class CampaignDispatchServiceTest {
                         "http_esp", "delivery-provider:55:3",
                         endpoint + "|account=" + account, "secret:v1:55"),
                 null);
+    }
+
+    private static DeliveryClaimTarget claimTarget(ResolvedDeliveryProvider target) {
+        return new DeliveryClaimTarget(
+                target.providerId(), target.attemptTargetFingerprint(), target.idempotentSubmission());
     }
 
     private static CampaignDelivery expiredClaim(ResolvedDeliveryProvider attempted) {

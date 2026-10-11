@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 
 class CampaignEngagementServiceTest extends AbstractServiceTest {
+    private static final long AUDIENCE_LEASE_MICROS = 48_000_000L;
 
     @Autowired private CampaignService campaignService;
     @Autowired private CampaignSendService campaignSendService;
@@ -158,7 +159,7 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
     }
 
     private void toDispatched(int id) {
-        campaignDeliveryMapper.claim(workspace.getId(), id);
+        campaignDeliveryMapper.claim(workspace.getId(), id, AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markDispatched(workspace.getId(), id, "prov", "msg-" + id);
         recordEvent(id, "dispatched");
     }
@@ -176,12 +177,12 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
     }
 
     private void toSkipped(int id, String reason) {
-        campaignDeliveryMapper.claim(workspace.getId(), id);
+        campaignDeliveryMapper.claim(workspace.getId(), id, AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markSkipped(workspace.getId(), id, reason);
     }
 
     private void toFailed(int id) {
-        campaignDeliveryMapper.claim(workspace.getId(), id);
+        campaignDeliveryMapper.claim(workspace.getId(), id, AUDIENCE_LEASE_MICROS);
         campaignDeliveryMapper.markFailed(workspace.getId(), id, "boom", "relay_error");
         recordEvent(id, "failed");
     }

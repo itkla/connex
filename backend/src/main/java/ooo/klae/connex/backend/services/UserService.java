@@ -94,7 +94,7 @@ public class UserService implements UserDetailsService {
     /** Returns requested active-member references without loading the whole workspace directory. */
     public List<UserReferenceDto> getActiveWorkspaceMemberReferences(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<UserReferenceDto> references = tenantWorkScope.unrouted(() ->
+        List<UserReferenceDto> references = tenantWorkScope.unroutedRead(() ->
             userMapper.getActiveWorkspaceMemberReferencesByIds(workspaceId, ids));
         Map<Integer, UserReferenceDto> referencesById = references.stream().collect(
             Collectors.toMap(UserReferenceDto::id, Function.identity()));

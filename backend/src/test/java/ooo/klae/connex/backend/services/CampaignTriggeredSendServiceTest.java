@@ -4,10 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -41,6 +44,7 @@ import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryClaimTarget;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
 import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -109,6 +113,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 .thenReturn(true);
         lenient().when(deliveryProviderConfigService.resolveForWorkspace(anyInt(), eq(DeliveryChannel.EMAIL)))
                 .thenAnswer(invocation -> resolvedTarget(invocation.getArgument(0)));
+        lenient().when(deliveryProviderConfigService.describeClaimTarget(anyInt(), eq(DeliveryChannel.EMAIL)))
+                .thenAnswer(invocation -> claimTarget(resolvedTarget(invocation.getArgument(0))));
         lenient().when(triggeredSendGate.enabled()).thenReturn(true);
         lenient().when(triggeredSendGate.dispatchPageSize()).thenReturn(200);
         lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
@@ -427,6 +433,11 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                         + "WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), result.deliveryId());
 
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        verify(deliveryProviderConfigService, never()).resolveForWorkspace(anyInt(), any());
+        assertEquals("pending", campaignDeliveryMapper.getDelivery(
+                workspace.getId(), result.deliveryId()).getStatus());
+
         ReflectionTestUtils.setField(campaignSendWorker, "dispatchEnabled", true);
         try {
             campaignSendWorker.dispatch();
@@ -456,11 +467,11 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         DeliveryProviderConfig original = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
         String originalFingerprint = deliveryTargetFingerprint(original);
-        when(deliveryProviderConfigService.resolveForWorkspace(
+        when(deliveryProviderConfigService.describeClaimTarget(
                 workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> {
                     DeliveryProviderConfig current = deliveryProviderConfigMapper.findByWorkspaceChannel(
                             workspace.getId(), DeliveryChannel.EMAIL.token());
-                    return resolvedTargetFor(current);
+                    return claimTarget(resolvedTargetFor(current));
                 });
 
         assertEquals(1, campaignDeliveryMapper.claimTriggered(
@@ -479,8 +490,14 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(rotated.getConfigGeneration(), deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token()).getConfigGeneration());
         assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        verify(deliveryProviderConfigService, never()).resolveForWorkspace(anyInt(), any());
         assertEquals("pending", campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId()).getStatus());
+
+        when(deliveryProviderConfigService.resolveForWorkspace(
+                workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> resolvedTargetFor(
+                        deliveryProviderConfigMapper.findByWorkspaceChannel(
+                                workspace.getId(), DeliveryChannel.EMAIL.token())));
 
         String rotatedFingerprint = deliveryTargetFingerprint(rotated);
         rotated.setEndpoint("https://account-a.example.test/Send");
@@ -518,10 +535,10 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         DeliveryProviderConfig original = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
         String originalFingerprint = deliveryTargetFingerprint(original);
-        when(deliveryProviderConfigService.resolveForWorkspace(
-                workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> resolvedTargetFor(
+        when(deliveryProviderConfigService.describeClaimTarget(
+                workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> claimTarget(resolvedTargetFor(
                         deliveryProviderConfigMapper.findByWorkspaceChannel(
-                                workspace.getId(), DeliveryChannel.EMAIL.token())));
+                                workspace.getId(), DeliveryChannel.EMAIL.token()))));
 
         assertEquals(1, campaignDeliveryMapper.claimTriggered(
                 workspace.getId(), result.deliveryId(), "pre-rotation-worker", 1_000_000L,
@@ -537,6 +554,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(original.getConfigGeneration() + 1, rotated.getConfigGeneration());
         assertFalse(originalFingerprint.equals(deliveryTargetFingerprint(rotated)));
         assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        verify(deliveryProviderConfigService, never()).resolveForWorkspace(anyInt(), any());
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId());
         assertEquals("failed", delivery.getStatus());
@@ -569,9 +587,11 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 null,
                 null,
                 DeliveryCredentials.none());
-        when(deliveryProviderConfigService.resolveForWorkspace(
-                workspace.getId(), DeliveryChannel.EMAIL)).thenReturn(changed);
+        when(deliveryProviderConfigService.describeClaimTarget(
+                workspace.getId(), DeliveryChannel.EMAIL)).thenReturn(claimTarget(changed));
 
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        verify(deliveryProviderConfigService, never()).resolveForWorkspace(anyInt(), any());
         assertTrue(dispatchService(true).processSend(workspace.getId(), result.sendId()));
 
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
@@ -599,7 +619,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                         + "WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), result.deliveryId());
 
-        assertTrue(dispatchService(true).processSend(workspace.getId(), result.sendId()));
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        verify(deliveryProviderConfigService, never()).resolveForWorkspace(anyInt(), any());
         assertTrue(dispatchService(true).processSend(workspace.getId(), result.sendId()));
 
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
@@ -859,6 +880,11 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 action,
                 campaignId);
         return count == null ? 0 : count;
+    }
+
+    private static DeliveryClaimTarget claimTarget(ResolvedDeliveryProvider target) {
+        return new DeliveryClaimTarget(
+                target.providerId(), target.attemptTargetFingerprint(), target.idempotentSubmission());
     }
 
     private CampaignDispatchService dispatchService(boolean enabled) {

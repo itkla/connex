@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,12 +31,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.beans.DeliveryProviderConfig;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.dto.DeliveryProviderConfigRequest;
 import ooo.klae.connex.backend.dto.DeliveryWebhookTokenDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
+import ooo.klae.connex.backend.mail.MailProperties;
+import ooo.klae.connex.backend.mail.SecretCipher;
+import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -241,7 +247,7 @@ class DeliveryProviderConfigServiceTest {
     @Test
     void isReady_requiresAnEnabledSmsConfigWithAnEndpointCredentialAndCipher() {
         when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(enabledSms());
-        when(cipher.isAvailable()).thenReturn(true);
+        when(cipher.canDecryptCredential(WORKSPACE, DeliveryChannel.SMS, "secret:v1:77")).thenReturn(true);
         assertTrue(service().isReady(WORKSPACE, DeliveryChannel.SMS));
     }
 
@@ -399,7 +405,7 @@ class DeliveryProviderConfigServiceTest {
     @Test
     void isReady_reflectsEspReadinessAndSmtpFallback() {
         when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
-        when(cipher.isAvailable()).thenReturn(true);
+        when(cipher.canDecryptCredential(WORKSPACE, DeliveryChannel.EMAIL, "secret:v1:55")).thenReturn(true);
         assertTrue(service().isReady(WORKSPACE, DeliveryChannel.EMAIL));
         assertFalse(service().isReady(WORKSPACE, DeliveryChannel.SMS));
     }
@@ -473,6 +479,93 @@ class DeliveryProviderConfigServiceTest {
         RequirePermission annotation = target.getAnnotation(RequirePermission.class);
         assertTrue(annotation != null, method + " must be @RequirePermission gated");
         assertEquals(Permission.WORKSPACE_SETTINGS, annotation.value());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void readinessChecksTheSelectedCredentialKey(boolean sms) {
+        DeliveryChannel channel = sms ? DeliveryChannel.SMS : DeliveryChannel.EMAIL;
+        DeliveryProviderConfig config = sms ? enabledSms() : enabledEsp();
+        when(mapper.findByWorkspaceChannel(WORKSPACE, channel.token())).thenReturn(config);
+        when(cipher.canDecryptCredential(WORKSPACE, channel, config.getCredentialRef())).thenReturn(false, true);
+
+        assertFalse(service().isReady(WORKSPACE, channel));
+        assertTrue(service().isReady(WORKSPACE, channel));
+        verify(cipher, never()).decryptCredential(anyInt(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void claimDescriptionMatchesResolvedApiProviderWithoutDecrypting(boolean sms) {
+        DeliveryChannel channel = sms ? DeliveryChannel.SMS : DeliveryChannel.EMAIL;
+        DeliveryProviderConfig config = sms ? enabledSms() : enabledEsp();
+        config.setIdempotentSubmission(true);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, channel.token())).thenReturn(config);
+        when(cipher.canDecryptCredential(WORKSPACE, channel, config.getCredentialRef())).thenReturn(true);
+        DeliveryProviderConfigService service = service();
+
+        DeliveryClaimTarget described = service.describeClaimTarget(WORKSPACE, channel);
+
+        verify(cipher, never()).decryptCredential(anyInt(), any(), any());
+        when(cipher.decryptCredential(WORKSPACE, channel, config.getCredentialRef())).thenReturn(API_KEY);
+        ResolvedDeliveryProvider resolved = service.resolveForWorkspace(WORKSPACE, channel);
+        assertEquals(new DeliveryClaimTarget(resolved.providerId(), resolved.attemptTargetFingerprint(),
+                resolved.idempotentSubmission()), described);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void claimDescriptionRefusesAnUnresolvableApiCredential(boolean sms) {
+        DeliveryChannel channel = sms ? DeliveryChannel.SMS : DeliveryChannel.EMAIL;
+        DeliveryProviderConfig config = sms ? enabledSms() : enabledEsp();
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, channel.token())).thenReturn(config);
+        when(cipher.canDecryptCredential(WORKSPACE, channel, config.getCredentialRef())).thenReturn(false);
+
+        assertThrows(DeliveryProviderException.class, () -> service().describeClaimTarget(WORKSPACE, channel));
+        verify(cipher, never()).decryptCredential(anyInt(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"managed", "stored_password", "no_auth", "unusable_override", "instance_default"})
+    void claimDescriptionMatchesEverySmtpSelectionWithoutDecrypting(String branch) {
+        MailProperties properties = new MailProperties();
+        properties.setEnabled(true);
+        properties.setHost("smtp.instance.test");
+        properties.setFrom("instance@sender.test");
+        properties.setPassword("instance-secret");
+        properties.setManaged(branch.equals("managed"));
+        MailConfigMapper mailMapper = mock(MailConfigMapper.class);
+        SecretCipher secretCipher = mock(SecretCipher.class);
+        if (!branch.equals("managed") && !branch.equals("instance_default")) {
+            WorkspaceMailConfig override = new WorkspaceMailConfig();
+            override.setWorkspaceId(WORKSPACE);
+            override.setEnabled(true);
+            override.setHost(branch.equals("unusable_override") ? null : "smtp.workspace.test");
+            override.setUsername("workspace-user");
+            override.setFromAddress("workspace@sender.test");
+            override.setAuth(branch.equals("stored_password"));
+            override.setPasswordEnc("secret:v1:44");
+            when(mailMapper.findByWorkspace(WORKSPACE)).thenReturn(override);
+        }
+        if (branch.equals("stored_password")) {
+            when(secretCipher.canResolveForWorkspace(WORKSPACE, "secret:v1:44")).thenReturn(true);
+        }
+        when(workspaceMapper.lockWorkspaceForShare(WORKSPACE)).thenReturn(WORKSPACE);
+        MailConfigResolver resolver = new MailConfigResolver(properties, mailMapper, secretCipher, workspaceMapper, userMapper);
+        DeliveryProviderConfigService service = new DeliveryProviderConfigService(resolver, mapper, cipher, endpointValidator,
+                workspaceService, authService, auditService, sessionSecurityService,
+                userMapper, workspaceMapper, deliveryMapper);
+
+        DeliveryClaimTarget described = service.describeClaimTarget(WORKSPACE, DeliveryChannel.EMAIL);
+
+        verify(cipher, never()).decryptCredential(anyInt(), any(), any());
+        verify(secretCipher, never()).decryptForWorkspace(anyInt(), any());
+        if (branch.equals("stored_password")) {
+            when(secretCipher.decryptForWorkspace(WORKSPACE, "secret:v1:44")).thenReturn("workspace-secret");
+        }
+        ResolvedDeliveryProvider resolved = service.resolveForWorkspace(WORKSPACE, DeliveryChannel.EMAIL);
+        assertEquals(new DeliveryClaimTarget(resolved.providerId(), resolved.attemptTargetFingerprint(),
+                resolved.idempotentSubmission()), described);
     }
 
     private DeliveryProviderConfig enabledSms() {

@@ -52,6 +52,7 @@ public class BusinessCardOcrClient {
     private final Semaphore invocation = new Semaphore(1);
     private final AtomicReference<CompletableFuture<Boolean>> readinessProbe = new AtomicReference<>();
     private final AtomicLong readinessGeneration = new AtomicLong();
+    private final Object readinessPublication = new Object();
 
     private volatile long readinessExpiresAtNanos;
     private volatile boolean cachedReady;
@@ -239,6 +240,14 @@ public class BusinessCardOcrClient {
         }
     }
 
+    /**
+     * Starts a sidecar readiness probe, or joins the one already in flight. A probe publishes its
+     * result before it releases the in-flight slot, so a caller that read readiness just before a
+     * probe completed can win the empty slot just after. A fresh ready result seen once this method
+     * owns the slot is therefore reused instead of sending a redundant request (#1834).
+     *
+     * @return the probe's eventual readiness, or {@code null} when probing is disabled or unconfigured
+     */
     private CompletableFuture<Boolean> refreshReadiness() {
         if (!readinessEnabled || !isConfigured()) {
             return null;
@@ -248,17 +257,18 @@ public class BusinessCardOcrClient {
         if (current != null) {
             return current;
         }
+        if (cachedReady && System.nanoTime() < readinessExpiresAtNanos) {
+            readinessProbe.compareAndSet(created, null);
+            created.complete(true);
+            return created;
+        }
         long generation = readinessGeneration.get();
         Thread.startVirtualThread(() -> {
             boolean accepted = false;
             try {
                 boolean ready = checkHealth();
                 long expiresAt = System.nanoTime() + properties.getReadinessCache().toNanos();
-                if (readinessGeneration.get() == generation) {
-                    cachedReady = ready;
-                    readinessExpiresAtNanos = expiresAt;
-                    accepted = ready;
-                }
+                accepted = publishReadiness(generation, ready, expiresAt) && ready;
             } finally {
                 readinessProbe.compareAndSet(created, null);
                 created.complete(accepted);
@@ -267,10 +277,36 @@ public class BusinessCardOcrClient {
         return created;
     }
 
+    /**
+     * Publishes a probe's result unless a worker failure invalidated readiness after the probe
+     * started. The generation check and the writes hold the same monitor as
+     * {@link #markUnavailable()}, so an invalidation cannot land between them and then be
+     * overwritten by a stale ready result (#1987).
+     *
+     * @return whether the result was published
+     */
+    private boolean publishReadiness(long generation, boolean ready, long expiresAtNanos) {
+        synchronized (readinessPublication) {
+            if (readinessGeneration.get() != generation) {
+                return false;
+            }
+            cachedReady = ready;
+            readinessExpiresAtNanos = expiresAtNanos;
+            return true;
+        }
+    }
+
+    /**
+     * Invalidates readiness after a worker failure. A probe publication already holding the monitor
+     * finishes first and is then overwritten; one that has not reached it sees the new generation and
+     * publishes nothing.
+     */
     private void markUnavailable() {
-        readinessGeneration.incrementAndGet();
-        cachedReady = false;
-        readinessExpiresAtNanos = 0;
+        synchronized (readinessPublication) {
+            readinessGeneration.incrementAndGet();
+            cachedReady = false;
+            readinessExpiresAtNanos = 0;
+        }
     }
 
     private List<OcrLine> handle(OcrResponse response) throws IOException {

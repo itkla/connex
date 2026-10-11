@@ -268,7 +268,8 @@
         "domainsLoadFailedBody": "Nothing changed. The policy itself didn't load, so try again in a moment.",
         "domainRemoved": "Domain removed",
         "domainRemoveFailed": "Couldn't remove the domain",
-        "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email."
+        "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email.",
+        "approvalCode": "Passkey approval code"
     },
     "WorkspaceRoles": {
         "title": "Roles",

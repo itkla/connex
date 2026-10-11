@@ -473,6 +473,33 @@ class IdentityInvitationTrustIntegrationTest {
     }
 
     @Test
+    void emailChangeClearsRevokedGrantNotificationsButKeepsAnActiveMembershipsRows() throws Exception {
+        Account account = preregister();
+        orgAllowedDomainMapper.remove(target.getOrgId(), "victim.example");
+        Workspace other = newWorkspace();
+        Workspace active = newWorkspace();
+        int userId = account.user().getId();
+        workspaceMapper.addPendingMember(target.getId(), userId, "member");
+        workspaceMapper.addPendingMember(other.getId(), userId, "member");
+        workspaceMapper.addMember(active.getId(), userId, "member");
+        lifecycleMapper.markWorkspaceTearingDown(other.getOrgId(), other.getId());
+        lifecycleMapper.markOrganizationTearingDown(other.getOrgId());
+        for (Workspace workspace : List.of(target, other, active)) {
+            seedNotificationRows(workspace.getId(), userId);
+        }
+
+        confirmEmailChange(prepareEmailChange(account, unique() + "@attacker.example"));
+
+        assertEquals(0, notificationRows(target.getId(), userId));
+        assertEquals(0, notificationRows(other.getId(), userId));
+        assertEquals(2, notificationRows(active.getId(), userId));
+        jdbcTemplate.update("DELETE FROM notification WHERE workspace_id = ? AND recipient_id = ?",
+            active.getId(), userId);
+        jdbcTemplate.update("DELETE FROM historical_notification_baseline"
+            + " WHERE workspace_id = ? AND recipient_id = ?", active.getId(), userId);
+    }
+
+    @Test
     void emailConfirmationRevokesPendingGrantCommittedWhileWaitingForUserLock() throws Exception {
         Account account = preregister();
         orgAllowedDomainMapper.remove(target.getOrgId(), "victim.example");
@@ -945,6 +972,30 @@ class IdentityInvitationTrustIntegrationTest {
         }
         PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
         return user;
+    }
+
+    private void seedNotificationRows(int workspaceId, int recipientId) {
+        jdbcTemplate.update(
+            "INSERT INTO notification (workspace_id, recipient_id, type, category, severity,"
+                + " template_version, title, dedupe_key, triggered_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())",
+            workspaceId, recipientId, "workspace.join", "workspace", "info", 1,
+            "Workspace invitation", "workspace.join:" + workspaceId);
+        jdbcTemplate.update(
+            "INSERT INTO historical_notification_baseline (workspace_id, recipient_id, dedupe_key,"
+                + " notification_type, baseline_severity, source_state_hash, import_run_id)"
+                + " VALUES (?, ?, ?, ?, ?, UNHEX(SHA2(?, 256)), UNHEX(SHA2(?, 256)))",
+            workspaceId, recipientId, "baseline:" + workspaceId, "workspace.join", "info",
+            "state:" + workspaceId, "run:" + workspaceId);
+    }
+
+    private int notificationRows(int workspaceId, int recipientId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT (SELECT COUNT(*) FROM notification WHERE workspace_id = ? AND recipient_id = ?)"
+                + " + (SELECT COUNT(*) FROM historical_notification_baseline"
+                + " WHERE workspace_id = ? AND recipient_id = ?)",
+            Integer.class, workspaceId, recipientId, workspaceId, recipientId);
+        return count == null ? 0 : count;
     }
 
     private Workspace newWorkspace() {

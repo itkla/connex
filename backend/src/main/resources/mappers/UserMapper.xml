@@ -142,6 +142,21 @@
     FOR SHARE
   </select>
 
+  <!-- Locks only the account's assigned custom-role rows, never its memberships, for privilege
+       re-checks under a shared account root (#1897). Two of the account's own transactions can each
+       hold one of its memberships exclusively; share-locking every membership, as
+       lockAssignedCustomRoleIds does, would deadlock them. Role edits still conflict on the role rows
+       and role assignments on the account root. flushCache discards the session's cached privilege
+       answer so the re-check reads committed state. -->
+  <select id="lockAssignedCustomRoleRowsForShare" resultType="java.lang.Integer" flushCache="true">
+    SELECT wr.id
+    FROM workspace_member wm
+    JOIN workspace_role wr ON wr.id = wm.role_id AND wr.workspace_id = wm.workspace_id
+    WHERE wm.user_id = #{id}
+    ORDER BY wr.id
+    FOR SHARE OF wr
+  </select>
+
   <select id="isAccountDeletionReserved" resultType="boolean">
     SELECT COALESCE(
       account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),

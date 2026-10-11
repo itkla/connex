@@ -700,6 +700,207 @@ class AuditServiceTest {
     }
 
     /**
+     * An under-lock step-up refusal is built at the call and appended only once its transaction
+     * completes, with the call's actor and request rather than whatever is bound by then (#1986). It
+     * is the same row the immediate refusal writes, scoped explicitly to no workspace or organization.
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void deferredStepUpRefusalKeepsTheCallTimeActorAndRequest(boolean scheduleDelete) {
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Scheduling Admin");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("User-Agent", "Probe/1.0");
+        request.getSession(true);
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            if (scheduleDelete) {
+                service.deferScheduleDeleteStepUpRefusal();
+            } else {
+                service.deferExportStepUpRefusal();
+            }
+            verify(auditIntegrityService, never()).appendIndependent(any(AuditLog.class));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(AuditService.EXPORT_STEP_UP_ACTION, row.getAction());
+        assertEquals("user", row.getEntityType());
+        assertEquals(42, row.getEntityId());
+        assertEquals(42, row.getActorId());
+        assertEquals("Scheduling Admin", row.getActorLabel());
+        assertEquals("Scheduling Admin", row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
+        assertEquals(scheduleDelete
+                ? AuditService.SCHEDULE_DELETE_STEP_UP_SUMMARY
+                : AuditService.EXPORT_STEP_UP_SUMMARY, row.getSummary());
+        assertTrue(row.getContext().contains(AuditService.EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON));
+        assertNull(row.getWorkspaceId());
+        assertNull(row.getOrgId());
+        assertEquals("203.0.113.9", row.getIpAddress());
+        assertEquals("Probe/1.0", row.getUserAgent());
+        assertNotNull(row.getSessionId());
+        assertNotNull(row.getRequestId());
+    }
+
+    /**
+     * A failure recorded under a lock its independent append would need is deferred whether or not
+     * this transaction holds the entry's integrity head: it is built at the call, with the call's
+     * actor, tenant scope and request, and appended only once the transaction completes (#1993).
+     */
+    @Test
+    void deferredFailureIsAppendedOnlyAfterCompletionWithTheCallTimeActorScopeAndRequest() {
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Email Changer");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("203.0.113.9");
+        request.addHeader("User-Agent", "Probe/1.0");
+        request.getSession(true);
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deferFailure("auth.email_change.refused", "user", 42, null,
+                    "Email change refused for a privileged account", "recent_authentication_required");
+            verify(auditIntegrityService, never()).appendIndependent(any(AuditLog.class));
+            verify(auditIntegrityService, never()).holdsHead(any());
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+        lenient().when(tenantContext.getWorkspaceId()).thenReturn(null);
+        lenient().when(tenantContext.getOrgId()).thenReturn(null);
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals("auth.email_change.refused", row.getAction());
+        assertEquals("user", row.getEntityType());
+        assertEquals(42, row.getEntityId());
+        assertEquals(42, row.getActorId());
+        assertEquals("Email Changer", row.getActorLabel());
+        assertNull(row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
+        assertEquals("Email change refused for a privileged account", row.getSummary());
+        assertTrue(row.getContext().contains("recent_authentication_required"));
+        assertEquals(7, row.getWorkspaceId());
+        assertEquals(8, row.getOrgId());
+        assertEquals("203.0.113.9", row.getIpAddress());
+        assertEquals("Probe/1.0", row.getUserAgent());
+        assertNotNull(row.getSessionId());
+        assertNotNull(row.getRequestId());
+    }
+
+    /** Without a transaction there is nothing to wait for, so a deferred failure is appended at once. */
+    @Test
+    void deferredFailureWithoutATransactionIsAppendedImmediately() {
+        assertFalse(TransactionSynchronizationManager.isSynchronizationActive());
+
+        service.deferFailure("auth.email_change.refused", "user", 42, null,
+                "Email change refused for a privileged account", "privileged_mfa_enrollment_required");
+
+        verify(auditIntegrityService).appendIndependent(any(AuditLog.class));
+    }
+
+    /** A deferred append that fails is logged and swallowed, never reaching the completed request. */
+    @Test
+    void aFailedDeferredAppendDoesNotReachTheCaller() {
+        doThrow(new IllegalStateException("audit store unavailable"))
+                .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deferFailure("auth.email_change.refused", "user", 42, null,
+                    "Email change refused for a privileged account", "recent_authentication_required");
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        assertDoesNotThrow(() -> synchronizations.get(0).afterCompletion(
+                TransactionSynchronization.STATUS_ROLLED_BACK));
+        verify(auditIntegrityService).appendIndependent(any(AuditLog.class));
+    }
+
+    /**
+     * The explicit-scope twin defers the same way and keeps its explicit scope: a null workspace and
+     * organization stay null even though the request's tenant context resolves both (#1995).
+     */
+    @Test
+    void deferredScopedFailureKeepsItsExplicitScopeAndTheCallTimeActor() {
+        User actor = new User();
+        actor.setId(7);
+        actor.setDisplayName("Admin");
+        List<TransactionSynchronization> synchronizations;
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deferFailureScoped(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, "user", 7,
+                    null, null, "Admin", AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                    AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON);
+            verify(auditIntegrityService, never()).appendIndependent(any(AuditLog.class));
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+        }
+
+        synchronizations.get(0).afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog row = appended.getValue();
+        assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, row.getAction());
+        assertEquals("user", row.getEntityType());
+        assertEquals(7, row.getEntityId());
+        assertEquals(7, row.getActorId());
+        assertEquals("Admin", row.getActorLabel());
+        assertEquals("Admin", row.getTargetLabel());
+        assertEquals("failure", row.getOutcome());
+        assertEquals(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY, row.getSummary());
+        assertTrue(row.getContext().contains(AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
+        assertNull(row.getWorkspaceId());
+        assertNull(row.getOrgId());
+    }
+
+    /** Without a transaction the scoped twin appends at once, and a failed append never escapes. */
+    @Test
+    void deferredScopedFailureWithoutATransactionAppendsAtOnceAndNeverThrows() {
+        assertFalse(TransactionSynchronizationManager.isSynchronizationActive());
+        doThrow(new IllegalStateException("audit store unavailable"))
+                .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+
+        assertDoesNotThrow(() -> service.deferFailureScoped(
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_ACTION, "user", 7, null, null, "Admin",
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_SUMMARY,
+                AuditService.PASSKEY_BOOTSTRAP_CONFIRMATION_REQUIRED_REASON));
+
+        verify(auditIntegrityService).appendIndependent(any(AuditLog.class));
+    }
+
+    /**
      * A {@code NESTED} append fails with {@link TransactionSystemException} only when its savepoint is
      * gone, as after the database rolled the whole transaction back on a deadlock: swallowing it would
      * let the caller commit only the work after the audit, so it reaches the caller (#1947).

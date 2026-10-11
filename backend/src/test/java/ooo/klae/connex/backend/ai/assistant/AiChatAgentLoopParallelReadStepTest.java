@@ -290,9 +290,10 @@ class AiChatAgentLoopParallelReadStepTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(persistenceService).proposeTool(TURN, 1, 1, "search_records", search("alpha"));
         verify(persistenceService).proposeTool(
-                TURN, 1, 2, "aggregate_metric", "{\"metric\":\"deal_kpis\"}");
+                TURN, 1, 1, "search_records", refused(search("alpha")));
+        verify(persistenceService).proposeTool(
+                TURN, 1, 2, "aggregate_metric", refused("{\"metric\":\"deal_kpis\"}"));
         verify(persistenceService, times(2)).failTool(
                 TURN, 29, "{\"reason\":\"tool_not_loaded\"}");
         verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
@@ -655,7 +656,8 @@ class AiChatAgentLoopParallelReadStepTest {
                 eq("search_records"), any(JsonNode.class), any(), eq(true), any());
         verify(toolExecutor, never()).execute(
                 eq("get_record"), any(), any(), any(Boolean.class), any());
-        verify(persistenceService).proposeTool(TURN, 1, 2, "get_record", "{\"handle\":\"r1\"}");
+        verify(persistenceService).proposeTool(
+                TURN, 1, 2, "get_record", refused("{\"handle\":\"r1\"}"));
         verify(persistenceService).failTool(TURN, 29, "{\"reason\":\"unknown_handle\"}");
         List<AiToolExchange> replayed = requests().getLast().exchanges();
         assertEquals(
@@ -823,7 +825,7 @@ class AiChatAgentLoopParallelReadStepTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(persistenceService).proposeTool(TURN, 3, 1, "set_todos", todos("nine"));
+        verify(persistenceService).proposeTool(TURN, 3, 1, "set_todos", refused(todos("nine")));
         verify(persistenceService).failTool(
                 TURN, 29, "{\"reason\":\"plan_updates_exhausted\"}");
         verify(persistenceService).proposeTool(TURN, 3, 2, "search_records", search("alpha"));
@@ -951,6 +953,12 @@ class AiChatAgentLoopParallelReadStepTest {
 
     private static String todos(String item) {
         return "{\"items\":[\"" + item + "\"]}";
+    }
+
+
+    /** The stored form of a refused call's arguments: wrapped, never a bare envelope (#1867). */
+    private static String refused(String argumentsJson) {
+        return "{\"refusedArguments\":" + argumentsJson + "}";
     }
 
     private static String search(String query) {

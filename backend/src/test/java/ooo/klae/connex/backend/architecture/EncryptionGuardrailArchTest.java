@@ -269,8 +269,8 @@ class EncryptionGuardrailArchTest {
         Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderCredentialService.java#UserProviderSecretCipher", 1));
 
     private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.ofEntries(
-        Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3),
-        Map.entry("ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 3),
+        Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 4),
+        Map.entry("ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 4),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_EMAIL", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL_SMS", 1),
         Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3),

@@ -19,11 +19,15 @@ public class ConnectorSecretCipher {
     private final SecretStore secretStore;
 
     /**
-     * Whether the underlying secret store is available to encrypt and decrypt.
-     * @return true when the secret store can be used
+     * Whether a workspace's stored connector credential could be decrypted: the row is in this
+     * workspace's scope and purpose, its algorithms are supported, and its own key is configured and
+     * enabled. Nothing is decrypted and no secret use is audited.
+     * @param workspaceId the workspace
+     * @param reference the stored secret reference
+     * @return whether the credential's metadata permits decryption
      */
-    public boolean isAvailable() {
-        return secretStore.isAvailable();
+    public boolean canDecryptCredential(int workspaceId, String reference) {
+        return secretStore.canDecrypt(SecretPurpose.WORKSPACE_CONNECTOR_CREDENTIAL, workspaceId, reference);
     }
 
     /**

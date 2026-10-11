@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.DisclosureControlData;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.WorkspaceSnapshot;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
@@ -51,9 +52,13 @@ class DataSubjectRequestServiceUnitTest {
 
     @BeforeEach
     void setUp() {
-        when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
+        lenient().when(tenantWorkScope.unrouted(any())).thenAnswer(invocation -> {
             Supplier<?> work = invocation.getArgument(0);
             return work.get();
+        });
+        lenient().when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation -> {
+            ControlPlaneRead<?> read = invocation.getArgument(0);
+            return read.read();
         });
         lenient().when(disclosureAccess.withLockedSubjectPerson(
                 anyInt(),

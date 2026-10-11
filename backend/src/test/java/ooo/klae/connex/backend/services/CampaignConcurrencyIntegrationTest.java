@@ -146,6 +146,13 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             .thenReturn(true);
     }
 
+    /**
+     * How long a waiter may take to queue behind a {@link TransactionBarrier} holder. It is shorter
+     * than the 10-second release timeout the holder waits under, so a timeout dump still sees the
+     * holder's locks rather than what happened after the holder gave up.
+     */
+    private static final int HOLDER_WAIT_PROBE_SECONDS = 8;
+
     private static final String OBSERVED_WAIT_QUERY = """
             SELECT COUNT(*)
             FROM performance_schema.data_lock_waits w
@@ -519,7 +526,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
                                 prefix, currentUser.getId());
                         return null;
                     }));
-            awaitHolderOwnedWait(holderBarrier, 1, "Authorized campaign mutation");
+            awaitHolderOwnedWait(holderBarrier, applied, "Authorized campaign mutation");
             Future<?> revoked = revocationExecutor.submit(() -> asActor(
                     revoker.actor(), () -> {
                         roleService.updateRole(
@@ -554,11 +561,15 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
 
     private void awaitHolderOwnedWait(
             TransactionBarrier holder,
-            int minimumWaiters,
+            Future<?> waiter,
             String description) throws InterruptedException {
         long holderTransactionId = holder.engineTransactionId();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(HOLDER_WAIT_PROBE_SECONDS);
         while (System.nanoTime() < deadline) {
+            if (waiter.isDone()) {
+                throw finishedBeforeWaiting(waiter,
+                        description + " finished before it waited behind holder transaction " + holderTransactionId);
+            }
             Integer waits = jdbcTemplate.queryForObject("""
                     SELECT COUNT(*)
                     FROM performance_schema.data_lock_waits waits
@@ -574,13 +585,53 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
                       AND blocking.LOCK_TYPE = requested.LOCK_TYPE
                       AND blocking.ENGINE_TRANSACTION_ID = ?
                     """, Integer.class, holderTransactionId);
-            if (waits != null && waits >= minimumWaiters) {
+            if (waits != null && waits >= 1) {
                 return;
             }
             Thread.sleep(25);
         }
         throw new IllegalStateException(
-                description + " did not wait behind holder transaction " + holderTransactionId);
+                description + " did not wait behind holder transaction " + holderTransactionId
+                        + System.lineSeparator() + lockWaitDump());
+    }
+
+    private static IllegalStateException finishedBeforeWaiting(Future<?> waiter, String message)
+            throws InterruptedException {
+        try {
+            waiter.get();
+            return new IllegalStateException(message + "; it completed without waiting");
+        } catch (ExecutionException failure) {
+            return new IllegalStateException(message + "; it failed", failure.getCause());
+        }
+    }
+
+    private String lockWaitDump() {
+        try {
+            List<?> waits = jdbcTemplate.queryForList("""
+                    SELECT waits.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx,
+                           waits.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx,
+                           requested.OBJECT_NAME, requested.INDEX_NAME, requested.LOCK_TYPE,
+                           requested.LOCK_MODE
+                    FROM performance_schema.data_lock_waits waits
+                    JOIN performance_schema.data_locks requested
+                      ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                    WHERE requested.OBJECT_SCHEMA = DATABASE()
+                    ORDER BY requesting_trx, requested.OBJECT_NAME, requested.INDEX_NAME
+                    """);
+            List<?> transactions = jdbcTemplate.queryForList("""
+                    SELECT DISTINCT trx.trx_id, trx.trx_state, trx.trx_started, trx.trx_mysql_thread_id,
+                           trx.trx_rows_locked, trx.trx_operation_state
+                    FROM information_schema.innodb_trx trx
+                    JOIN performance_schema.data_locks locks
+                      ON locks.ENGINE_TRANSACTION_ID = trx.trx_id
+                    WHERE locks.OBJECT_SCHEMA = DATABASE()
+                    ORDER BY trx.trx_started
+                    """);
+            return "performance_schema.data_lock_waits=" + waits
+                    + System.lineSeparator() + "information_schema.innodb_trx=" + transactions;
+        } catch (RuntimeException exception) {
+            return "lock wait dump failed: " + exception;
+        }
     }
 
     private void awaitObservedCampaignPairWait(
@@ -1176,16 +1227,25 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
         return waiter;
     }
 
+    /**
+     * The holder's InnoDB transaction id, read from {@code performance_schema.data_locks}, which is live.
+     * {@code information_schema.innodb_trx} is served from a buffer InnoDB refreshes at most every 0.1
+     * seconds, so on a pooled connection reused within that window it still reports the previous
+     * holder's committed transaction, and the probe then waits for a blocker that no longer exists
+     * (#1966). The holder has locked its rows by the time this runs.
+     */
     private long currentEngineTransactionId() {
-        Long transactionId = jdbcTemplate.queryForObject("""
-                SELECT trx_id
-                FROM information_schema.innodb_trx
-                WHERE trx_mysql_thread_id = CONNECTION_ID()
+        List<Long> transactionIds = jdbcTemplate.queryForList("""
+                SELECT DISTINCT l.ENGINE_TRANSACTION_ID
+                FROM performance_schema.data_locks l
+                JOIN performance_schema.threads t ON t.THREAD_ID = l.THREAD_ID
+                WHERE t.PROCESSLIST_ID = CONNECTION_ID()
                 """, Long.class);
-        if (transactionId == null) {
-            throw new IllegalStateException("Campaign concurrency holder has no InnoDB transaction id");
+        if (transactionIds.size() != 1) {
+            throw new IllegalStateException(
+                    "Campaign concurrency holder has no single InnoDB transaction id: " + transactionIds);
         }
-        return transactionId;
+        return transactionIds.getFirst();
     }
 
     private TransactionTemplate transaction() {

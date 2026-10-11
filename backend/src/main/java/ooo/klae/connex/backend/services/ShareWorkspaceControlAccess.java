@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
-import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -18,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -91,14 +91,14 @@ public class ShareWorkspaceControlAccess {
         return new OrganizationWorkspaces(orgId, orderedNamesById);
     }
 
-    private <T> T execute(Supplier<T> work) {
+    private <T> T execute(ControlPlaneRead<T> read) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || tenantContext.getCatalog() == null) {
-            return tenantWorkScope.unrouted(work);
+            return tenantWorkScope.unroutedRead(read);
         }
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
-        return transaction.execute(status -> tenantWorkScope.unrouted(work));
+        return transaction.execute(status -> tenantWorkScope.unroutedRead(read));
     }
 
     /**

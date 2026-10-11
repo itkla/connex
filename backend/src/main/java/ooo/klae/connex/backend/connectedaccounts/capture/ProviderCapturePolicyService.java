@@ -763,7 +763,7 @@ public class ProviderCapturePolicyService {
     }
 
     private ProviderConnection connection(int userId, String provider) {
-        return tenantWorkScope.unrouted(
+        return tenantWorkScope.unroutedRead(
             () -> connectionMapper.getByUserAndProvider(userId, provider));
     }
 

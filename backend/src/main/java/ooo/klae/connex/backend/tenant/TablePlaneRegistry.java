@@ -67,6 +67,8 @@ public final class TablePlaneRegistry {
         "organization_duplicate_decision_lock",
         "passkey_bootstrap_confirmation_token",
         "password_reset_token",
+        "privileged_credential_attestation",
+        "privileged_mfa_attestation_grant",
         "privileged_mfa_recovery_redemption",
         "registration_verification_token",
         "provider_connection",
@@ -103,6 +105,7 @@ public final class TablePlaneRegistry {
     public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
         "api_credential",
         "audit_log",
+        "privileged_mfa_attestation_grant",
         "secret_value",
         "tenant_cleanup_tombstone",
         "tenant_export_download_grant",

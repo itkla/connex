@@ -71,7 +71,7 @@ public class AiOrganizationBudgetCoordinator {
     public void sweepExpiredReservations() {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         for (int batch = 0; batch < MAX_SWEEP_BATCHES; batch++) {
-            List<String> expiredIds = controlAccess.execute(() -> operations.expiredReservationIds(now));
+            List<String> expiredIds = controlAccess.executeRead(() -> operations.expiredReservationIds(now));
             if (expiredIds.isEmpty()) break;
             for (String reservationId : expiredIds) {
                 controlAccess.execute(() -> {

@@ -12,6 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NotificationQuietHours;
 import ooo.klae.connex.backend.mappers.NotificationQuietHoursMapper;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -34,7 +35,7 @@ public class NotificationQuietHoursControlAccess {
      * @return the stored preference, or {@code null} when absent
      */
     public NotificationQuietHours findByUserId(int userId) {
-        return execute(() -> quietHoursMapper.findByUserId(userId));
+        return executeRead(() -> quietHoursMapper.findByUserId(userId));
     }
 
     /**
@@ -54,7 +55,7 @@ public class NotificationQuietHoursControlAccess {
      * @return the active state and next transition
      */
     public NotificationQuietHoursEvaluator.Evaluation evaluateForUser(int userId, Instant asOf) {
-        return execute(() -> {
+        return executeRead(() -> {
             NotificationQuietHours quietHours = quietHoursMapper.findByUserId(userId);
             if (quietHours == null) {
                 return new NotificationQuietHoursEvaluator.Evaluation(false, null);
@@ -71,5 +72,15 @@ public class NotificationQuietHoursControlAccess {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
         return transaction.execute(status -> tenantWorkScope.unrouted(work));
+    }
+
+    private <T> T executeRead(ControlPlaneRead<T> read) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || tenantContext.getCatalog() == null) {
+            return tenantWorkScope.unroutedRead(read);
+        }
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        return transaction.execute(status -> tenantWorkScope.unroutedRead(read));
     }
 }

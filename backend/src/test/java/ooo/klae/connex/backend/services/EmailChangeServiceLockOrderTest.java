@@ -55,7 +55,7 @@ class EmailChangeServiceLockOrderTest {
         when(tokenMapper.markConsumed(tokenHash)).thenReturn(1);
         when(workspaceMapper.findPendingGrants(user.getId())).thenReturn(List.of());
 
-        assertTrue(service.confirmChange(rawToken).isEmpty());
+        assertTrue(service.confirmChange(rawToken).revokedInvitations().isEmpty());
 
         InOrder order = inOrder(userMapper, tokenMapper);
         order.verify(userMapper).lockById(user.getId());

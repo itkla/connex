@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
@@ -215,6 +217,42 @@ class TenantWorkScopeTest {
         });
 
         assertNull(inner);
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
+    void unroutedReadMasksARoutedScopeAndRestoresIt() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+
+        String inner = workScope.unroutedRead(() -> tenantContext.getCatalog());
+
+        assertNull(inner);
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
+    void unroutedReadRestoresTheRoutedScopeWhenTheReadFails() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+
+        assertThrows(IllegalArgumentException.class, () -> workScope.unroutedRead(() -> {
+            throw new IllegalArgumentException("read failed");
+        }));
+
+        assertEquals("cnx_outer", tenantContext.getCatalog());
+    }
+
+    @Test
+    void unroutedReadRefusesToLeaveARoutedCatalogInsideATransaction() {
+        tenantContext.set(1, 1, 1, "owner", "cnx_outer");
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> workScope.unroutedRead(() -> tenantContext.getCatalog()));
+            assertTrue(refused.getMessage().startsWith(
+                "Catalog scope cannot CHANGE inside an active transaction"));
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
         assertEquals("cnx_outer", tenantContext.getCatalog());
     }
 

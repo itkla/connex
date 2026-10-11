@@ -80,7 +80,19 @@
     "confirmationFailed": "確認メールを送信できませんでした",
     "confirmationUnavailable": "このインスタンスはメールを送信できません。管理者に設定を依頼してください。",
     "confirmationRequired": "最初のパスキーを追加する前に、メールのリンクを確認してください",
-    "confirmationSatisfied": "確認が完了しました。パスキーを追加できます。"
+    "confirmationSatisfied": "確認が完了しました。パスキーを追加できます。",
+    "approvalTitle": "パスキー承認コード",
+    "approvalDescription": "管理者からコードを受け取った場合は、コードを入力し、承認を受けたいパスキーで確認してください。",
+    "approvalEnter": "コードを入力",
+    "approvalDialogTitle": "承認コードを入力",
+    "approvalDialogDescription": "続いて、承認を受けたいパスキーで確認します。そのパスキーは、コードを発行した管理者の組織で管理者アクセスに使えるようになります。",
+    "approvalCodeLabel": "承認コード",
+    "approvalCodePlaceholder": "XXXX-XXXX-XXXX-XXXX",
+    "approvalRefused": "このコードは使用できません。コードを発行した管理者に確認するか、新しいコードを依頼してください。",
+    "approvalFailed": "パスキーを承認できませんでした",
+    "approvalDone": "パスキーを承認しました",
+    "approvalDoneDescription": "{organization} の管理者アクセスに使えるようになりました。",
+    "approvalDoneDescriptionGeneric": "その組織の管理者アクセスに使えるようになりました。"
   },
   "AccountConnections": {
     "title": "連携アカウント",

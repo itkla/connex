@@ -34,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 
 class AiOrganizationBudgetCoordinatorTest {
     @Test
@@ -242,6 +243,10 @@ class AiOrganizationBudgetCoordinatorTest {
             Supplier<?> work = call.getArgument(0);
             return work.get();
         }).when(controlAccess).execute(any());
+        doAnswer(call -> {
+            ControlPlaneRead<?> read = call.getArgument(0);
+            return read.read();
+        }).when(controlAccess).executeRead(any());
         when(operations.reserve(
                 eq(3), any(LocalDate.class), anyLong(), anyString(),
                 any(LocalDateTime.class), any(LocalDateTime.class)))

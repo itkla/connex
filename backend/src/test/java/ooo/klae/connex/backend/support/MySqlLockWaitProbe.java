@@ -5,7 +5,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Observes an exact physical connection waiting for an exclusively locked primary-key record. */
+/** Observes an exact physical connection waiting for a locked primary-key record. */
 public final class MySqlLockWaitProbe {
     private MySqlLockWaitProbe() {
     }
@@ -13,6 +13,17 @@ public final class MySqlLockWaitProbe {
     /** Requires a real MySQL wait in the observer's catalog before the holder may be released. */
     public static void awaitExclusiveRecordLock(
             JdbcTemplate jdbc, long connectionId, String table, String primaryKey) {
+        awaitRecordLock(jdbc, connectionId, table, primaryKey, "X%");
+    }
+
+    /** Requires a real wait for a shared record lock, such as a {@code FOR SHARE} read, on the record. */
+    public static void awaitSharedRecordLock(
+            JdbcTemplate jdbc, long connectionId, String table, String primaryKey) {
+        awaitRecordLock(jdbc, connectionId, table, primaryKey, "S%");
+    }
+
+    private static void awaitRecordLock(
+            JdbcTemplate jdbc, long connectionId, String table, String primaryKey, String lockMode) {
         if (connectionId <= 0) {
             throw new AssertionError("The waiting transaction did not expose its connection id");
         }
@@ -35,7 +46,7 @@ public final class MySqlLockWaitProbe {
                   AND requested_lock.OBJECT_NAME = ?
                   AND requested_lock.INDEX_NAME = 'PRIMARY'
                   AND requested_lock.LOCK_TYPE = 'RECORD'
-                  AND requested_lock.LOCK_MODE LIKE 'X%'
+                  AND requested_lock.LOCK_MODE LIKE ?
                   AND requested_lock.LOCK_STATUS = 'WAITING'
                   AND requested_lock.LOCK_DATA IN (?, CONCAT(CHAR(39), ?, CHAR(39)))
                   AND blocking_lock.OBJECT_SCHEMA = requested_lock.OBJECT_SCHEMA
@@ -44,7 +55,7 @@ public final class MySqlLockWaitProbe {
                   AND blocking_lock.LOCK_TYPE = requested_lock.LOCK_TYPE
                   AND blocking_lock.LOCK_STATUS = 'GRANTED'
                   AND blocking_lock.LOCK_DATA = requested_lock.LOCK_DATA
-                """, Integer.class, connectionId, table, primaryKey, primaryKey);
+                """, Integer.class, connectionId, table, lockMode, primaryKey, primaryKey);
             if (waiting != null && waiting > 0) {
                 return;
             }

@@ -1006,7 +1006,16 @@ public class AiAssistantWriteToolService {
         }
     }
 
+    /**
+     * Reads a stored envelope for a decision or an undo. A proposal still pending is acted on only
+     * when the server wrote it (#1867): a refused call stores what the model sent, and one stranded
+     * as {@code proposed} by an interrupted run could otherwise be approved as a proposal the server
+     * never prepared. An executed row was already acted on, so its undo still reads it.
+     */
     private StoredWrite readStored(AiChatToolCall toolCall) {
+        if (PROPOSED.equals(toolCall.getStatus()) && !toolCall.isServerProposal()) {
+            throw new ConflictException("Assistant tool proposal was not prepared by the server");
+        }
         try {
             JsonNode root = objectMapper.readTree(toolCall.getArgumentsJson());
             String toolName = text(root, "tool");

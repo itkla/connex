@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -131,11 +133,15 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
     /**
      * A promotion that commits after the password-only request passed the pre-lock gate, but
      * before it takes the account lock, is refused by the re-check under that lock. The request is
-     * one MyBatis session, so the re-check must not be answered from the pre-lock reads. It writes
-     * no audit, because the request then holds its own account row exclusively.
+     * one MyBatis session, so the re-check must not be answered from the pre-lock reads. The refusal
+     * is audited once the request's transaction completes: an immediate independent append would
+     * wait on the request's own exclusive account lock until the InnoDB timeout, which the bound
+     * below catches (#1993). The row carries the request's workspace scope, as the pre-lock refusal
+     * does.
      */
     @Test
-    void aPromotionCommittedBeforeTheAccountLockIsRefusedUnderItWithoutAnAudit() throws Exception {
+    void aPromotionCommittedBeforeTheAccountLockIsRefusedUnderItAndAuditedAfterCompletion()
+            throws Exception {
         assertFalse(privilegedMfaProperties.isEnforced());
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         int workspaceId = freshWorkspace(suffix);
@@ -158,8 +164,21 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
 
         assertTrue(promoted.get());
         assertEquals(0, count("SELECT COUNT(*) FROM email_change_token WHERE user_id = ?", member.getId()));
-        assertEquals(0, count("SELECT COUNT(*) FROM audit_log WHERE action = 'auth.email_change.refused'"
-                + " AND entity_id = ?", member.getId()));
+        List<Map<String, Object>> refusals = jdbcTemplate.queryForList("""
+                SELECT actor_id, outcome, context, workspace_id, org_id, chain_scope_type, chain_scope_id
+                FROM audit_log
+                WHERE action = 'auth.email_change.refused' AND entity_id = ?
+                """, member.getId());
+        assertEquals(1, refusals.size(), "the under-lock refusal must be audited exactly once");
+        Map<String, Object> refusal = refusals.getFirst();
+        assertEquals(member.getId(), ((Number) refusal.get("actor_id")).intValue());
+        assertEquals("failure", refusal.get("outcome"));
+        assertTrue(String.valueOf(refusal.get("context")).contains("privileged_mfa_enrollment_required"));
+        assertEquals(workspaceId, ((Number) refusal.get("workspace_id")).intValue());
+        assertEquals(count("SELECT org_id FROM workspace WHERE id = ?", workspaceId),
+                ((Number) refusal.get("org_id")).intValue());
+        assertEquals("workspace", refusal.get("chain_scope_type"));
+        assertEquals(workspaceId, ((Number) refusal.get("chain_scope_id")).intValue());
     }
 
     private void promoteInIndependentTransaction(int workspaceId, int userId) {

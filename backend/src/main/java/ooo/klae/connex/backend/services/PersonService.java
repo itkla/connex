@@ -659,16 +659,22 @@ public class PersonService {
      * deal risk; {@code introExcluded} removes them from introduction suggestions and
      * intro-opportunity nudges. A {@code null} flag is left unchanged. Warmth display and plain
      * date reminders are unaffected, and existing engine notifications about the contact resolve
-     * on the next scheduled sweep.
+     * on the next scheduled sweep. The audited previous flags come from the contact row locked
+     * before the write, and an archived contact is refused under that lock (#1968). It runs at
+     * {@code READ_COMMITTED}, so the contact returned is a fresh read even when a concurrent change
+     * already set the same flags.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateEvaluationExclusions(int id, Boolean riskExcluded, Boolean introExcluded) {
         if (riskExcluded == null && introExcluded == null) {
             throw new BadRequestException("At least one evaluation flag must be provided");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requireOwnedPerson(workspaceId, id);
+        Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
         personMapper.updateEvaluationExclusions(workspaceId, id, riskExcluded, introExcluded);
         Person after = requireOwnedPerson(workspaceId, id);
         auditService.record("person.updateEvaluation", "person", id, before.getName(),
@@ -932,14 +938,23 @@ public class PersonService {
     }
 
     /**
-     * Replaces the tags associated with a person in the active workspace.
+     * Replaces the tags associated with a person in the active workspace. The contact row is locked
+     * first and an archived contact is refused under that lock; the audited previous tags are then
+     * read under locks on the association rows. A concurrent {@link #addTag} waits on the contact row
+     * at its foreign-key check and a concurrent {@link #removeTag} waits on the association row, so
+     * the audit names exactly the tags this replacement removed (#1968). It runs at
+     * {@code READ_COMMITTED}, so the tags returned are a fresh read.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
-        List<String> before = tagMapper.getTagsByPersonId(workspaceId, personId).stream().map(Tag::getName).toList();
+        Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+        if (person == null || person.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
+        List<String> before = tagMapper.getTagsByPersonIdForUpdate(workspaceId, personId).stream()
+            .map(Tag::getName).toList();
         personMapper.clearTags(workspaceId, personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(workspaceId, personId, tagIds);
         List<Tag> after = tagMapper.getTagsByPersonId(workspaceId, personId);

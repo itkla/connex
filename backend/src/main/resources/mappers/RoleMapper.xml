@@ -36,11 +36,14 @@
     FOR UPDATE
   </select>
 
+  <!-- The locking read selects the role's rows by equality alone (#1578). A range on permission,
+       such as excluding the inert permissions here, lets MySQL run it as a full primary-key scan on
+       a small table, and that scan locks and waits on every custom role's permission rows in the
+       catalog. Callers drop the inert permissions when they parse the result. -->
   <select id="lockPermissions" resultType="string">
     SELECT wrp.permission FROM workspace_role_permission wrp
     JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
     WHERE wrp.workspace_role_id = #{roleId}
-      AND wrp.permission NOT IN ('SSO_MANAGE', 'WORKSPACE_DELETE')
     ORDER BY wrp.permission
     FOR UPDATE
   </select>

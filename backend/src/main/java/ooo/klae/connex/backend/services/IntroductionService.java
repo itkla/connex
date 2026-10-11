@@ -573,7 +573,7 @@ public class IntroductionService {
         }
         Map<Integer, String> namesById = new HashMap<>();
         for (UserDisplayNameDto user :
-                tenantWorkScope.unrouted(() -> userMapper.getDisplayNamesByIds(introducerIds))) {
+                tenantWorkScope.unroutedRead(() -> userMapper.getDisplayNamesByIds(introducerIds))) {
             namesById.put(user.id(), user.displayName());
         }
         for (IntroductionDto item : items) {

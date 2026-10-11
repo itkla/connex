@@ -137,7 +137,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         connector = mock(AudienceSyncConnector.class);
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
         connectorConfigMapper.upsert(connectorConfig(endpoint, listId, credentialRef, true));
-        when(connectorSecretCipher.isAvailable()).thenReturn(true);
+        when(connectorSecretCipher.canDecryptCredential(workspace.getId(), credentialRef)).thenReturn(true);
         when(connectorSecretCipher.decryptCredential(workspace.getId(), credentialRef))
                 .thenReturn("integration-api-key");
         when(deliveryProviderRouter.connectorFor(CONNECTOR)).thenReturn(connector);

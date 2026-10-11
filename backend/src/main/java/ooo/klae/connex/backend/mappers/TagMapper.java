@@ -26,7 +26,12 @@ public interface TagMapper {
 
     List<Tag> getTagsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Tag> getTagsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<Tag> getTagsByPersonIdForUpdate(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Tag> getTagsByCompanyIdForUpdate(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
     List<Tag> getTagsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Tag> getTagsByDealIdForUpdate(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Tag> getTagsByAttachmentIdForUpdate(
+        @Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
     List<Tag> getTagsByAttachmentId(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
 
     /**

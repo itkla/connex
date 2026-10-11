@@ -65,15 +65,16 @@ The published profile sets `CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend`. The
 those Compose service names through Docker DNS at startup and refreshes them periodically and after
 an address miss, so service recreation does not require pinned bridge addresses or operator-managed
 subnets. Caddy is the backend peer for browser `/api/*` traffic, while the frontend is the backend
-peer for server-rendered document previews. Caddy trusts only the exact
-TLS-terminating proxy CIDRs in `CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES`, parses forwarded chains
-right-to-left, and replaces the frontend-facing `X-Forwarded-For` value with that validated client
-address. The frontend passes that one validated `<client>` value to the backend for an SSR preview;
-the backend accepts it only when the direct socket peer resolves to the configured `frontend`
-service. The frontend's `API_URL` uses the `backend-app` alias, which exists only on the `app`
-network. Direct browser API traffic carries the same one-value form from the separately trusted
-`caddy` peer. A recipient-supplied forwarding header is overwritten by Caddy and never trusted
-directly.
+peer for the reads it makes while rendering a page. Caddy trusts only the exact TLS-terminating
+proxy CIDRs in `CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES`, parses forwarded chains right-to-left, and
+replaces the `X-Forwarded-For` value on every request it proxies, to the backend or to the frontend,
+with that validated client address. Direct browser API traffic therefore reaches the backend with
+that one validated value from the trusted `caddy` peer. The frontend's server-side reads forward
+only the session cookie and set no forwarding header, so the backend resolves them to the
+frontend's own address. No page has passed a client address through the frontend since emailed
+document-acceptance links moved to a browser-side grant exchange (#1597). The frontend's `API_URL`
+uses the `backend-app` alias, which exists only on the `app` network. A recipient-supplied
+forwarding header is overwritten by Caddy and never trusted directly.
 
 The published backend image loads `networkaddress.cache.ttl=1` and
 `networkaddress.cache.negative.ttl=0` through its JVM security-properties file before application

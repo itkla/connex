@@ -213,8 +213,17 @@ class ConnectorConfigServiceTest {
     @Test
     void isReady_requiresEnabledEndpointListAndCredential() {
         when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(enabledConnector());
-        when(cipher.isAvailable()).thenReturn(true);
+        when(cipher.canDecryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(true);
         assertTrue(service().isReady(WORKSPACE, "http_list"));
+        verify(cipher, never()).decryptCredential(WORKSPACE, "secret:v1:55");
+    }
+
+    @Test
+    void isReady_falseWhenTheCredentialsOwnKeyCannotDecryptIt() {
+        when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(enabledConnector());
+        when(cipher.canDecryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(false);
+        assertFalse(service().isReady(WORKSPACE, "http_list"));
+        verify(cipher, never()).decryptCredential(WORKSPACE, "secret:v1:55");
     }
 
     @Test

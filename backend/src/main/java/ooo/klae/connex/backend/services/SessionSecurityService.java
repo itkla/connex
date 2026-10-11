@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
+import ooo.klae.connex.backend.session.StepUpProof;
 
 /**
  * Tracks authenticated-session age and WebAuthn step-up stamps in the servlet session.
@@ -33,6 +34,7 @@ public class SessionSecurityService {
     public static final String AUTHENTICATED_USER_ATTR = "connex.authenticatedUserId";
     public static final String WEBAUTHN_STEP_UP_AT_ATTR = "connex.webauthnStepUpAt";
     public static final String WEBAUTHN_STEP_UP_USER_ATTR = "connex.webauthnStepUpUserId";
+    public static final String WEBAUTHN_STEP_UP_PROOF_ATTR = "connex.webauthnStepUpProof";
     static final String REQUEST_IDENTITY_ATTR = "connex.requestIdentity";
     static final String REQUEST_IDENTITY_SESSION_ATTR = "connex.requestIdentitySessionId";
     static final String REQUEST_IDENTITY_USER_ATTR = "connex.requestIdentityUserId";
@@ -55,6 +57,7 @@ public class SessionSecurityService {
         session.setAttribute(AUTHENTICATED_USER_ATTR, userId);
         session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
         session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+        session.removeAttribute(WEBAUTHN_STEP_UP_PROOF_ATTR);
         replaceRequestIdentity(session, userId);
     }
 
@@ -148,6 +151,7 @@ public class SessionSecurityService {
         session.removeAttribute(AUTHENTICATED_USER_ATTR);
         session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
         session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+        session.removeAttribute(WEBAUTHN_STEP_UP_PROOF_ATTR);
         session.removeAttribute(REQUEST_IDENTITY_ATTR);
         session.removeAttribute(REQUEST_IDENTITY_SESSION_ATTR);
         session.removeAttribute(REQUEST_IDENTITY_USER_ATTR);
@@ -187,8 +191,78 @@ public class SessionSecurityService {
         }
     }
 
-    public void markStepUp(HttpServletRequest request, int userId) {
-        markStepUp(request.getSession(), userId, clock.millis());
+    /**
+     * Stamps a WebAuthn step-up for the account and binds the passkey that signed it to that stamp
+     * (#1534). The binding is one string naming the account, the stamp time and the credential, so
+     * code that refreshes the stamp without rebinding it, such as an older binary during a rollback,
+     * orphans the binding instead of lending it to a different ceremony.
+     *
+     * @param request the current request
+     * @param userId the account that stepped up
+     * @param credentialRowId the {@code webauthn_credential.id} that signed the ceremony
+     */
+    public void markStepUp(HttpServletRequest request, int userId, int credentialRowId) {
+        HttpSession session = request.getSession();
+        long now = clock.millis();
+        markStepUp(session, userId, now);
+        session.setAttribute(WEBAUTHN_STEP_UP_PROOF_ATTR, userId + ":" + now + ":" + credentialRowId);
+    }
+
+    /**
+     * The passkey behind the session's current step-up stamp, while that stamp is fresh and belongs
+     * to the account. A stamp without a binding, or refreshed since without one, yields null.
+     *
+     * @param session the authenticated session, or null
+     * @param userId the account the stamp must belong to
+     * @return the signing credential and the stamp time, or null
+     */
+    public StepUpProof recentStepUpProof(HttpSession session, int userId) {
+        if (session == null || !hasFreshRecentAuthentication(session, userId)) {
+            return null;
+        }
+        Long stampedAt = longAttribute(session, WEBAUTHN_STEP_UP_AT_ATTR);
+        String binding = stringAttribute(session, WEBAUTHN_STEP_UP_PROOF_ATTR);
+        if (stampedAt == null || binding == null) {
+            return null;
+        }
+        String[] parts = binding.split(":", -1);
+        if (parts.length != 3) {
+            return null;
+        }
+        try {
+            int boundUserId = Integer.parseInt(parts[0]);
+            long boundAt = Long.parseLong(parts[1]);
+            int credentialRowId = Integer.parseInt(parts[2]);
+            if (boundUserId != userId || boundAt != stampedAt) {
+                return null;
+            }
+            return new StepUpProof(credentialRowId, boundAt);
+        } catch (NumberFormatException malformed) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether a step-up proof is still inside the recent-authentication window, for re-checking a
+     * proof after waiting on a lock.
+     *
+     * @param proof a proof read with {@link #recentStepUpProof(HttpSession, int)}
+     * @return true while the proof is fresh
+     */
+    public boolean isFresh(StepUpProof proof) {
+        return isWithinRecentAuthenticationWindow(proof.stampedAtMillis());
+    }
+
+    /**
+     * The session store's stable row identity for the request's session, which survives a
+     * session-id rotation.
+     *
+     * @param request the current request
+     * @return the {@code SPRING_SESSION.PRIMARY_ID}, or null when the session is not stored
+     */
+    public String sessionPrimaryId(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        return session == null ? null : springSessionMapper.primaryIdBySessionId(session.getId());
     }
 
     /** Clears any WebAuthn step-up proof from the current session. */
@@ -197,6 +271,7 @@ public class SessionSecurityService {
         if (session != null) {
             session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
             session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+            session.removeAttribute(WEBAUTHN_STEP_UP_PROOF_ATTR);
         }
     }
 

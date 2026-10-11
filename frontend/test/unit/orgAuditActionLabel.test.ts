@@ -21,7 +21,9 @@ const BACKEND_SOURCE = path.resolve(process.cwd(), "..", "backend", "src", "main
  *   `AuditService.writeUnchecked` scopes to the org and nulls the workspace;
  * - `auditService.record*Scoped(action, …, workspaceId, orgId, …)` called with a null workspace and
  *   a non-null org: the teardown, workspace-export and support-bundle services pass a literal null,
- *   and `SecretStore`/`SecretStoreLifecycleService` pass null for organization-scoped secrets.
+ *   `SecretStore`/`SecretStoreLifecycleService` pass null for organization-scoped secrets, and
+ *   `PrivilegedMfaAttestationService` passes an organization owner's grant's null workspace when it
+ *   audits creating, turning off or redeeming a passkey approval code (#1534).
  *
  * `AuditService.sensitiveAction` then rewrites any unlisted `secret_store.*` action to
  * `secret_store.operation` before the rows leave the service, so that alias is reachable too.
@@ -40,6 +42,9 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "appi.subject_request.create",
     "appi.subject_request.disclosure",
     "appi.subject_request.update",
+    "auth.mfa.attestation.issued",
+    "auth.mfa.attestation.redeemed",
+    "auth.mfa.attestation.revoked",
     "org.ai_provider.revoke",
     "org.ai_provider.save",
     "org.ai_provider.zdr_attest",

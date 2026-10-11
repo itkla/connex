@@ -100,7 +100,7 @@ class BackgroundJobTenantIsolationTest {
         ReflectionTestUtils.setField(worker, "dispatchEnabled", true);
         when(placementRegistry.activeCatalogs())
                 .thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
-        when(mapper.workspaceIdsWithQueuedSends(false, 30_000_000L))
+        when(mapper.workspaceIdsWithQueuedSends(false, 30_000_000L, 900L))
                 .thenReturn(List.of(SIBLING_WORKSPACE_ID))
                 .thenReturn(List.of(FOREIGN_ORGANIZATION_WORKSPACE_ID));
 

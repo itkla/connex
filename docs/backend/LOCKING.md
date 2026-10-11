@@ -8,6 +8,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 
 - Discover keys without locks when the contract says to do so; sort deterministic key sets in Java before acquiring exact locks.
 - `ORDER BY ... FOR UPDATE` is not a substitute for an explicitly ordered series of exact lock acquisitions when a contract requires deterministic ordering.
+- **A locking read selects its rows by equality on an index prefix, not by a range or `NOT IN` on a later key column (#1578).** MySQL may run such a multi-range read as a full index scan on a small table. A locking full scan must lock, and wait on, every row it reads before discarding it, including other roles' and other workspaces' rows. `RoleMapper.lockPermissions` therefore reads a custom role's `workspace_role_permission` rows by `workspace_role_id` alone, and its callers drop inert permissions in Java. MySQL 8.4 runs that read as a `ref` lookup of the role's own rows in every distribution measured (tiny, balanced and skewed), but a statement cannot force a plan, so that is the expected access path rather than an enforced one. Under REPEATABLE READ the lookup's end still takes a gap lock before the next role's first row; that blocks inserts into the gap, not another role's locking read. Members who share a role still serialize on its row.
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
@@ -74,7 +75,21 @@ entry shared and then takes the workspace audit head or the workflow gate. A leg
 `assign_owner` reaches the owner change holding the gate, and the audit head too once an earlier
 action has audited. Either one would close a deadlock if the owner change locked that entry. The
 other single-column deal updates, `reschedule` and `updateRiskExcluded`, read the deal through the
-same primary-key lock for the same reason (#1958). The collaborator path is in the #1582 class
+same primary-key lock for the same reason (#1958). The contact and company tag replacements
+(`PersonService` and `CompanyService.replaceTags`) and the contact evaluation opt-out
+(`PersonService.updateEvaluationExclusions`) also read the record row `FOR UPDATE` first, refuse an
+archived row under it, and audit from what they read after it, at `READ_COMMITTED` (#1968). The deal
+and attachment tag replacements do the same (#1980): the deal through `getDealByPrimaryKeyForUpdate`,
+whose `PRIMARY`-only lock is the record a `deal_tag` foreign-key check takes, refusing a deleted deal;
+the attachment through `getMetadataByIdForUpdate`, re-checking its type and note-target visibility
+under that lock. A tag replacement then reads the record's `person_tag`, `company_tag`, `deal_tag` or
+`attachment_tag` rows `FOR UPDATE OF` the association table, driven from its primary-key prefix,
+before clearing them. A concurrent `addTag` blocks on the
+record row at its foreign-key check, and a concurrent `removeTag`, which takes no record lock, blocks
+on the association row, so the audited previous tags are exactly the rows the replacement deletes. A
+tag deletion that cascades into a record while a replacement re-adds the same tag can still deadlock,
+as it could before (the replacement holds the association row and waits on the tag row for its
+insert's foreign-key check); InnoDB rolls one back with a retryable error. The collaborator path is in the #1582 class
 below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
 step 3 would therefore both barrier every audited write in the tenant for the duration of an
 authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
@@ -157,12 +172,12 @@ an email-change token and then acquire its account root.
 2. Discover the account's pending grants without locks and take them in ascending `workspace_id`.
 3. Lock each of those workspace roots exclusively in that order.
 4. Lock the recipient's globally ordered `workspace_member` set (`NotificationMapper.lockRecipientMemberships`) — the same point invitation decline takes it, so notification cleanup cannot invert membership lock order.
-5. Per workspace: delete the pending row, and only when that delete claimed it, delete the recipient's notification baselines and notifications and write the scoped audit event.
+5. Per workspace: delete the pending row, and only when that delete claimed it, write the scoped audit event.
 6. Bump the recipient's notification state version once, after all deletions.
 
-Discovery is deliberately unfiltered by `lifecycle_state`, so a grant parked in a suspended or tearing-down tenant is revoked too. The account root is held throughout, and every invite-grant writer locks the recipient root first, so no new pending row can be committed behind the sweep.
+Every statement in that transaction is control-plane, so the revocation commits atomically with the email change. The revoked grants' notification baselines and notifications are tenant data in each workspace's own catalog, which that transaction cannot install. They are cleared afterwards by `RevokedGrantNotificationCleanup` (#1708), one transaction per revoked workspace in ascending id. Each unit pins the workspace's catalog with `inLifecycleWorkspace` (so suspended and tearing-down workspaces resolve too) before opening its transaction, then locks the `app_user` root, the workspace root and the recipient's ordered membership set, the same order as step 1–4 and as decline. It skips a workspace where any membership row, pending or active, exists again, so a re-invitation or acceptance committed since the change keeps its notifications. Taking the account row before the membership set, as the sweep and a member's leave do, places each unit in the #1582 class with membership-first record mutations that end in an audit. InnoDB resolves that cycle by rolling one side back: a unit that loses is caught like any other failed unit, while the other side's request fails and must be retried. `EmailChangeConfirmationService` runs the confirmation and then the cleanup, and refuses to start inside a caller's transaction, before consuming anything. The cleanup is one best-effort attempt per workspace: a failed unit is logged and leaves that workspace's rows in place, possibly indefinitely, since account erasure visits only `PlacementRegistry.activeCatalogs()`. Those rows stay out of the inbox, which requires a membership the revocation removed, and a fresh membership purges them.
 
-The sweep runs single-catalog: it issues each workspace's tenant-plane notification deletes on the request's own connection without installing that workspace's placement, which is inert while every workspace lives in one database. Before placement routing is enabled it must run each workspace's deletes inside `tenantWorkScope.withWorkspacePlacement`.
+Discovery is deliberately unfiltered by `lifecycle_state`, so a grant parked in a suspended or tearing-down tenant is revoked too. The account root is held throughout, and every invite-grant writer locks the recipient root first, so no new pending row can be committed behind the sweep.
 
 The following boundaries run at `READ_COMMITTED` rather than the default isolation and must stay that way:
 
@@ -755,6 +770,14 @@ the same actor-before-workspace order. Resolution performs no provider I/O; the 
 made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
 disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
 
+`DeliveryProviderConfigService.describeClaimTarget` takes the same actor/workspace roots and then
+`delivery_provider_config FOR SHARE` as resolution. `MailConfigResolver.describeForWorkspace`
+uses the same root-first selection as SMTP resolution (managed instance settings need no workspace
+lookup). Both descriptions are non-sendable and perform no decrypt or secret-use audit. Metadata
+checks cannot detect ciphertext or key-material corruption or lazy rewrap failures. These locks do
+not by themselves make recovery's replay decision correct: dispatch rechecks the claimed target
+before egress.
+
 ## Campaign mutations
 
 Campaign update, live-audience replacement, snapshot creation, and send creation acquire current
@@ -964,9 +987,16 @@ complete a replacement claim. SMTP is consequently a best-effort campaign transp
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
-Audience delivery dispatch claims with a bare `pending` → `dispatching` compare-and-set and stores
-no lease owner, lease expiry, or attempt-target fingerprint. Its only persisted age anchor is the
-frequency reservation, which the worker writes as database time plus the hard provider deadline in
+Audience delivery dispatch claims with a `pending` → `dispatching` compare-and-set that also writes
+the attempt's own lease end time, `audience_lease_until` (#1773), and stores no lease owner or
+attempt-target fingerprint. The `dispatch_lease_*` columns stay a triggered claim's, so
+`dispatch_lease_owner IS NULL` still identifies an audience row to every statement, including the
+previous release's, which never reads the new column. An audience row is never returned to `pending`,
+so no other worker can hold it and an owner would fence nothing; the worker renews the end time once
+just before egress, by a compare-and-set that does not require the lease to be live, because the only
+actor that can take the row is a recovery sweep and the row's status decides that race. The lease end
+time ages an attempt that never reserved; for one that did, the anchor is the frequency reservation,
+which the worker writes as database time plus the hard provider deadline in
 `CampaignFrequencyAdmissionService`'s short workspace → delivery transaction before egress, after
 capturing that deadline. A worker that dies between reservation and its terminal write therefore
 leaves a `dispatching` row whose reservation would cap the contact/channel for the whole frequency
@@ -991,16 +1021,24 @@ rows; the statement runs once per catalog with no workspace predicate, so no ind
 `workspace_id` could be seeked for it. Every statement stays correct without that index and only the
 scan returns, so `DeliveryRecoveryIndexArchTest` pins its leading columns against a later index
 consolidation. The same pass then settles every audience send that is still
-`running` with nothing `pending` or `dispatching`: it completes the send and refreshes the counters,
-without resolving a provider, so a connector disabled after the worker died cannot keep the send
-running. The completion is a single compare-and-set that proves the absence of `pending` and
+`running` with nothing `pending` or `dispatching`: it refreshes the counters, completes the send,
+and refreshes them again after a completion, without resolving a provider, so a connector disabled
+after the worker died cannot keep the send running. The first refresh precedes the completion so a
+refresh that fails, or a process that dies before completing, leaves the send `running` and found
+again. The completion is a single compare-and-set that proves the absence of `pending` and
 `dispatching` rows in the same statement that writes `completed`, so a live worker's terminal write
 cannot land between the proof and the completion; because no delivery can return to `pending` or
-`dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
-final state. A `dispatching`
-row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
-it after its terminal write, an attempt it abandons after reserving is swept and settled by a later
-pass, and one abandoned before reserving is left to the dispatch loop's own settlement. That send is
+`dispatching` afterwards, the refresh that follows a completion reads every delivery in its final
+state. A death between the completion and that second refresh loses only terminal writes that landed
+after the first refresh, and each such write's own worker refreshes after it, so the counters stay
+stale only if that worker dies too. A `dispatching`
+row may belong to a live worker, possibly on another instance, so that send stays `running`. The
+dispatch loop settles through the same compare-and-set (#1773), so whichever settlement follows the
+last terminal write completes the send, and a running send with nothing `pending` is settled there
+without resolving its provider, so waiting on another attempt is never reported as a failed run. An
+attempt its worker abandons, before or after reserving, is swept and settled by a later pass. Before
+#1773 the loop completed a send once nothing was `pending`, which could complete it under a peer's
+in-flight attempt. That send is
 selected by a durable predicate, not remembered from the sweep, because a marked row no longer
 matches the sweep: a settlement that fails is found again on a later pass, and scheduler discovery
 already returns a workspace that owns a `running` send. The predicate deliberately carries no
@@ -1016,11 +1054,14 @@ counter-disagreement selector: comparing `failed_count` with a `COUNT(*)` of fai
 dependent subquery over every audience send's delivery history, which the scheduler would pay on
 every tick, and putting the reconciliation `EXISTS` first does not bound it, because
 `reconciliation_required_at` is not in `idx_campaign_delivery_send_status` and the probe therefore
-reads the same failed rows from the clustered index. The bound that leaves: if a pass dies between
-the sweep's compare-and-set and its counter refresh, an already completed send under-reports
-`failed_count` until an operator resolves the reconciliation row the sweep created, which refreshes
-the counters itself. The delivery row is terminal and reconcilable throughout, so nothing is lost
-except the send-level counter. Settlement takes the same single-row auto-commit writes on
+reads the same failed rows from the clustered index. The bound that leaves: if a pass dies after a
+sweep's compare-and-set and before the matching counter refresh of an already `completed` send,
+that send keeps a `failed_count` missing every row the pass marked, up to one page; a `running` send
+is refreshed before its completion, so it is found again instead. Resolving an ambiguous row's reconciliation
+refreshes the counters, but a definitive abandonment (below) creates no reconciliation row, so its
+under-report remains. A pass that dies between a compare-and-set and its event append also loses that
+row's `failed` event. The delivery rows themselves are terminal throughout, and the ambiguous ones stay
+reconcilable. Settlement takes the same single-row auto-commit writes on
 `campaign_send` the dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
 sweep loses its `status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then
 attaches its provider id and message id to that swept row through a second single-row
@@ -1047,8 +1088,32 @@ reconciliation with no message id — a worker that never returns, a replay that
 return refused because a newer attempt held the claim, a terminal write or late attach that could
 not be persisted, and a receipt that names no message id from either attempt —
 so their webhooks still match no row and operators check the provider by hand for every triggered
-item (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows
-without a person (which are never reserved), have no age anchor and are not swept.
+item (`docs/DELIVERABILITY.md` §3.1).
+
+Audience attempts abandoned with no frequency reservation are swept by their lease (#1773): a person
+row whose worker died before reserving, or after releasing its reservation before egress, and a row
+with no person, which never reserves. A row is due once its `audience_lease_until` has been expired for
+the same safety-margin grace. A row an older version claimed carries no lease and is due once it has
+been idle, by its own `updated_at` clock, for three times the maximum lease. That is a heuristic rather
+than proof the older worker is gone, because older code bounds the provider call but not the
+preparation before it. What holds regardless: a person row's late worker can no longer reserve, since
+reservation requires `dispatching`, so it cannot send and the definitive outcome below stays true; the
+cost is a delivery that fails instead of going out late. A person-less row's late older worker may
+still reach the provider; the row is held for reconciliation either way, but that worker's
+late-correlation statement matches only the reservation sweep's marker, so its provider id is not
+attached and a bounce cannot resolve to the row. Both need an older worker stalled past that idle time
+while a newer version runs beside it, which a restart deploy of the single backend never allows. A person
+row with no reservation never reached the provider — reservation precedes egress and is released only
+where egress provably did not happen, including a rejection the adapter proves preceded egress — so it
+becomes a definitive `failed` row with no
+reconciliation and no frequency cap. A row with no person may have reached the provider, so it becomes
+an ambiguous `failed` row requiring reconciliation, like an expired reservation, and a late worker's
+provider correlation still attaches to it. Neither is replayed. The statements have the reservation
+sweep's shape and lock footprint — one auto-commit compare-and-set per row on the delivery joined to its
+send for `origin` — and the owning sends are settled the same way. Scheduler discovery gains a matching
+row-driven arm, which reads `idx_campaign_delivery_unleased_reservation` with `status`,
+`dispatch_lease_owner` and `frequency_reserved_at` as equalities, so it reads only unreserved
+outstanding attempts.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
@@ -1182,8 +1247,132 @@ account root.
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
   against committed state. That statement is mapped with `flushCache="true"`: the request is one
   MyBatis session, so without the flush the re-check would return the privilege and passkey answers
-  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
-  below).
+  cached by the pre-lock evaluation. A refusal that appears only under the root is audited once the
+  transaction completes (see below).
+- `WebAuthnService.finishRegistration` takes the account root exclusively (`lockById`), checks the
+  `session_epoch`, locks the assigned custom roles `FOR SHARE`, and then evaluates the first-passkey
+  confirmation fence (#1506) against committed state. `WebAuthnController` audits that refusal
+  strictly at both ceremony phases, before any lock. A refusal that appears only under the root is
+  recorded with the same row through `AuditService.deferFailureScoped` and appended once the
+  transaction completes, because an immediate independent append would wait on the request's own
+  exclusive lock (#1995). It is best-effort, with the bounds of the step-up deferral (#1986).
+- Under the same locks, after `registerCredential`, `finishRegistration` records the new passkey's
+  provenance (#1534). It reads the recovery restamp grant before clearing it, then writes founder
+  coverage, then either inherited coverage and assurance (for a fresh step-up by a passkey the
+  account still holds) or break-glass assurance (for the recovery session itself). Every row it
+  writes belongs to the new credential. Its reads of `org_member`, the source passkey's coverage and
+  the grant are non-locking at `READ COMMITTED`. They are still current, because every writer of
+  that state takes this account's root first:
+  - founding (`createWorkspace`, owner row `FOR SHARE`);
+  - org role changes and removal (`lockMembershipUserRoots`);
+  - passkey deletion and recovery.
+
+  Organization teardown is the exception. It removes `org_member` and coverage rows through the
+  organization's cascade, holding its actor and the organization rather than this account. Coverage
+  rows are children of `organization`, so each insert's foreign-key check takes the organization
+  row shared. Only organizations still active at the registration's read get new coverage, which
+  keeps registration out of a teardown whose fence committed first. A teardown that commits its
+  fence after that read still meets the insert:
+  - coverage written for an organization being torn down goes with its cascade;
+  - an insert that reaches a final deletion still in flight waits for it;
+  - if that deletion commits first, the foreign-key check fails and the whole registration rolls
+    back as a retryable failure.
+
+  This is accepted rather than locking candidate organizations inside every registration: the
+  outcome is benign and rare, and the lock would couple passkey enrollment to the tenant lifecycle.
+- Founding an organization (`OrgMemberService.addFoundingOwner`, under `createWorkspace`'s owner row
+  `FOR SHARE`) inserts the owner row flagged as founder. It then covers the owner's existing passkeys
+  with an `INSERT … SELECT`, which at the default isolation is a locking read. A passkey that a
+  registration committed while founding waited on the account row is therefore covered. In the
+  other order, the registration waits on the shared account row, then reads the committed founder
+  flag. `PrivilegedCredentialProvenanceIntegrationTest` drives both commit orders against real lock
+  waits.
+- Attestation codes (#1534) take the authority locks of the role they attest before they touch a
+  grant. Issuing, revoking, redeeming and burning one member's codes therefore serialize on that
+  member's account row.
+  - **Workspace grants** reuse the role-mutation order (`WorkspaceService.lockAttestationAuthority`
+    over `lockRoleMutation`):
+    1. accounts ascending, `FOR UPDATE`;
+    2. the workspace row exclusively;
+    3. both memberships;
+    4. the custom-role roots involved, ascending, then their permission sets;
+    5. the workspace's organization, shared and after the workspace, as teardown takes them.
+  - **Org grants** reuse `setMember`'s order (`OrgMemberService.lockAttestationAuthority`):
+    1. accounts shared, ascending;
+    2. the organization exclusively, before the owner rows, so nothing upgrades a shared lock.
+       It is locked only while active (`lockActiveById`), so a teardown fence that commits while
+       the request waits refuses it;
+    3. the owner rows;
+    4. exactly the member's own `org_member` row (`lockExactRole`, with no join).
+  - **Deletion reservations** of both accounts are read with locking reads once the accounts are
+    locked. Issuing and revoking run at `REPEATABLE READ`, and an ordinary read would answer from
+    the snapshot taken before the request waited, missing a reservation committed meanwhile.
+  - **After the authority locks**, the grant row (supersede, claim), then the coverage insert, whose
+    foreign-key checks take the passkey and organization rows shared. The scoped audit comes last.
+  - **Redemption** runs the passkey assertion in its own earlier transaction. Verifying advances the
+    passkey's counter, and inside the redemption it would take the credential before the account
+    root, against deletion and recovery's account-then-credential order.
+  - **The refusal count** runs in a third transaction once the redemption has rolled back:
+    1. the member's account row, `FOR UPDATE`;
+    2. their redeemable grants.
+
+    It takes no tenant parent. Its denial audit is appended afterwards at account scope, so it can
+    neither wait on the redemption it follows nor invert teardown.
+
+- `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
+  step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
+  (`lockWorkspaceForShare`) → assigned custom-role rows `FOR SHARE`
+  (`lockAssignedCustomRoleRowsForShare`, flushing the MyBatis session cache) → privilege/step-up
+  re-check with its refusal audited after completion → existing schedule mutation and transactional
+  success audit.
+- `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
+  and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
+  shared, active workspace shared, authorization membership exclusive) → assigned custom-role rows
+  shared with cache flush (`lockAssignedCustomRoleRowsForShare`) → `lockDefinitions` (workspace
+  report definitions exclusive) → `getDefinition` and not-found check → schedule/privilege
+  re-check and step-up, its refusal audited after completion → existing deletion policy, snapshot
+  checks, cascade and transactional success audit. The definition locks block schedule inserts
+  through their parent foreign-key check.
+
+These schedule/report account roots are **shared**, unlike email-change, passkey and
+password-reset credential flows. Report writers (scheduled delivery, report creation and manual
+snapshots) run as the report's user, lock report definitions or schedule rows, then audit, taking
+`app_user` shared. An exclusive account root here would deadlock against those writers. The shared
+root still conflicts with every invitee-timed activation, which locks the grantee's `app_user`
+`FOR UPDATE`; the custom-role row locks also conflict with `lockRole`. These gates use
+`lockAssignedCustomRoleRowsForShare` (`FOR SHARE OF` the role rows) rather than
+`lockAssignedCustomRoleIds`, which also share-locks every custom-role membership the account holds:
+with a shared account root, two of the account's own report deletions in different workspaces each
+hold their own membership exclusively (`isLockedBuiltInAdministrator`) and would then deadlock on
+each other's. The account root is the only one of these locks that waits for a built-in role
+promotion in another workspace: privilege is account-wide, and the role-row lock reaches memberships
+only through their custom roles (`PrivilegedGateConcurrencyIntegrationTest` pins both). The
+workspace root must precede custom-role locks to match `lockRoleMutation`. Both the unlocked
+pre-check and the under-lock re-check audit their refusals, but only the pre-check appends
+immediately. The independent audit takes the account row `FOR SHARE` on its own connection, and
+InnoDB queues that request behind any exclusive request already waiting on the operation's shared
+root, such as a role change or an invite acceptance for the same account. That writer waits on the
+operation, and the operation would wait on the audit in the application, where InnoDB can't see the
+cycle; the refusal used to stall until the writer's lock wait timed out. The under-lock refusal is
+therefore built at the call and appended after the transaction completes
+(`AuditService.deferExportStepUpRefusal` / `deferScheduleDeleteStepUpRefusal`, #1986). That removes
+the cycle but is best-effort: the append's own waits are not bounded, and a failure or a crash before
+it commits loses the row, as for the integrity-head deferral (#1879). Like every chained row, it takes
+its `created_at` and `integrity_actor_id` at append time. It can therefore trail the refusal by the
+queued writer's own transaction, where the immediate append trailed it by that writer's whole lock
+wait. And if that writer is the account's own deletion (self-service only), the row keeps the actor in
+its signed `entity_id` and its labels but not in `actor_id`, as any append after the deletion does.
+The re-check catches a
+promotion, a newly committed schedule (G7), or a step-up that expired while the operation waited
+for its locks.
+
+Residuals: two promotions are not serialized by these shared roots. `OrgMemberService.setMember`
+locks the grantee only `FOR SHARE`, and self-service workspace creation
+(`WorkspaceService.createWorkspace`, #1982) holds the creator's account row only `FOR SHARE`. Both
+are harmless here: nothing that authorizes the gated writes reads `org_member` or a membership the
+write does not already hold (`permissionsFor`, `lockAndRequirePermissions`,
+`isLockedBuiltInAdministrator`, `DeletionPolicy`), so a write that escapes the re-check is one the
+account could have made without the step-up a moment earlier.
 
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:
@@ -1208,8 +1397,11 @@ would wait on the caller's own lock until the InnoDB timeout, lose the event, an
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
-re-check of the privileged gate throws without auditing, because any append there would block on
-the request's own exclusive lock.
+re-check of the privileged gate audits its refusal through `AuditService.deferFailure` instead: the
+entry, with its tenant scope, actor and request metadata, is built at the call and appended after the
+request's transaction completes, once its own exclusive lock is released (#1993). That append is
+best-effort with the bounds of the step-up deferral (#1986): `created_at` is the append time, and a
+row appended after its account was deleted keeps the actor only in `entity_id` and its actor label.
 
 The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
 The corpus lookup runs before any lock, but the fail-open decision reads account privilege under

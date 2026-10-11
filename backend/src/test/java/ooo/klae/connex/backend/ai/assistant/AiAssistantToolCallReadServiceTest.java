@@ -603,6 +603,49 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     /**
+     * A refused call stores the model's own arguments, which a model can shape into a complete
+     * proposal envelope, and an interrupted run can strand one as pending. A pending or failed row
+     * the server did not propose is never a card and reads as 404, however complete its envelope.
+     * A genuine failed proposal still shows, and an executed row stays as history (#1867).
+     */
+    @Test
+    void aPendingOrFailedRowTheServerDidNotProposeLeavesNoCardHoweverCompleteItsEnvelope() {
+        AiChatToolCall refused = toolCall(
+                36, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 20,
+                "{\"reason\":\"tool_not_loaded\"}");
+        refused.setServerProposal(false);
+        AiChatToolCall stranded = toolCall(
+                38, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 22, null);
+        stranded.setServerProposal(false);
+        AiChatToolCall failedProposal = toolCall(
+                37, USER_ID, "change_deal_stage", "confirm", "failed", "deal", 41, 21,
+                "{\"reason\":\"forbidden\"}");
+        AiChatToolCall history = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        history.setServerProposal(false);
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(history, refused, failedProposal, stranded));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+        stubVisibleDeal();
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(List.of(29, 37), result.stream().map(AiAssistantToolCallReadDto::id).toList());
+        assertEquals("failed", result.getLast().status());
+        for (AiChatToolCall untrusted : List.of(refused, stranded)) {
+            when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, untrusted.getId()))
+                    .thenReturn(untrusted);
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> service.get(SESSION_ID, untrusted.getId()),
+                    untrusted.getStatus());
+        }
+    }
+
+    /**
      * A row whose stored tool matches its name but names no registered write — a read tool's, one
      * forged with a write tier, or a name the catalog no longer declares — is never a card, and a
      * direct read of it answers 404.
@@ -2745,6 +2788,7 @@ class AiAssistantToolCallReadServiceTest {
                 + "},\"request\":" + request + "}");
         toolCall.setResultJson(resultJson);
         toolCall.setIdempotencyKey("turn-" + turnId + "-step-1");
+        toolCall.setServerProposal(true);
         toolCall.setCreatedAt("2026-08-12 11:59:00.000000");
         toolCall.setUpdatedAt("2026-08-12 12:00:00.000000");
         toolCall.setExecutedAt("2026-08-12 12:00:00.000000");

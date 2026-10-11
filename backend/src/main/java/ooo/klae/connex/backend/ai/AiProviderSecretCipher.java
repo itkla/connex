@@ -14,8 +14,16 @@ import ooo.klae.connex.backend.secrets.SecretStore;
 public class AiProviderSecretCipher {
     private final SecretStore secretStore;
 
-    public boolean isAvailable() {
-        return secretStore.isAvailable();
+    /**
+     * Whether an organization's stored AI provider credential could be decrypted: the row is in this
+     * organization's scope and purpose, its algorithms are supported, and its own key is configured
+     * and enabled. Nothing is decrypted and no secret use is audited.
+     * @param orgId the organization
+     * @param reference the stored secret reference
+     * @return whether the credential's metadata permits decryption
+     */
+    public boolean canDecryptCredential(int orgId, String reference) {
+        return secretStore.canDecrypt(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, orgId, reference);
     }
 
     public String encryptCredential(int orgId, String jsonPlaintext) {

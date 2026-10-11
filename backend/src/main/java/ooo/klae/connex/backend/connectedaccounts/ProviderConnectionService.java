@@ -73,7 +73,7 @@ public class ProviderConnectionService {
     /** The current user's connections, masked for display. */
     public List<ProviderConnectionDto> getForCurrentUser() {
         int userId = workspaceService.getCurrentUserId();
-        return tenantWorkScope.unrouted(
+        return tenantWorkScope.unroutedRead(
             () -> connectionMapper.getByUserId(userId).stream()
                 .filter(connection -> !"disconnected".equals(connection.getStatus()))
                 .map(ProviderConnectionDto::from)

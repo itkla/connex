@@ -342,8 +342,19 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 && !isBlank(config.getProvider())
                 && ADAPTER_SUPPORTED_PROVIDERS.contains(config.getProvider())
                 && isProviderConfigurationComplete(config)
-                && (!requiresCredential(config.getProvider()) || !isBlank(config.getCredentialRef()))
-                && aiProviderSecretCipher.isAvailable();
+                && credentialResolvable(config);
+    }
+
+    /**
+     * Whether resolution would find the credential it needs: a stored credential, which resolution
+     * always decrypts, must be decryptable under its own configured key; without one, only a provider
+     * that needs no credential is ready. Checked without decrypting or auditing a secret use.
+     */
+    private boolean credentialResolvable(AiProviderConfig config) {
+        if (isBlank(config.getCredentialRef())) {
+            return !requiresCredential(config.getProvider());
+        }
+        return aiProviderSecretCipher.canDecryptCredential(config.getOrgId(), config.getCredentialRef());
     }
 
     private boolean isProviderConfigurationComplete(AiProviderConfig config) {

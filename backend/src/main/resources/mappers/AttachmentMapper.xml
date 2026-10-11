@@ -104,6 +104,15 @@
     WHERE a.workspace_id = #{workspaceId} AND a.id = #{id}
   </select>
 
+  <!-- Locks the attachment row through its primary key, the record a tag association's foreign-key
+       check locks, so a tag replacement holding it makes a concurrent tag addition wait. -->
+  <select id="getMetadataByIdForUpdate" resultMap="AttachmentResult" flushCache="true">
+    SELECT <include refid="attachmentColumns"/>
+    FROM attachment a FORCE INDEX (PRIMARY)
+    WHERE a.workspace_id = #{workspaceId} AND a.id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getMetadataByUrl" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a

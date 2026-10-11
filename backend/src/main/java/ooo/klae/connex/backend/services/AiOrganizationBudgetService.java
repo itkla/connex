@@ -59,7 +59,7 @@ public class AiOrganizationBudgetService {
     private AiOrganizationBudgetDto snapshot(int orgId) {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate usageDay = now.toLocalDate();
-        Snapshot snapshot = controlAccess.execute(() -> operations.snapshot(orgId, usageDay, now));
+        Snapshot snapshot = controlAccess.executeRead(() -> operations.snapshot(orgId, usageDay, now));
         long committed = saturatedAdd(snapshot.consumedTokens(), snapshot.reservedTokens());
         long remaining = snapshot.dailyTokenLimit() == 0
                 ? 0

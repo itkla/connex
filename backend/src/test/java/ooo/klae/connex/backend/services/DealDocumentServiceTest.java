@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -101,6 +102,22 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         assertTrue(doc.content().sections().intro().contains(currentUser.getDisplayName()));
         assertEquals(1, doc.content().lineItems().size());
         assertEquals(0, new BigDecimal("220.00").compareTo(doc.content().totals().grandTotal()));
+    }
+
+    /**
+     * Deactivating a template retires it: the deal documents picker hides it, and a direct call with
+     * its id is refused before any version is written (#1927).
+     */
+    @Test
+    void aDeactivatedTemplateCannotGenerateADocument() {
+        Deal deal = jpyDeal();
+        DocumentTemplate tpl = template();
+        tpl.setActive(false);
+        templateService.update(tpl.getId(), tpl);
+
+        assertThrows(ConflictException.class, () -> documentService.generate(deal.getId(), tpl.getId()));
+
+        assertTrue(documentService.getForDeal(deal.getId()).isEmpty());
     }
 
     @Test

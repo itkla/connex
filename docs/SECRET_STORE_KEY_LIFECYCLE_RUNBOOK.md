@@ -138,6 +138,18 @@ Secret use, failed use, and rewrap operations are audited with scope, purpose,
 secret id, and key ids where relevant. Audit entries never include plaintext,
 ciphertext, wrapped data keys, or key material.
 
+Readiness and expired-claim recovery check secret metadata without decrypting
+(#1938): the row's scope, algorithms, and that its own key is configured and
+enabled. A delivery credential whose ciphertext or key material is damaged, or
+whose `key_id` was edited, therefore still reports ready, and an expired
+idempotent claim that targets it returns to `pending`. Each campaign dispatch
+tick (every 60 seconds by default) then fails closed at decrypt: it writes one
+`secret_store.secret.use_failed` row per affected send and records a failed
+`campaign_send` job run, and nothing is sent. Watch for a repeating
+`use_failed` row with the same secret id. Re-entering the credential ends the
+affected claims as `delivery_target_changed` for reconciliation; restoring the
+original key material lets them replay under their original idempotency key.
+
 ## Related Documents
 
 - `SECURITY.md`

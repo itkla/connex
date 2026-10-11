@@ -39,12 +39,12 @@ public class DataSubjectRequestService {
     private final TenantWorkScope tenantWorkScope;
 
     public List<DataSubjectRequestDto> list(int orgId, int actorId, String status, int limit, int offset) {
-        return tenantWorkScope.unrouted(
+        return tenantWorkScope.unroutedRead(
             () -> controlOperations.list(orgId, actorId, status, limit, offset));
     }
 
     public DataSubjectRequestDto get(int orgId, long requestId, int actorId) {
-        return tenantWorkScope.unrouted(() -> controlOperations.get(orgId, requestId, actorId));
+        return tenantWorkScope.unroutedRead(() -> controlOperations.get(orgId, requestId, actorId));
     }
 
     public DataSubjectRequestDto create(int orgId, int actorId, DataSubjectRequestUpsertRequest request) {
@@ -112,7 +112,7 @@ public class DataSubjectRequestService {
      * the serving instance. Operators exporting such a subject should expect a slow response.
      */
     public DataSubjectDisclosureDto disclosure(int orgId, long requestId, int actorId) {
-        DisclosureControlData control = tenantWorkScope.unrouted(
+        DisclosureControlData control = tenantWorkScope.unroutedRead(
             () -> controlOperations.prepareDisclosure(orgId, requestId, actorId));
         int workspaceId = control.request().getSubjectWorkspaceId();
         int personId = control.request().getSubjectPersonId();

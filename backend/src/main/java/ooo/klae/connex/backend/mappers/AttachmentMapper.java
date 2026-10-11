@@ -18,6 +18,7 @@ public interface AttachmentMapper {
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getCreatedById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getMetadataById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Attachment getMetadataByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
         @Param("workspaceId") int workspaceId,
