@@ -1,11 +1,14 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,11 +17,14 @@ import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -32,6 +38,7 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -60,6 +67,7 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedAccountService privilegedAccountService;
     @Mock private AccountDeletionReservationRead accountDeletionReservationRead;
     @Mock private RegistrationVerificationService registrationVerificationService;
 
@@ -292,6 +300,71 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(roleMapper).lockPermissions(7, 11);
         order.verify(workspaceMapper).getMember(7, 1);
         order.verify(workspaceMapper).setMemberCustomRole(7, 1, 5);
+    }
+
+    /**
+     * A member-role change reads the confinement baseline over its target after every lock and
+     * before the write, and checks it after the write and before the success audit (#1534).
+     */
+    @Test
+    void memberRoleChangeChecksConfinementBetweenTheWriteAndTheSuccessAudit() {
+        stubOwnerActor();
+        stubRoleMutationTarget("member");
+        when(workspaceMapper.getOrgId(7)).thenReturn(3);
+        ConfinementBaseline baseline = new ConfinementBaseline(3, List.of(9), Set.of());
+        when(privilegedAccountService.confinementBaseline(any(), eq(List.of(9)))).thenReturn(baseline);
+
+        service.changeMemberRole(7, 1, 9, "admin", true);
+
+        ArgumentCaptor<IntSupplier> organization = ArgumentCaptor.forClass(IntSupplier.class);
+        InOrder order = inOrder(workspaceMapper, privilegedAccountService, auditService);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(privilegedAccountService).confinementBaseline(organization.capture(), eq(List.of(9)));
+        order.verify(workspaceMapper).updateMemberRole(7, 9, "admin");
+        order.verify(privilegedAccountService).requireConfinementAcknowledged(baseline, true);
+        order.verify(auditService).record(
+            "workspace.member.role", "workspace", 7, "Target", "Changed Target to admin", null);
+        assertEquals(3, organization.getValue().getAsInt());
+    }
+
+    /**
+     * A custom-role assignment reads the confinement baseline over its target after every lock and
+     * before the write; a refusal leaves no success audit (#1534).
+     */
+    @Test
+    void customRoleAssignmentChecksConfinementBeforeTheSuccessAudit() {
+        WorkspaceMember targetMembership = membership(1, "member", null, "active");
+        WorkspaceMember actorMembership = membership(9, "member", 11, "active");
+        when(workspaceMapper.getMemberRoleId(7, 9)).thenReturn(11);
+        when(roleMapper.findPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(userMapper.lockById(1)).thenReturn(1);
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 1)).thenReturn(targetMembership);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(7, 11)).thenReturn(11);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of(Permission.PERSON_CREATE.name()));
+        when(roleMapper.lockPermissions(7, 11))
+            .thenReturn(List.of(Permission.PERSON_CREATE.name(), Permission.ROLE_MANAGE.name()));
+        when(workspaceMapper.getMember(7, 1)).thenReturn(member("Target", "member", "active"));
+        ConfinementBaseline baseline = new ConfinementBaseline(3, List.of(1), Set.of());
+        when(privilegedAccountService.confinementBaseline(any(), eq(List.of(1)))).thenReturn(baseline);
+        doThrow(new PrivilegedMfaConfinementAcknowledgementRequiredException(1))
+            .when(privilegedAccountService).requireConfinementAcknowledged(baseline, false);
+
+        assertThrows(PrivilegedMfaConfinementAcknowledgementRequiredException.class,
+            () -> service.assignCustomRole(7, 9, 1, 5));
+
+        InOrder order = inOrder(roleMapper, workspaceMapper, privilegedAccountService);
+        order.verify(roleMapper).lockPermissions(7, 11);
+        order.verify(workspaceMapper).getMember(7, 1);
+        order.verify(privilegedAccountService).confinementBaseline(any(), eq(List.of(1)));
+        order.verify(workspaceMapper).setMemberCustomRole(7, 1, 5);
+        order.verify(privilegedAccountService).requireConfinementAcknowledged(baseline, false);
+        verifyNoInteractions(auditService);
     }
 
     @Test

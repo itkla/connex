@@ -194,10 +194,11 @@ public class WorkspaceController {
     public MemberDto updateMemberRole(@PathVariable int id, @PathVariable int userId,
             @Valid @RequestBody UpdateMemberRoleRequest request) {
         int actorId = authService.getCurrentUser().getId();
+        boolean acknowledged = request.isAcknowledgeConfinement();
         if (request.getRoleId() != null) {
-            return workspaceService.assignCustomRole(id, actorId, userId, request.getRoleId());
+            return workspaceService.assignCustomRole(id, actorId, userId, request.getRoleId(), acknowledged);
         }
-        return workspaceService.changeMemberRole(id, actorId, userId, request.getRole());
+        return workspaceService.changeMemberRole(id, actorId, userId, request.getRole(), acknowledged);
     }
 
     @DeleteMapping("/{id}/members/{userId}")

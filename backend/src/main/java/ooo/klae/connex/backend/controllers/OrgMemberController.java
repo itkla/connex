@@ -53,14 +53,15 @@ public class OrgMemberController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void addMember(@PathVariable int orgId, @Valid @RequestBody AddOrgMemberRequest request) {
         orgMemberService.setMemberByEmail(orgId, authService.getCurrentUser().getId(),
-                request.getEmail(), request.getOrgRole());
+                request.getEmail(), request.getOrgRole(), request.isAcknowledgeConfinement());
     }
 
     @PutMapping("/{orgId}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void setMember(@PathVariable int orgId, @PathVariable int userId,
             @Valid @RequestBody OrgMemberRequest request) {
-        orgMemberService.setMember(orgId, authService.getCurrentUser().getId(), userId, request.getOrgRole());
+        orgMemberService.setMember(orgId, authService.getCurrentUser().getId(), userId, request.getOrgRole(),
+                request.isAcknowledgeConfinement());
     }
 
     @DeleteMapping("/{orgId}/members/{userId}")

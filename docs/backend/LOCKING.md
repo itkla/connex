@@ -144,6 +144,26 @@ The built-in administrator exception (`WorkspaceService.requireBuiltInAdministra
 
 Custom-role creation uses `lockRoleCreationAuthorization`, which takes no role id and checks the grant ceiling after locking current role-management authority. Existing-role updates use `lockRoleMutationAuthorization` with a non-nullable role id and always enforce owner authority, retained recovery, and the grant ceiling after locking. Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
 
+**Confinement check and isolation (#1534).** `changeMemberRole`, `assignCustomRole` and `updateRole`
+run at `READ COMMITTED`. After step 7 they read which affected accounts are privileged in the
+organization; after the write, and before the success audit, they read it again together with
+passkey approvals there, and refuse an unacknowledged edit that makes members newly privileged
+without one (see [PRIVILEGED_MFA.md](../PRIVILEGED_MFA.md#acknowledging-confinement-in-role-edits)).
+A refusal rolls the write back with the transaction. `updateRole` reads its assignees from the
+memberships `lockRoleAssignees` holds.
+- Those reads are plain, so the isolation is what keeps them current. Under `REPEATABLE READ` they
+  would read the snapshot taken by the transaction's first read, before it waited on these locks,
+  and miss an approval committed meanwhile.
+- The authorization, recovery and last-owner checks already use the locking reads above, which see
+  the latest committed rows at any isolation.
+- `READ COMMITTED` drops next-key gap locks, which these mutations do not rely on. Every writer
+  that inserts or updates a workspace membership or a role's permissions first takes the exact
+  workspace root, exclusively or shared: role mutations, SSO JIT provisioning
+  (`ensureActiveMember`), invite grants, invite and link acceptance, and pending-membership
+  approval. So no assignee or owner can appear while a mutation holds the root.
+- The callers are non-transactional controllers. A caller that wraps one of these methods in its
+  own transaction must open it at `READ COMMITTED`.
+
 Member removal/leave/invitation decline also lock the departing user root. The target user's globally ordered membership set is acquired at the documented point during removal so notification cleanup cannot invert membership lock order.
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
@@ -398,6 +418,9 @@ a new membership needs is a plain read after these locks. It is current because:
   provisioning takes no account lock.
 
 No new lock is taken, so the account → workspace → organization order is unchanged.
+
+`setMember` checks confinement the same way as the workspace role edits above: it reads the
+baseline after step 4 and before the upsert, and checks it after the upsert and before the audit.
 
 `OrgMemberService.leave` takes the same order for the caller alone:
 1. the caller's `app_user` row, shared;

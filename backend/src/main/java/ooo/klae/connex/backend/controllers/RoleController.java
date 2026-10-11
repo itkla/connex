@@ -51,7 +51,7 @@ public class RoleController {
     public WorkspaceRole update(@PathVariable int workspaceId, @PathVariable int roleId,
             @Valid @RequestBody RoleRequest request) {
         return roleService.updateRole(workspaceId, authService.getCurrentUser().getId(), roleId,
-                request.getName(), request.getPermissions());
+                request.getName(), request.getPermissions(), request.isAcknowledgeConfinement());
     }
 
     @DeleteMapping("/{roleId}")

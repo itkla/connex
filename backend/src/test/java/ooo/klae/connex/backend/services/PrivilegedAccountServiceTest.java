@@ -4,14 +4,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,12 +28,14 @@ import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
 import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyApprovalGapDto;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /** Pins how privileged-MFA standing is derived and relaxed while attestation is off (#1534). */
 class PrivilegedAccountServiceTest {
     private static final int USER_ID = 7;
     private static final int PASSKEY_ROW_ID = 41;
+    private static final int ORG_ID = 3;
 
     private final UserMapper userMapper = mock(UserMapper.class);
 
@@ -114,6 +123,100 @@ class PrivilegedAccountServiceTest {
 
         assertEquals(List.of(new PasskeyApprovalGapDto("Y3JlZD8-eA", 3, "Acme")),
                 service("true").passkeyApprovalGaps(USER_ID));
+    }
+
+    /** While attestation is off, a role edit reads nothing for the check, not even its organization. */
+    @Test
+    void theConfinementCheckReadsNothingWhileAttestationIsOff() {
+        PrivilegedAccountService service = service("false");
+
+        ConfinementBaseline baseline = service.confinementBaseline(() -> {
+            throw new AssertionError("The organization must not be read");
+        }, List.of(USER_ID));
+        service.requireConfinementAcknowledged(baseline, false);
+
+        assertTrue(baseline.watchesNothing());
+        verifyNoInteractions(userMapper);
+    }
+
+    @Test
+    void anEditAffectingNobodyReadsNothing() {
+        PrivilegedAccountService service = service("true");
+
+        ConfinementBaseline baseline = service.confinementBaseline(() -> ORG_ID, List.of());
+        service.requireConfinementAcknowledged(baseline, false);
+
+        assertTrue(baseline.watchesNothing());
+        verifyNoInteractions(userMapper);
+    }
+
+    /**
+     * Only the accounts an edit makes newly privileged in the organization, and that hold no passkey
+     * covered there, are counted (#1534). Repeated ids are read and counted once.
+     */
+    @Test
+    void onlyNewlyPrivilegedAccountsWithoutCoverageHereAreCounted() {
+        PrivilegedAccountService service = service("true");
+        when(userMapper.privilegedInOrganizationAmong(ORG_ID, List.of(1, 2, 3, 4)))
+                .thenReturn(List.of(1))
+                .thenReturn(List.of(1, 2, 3, 4));
+        when(userMapper.coveredInOrganizationAmong(eq(ORG_ID), argThat(ids -> Set.copyOf(ids).equals(Set.of(2, 3, 4)))))
+                .thenReturn(List.of(3));
+
+        ConfinementBaseline baseline = service.confinementBaseline(() -> ORG_ID, List.of(1, 2, 3, 4, 2));
+        PrivilegedMfaConfinementAcknowledgementRequiredException refusal = assertThrows(
+                PrivilegedMfaConfinementAcknowledgementRequiredException.class,
+                () -> service.requireConfinementAcknowledged(baseline, false));
+
+        assertEquals(2, refusal.getAffectedCount());
+        assertEquals("PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED", refusal.getCode());
+    }
+
+    @Test
+    void anEditWhoseNewlyPrivilegedAccountsAreAllCoveredHerePasses() {
+        PrivilegedAccountService service = service("true");
+        when(userMapper.privilegedInOrganizationAmong(ORG_ID, List.of(1, 2)))
+                .thenReturn(List.of())
+                .thenReturn(List.of(1, 2));
+        when(userMapper.coveredInOrganizationAmong(eq(ORG_ID), argThat(ids -> Set.copyOf(ids).equals(Set.of(1, 2)))))
+                .thenReturn(List.of(1, 2));
+
+        service.requireConfinementAcknowledged(service.confinementBaseline(() -> ORG_ID, List.of(1, 2)), false);
+    }
+
+    @Test
+    void anEditThatMakesNobodyNewlyPrivilegedSkipsTheCoverageRead() {
+        PrivilegedAccountService service = service("true");
+        when(userMapper.privilegedInOrganizationAmong(ORG_ID, List.of(1, 2))).thenReturn(List.of(1));
+
+        service.requireConfinementAcknowledged(service.confinementBaseline(() -> ORG_ID, List.of(1, 2)), false);
+
+        verify(userMapper, never()).coveredInOrganizationAmong(anyInt(), any());
+    }
+
+    @Test
+    void anAcknowledgedEditReadsNothingAfterTheWrite() {
+        PrivilegedAccountService service = service("true");
+        when(userMapper.privilegedInOrganizationAmong(ORG_ID, List.of(USER_ID))).thenReturn(List.of());
+
+        service.requireConfinementAcknowledged(service.confinementBaseline(() -> ORG_ID, List.of(USER_ID)), true);
+
+        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, List.of(USER_ID));
+        verifyNoMoreInteractions(userMapper);
+    }
+
+    /** A role with many assignees is read in bounded chunks rather than one unbounded list. */
+    @Test
+    void manyAccountsAreReadInBoundedChunks() {
+        List<Integer> ids = IntStream.rangeClosed(1, 1201).boxed().toList();
+        when(userMapper.privilegedInOrganizationAmong(eq(ORG_ID), any())).thenReturn(List.of());
+
+        service("true").confinementBaseline(() -> ORG_ID, ids);
+
+        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(0, 500));
+        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(500, 1000));
+        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(1000, 1201));
+        verifyNoMoreInteractions(userMapper);
     }
 
     private void assertStanding(

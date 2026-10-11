@@ -1,6 +1,12 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.function.IntSupplier;
 
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.stereotype.Service;
@@ -12,6 +18,7 @@ import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyApprovalGapDto;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -20,6 +27,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @Service
 @RequiredArgsConstructor
 public class PrivilegedAccountService {
+    private static final int STANDING_READ_CHUNK = 500;
+
     private final UserMapper userMapper;
     private final PrivilegedMfaProperties privilegedMfaProperties;
 
@@ -98,6 +107,49 @@ public class PrivilegedAccountService {
      */
     public List<byte[]> sufficientPasskeyCredentialIds(int userId) {
         return userMapper.sufficientPasskeyCredentialIds(userId);
+    }
+
+    /**
+     * Reads what a role edit's confinement check needs from before the write (#1534). Call it after
+     * the edit's locks and before its write. While attestation is not enforced it reads nothing, not
+     * even the organization, and the later check passes, so the edit behaves as it always has.
+     *
+     * @param organization supplies the organization the edit grants privilege in
+     * @param userIds the accounts the edit can affect
+     * @return the baseline to hand to {@link #requireConfinementAcknowledged}
+     */
+    public ConfinementBaseline confinementBaseline(IntSupplier organization, Collection<Integer> userIds) {
+        if (!privilegedMfaProperties.isAttestationEnforced() || userIds.isEmpty()) {
+            return ConfinementBaseline.NONE;
+        }
+        int orgId = organization.getAsInt();
+        List<Integer> watched = List.copyOf(new LinkedHashSet<>(userIds));
+        return new ConfinementBaseline(orgId, watched, privilegedInOrganization(orgId, watched));
+    }
+
+    /**
+     * Refuses, after a role edit's write and before its success audit, an unacknowledged edit that
+     * makes members newly privileged in the organization while none of their passkeys is approved
+     * there (#1534). Only this organization's own facts decide: being already confined by another
+     * organization changes nothing, so the answer reveals nothing about other tenants. The refusal
+     * rolls the edit back with the rest of its transaction.
+     *
+     * @param baseline what {@link #confinementBaseline} read before the write
+     * @param acknowledged whether the request accepted that members may be confined
+     */
+    public void requireConfinementAcknowledged(ConfinementBaseline baseline, boolean acknowledged) {
+        if (baseline.watchesNothing() || acknowledged) {
+            return;
+        }
+        Set<Integer> newlyPrivileged = privilegedInOrganization(baseline.orgId(), baseline.userIds());
+        newlyPrivileged.removeAll(baseline.privilegedBefore());
+        if (newlyPrivileged.isEmpty()) {
+            return;
+        }
+        newlyPrivileged.removeAll(coveredInOrganization(baseline.orgId(), newlyPrivileged));
+        if (!newlyPrivileged.isEmpty()) {
+            throw new PrivilegedMfaConfinementAcknowledgementRequiredException(newlyPrivileged.size());
+        }
     }
 
     /**
@@ -210,5 +262,30 @@ public class PrivilegedAccountService {
     private static PasskeyApprovalGapDto toDto(PasskeyApprovalGap gap) {
         return new PasskeyApprovalGapDto(
                 new Bytes(gap.credentialId()).toBase64UrlString(), gap.orgId(), gap.orgName());
+    }
+
+    private Set<Integer> privilegedInOrganization(int orgId, Collection<Integer> userIds) {
+        Set<Integer> privileged = new HashSet<>();
+        for (List<Integer> chunk : chunks(userIds)) {
+            privileged.addAll(userMapper.privilegedInOrganizationAmong(orgId, chunk));
+        }
+        return privileged;
+    }
+
+    private Set<Integer> coveredInOrganization(int orgId, Collection<Integer> userIds) {
+        Set<Integer> covered = new HashSet<>();
+        for (List<Integer> chunk : chunks(userIds)) {
+            covered.addAll(userMapper.coveredInOrganizationAmong(orgId, chunk));
+        }
+        return covered;
+    }
+
+    private static List<List<Integer>> chunks(Collection<Integer> userIds) {
+        List<Integer> ordered = List.copyOf(userIds);
+        List<List<Integer>> chunks = new ArrayList<>();
+        for (int start = 0; start < ordered.size(); start += STANDING_READ_CHUNK) {
+            chunks.add(ordered.subList(start, Math.min(ordered.size(), start + STANDING_READ_CHUNK)));
+        }
+        return chunks;
     }
 }

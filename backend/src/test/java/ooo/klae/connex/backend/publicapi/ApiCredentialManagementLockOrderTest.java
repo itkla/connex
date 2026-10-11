@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.services.AccountDeletionReservationRead;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.OrgAllowedDomainService;
 import ooo.klae.connex.backend.services.OrgMemberService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.RegistrationVerificationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SystemActor;
@@ -86,6 +87,7 @@ class ApiCredentialManagementLockOrderTest {
             auditService,
             mock(SystemActor.class),
             sessionSecurityService,
+            mock(PrivilegedAccountService.class),
             mock(AccountDeletionReservationRead.class),
             mock(RegistrationVerificationService.class));
         service = new ApiCredentialService(
