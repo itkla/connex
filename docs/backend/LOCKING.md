@@ -1258,6 +1258,10 @@ account root.
   recorded with the same row through `AuditService.deferFailureScoped` and appended once the
   transaction completes, because an immediate independent append would wait on the request's own
   exclusive lock (#1995). It is best-effort, with the bounds of the step-up deferral (#1986).
+- Once attestation is enforced, `finishRegistration` also re-authorizes an additional passkey under
+  the same locks, before `registerCredential`. The step-up proof behind the ceremony must still be
+  fresh, its passkey still the account's (`findOwnedRowId`) and, for a privileged account,
+  sufficient. These reads are current for the same reason as the provenance reads below.
 - Under the same locks, after `registerCredential`, `finishRegistration` records the new passkey's
   provenance (#1534). It reads the recovery restamp grant before clearing it, then writes founder
   coverage, then either inherited coverage and assurance (for a fresh step-up by a passkey the
@@ -1307,8 +1311,18 @@ account root.
     3. the owner rows;
     4. exactly the member's own `org_member` row (`lockExactRole`, with no join).
   - **Deletion reservations** of both accounts are read with locking reads once the accounts are
-    locked. Issuing and revoking run at `REPEATABLE READ`, and an ordinary read would answer from
-    the snapshot taken before the request waited, missing a reservation committed meanwhile.
+    locked.
+  - **Isolation:** issuing, revoking and redeeming run at `READ COMMITTED`. Each asserts on entry,
+    before any read, that it runs in an active `READ COMMITTED` transaction, because a method's
+    isolation annotation cannot change a caller's transaction that it joins.
+  - **Grantor re-checks** (once attestation is enforced) read after the authority locks:
+    - issuing and revoking read whether the grantor's step-up passkey is still the grantor's and
+      covered in the grant's organization;
+    - redeeming reads whether the grantor still holds any such passkey.
+
+    Those reads are current: the locks hold the grantor's account row, which every writer of that
+    passkey's ownership and coverage takes first, and an organization's cascade needs the
+    organization row these locks hold.
   - **After the authority locks**, the grant row (supersede, claim), then the coverage insert, whose
     foreign-key checks take the passkey and organization rows shared. The scoped audit comes last.
   - **Redemption** runs the passkey assertion in its own earlier transaction. Verifying advances the

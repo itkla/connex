@@ -15,6 +15,7 @@ import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.CredentialRecord;
 import org.springframework.security.web.webauthn.api.PublicKeyCredential;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialDescriptor;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
 import org.springframework.security.web.webauthn.management.ImmutablePublicKeyCredentialCreationOptionsRequest;
@@ -35,6 +36,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -142,12 +145,16 @@ public class WebAuthnService {
             throw new ConflictException(
                     "The session changed while the passkey was being registered; try again");
         }
-        if (!hasPasskey(expectedUserId)
+        boolean additionalPasskey = hasPasskey(expectedUserId);
+        if (!additionalPasskey
                 && !bootstrapConfirmationSatisfied
                 && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {
             deferBootstrapConfirmationRefusalAudit(expectedUserId);
             throw new ForbiddenException(
                     "Confirm the emailed enrollment link before adding the first passkey");
+        }
+        if (additionalPasskey) {
+            requireLiveProofForAdditionalPasskey(expectedUserId, evidence.stepUpProof());
         }
         PublicKeyCredentialUserEntity optionUser = options.getUser();
         Integer optionUserId = optionUser == null
@@ -171,6 +178,28 @@ public class WebAuthnService {
         auditService.recordStrict("auth.passkey.register", "user", expectedUserId, user.getDisplayName(),
                 "Passkey registered", auditService.singleChange("label", null, label));
         return new RegisteredPasskey(record, registered.getId());
+    }
+
+    /**
+     * Re-authorizes adding a passkey under the account and assigned-role locks
+     * {@link #finishRegistration} holds (#1534). Once attestation is enforced, the step-up that
+     * started the ceremony must still be fresh and signed by a passkey the account still owns and,
+     * for a privileged account, one that is still sufficient. A signer removed or made insufficient
+     * while the request waited therefore cannot vouch for a new passkey, and an account awaiting
+     * approval cannot add passkeys. The first passkey, which operator recovery also leads back to,
+     * is the exception and is fenced by the first-passkey confirmation instead.
+     */
+    private void requireLiveProofForAdditionalPasskey(int userId, StepUpProof proof) {
+        if (!privilegedAccountService.isAttestationEnforced()) {
+            return;
+        }
+        boolean live = proof != null
+                && sessionSecurityService.isFresh(proof)
+                && credentialMapper.findOwnedRowId(proof.credentialRowId(), userId) != null;
+        if (!live || (privilegedAccountService.requiresSufficientPasskey(userId)
+                && !privilegedAccountService.isSufficientPasskey(userId, proof.credentialRowId()))) {
+            throw new RecentAuthenticationRequiredException();
+        }
     }
 
     /**
@@ -220,17 +249,65 @@ public class WebAuthnService {
     }
 
     /**
-     * Issues assertion options for the authenticated account's own enrolled passkeys.
+     * Issues step-up assertion options for the authenticated account's own enrolled passkeys. Once
+     * attestation is enforced, a privileged account is offered only its sufficient passkeys
+     * (#1534), and is refused rather than offered none: an empty list would let the browser use any
+     * discoverable credential.
      * @param auth the current authenticated principal
      * @return request options restricted to the caller's credentials
      */
     public PublicKeyCredentialRequestOptions createStepUpOptions(Authentication auth) {
         User user = (User) auth.getPrincipal();
-        if (!hasPasskey(user.getId())) {
+        PublicKeyCredentialRequestOptions options = createOwnPasskeyOptions(auth, user.getId());
+        if (!privilegedAccountService.requiresSufficientPasskey(user.getId())) {
+            return options;
+        }
+        List<byte[]> sufficient = privilegedAccountService.sufficientPasskeyCredentialIds(user.getId());
+        List<PublicKeyCredentialDescriptor> allowed = options.getAllowCredentials().stream()
+            .filter(descriptor -> sufficient.stream()
+                .anyMatch(id -> MessageDigest.isEqual(id, descriptor.getId().getBytes())))
+            .toList();
+        if (allowed.isEmpty()) {
+            throw new PrivilegedMfaAttestationRequiredException();
+        }
+        return PublicKeyCredentialRequestOptions.builder()
+            .challenge(options.getChallenge())
+            .timeout(options.getTimeout())
+            .rpId(options.getRpId())
+            .allowCredentials(allowed)
+            .userVerification(options.getUserVerification())
+            .extensions(options.getExtensions())
+            .build();
+    }
+
+    /**
+     * Issues assertion options for redeeming a passkey approval code (#1534): every passkey the
+     * account owns, sufficient or not, because an unapproved passkey is exactly what a code
+     * approves. The stamp a redemption leaves satisfies privileged operations only once that
+     * passkey is sufficient.
+     * @param auth the current authenticated principal
+     * @return request options restricted to the caller's credentials
+     */
+    public PublicKeyCredentialRequestOptions createAttestationOptions(Authentication auth) {
+        User user = (User) auth.getPrincipal();
+        return createOwnPasskeyOptions(auth, user.getId());
+    }
+
+    /**
+     * Options listing the account's own passkeys. The list is checked after it is built: recovery
+     * can remove every passkey between the existence check and the enumeration, and an empty list
+     * would admit any discoverable credential.
+     */
+    private PublicKeyCredentialRequestOptions createOwnPasskeyOptions(Authentication auth, int userId) {
+        if (!hasPasskey(userId)) {
             throw new PasskeyEnrollmentRequiredException();
         }
-        return rpOperations.createCredentialRequestOptions(
+        PublicKeyCredentialRequestOptions options = rpOperations.createCredentialRequestOptions(
             new ImmutablePublicKeyCredentialRequestOptionsRequest(auth));
+        if (options.getAllowCredentials() == null || options.getAllowCredentials().isEmpty()) {
+            throw new PasskeyEnrollmentRequiredException();
+        }
+        return options;
     }
 
     /**

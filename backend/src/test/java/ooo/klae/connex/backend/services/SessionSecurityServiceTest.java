@@ -15,7 +15,11 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.AfterEach;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +46,7 @@ class SessionSecurityServiceTest {
     private SessionSecurityProperties properties;
     private PrivilegedMfaProperties privilegedMfaProperties;
     private SessionSecurityService service;
+    private PrivilegedAccountService privilegedAccountService;
 
     @BeforeEach
     void setUp() {
@@ -50,12 +55,14 @@ class SessionSecurityServiceTest {
         privilegedMfaProperties = new PrivilegedMfaProperties();
         properties.setAbsoluteTimeout(Duration.ofHours(12));
         properties.setRecentAuthenticationWindow(Duration.ofMinutes(10));
+        privilegedAccountService = mock(PrivilegedAccountService.class);
         service = new SessionSecurityService(
                 properties,
                 privilegedMfaProperties,
                 clock,
                 mock(UserMapper.class),
-                mock(SpringSessionMapper.class));
+                mock(SpringSessionMapper.class),
+                privilegedAccountService);
     }
 
     @AfterEach
@@ -97,6 +104,63 @@ class SessionSecurityServiceTest {
         assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
         service.markStepUp(request, 7, PASSKEY_ROW_ID);
         assertDoesNotThrow(() -> service.requireRecentAuthentication(7));
+    }
+
+    /**
+     * Once attestation is enforced, a privileged account's fresh stamp satisfies privileged
+     * operations and exports only when its bound passkey is sufficient (#1534).
+     */
+    @Test
+    void aPrivilegedStepUpCountsOnlyFromASufficientPasskey() {
+        User user = new User();
+        user.setId(7);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        when(privilegedAccountService.requiresSufficientPasskey(7)).thenReturn(true);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
+        assertFalse(service.isExportStepUpSatisfied(request.getSession(false), 7));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+
+        when(privilegedAccountService.isSufficientPasskey(7, PASSKEY_ROW_ID)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.requireRecentAuthentication(7));
+        assertTrue(service.isExportStepUpSatisfied(request.getSession(false), 7));
+        assertDoesNotThrow(() -> service.requireExportStepUp());
+    }
+
+    /** A stamp that names no passkey never counts where a sufficient one is required (#1534). */
+    @Test
+    void anUnboundStampIsNeverSufficient() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        request.getSession().removeAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR);
+        when(privilegedAccountService.requiresSufficientPasskey(7)).thenReturn(true);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
+        verify(privilegedAccountService, never()).isSufficientPasskey(anyInt(), anyInt());
+    }
+
+    /**
+     * Freshness alone is what approval-code issuance checks on entry; it re-checks the stamp's
+     * passkey against the grant's organization under its own locks (#1534).
+     */
+    @Test
+    void aFreshStepUpPassesTheFreshnessOnlyCheckWithoutReadingSufficiency() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireFreshStepUp(7));
+        service.markStepUp(request, 7, PASSKEY_ROW_ID);
+        when(privilegedAccountService.requiresSufficientPasskey(7)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.requireFreshStepUp(7));
+        assertEquals(PASSKEY_ROW_ID, service.currentStepUpProof(7).credentialRowId());
+        assertNull(service.currentStepUpProof(8));
+        verify(privilegedAccountService, never()).requiresSufficientPasskey(anyInt());
     }
 
     @Test

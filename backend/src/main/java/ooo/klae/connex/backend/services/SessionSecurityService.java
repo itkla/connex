@@ -50,6 +50,7 @@ public class SessionSecurityService {
     private final Clock clock;
     private final UserMapper userMapper;
     private final SpringSessionMapper springSessionMapper;
+    private final PrivilegedAccountService privilegedAccountService;
 
     public void markAuthenticated(HttpServletRequest request, int userId) {
         HttpSession session = request.getSession();
@@ -398,16 +399,61 @@ public class SessionSecurityService {
 
     /**
      * Evaluates the shared filter and service export policy, including the staged-rollout exception.
+     * Once attestation is enforced, a privileged account's assertion must also come from a
+     * sufficient passkey (#1534).
      * @param session current HTTP session, or null when absent
      * @param userId authenticated account, or null when absent
      * @return whether export step-up is disabled or a fresh account-bound passkey assertion exists
      */
     public boolean isExportStepUpSatisfied(HttpSession session, Integer userId) {
         return !privilegedMfaProperties.isEnforced()
-                || (userId != null && hasFreshRecentAuthentication(session, userId));
+                || (userId != null
+                        && hasFreshRecentAuthentication(session, userId)
+                        && hasSufficientStepUp(session, userId));
     }
 
+    /**
+     * Requires a fresh WebAuthn step-up by the account in the current request's session. Once
+     * attestation is enforced, a privileged account's stamp must also be bound to one of its own
+     * sufficient passkeys (#1534): a stamp from an unapproved passkey, from passkey login or from
+     * redeeming an approval code satisfies privileged operations only if that passkey is
+     * sufficient, and an unbound stamp never does.
+     *
+     * @param userId the account that must have stepped up
+     */
     public void requireRecentAuthentication(int userId) {
+        HttpSession session = requireFreshStepUpSession(userId);
+        if (!hasSufficientStepUp(session, userId)) {
+            throw new RecentAuthenticationRequiredException();
+        }
+    }
+
+    /**
+     * Requires a fresh WebAuthn step-up by the account, without the sufficiency that
+     * {@link #requireRecentAuthentication(int)} adds. Only for callers that check the stamp's
+     * passkey themselves under their own locks, as approval-code issuance does against the grant's
+     * organization (#1534).
+     *
+     * @param userId the account that must have stepped up
+     */
+    public void requireFreshStepUp(int userId) {
+        requireFreshStepUpSession(userId);
+    }
+
+    /**
+     * The passkey behind the current request's fresh step-up stamp, for re-checking it after
+     * waiting on locks.
+     *
+     * @param userId the account the stamp must belong to
+     * @return the bound proof, or null when the stamp is missing, stale, unbound or another
+     *     account's
+     */
+    public StepUpProof currentStepUpProof(int userId) {
+        HttpServletRequest request = currentRequest();
+        return request == null ? null : recentStepUpProof(request.getSession(false), userId);
+    }
+
+    private HttpSession requireFreshStepUpSession(int userId) {
         HttpServletRequest request = currentRequest();
         if (request == null) {
             throw new RecentAuthenticationRequiredException();
@@ -416,6 +462,15 @@ public class SessionSecurityService {
         if (session == null || !hasFreshRecentAuthentication(session, userId)) {
             throw new RecentAuthenticationRequiredException();
         }
+        return session;
+    }
+
+    private boolean hasSufficientStepUp(HttpSession session, int userId) {
+        if (!privilegedAccountService.requiresSufficientPasskey(userId)) {
+            return true;
+        }
+        StepUpProof proof = recentStepUpProof(session, userId);
+        return proof != null && privilegedAccountService.isSufficientPasskey(userId, proof.credentialRowId());
     }
 
     /**

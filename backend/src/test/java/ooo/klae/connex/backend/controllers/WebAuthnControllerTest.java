@@ -293,7 +293,7 @@ class WebAuthnControllerTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
         WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
-        when(webAuthnService.createStepUpOptions(any())).thenReturn(options);
+        when(webAuthnService.createAttestationOptions(any())).thenReturn(options);
         when(mapper.write(options)).thenReturn("{\"challenge\":\"c\"}");
 
         ResponseEntity<String> result = controller(mapper).attestationOptions(request, response);

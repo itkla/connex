@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -776,6 +777,43 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     /**
+     * Vouching in an organization rests on that organization alone (#1534): a passkey covered there,
+     * or carrying break-glass assurance, vouches there whatever its coverage elsewhere. Only the
+     * account's own passkeys count, and step-up lists only its sufficient ones.
+     */
+    @Test
+    void vouchingNeedsOnlyTheOrganizationsCoverageAndStepUpListsOnlySufficientPasskeys() {
+        Workspace first = freshWorkspace();
+        Workspace second = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        User other = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(first.getOrgId(), user.getId(), "admin");
+        orgMemberMapper.addMember(second.getOrgId(), user.getId(), "admin");
+        int coversFirst = addPasskey(user);
+        int coversBoth = addPasskey(user);
+        approve(coversFirst, first.getOrgId());
+        approve(coversBoth, first.getOrgId());
+        approve(coversBoth, second.getOrgId());
+
+        assertTrue(userMapper.isPasskeyCoveredInOrganization(user.getId(), coversFirst, first.getOrgId()));
+        assertFalse(userMapper.isPasskeyCoveredInOrganization(user.getId(), coversFirst, second.getOrgId()));
+        assertTrue(userMapper.hasPasskeyCoveredInOrganization(user.getId(), second.getOrgId()));
+        assertFalse(userMapper.isPasskeyCoveredInOrganization(other.getId(), coversFirst, first.getOrgId()));
+        assertFalse(userMapper.hasPasskeyCoveredInOrganization(other.getId(), first.getOrgId()));
+        assertEquals(List.of(credentialIdHex(coversBoth)), userMapper.sufficientPasskeyCredentialIds(user.getId())
+                .stream().map(HexFormat.of()::formatHex).toList());
+
+        int breakGlass = addPasskey(other);
+        jdbcTemplate.update(
+                "UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS', privileged_assured_at = NOW(3) WHERE id = ?",
+                breakGlass);
+        sqlSession.clearCache();
+
+        assertTrue(userMapper.isPasskeyCoveredInOrganization(other.getId(), breakGlass, second.getOrgId()));
+        assertTrue(userMapper.hasPasskeyCoveredInOrganization(other.getId(), first.getOrgId()));
+    }
+
+    /**
      * The startup count covers privileged accounts holding passkeys none of which is sufficient;
      * an account without any passkey is the enrollment inventory's, not this count's (#1534).
      */
@@ -857,6 +895,13 @@ class UserMapperTest extends AbstractMapperTest {
                 "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'FOUNDER')",
                 credentialRowId, orgId);
         sqlSession.clearCache();
+    }
+
+    private String credentialIdHex(int credentialRowId) {
+        byte[] credentialId = jdbcTemplate.queryForObject(
+                "SELECT credential_id FROM webauthn_credential WHERE id = ?", byte[].class, credentialRowId);
+        assertNotNull(credentialId);
+        return HexFormat.of().formatHex(credentialId);
     }
 
     private String organizationName(int orgId) {

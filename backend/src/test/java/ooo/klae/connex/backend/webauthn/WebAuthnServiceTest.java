@@ -15,8 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.dao.DataRetrievalFailureException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.webauthn.api.Bytes;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialDescriptor;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
+import org.springframework.security.web.webauthn.api.UserVerificationRequirement;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
 import org.springframework.security.web.webauthn.api.PublicKeyCredential;
@@ -39,8 +44,12 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.beans.User;
 
+import java.time.Duration;
 import java.util.List;
 
 class WebAuthnServiceTest {
@@ -599,6 +608,194 @@ class WebAuthnServiceTest {
         verifyNoInteractions(auditService);
     }
 
+    /**
+     * Once attestation is enforced, adding a passkey to an account that already holds one is
+     * re-authorized under the account locks (#1534): the step-up behind the ceremony must still be
+     * fresh and signed by a passkey the account still owns. Nothing is registered otherwise.
+     */
+    @Test
+    void anAdditionalPasskeyNeedsALiveOwnedProofUnderTheLockOnceEnforced() {
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        EnrollmentEvidence signed = new EnrollmentEvidence("session-a", proof);
+        record Attempt(EnrollmentEvidence evidence, boolean fresh, Integer ownedRowId) {
+        }
+        for (Attempt attempt : List.of(
+                new Attempt(NO_EVIDENCE, true, STEP_UP_PASSKEY_ROW_ID),
+                new Attempt(signed, false, STEP_UP_PASSKEY_ROW_ID),
+                new Attempt(signed, true, null))) {
+            RegistrationFixture fixture = successfulRegistration();
+            when(fixture.credentialMapper().existsByUserId(7)).thenReturn(true);
+            when(fixture.privilegedAccounts().isAttestationEnforced()).thenReturn(true);
+            when(fixture.sessionSecurity().isFresh(proof)).thenReturn(attempt.fresh());
+            when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7))
+                    .thenReturn(attempt.ownedRowId());
+
+            assertThrows(RecentAuthenticationRequiredException.class, () -> fixture.service().finishRegistration(
+                    7, 3, false, attempt.evidence(), fixture.options(), fixture.credential(), "Work key"),
+                    attempt.toString());
+
+            InOrder order = inOrder(fixture.userMapper(), fixture.relyingParty());
+            order.verify(fixture.userMapper()).lockById(7);
+            order.verify(fixture.userMapper()).lockAssignedCustomRoleIds(7);
+            verify(fixture.relyingParty(), never()).registerCredential(any());
+        }
+    }
+
+    @Test
+    void aPrivilegedAccountCanAddAPasskeyOnlyWithAStillSufficientProofOnceEnforced() {
+        StepUpProof proof = new StepUpProof(STEP_UP_PASSKEY_ROW_ID, 1_000L);
+        RegistrationFixture insufficient = additionalPasskeyRegistration(proof);
+        when(insufficient.privilegedAccounts().requiresSufficientPasskey(7)).thenReturn(true);
+
+        assertThrows(RecentAuthenticationRequiredException.class, () -> insufficient.service().finishRegistration(
+                7, 3, false, new EnrollmentEvidence("session-a", proof),
+                insufficient.options(), insufficient.credential(), "Work key"));
+        verify(insufficient.relyingParty(), never()).registerCredential(any());
+
+        RegistrationFixture sufficient = additionalPasskeyRegistration(proof);
+        when(sufficient.privilegedAccounts().requiresSufficientPasskey(7)).thenReturn(true);
+        when(sufficient.privilegedAccounts().isSufficientPasskey(7, STEP_UP_PASSKEY_ROW_ID)).thenReturn(true);
+
+        assertEquals(NEW_PASSKEY_ROW_ID, sufficient.service().finishRegistration(
+                7, 3, false, new EnrollmentEvidence("session-a", proof),
+                sufficient.options(), sufficient.credential(), "Work key").credentialRowId());
+
+        InOrder order = inOrder(sufficient.userMapper(), sufficient.credentialMapper(),
+                sufficient.privilegedAccounts(), sufficient.relyingParty());
+        order.verify(sufficient.userMapper()).lockById(7);
+        order.verify(sufficient.userMapper()).lockAssignedCustomRoleIds(7);
+        order.verify(sufficient.credentialMapper()).findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7);
+        order.verify(sufficient.privilegedAccounts()).isSufficientPasskey(7, STEP_UP_PASSKEY_ROW_ID);
+        order.verify(sufficient.relyingParty()).registerCredential(any());
+    }
+
+    /** The first passkey, and every passkey while attestation is off, are not re-authorized (#1534). */
+    @Test
+    void theFirstPasskeyAndEveryPasskeyWhileAttestationIsOffNeedNoProof() {
+        RegistrationFixture first = successfulRegistration();
+        when(first.privilegedAccounts().isAttestationEnforced()).thenReturn(true);
+        assertEquals(NEW_PASSKEY_ROW_ID, first.service().finishRegistration(
+                7, 3, true, NO_EVIDENCE, first.options(), first.credential(), "Work key").credentialRowId());
+
+        RegistrationFixture additional = successfulRegistration();
+        when(additional.credentialMapper().existsByUserId(7)).thenReturn(true);
+        assertEquals(NEW_PASSKEY_ROW_ID, additional.service().finishRegistration(
+                7, 3, false, NO_EVIDENCE, additional.options(), additional.credential(), "Work key")
+                .credentialRowId());
+        verify(additional.privilegedAccounts(), never()).requiresSufficientPasskey(anyInt());
+    }
+
+    /**
+     * Once attestation is enforced, a privileged account steps up only with its sufficient passkeys
+     * (#1534), and is refused rather than offered an empty list that would admit any discoverable
+     * credential.
+     */
+    @Test
+    void stepUpOffersAPrivilegedAccountOnlyItsSufficientPasskeysOnceEnforced() {
+        Bytes sufficient = Bytes.random();
+        Bytes unapproved = Bytes.random();
+        OptionsFixture fixture = optionsFixture(List.of(unapproved, sufficient));
+        when(fixture.privilegedAccounts().requiresSufficientPasskey(7)).thenReturn(true);
+        when(fixture.privilegedAccounts().sufficientPasskeyCredentialIds(7))
+                .thenReturn(List.of(sufficient.getBytes()));
+
+        PublicKeyCredentialRequestOptions options = fixture.service().createStepUpOptions(fixture.auth());
+
+        assertEquals(List.of(sufficient), options.getAllowCredentials().stream()
+                .map(PublicKeyCredentialDescriptor::getId).toList());
+        assertEquals(fixture.issued().getChallenge(), options.getChallenge());
+        assertEquals(fixture.issued().getRpId(), options.getRpId());
+        assertEquals(fixture.issued().getTimeout(), options.getTimeout());
+        assertEquals(fixture.issued().getUserVerification(), options.getUserVerification());
+
+        when(fixture.privilegedAccounts().sufficientPasskeyCredentialIds(7)).thenReturn(List.of());
+        assertThrows(PrivilegedMfaAttestationRequiredException.class,
+                () -> fixture.service().createStepUpOptions(fixture.auth()));
+    }
+
+    @Test
+    void stepUpOffersEveryOwnPasskeyWhenNoSufficiencyIsRequired() {
+        Bytes first = Bytes.random();
+        Bytes second = Bytes.random();
+        OptionsFixture fixture = optionsFixture(List.of(first, second));
+
+        PublicKeyCredentialRequestOptions options = fixture.service().createStepUpOptions(fixture.auth());
+
+        assertEquals(fixture.issued(), options);
+        verify(fixture.privilegedAccounts(), never()).sufficientPasskeyCredentialIds(anyInt());
+    }
+
+    /**
+     * Redeeming an approval code may use any passkey the account owns, since an unapproved passkey is
+     * what the code approves (#1534).
+     */
+    @Test
+    void approvalCodeOptionsOfferEveryOwnPasskeyEvenWhenSufficiencyIsRequired() {
+        Bytes unapproved = Bytes.random();
+        OptionsFixture fixture = optionsFixture(List.of(unapproved));
+        when(fixture.privilegedAccounts().requiresSufficientPasskey(7)).thenReturn(true);
+
+        assertEquals(fixture.issued(), fixture.service().createAttestationOptions(fixture.auth()));
+        verify(fixture.privilegedAccounts(), never()).sufficientPasskeyCredentialIds(anyInt());
+    }
+
+    /**
+     * Recovery can remove every passkey between the existence check and the enumeration. Both
+     * authenticated ceremonies then refuse instead of issuing an empty list, whatever the switch.
+     */
+    @Test
+    void authenticatedOptionsRefuseAnEmptyListEvenAfterAPasskeyWasSeen() {
+        OptionsFixture fixture = optionsFixture(List.of());
+
+        assertThrows(PasskeyEnrollmentRequiredException.class,
+                () -> fixture.service().createStepUpOptions(fixture.auth()));
+        assertThrows(PasskeyEnrollmentRequiredException.class,
+                () -> fixture.service().createAttestationOptions(fixture.auth()));
+    }
+
+    private static RegistrationFixture additionalPasskeyRegistration(StepUpProof proof) {
+        RegistrationFixture fixture = successfulRegistration();
+        when(fixture.credentialMapper().existsByUserId(7)).thenReturn(true);
+        when(fixture.privilegedAccounts().isAttestationEnforced()).thenReturn(true);
+        when(fixture.sessionSecurity().isFresh(proof)).thenReturn(true);
+        when(fixture.credentialMapper().findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7))
+                .thenReturn(STEP_UP_PASSKEY_ROW_ID);
+        return fixture;
+    }
+
+    private record OptionsFixture(
+            WebAuthnService service,
+            PrivilegedAccountService privilegedAccounts,
+            Authentication auth,
+            PublicKeyCredentialRequestOptions issued) {
+    }
+
+    private static OptionsFixture optionsFixture(List<Bytes> ownCredentialIds) {
+        WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
+        WebAuthnService service = new WebAuthnService(
+                relyingParty, mock(UserCredentialRepository.class), mock(WebauthnUserEntityMapper.class),
+                credentialMapper, mock(PrivilegedCredentialAttestationMapper.class),
+                mock(SessionSecurityService.class), mock(UserMapper.class), privilegedAccounts,
+                mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
+        User user = new User();
+        user.setId(7);
+        Authentication auth = new UsernamePasswordAuthenticationToken(user, null, List.of());
+        PublicKeyCredentialRequestOptions issued = PublicKeyCredentialRequestOptions.builder()
+                .challenge(Bytes.random())
+                .timeout(Duration.ofMinutes(5))
+                .rpId("connex.test")
+                .allowCredentials(ownCredentialIds.stream()
+                        .map(id -> PublicKeyCredentialDescriptor.builder().id(id).build())
+                        .toList())
+                .userVerification(UserVerificationRequirement.REQUIRED)
+                .build();
+        when(credentialMapper.existsByUserId(7)).thenReturn(true);
+        when(relyingParty.createCredentialRequestOptions(any())).thenReturn(issued);
+        return new OptionsFixture(service, privilegedAccounts, auth, issued);
+    }
+
     private record RegistrationFixture(
             WebAuthnService service,
             WebAuthnRelyingPartyOperations relyingParty,
@@ -607,6 +804,7 @@ class WebAuthnServiceTest {
             PrivilegedCredentialAttestationMapper attestationMapper,
             SessionSecurityService sessionSecurity,
             UserMapper userMapper,
+            PrivilegedAccountService privilegedAccounts,
             AuditService auditService,
             PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential) {
@@ -620,10 +818,11 @@ class WebAuthnServiceTest {
         PrivilegedCredentialAttestationMapper attestationMapper = mock(PrivilegedCredentialAttestationMapper.class);
         SessionSecurityService sessionSecurity = mock(SessionSecurityService.class);
         UserMapper userMapper = mock(UserMapper.class);
+        PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
         AuditService auditService = mock(AuditService.class);
         WebAuthnService service = new WebAuthnService(
                 relyingParty, credentials, userEntities, credentialMapper, attestationMapper,
-                sessionSecurity, userMapper, mock(PrivilegedAccountService.class),
+                sessionSecurity, userMapper, privilegedAccounts,
                 mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
         PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
         PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
@@ -645,6 +844,6 @@ class WebAuthnServiceTest {
         when(userMapper.currentSessionEpoch(7)).thenReturn(3);
         when(userMapper.getUserById(7)).thenReturn(user);
         return new RegistrationFixture(service, relyingParty, credentials, credentialMapper,
-                attestationMapper, sessionSecurity, userMapper, auditService, options, credential);
+                attestationMapper, sessionSecurity, userMapper, privilegedAccounts, auditService, options, credential);
     }
 }

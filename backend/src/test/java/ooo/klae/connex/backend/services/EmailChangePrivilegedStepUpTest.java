@@ -137,7 +137,8 @@ class EmailChangePrivilegedStepUpTest {
         when(privilegedAccountService.enforcedStanding(USER_ID))
                 .thenReturn(PrivilegedMfaStanding.SATISFIED);
         new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
-                userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
+                userMapper, mock(SpringSessionMapper.class), privilegedAccountService)
+                .markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         assertDoesNotThrow(() -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
@@ -253,7 +254,8 @@ class EmailChangePrivilegedStepUpTest {
         when(privilegedAccountService.enforcedStanding(USER_ID))
                 .thenReturn(PrivilegedMfaStanding.SATISFIED, PrivilegedMfaStanding.ATTESTATION_REQUIRED);
         new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
-                userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
+                userMapper, mock(SpringSessionMapper.class), privilegedAccountService)
+                .markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         assertThrows(PrivilegedMfaAttestationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
@@ -284,7 +286,8 @@ class EmailChangePrivilegedStepUpTest {
         when(userMapper.lockById(USER_ID)).thenReturn(USER_ID);
         when(userMapper.getUserByIdForShare(USER_ID)).thenReturn(user());
         SessionSecurityService sessionSecurityService = new SessionSecurityService(
-                sessionProperties(), properties(enforced), CLOCK, userMapper, mock(SpringSessionMapper.class));
+                sessionProperties(), properties(enforced), CLOCK, userMapper, mock(SpringSessionMapper.class),
+                privilegedAccountService);
         EmailChangeService service = new EmailChangeService(
                 userMapper,
                 mock(WorkspaceMapper.class),

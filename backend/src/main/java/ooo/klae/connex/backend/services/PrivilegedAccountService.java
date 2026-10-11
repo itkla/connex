@@ -68,6 +68,64 @@ public class PrivilegedAccountService {
     }
 
     /**
+     * Whether attestation enforcement is on (#1534), for decision sites that consult it beside
+     * standing.
+     *
+     * @return true when unapproved passkeys no longer satisfy privileged MFA
+     */
+    public boolean isAttestationEnforced() {
+        return privilegedMfaProperties.isAttestationEnforced();
+    }
+
+    /**
+     * Whether the account's privileged proofs must come from a sufficient passkey (#1534): only
+     * while attestation is enforced and the account is privileged. Read-only; a caller deciding
+     * under locks must read it after acquiring them.
+     *
+     * @param userId account to evaluate
+     * @return true when a step-up or registration proof must be signed by a sufficient passkey
+     */
+    public boolean requiresSufficientPasskey(int userId) {
+        return privilegedMfaProperties.isAttestationEnforced() && userMapper.isPrivilegedAccount(userId);
+    }
+
+    /**
+     * The credential ids of the account's sufficient passkeys (#1534), so step-up can offer only
+     * those.
+     *
+     * @param userId account to evaluate
+     * @return the raw WebAuthn credential ids, in row order
+     */
+    public List<byte[]> sufficientPasskeyCredentialIds(int userId) {
+        return userMapper.sufficientPasskeyCredentialIds(userId);
+    }
+
+    /**
+     * Whether the passkey lets the account vouch in the organization (#1534): it is the account's
+     * own and carries break-glass assurance or is covered there. Vouching in one organization rests
+     * on that organization alone, not on the account's standing elsewhere.
+     *
+     * @param userId account that must own the passkey
+     * @param credentialRowId the passkey's {@code webauthn_credential.id}
+     * @param orgId the organization the account vouches in
+     * @return whether the passkey may back a grant in that organization
+     */
+    public boolean isPasskeyCoveredInOrganization(int userId, int credentialRowId, int orgId) {
+        return userMapper.isPasskeyCoveredInOrganization(userId, credentialRowId, orgId);
+    }
+
+    /**
+     * Whether the account holds any passkey that vouches in the organization (#1534).
+     *
+     * @param userId the account
+     * @param orgId the organization
+     * @return whether one of its passkeys carries break-glass assurance or is covered there
+     */
+    public boolean hasPasskeyCoveredInOrganization(int userId, int orgId) {
+        return userMapper.hasPasskeyCoveredInOrganization(userId, orgId);
+    }
+
+    /**
      * Whether the passkey belongs to the account and is sufficient for its privileged MFA: it
      * carries break-glass assurance, or it is approved in every organization where the account is
      * privileged (#1534).
@@ -92,8 +150,7 @@ public class PrivilegedAccountService {
      * @return true when the passkey is the account's last sufficient one under enforcement
      */
     public boolean isLastSufficientPasskey(int userId, int credentialRowId) {
-        return privilegedMfaProperties.isAttestationEnforced()
-                && userMapper.isPrivilegedAccount(userId)
+        return requiresSufficientPasskey(userId)
                 && userMapper.isSufficientPasskey(userId, credentialRowId)
                 && !userMapper.hasOtherSufficientPasskey(userId, credentialRowId);
     }

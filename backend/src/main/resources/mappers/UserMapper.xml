@@ -297,6 +297,18 @@
       ))
   </sql>
 
+  <!-- Whether passkey c vouches in organization coverageOrgId (#1534): it carries break-glass
+       assurance, or it is covered in that organization. A grantor's authority in one organization
+       rests on this, not on the grantor's standing everywhere. -->
+  <sql id="coveredInOrganization">
+    (c.privileged_assurance = 'BREAK_GLASS'
+      OR EXISTS (
+        SELECT 1
+        FROM privileged_credential_attestation pca
+        WHERE pca.credential_row_id = c.id AND pca.org_id = ${coverageOrgId}
+      ))
+  </sql>
+
   <sql id="unenrolledPrivilegedAccount">
     u.username != '__connex_system__'
       AND <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="u.id"/></include>
@@ -349,6 +361,36 @@
       WHERE e.user_id = #{userId}
         AND c.id != #{credentialRowId}
         AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{userId}"/></include>
+    )
+  </select>
+
+  <select id="sufficientPasskeyCredentialIds" resultType="_byte[]">
+    SELECT c.credential_id
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = #{userId}
+      AND <include refid="sufficientPasskey"><property name="credentialUserId" value="#{userId}"/></include>
+    ORDER BY c.id
+  </select>
+
+  <select id="isPasskeyCoveredInOrganization" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND c.id = #{credentialRowId}
+        AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+    )
+  </select>
+
+  <select id="hasPasskeyCoveredInOrganization" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+      WHERE e.user_id = #{userId}
+        AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
     )
   </select>
 
