@@ -33,6 +33,58 @@
     )
   </select>
 
+  <!-- Who may be addressed by an add at all: an existing member of the active organization, or an
+       active member of one of its active workspaces (#1534). One statement answers for an unknown
+       account and an outsider alike, before any lock is taken, so neither the refusal nor its cost
+       tells the two apart. -->
+  <sql id="eligibleForOrganizationMembership">
+    (EXISTS (
+       SELECT 1
+       FROM org_member om
+       JOIN organization o ON o.id = om.org_id
+       WHERE om.org_id = #{orgId}
+         AND om.user_id = u.id
+         AND o.lifecycle_state = 'active'
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM workspace_member wm
+       JOIN workspace w ON w.id = wm.workspace_id
+       WHERE w.org_id = #{orgId}
+         AND w.lifecycle_state = 'active'
+         AND wm.user_id = u.id
+         AND wm.status = 'active'
+     ))
+  </sql>
+
+  <select id="isEligibleForMembership" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM app_user u
+      WHERE u.id = #{userId}
+        AND <include refid="eligibleForOrganizationMembership"/>
+    )
+  </select>
+
+  <select id="findEligibleUserIdByEmail" resultType="java.lang.Integer">
+    SELECT u.id
+    FROM app_user u
+    WHERE u.email = #{email}
+      AND <include refid="eligibleForOrganizationMembership"/>
+  </select>
+
+  <select id="isActiveWorkspaceTenant" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id
+      WHERE w.org_id = #{orgId}
+        AND w.lifecycle_state = 'active'
+        AND wm.user_id = #{userId}
+        AND wm.status = 'active'
+    )
+  </select>
+
   <insert id="addMember">
     INSERT INTO org_member (org_id, user_id, org_role)
     VALUES (#{orgId}, #{userId}, #{orgRole})

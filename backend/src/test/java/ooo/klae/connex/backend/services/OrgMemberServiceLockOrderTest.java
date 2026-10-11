@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,7 +20,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
@@ -26,6 +30,9 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 
 @ExtendWith(MockitoExtension.class)
 class OrgMemberServiceLockOrderTest {
+    private static final String NOT_A_TENANT =
+            "Only active members of a workspace in this organization can be added to it";
+
     @Mock private OrgMemberMapper orgMemberMapper;
     @Mock private OrganizationMapper organizationMapper;
     @Mock private UserMapper userMapper;
@@ -40,21 +47,26 @@ class OrgMemberServiceLockOrderTest {
     void setMemberLocksOrganizationAndSortedUsersBeforeOwnerRowsAndUpsert() {
         User target = targetUser(1);
         when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
-        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
         when(userMapper.lockByIdForShare(1)).thenReturn(1);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(userMapper.getUserByIdForShare(1)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
+        when(orgMemberMapper.isEligibleForMembership(7, 1)).thenReturn(true);
+        when(orgMemberMapper.isActiveWorkspaceTenant(7, 1)).thenReturn(true);
 
         service.setMember(7, 9, 1, "admin");
 
         InOrder order = inOrder(organizationMapper, userMapper, orgMemberMapper);
         order.verify(orgMemberMapper).getRole(7, 9);
+        order.verify(orgMemberMapper).isEligibleForMembership(7, 1);
         order.verify(userMapper).lockByIdForShare(1);
         order.verify(userMapper).lockByIdForShare(9);
-        order.verify(organizationMapper).lockById(7);
+        order.verify(organizationMapper).lockActiveById(7);
         order.verify(userMapper).getUserByIdForShare(1);
         order.verify(orgMemberMapper).lockOwnerIds(7);
+        order.verify(orgMemberMapper).getRoleForUpdate(7, 1);
+        order.verify(orgMemberMapper).isActiveWorkspaceTenant(7, 1);
         order.verify(orgMemberMapper).addMemberClearingFounder(7, 1, "admin");
         verify(orgMemberMapper, never()).addMember(7, 1, "admin");
     }
@@ -64,11 +76,12 @@ class OrgMemberServiceLockOrderTest {
     void anOwnerChangingTheirOwnRoleKeepsTheirFounderAttribution() {
         User self = targetUser(9);
         when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
-        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(userMapper.getUserByIdForShare(9)).thenReturn(self);
         when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn("owner");
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2, 9));
+        when(orgMemberMapper.isEligibleForMembership(7, 9)).thenReturn(true);
 
         service.setMember(7, 9, 9, "admin");
 
@@ -113,11 +126,12 @@ class OrgMemberServiceLockOrderTest {
     void setMemberRevalidatesCurrentOwnerAuthorityBeforeWriting() {
         User target = targetUser(9);
         when(orgMemberMapper.getRole(7, 1)).thenReturn("owner");
-        when(organizationMapper.lockById(7)).thenReturn(7);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
         when(userMapper.lockByIdForShare(1)).thenReturn(1);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
         when(userMapper.getUserByIdForShare(9)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
+        when(orgMemberMapper.isEligibleForMembership(7, 9)).thenReturn(true);
 
         assertThrows(ForbiddenException.class, () -> service.setMember(7, 1, 9, "admin"));
 
@@ -137,6 +151,143 @@ class OrgMemberServiceLockOrderTest {
         assertThrows(ForbiddenException.class, () -> service.removeMember(7, 1, 9));
 
         verify(orgMemberMapper, never()).removeMember(7, 9);
+        verifyNoInteractions(auditService);
+    }
+
+    /**
+     * Tenancy is revalidated under the locks, before mailbox proof is consulted: a target that was
+     * a tenant when the add began but is not any more is refused like any outsider (#1534).
+     */
+    @Test
+    void tenancyIsRevalidatedUnderTheLocksBeforeMailboxProof() {
+        User target = targetUser(1);
+        when(orgMemberMapper.isEligibleForMembership(7, 1)).thenReturn(true);
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(userMapper.getUserByIdForShare(1)).thenReturn(target);
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
+
+        BadRequestException refused = assertThrows(BadRequestException.class,
+                () -> service.setMember(7, 9, 1, "admin"));
+
+        assertEquals(NOT_A_TENANT, refused.getMessage());
+        verifyNoInteractions(registrationVerificationService, auditService);
+        verify(orgMemberMapper, never()).addMemberClearingFounder(7, 1, "admin");
+    }
+
+    /**
+     * An unknown account and an outsider answer the same organization-scoped read and are refused
+     * before any lock is taken, so neither the refusal nor its cost tells them apart (#1534).
+     */
+    @Test
+    void anIneligibleTargetIsRefusedBeforeAnyLock() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+
+        BadRequestException refused = assertThrows(BadRequestException.class,
+                () -> service.setMember(7, 9, 1, "admin"));
+
+        assertEquals(NOT_A_TENANT, refused.getMessage());
+        verify(orgMemberMapper).isEligibleForMembership(7, 1);
+        verify(userMapper, never()).lockByIdForShare(anyInt());
+        verifyNoInteractions(organizationMapper, auditService);
+    }
+
+    /**
+     * An add by email checks the role before looking anyone up, then resolves the address through
+     * the same organization-scoped read, so a malformed role or an ineligible address answers alike
+     * whether or not the address has an account (#1534).
+     */
+    @Test
+    void anAddByEmailChecksTheRoleFirstAndRefusesAnIneligibleAddressBeforeAnyLock() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+
+        BadRequestException badRole = assertThrows(BadRequestException.class,
+                () -> service.setMemberByEmail(7, 9, "someone@example.com", "bogus"));
+        assertEquals("Unknown org role: bogus", badRole.getMessage());
+        verify(orgMemberMapper, never()).findEligibleUserIdByEmail(anyInt(), any());
+        when(orgMemberMapper.findEligibleUserIdByEmail(7, "someone@example.com")).thenReturn(null);
+
+        BadRequestException ineligible = assertThrows(BadRequestException.class,
+                () -> service.setMemberByEmail(7, 9, "Someone@Example.com ", "admin"));
+
+        assertEquals(NOT_A_TENANT, ineligible.getMessage());
+        verify(orgMemberMapper).findEligibleUserIdByEmail(7, "someone@example.com");
+        verify(userMapper, never()).getUserByEmail(any());
+        verify(userMapper, never()).lockByIdForShare(anyInt());
+        verifyNoInteractions(organizationMapper, auditService);
+    }
+
+    /** No membership is created in or changed for an organization whose teardown has begun (#1534). */
+    @Test
+    void setMemberLocksOnlyAnActiveOrganization() {
+        when(orgMemberMapper.isEligibleForMembership(7, 1)).thenReturn(true);
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> service.setMember(7, 9, 1, "admin"));
+
+        verify(organizationMapper, never()).lockById(anyInt());
+        verify(orgMemberMapper, never()).lockOwnerIds(anyInt());
+        verifyNoInteractions(auditService);
+    }
+
+    /**
+     * Leaving an organization takes the caller's account shared, the organization exclusively
+     * while active, the owner rows and the caller's own row before deleting it, then audits
+     * strictly (#1534).
+     */
+    @Test
+    void leaveLocksInSetMembersOrderBeforeDeletingAndAuditsStrictly() {
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2, 9));
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn("owner");
+
+        service.leave(7, 9);
+
+        InOrder order = inOrder(userMapper, organizationMapper, orgMemberMapper, auditService);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(organizationMapper).lockActiveById(7);
+        order.verify(orgMemberMapper).lockOwnerIds(7);
+        order.verify(orgMemberMapper).getRoleForUpdate(7, 9);
+        order.verify(orgMemberMapper).removeMember(7, 9);
+        order.verify(auditService).recordStrictScoped("org.member.leave", "organization", 7, null, 7,
+                null, "Left the organization", null);
+        verifyNoInteractions(sessionSecurityService);
+    }
+
+    @Test
+    void theLastOwnerCannotLeave() {
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn("owner");
+
+        assertThrows(BadRequestException.class, () -> service.leave(7, 9));
+
+        verify(orgMemberMapper, never()).removeMember(anyInt(), anyInt());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void onlyAMemberOfAnActiveOrganizationCanLeave() {
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.leave(7, 9));
+        verify(orgMemberMapper, never()).lockOwnerIds(anyInt());
+
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
+        when(orgMemberMapper.getRoleForUpdate(7, 9)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.leave(7, 9));
+
+        verify(orgMemberMapper, never()).removeMember(anyInt(), anyInt());
         verifyNoInteractions(auditService);
     }
 

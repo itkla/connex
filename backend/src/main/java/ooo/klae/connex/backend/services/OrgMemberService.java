@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -145,28 +146,30 @@ public class OrgMemberService {
 
     /**
      * Adds an org administrator by email, or changes their role if already a member. Owner-gated;
-     * the email must belong to an existing Connex account that still holds it. Mailbox proof for a
-     * new grant is enforced by the delegated {@link #setMember}, which every org-membership write
-     * goes through.
+     * the email must belong to an existing Connex account that still holds it. Mailbox proof and
+     * the tenancy rule for a new grant are enforced by the delegated {@link #setMember}, which
+     * every org-membership write goes through. An unknown address answers exactly like an account
+     * that is not a tenant, so the endpoint does not reveal which addresses have accounts (#1534).
      * Transactional so that delegated call — reached by an internal call that bypasses the
      * transactional proxy — still runs under this boundary, keeping its last-owner row lock and
-     * audit write atomic.
+     * audit write atomic, at the {@code READ COMMITTED} isolation its tenancy read relies on.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        OrgRole role = parseRole(roleRaw);
         String email = emailRaw == null ? "" : emailRaw.trim().toLowerCase();
-        User target = userMapper.getUserByEmail(email);
-        if (target == null) {
-            throw new BadRequestException("No Connex account uses that email address");
+        Integer targetId = orgMemberMapper.findEligibleUserIdByEmail(orgId, email);
+        if (targetId == null) {
+            throw notAnActiveTenant();
         }
-        lockMembershipUserRoots(actorId, target.getId());
-        User fresh = userMapper.getUserByIdForShare(target.getId());
+        lockMembershipUserRoots(actorId, targetId);
+        User fresh = userMapper.getUserByIdForShare(targetId);
         if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {
             throw new ConflictException("The account's email changed; refresh and try again");
         }
-        setMember(orgId, actorId, target.getId(), roleRaw);
+        applyMember(orgId, actorId, targetId, role);
     }
 
     /**
@@ -187,24 +190,53 @@ public class OrgMemberService {
      * <p>A role set on behalf of another account ends that member's founder attribution, so the
      * passkeys it enrolls afterwards are no longer covered as the founder's (#1534). An owner
      * changing their own role keeps it.
+     *
+     * <p>A new membership is granted only to an existing tenant: an active member of an active
+     * workspace in the organization (#1534). Otherwise any owner could confer organization-wide
+     * privilege, and with it privileged-MFA confinement, on any account at all. Every way such an
+     * add can fail before the account is known to be a tenant answers with the same refusal, so it
+     * does not reveal whether an account exists. The tenancy read is a plain read under the target's
+     * shared account row at {@code READ COMMITTED}: every writer that removes or deactivates a
+     * workspace membership takes that row exclusively, so it has committed already or waits. The
+     * organization is locked only while active, so nothing joins one whose teardown has begun.
+     *
+     * <p>Before any lock, one organization-scoped read asks whether the target may be addressed at
+     * all: an existing member or an existing tenant. An unknown account and an outsider answer that
+     * read alike and are refused before taking any lock, so neither the refusal nor its cost tells
+     * them apart. The answer is revalidated under the locks.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
-        lockMembershipUserRoots(actorId, targetUserId);
-        if (organizationMapper.lockById(orgId) == null) {
+        if (!orgMemberMapper.isEligibleForMembership(orgId, targetUserId)) {
+            throw notAnActiveTenant();
+        }
+        applyMember(orgId, actorId, targetUserId, role);
+    }
+
+    private void applyMember(int orgId, int actorId, int targetUserId, OrgRole role) {
+        try {
+            lockMembershipUserRoots(actorId, targetUserId);
+        } catch (ResourceNotFoundException unknownTarget) {
+            throw notAnActiveTenant();
+        }
+        if (organizationMapper.lockActiveById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
         User target = userMapper.getUserByIdForShare(targetUserId);
         if (target == null) {
-            throw new ResourceNotFoundException("User not found: " + targetUserId);
+            throw notAnActiveTenant();
         }
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
-        if (orgMemberMapper.getRoleForUpdate(orgId, targetUserId) == null
-                && registrationVerificationService.requiresMailboxProof(target)) {
-            throw new BadRequestException("The account must verify its email before joining the organization");
+        if (orgMemberMapper.getRoleForUpdate(orgId, targetUserId) == null) {
+            if (!orgMemberMapper.isActiveWorkspaceTenant(orgId, targetUserId)) {
+                throw notAnActiveTenant();
+            }
+            if (registrationVerificationService.requiresMailboxProof(target)) {
+                throw new BadRequestException("The account must verify its email before joining the organization");
+            }
         }
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
@@ -240,6 +272,34 @@ public class OrgMemberService {
         }
         auditService.record("org.member.remove", "organization", orgId, null,
                 "Removed org member " + targetUserId, null);
+    }
+
+    /**
+     * Removes the caller's own organization membership: the safe exit for an account that
+     * membership confines under privileged MFA (#1534). Self-only and without step-up, since
+     * leaving only gives up authority and a confined account cannot produce a sufficient step-up.
+     * The last owner cannot leave. Locks in {@link #setMember}'s order: the caller's account row
+     * shared, the organization exclusively and only while active, the owner rows, then the
+     * caller's own row. The audit is strict, so an exit that cannot be recorded does not happen.
+     *
+     * @param orgId the organization to leave
+     * @param userId the departing member
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void leave(int orgId, int userId) {
+        if (userMapper.lockByIdForShare(userId) == null || organizationMapper.lockActiveById(orgId) == null) {
+            throw notAnOrganizationMember();
+        }
+        List<Integer> ownerIds = orgMemberMapper.lockOwnerIds(orgId);
+        if (orgMemberMapper.getRoleForUpdate(orgId, userId) == null) {
+            throw notAnOrganizationMember();
+        }
+        if (isSoleOwner(ownerIds, userId)) {
+            throw new BadRequestException("An organization must keep at least one owner");
+        }
+        orgMemberMapper.removeMember(orgId, userId);
+        auditService.recordStrictScoped("org.member.leave", "organization", orgId, null, orgId,
+                null, "Left the organization", null);
     }
 
     /**
@@ -297,6 +357,15 @@ public class OrgMemberService {
             throw new ForbiddenException("Requires the organization owner role");
         }
         throw new ResourceNotFoundException("User not found: " + userId);
+    }
+
+    private static BadRequestException notAnActiveTenant() {
+        return new BadRequestException(
+                "Only active members of a workspace in this organization can be added to it");
+    }
+
+    private static ResourceNotFoundException notAnOrganizationMember() {
+        return new ResourceNotFoundException("You are not a member of this organization");
     }
 
     private boolean isSoleOwner(List<Integer> ownerIds, int userId) {

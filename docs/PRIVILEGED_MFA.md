@@ -30,7 +30,7 @@ so an unenrolled privileged creator cannot bypass browser confinement with an ex
 
 An unenrolled privileged account may read its own account and workspace-membership snapshot, read
 the public capability posture, obtain a CSRF token, list and enroll passkeys, use the recovery
-ceremony, and log out. Every other API request is refused by the backend with
+ceremony, [leave a workspace or organization](#organization-tenancy-and-safe-exits), and log out. Every other API request is refused by the backend with
 `PRIVILEGED_MFA_ENROLLMENT_REQUIRED` until enrollment completes. Once
 [attestation is enforced](#standing-and-attestation-enforcement), an account that holds passkeys
 but none approved in every organization where it is privileged is confined the same way, with
@@ -565,6 +565,38 @@ is counted whether or not enforcement is on, so the population can be drained be
 
 **Do not switch it on yet.** Enforcement ships dark. It is switched on by its own release, after
 the cutover below, ownership offers, and the web client's approval flow have shipped.
+
+### Organization tenancy and safe exits
+
+Confinement is account-wide, so two owner decisions keep it from becoming a lever one organization
+holds over an account.
+
+**Existing tenancy.**
+- A new organization membership (owner or admin) is granted only to an account that is already an
+  **active member of an active workspace in that organization**. Anyone else first accepts a
+  workspace invite.
+- This applies to every path that creates one: `POST /api/orgs/{orgId}/members` (by email) and
+  `PUT /api/orgs/{orgId}/members/{userId}`.
+- Every add that fails before the account is known to be a tenant answers with the same
+  `400` "Only active members of a workspace in this organization can be added to it". That covers an
+  unknown email or id, an outsider, a pending member and a member only of a workspace being torn
+  down, so the endpoints don't reveal which accounts exist. The role is validated before anyone is
+  looked up, and one organization-scoped read refuses an unknown account and an outsider alike
+  before any lock is taken, so the cost of the answer doesn't tell them apart either.
+- Re-roling or removing an existing organization member is unaffected.
+- Founding an organization and the dev seeder write the founder's membership directly, and are the
+  only exceptions.
+
+**Safe exits.** A confined account can always give up the membership that confines it:
+- `POST /api/workspaces/{id}/leave` leaves a workspace, as before.
+- `POST /api/orgs/{orgId}/leave` leaves an organization. It is self-only and needs no step-up,
+  since leaving only gives up authority and a confined account cannot produce a sufficient
+  step-up. The last owner is refused.
+
+Both routes stay reachable while confined, whatever the standing. Both exits are audited strictly
+(`workspace.member.leave`, `org.member.leave`): an exit that cannot be recorded does not happen.
+After either exit the client re-reads standing, since other memberships may still confer
+privilege.
 
 ### Rollback and the cutover
 

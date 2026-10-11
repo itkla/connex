@@ -16,6 +16,38 @@ import ooo.klae.connex.backend.dto.OrganizationLayoutAuthorityMemberDto;
 public interface OrgMemberMapper {
     String getRole(@Param("orgId") int orgId, @Param("userId") int userId);
     String getRoleForUpdate(@Param("orgId") int orgId, @Param("userId") int userId);
+
+    /**
+     * Whether the account is an active member of an active workspace in the organization, which
+     * is what an account must be before it can be given an organization membership (#1534).
+     *
+     * @param orgId the organization
+     * @param userId the account
+     * @return true for an existing tenant of the organization
+     */
+    boolean isActiveWorkspaceTenant(@Param("orgId") int orgId, @Param("userId") int userId);
+
+    /**
+     * Whether an add may address the account at all: it is an existing member of the active
+     * organization, or an existing tenant of it (#1534). Unknown accounts answer exactly like
+     * outsiders. Non-locking; the add revalidates under its locks.
+     *
+     * @param orgId the organization
+     * @param userId the account
+     * @return true for an org member or an active tenant
+     */
+    boolean isEligibleForMembership(@Param("orgId") int orgId, @Param("userId") int userId);
+
+    /**
+     * The account an add by email may address: one holding the address that is an existing member
+     * of the active organization, or an existing tenant of it (#1534). Non-locking; the add
+     * revalidates under its locks.
+     *
+     * @param orgId the organization
+     * @param email the normalized address
+     * @return the account id, or null for an unknown address and an outsider alike
+     */
+    Integer findEligibleUserIdByEmail(@Param("orgId") int orgId, @Param("email") String email);
     boolean isMember(@Param("orgId") int orgId, @Param("userId") int userId);
     int addMember(@Param("orgId") int orgId, @Param("userId") int userId, @Param("orgRole") String orgRole);
 

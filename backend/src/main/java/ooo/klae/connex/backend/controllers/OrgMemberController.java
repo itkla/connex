@@ -70,6 +70,17 @@ public class OrgMemberController {
     }
 
     /**
+     * Leaves the organization: removes the caller's own org membership (#1534). It stays reachable
+     * while privileged MFA confines the caller, so a membership that confines an account is always
+     * one the account can give up. The last owner cannot leave.
+     */
+    @PostMapping("/{orgId}/leave")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leave(@PathVariable int orgId) {
+        orgMemberService.leave(orgId, authService.getCurrentUser().getId());
+    }
+
+    /**
      * Issues a one-time code attesting an org member's passkey for privileged MFA in this
      * organization (#1534). Owners only. The code is returned once and must reach the member out
      * of band.

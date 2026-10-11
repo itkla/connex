@@ -377,6 +377,39 @@ Updates lock the exact organization-scoped request after roots and compare persi
 
 SSO returning/existing-user paths discover non-locking then lock user, stored workspace when applicable, and organization before revalidation. New JIT paths without a user lock stored workspace and organization before revalidating absence/inserting.
 
+### Organization membership (#1534)
+
+`OrgMemberService.setMember`, and `setMemberByEmail` that delegates to it, run at
+`READ COMMITTED`. They lock in this order:
+1. actor and target `app_user` rows, shared and ascending;
+2. the organization exclusively, and only while it is active (`lockActiveById`);
+3. the owner rows;
+4. the target's own `org_member` row.
+
+Before any of these locks, one non-locking, organization-scoped read
+(`isEligibleForMembership` / `findEligibleUserIdByEmail`) refuses a target that is neither a member
+nor a tenant. Unknown accounts and outsiders therefore cost the same and are refused alike. The
+answer is revalidated under the locks: when the target's own row is absent, the tenancy check that
+a new membership needs is a plain read after these locks. It is current because:
+- every writer that removes or deactivates a workspace membership (removal, leave, decline, account
+  deletion) takes the target's `app_user` row exclusively, so it has committed before the read, or
+  waits for this transaction;
+- writers that add an active membership can only make a racing add refuse spuriously. SSO JIT
+  provisioning takes no account lock.
+
+No new lock is taken, so the account → workspace → organization order is unchanged.
+
+`OrgMemberService.leave` takes the same order for the caller alone:
+1. the caller's `app_user` row, shared;
+2. the organization exclusively while active;
+3. the owner rows;
+4. the caller's own row.
+
+It then deletes the row and appends a strict scoped audit in the same transaction. Two owners leaving
+at once, or one leaving while a co-owner's account is deleted, serialize on the organization row.
+Account deletion's sole-owner guard takes that row exclusively too, so an organization always keeps
+an owner.
+
 ## Legacy rules and canonical workflows
 
 The legacy `/api/rules` write surface is a compatibility projection over canonical workflows, not an independent aggregate.
