@@ -10,7 +10,8 @@ import lombok.Data;
 /**
  * Request body for creating or updating a custom role: a name plus the permission
  * catalog keys it grants. {@code acknowledgeConfinement} accepts that an update may leave
- * assignees privileged without a passkey approved in the organization (#1534).
+ * assignees privileged without a passkey approved in the organization (#1534); only {@code true}
+ * acknowledges. Creation ignores it, since a new role has no assignees.
  */
 @Data
 public class RoleRequest {
@@ -19,5 +20,5 @@ public class RoleRequest {
     private String name;
 
     private List<String> permissions;
-    private boolean acknowledgeConfinement;
+    private Boolean acknowledgeConfinement;
 }

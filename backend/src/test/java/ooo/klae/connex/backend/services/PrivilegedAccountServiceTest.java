@@ -10,12 +10,14 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.IntStream;
@@ -205,17 +207,29 @@ class PrivilegedAccountServiceTest {
         verifyNoMoreInteractions(userMapper);
     }
 
-    /** A role with many assignees is read in bounded chunks rather than one unbounded list. */
+    /**
+     * A role with many assignees is read in bounded chunks, before the write and after it, rather
+     * than in one unbounded list.
+     */
     @Test
-    void manyAccountsAreReadInBoundedChunks() {
+    void manyAccountsAreReadInBoundedChunksBeforeAndAfterTheWrite() {
+        PrivilegedAccountService service = service("true");
         List<Integer> ids = IntStream.rangeClosed(1, 1201).boxed().toList();
-        when(userMapper.privilegedInOrganizationAmong(eq(ORG_ID), any())).thenReturn(List.of());
+        when(userMapper.privilegedInOrganizationAmong(eq(ORG_ID), any()))
+                .thenReturn(List.of(), List.of(), List.of())
+                .thenAnswer(invocation -> List.copyOf(invocation.<Collection<Integer>>getArgument(1)));
+        when(userMapper.coveredInOrganizationAmong(eq(ORG_ID), any())).thenReturn(List.of());
 
-        service("true").confinementBaseline(() -> ORG_ID, ids);
+        ConfinementBaseline baseline = service.confinementBaseline(() -> ORG_ID, ids);
+        PrivilegedMfaConfinementAcknowledgementRequiredException refusal = assertThrows(
+                PrivilegedMfaConfinementAcknowledgementRequiredException.class,
+                () -> service.requireConfinementAcknowledged(baseline, false));
 
-        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(0, 500));
-        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(500, 1000));
-        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids.subList(1000, 1201));
+        assertEquals(1201, refusal.getAffectedCount());
+        verify(userMapper, times(2)).privilegedInOrganizationAmong(ORG_ID, ids.subList(0, 500));
+        verify(userMapper, times(2)).privilegedInOrganizationAmong(ORG_ID, ids.subList(500, 1000));
+        verify(userMapper, times(2)).privilegedInOrganizationAmong(ORG_ID, ids.subList(1000, 1201));
+        verify(userMapper, times(3)).coveredInOrganizationAmong(eq(ORG_ID), argThat(chunk -> chunk.size() <= 500));
         verifyNoMoreInteractions(userMapper);
     }
 

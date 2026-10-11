@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -283,22 +284,31 @@ class PrivilegedMfaConfinementAcknowledgementIntegrationTest {
     }
 
     /**
-     * A role edit counts each active assignee it makes newly privileged; a pending one never
-     * counts. A refused edit leaves the role's name, permissions and audit trail as they were.
+     * A role edit counts each assignee it makes newly privileged without an approval here. An
+     * assignee approved here, one already privileged here and a pending one never count. A refused
+     * edit leaves the role's name, permissions and audit trail as they were.
      */
     @Test
-    void aRoleEditCountsActiveAssigneesOnlyAndRollsBackUntilAcknowledged() throws Exception {
+    void aRoleEditCountsOnlyAssigneesItNewlyPrivilegesWithoutAnApprovalAndRollsBackUntilAcknowledged()
+            throws Exception {
         int role = customRole(List.of(UNPRIVILEGED));
         String name = roleName(role);
-        User active = workspaceMember();
-        workspaceMapper.setMemberCustomRole(workspace.getId(), active.getId(), role);
+        User withoutPasskey = workspaceMember();
+        User approvedElsewhere = workspaceMember();
+        cover(passkey(approvedElsewhere), newOrganization());
+        User approvedHere = workspaceMember();
+        cover(passkey(approvedHere), organization);
+        User alreadyPrivilegedHere = workspaceMember();
+        orgMemberMapper.addMember(organization.getId(), alreadyPrivilegedHere.getId(), "admin");
         User pending = pendingMember();
-        workspaceMapper.setMemberCustomRole(workspace.getId(), pending.getId(), role);
+        for (User assignee : List.of(withoutPasskey, approvedElsewhere, approvedHere, alreadyPrivilegedHere, pending)) {
+            workspaceMapper.setMemberCustomRole(workspace.getId(), assignee.getId(), role);
+        }
 
         updateRole(role, Map.of("name", "Taggers", "permissions", List.of(UNPRIVILEGED, PRIVILEGED)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(CODE))
-                .andExpect(jsonPath("$.affectedCount").value(1));
+                .andExpect(jsonPath("$.affectedCount").value(2));
         assertEquals(name, roleName(role));
         assertEquals(List.of(UNPRIVILEGED), permissions(role));
         assertEquals(0, workspaceAudits("workspace.role.update", null));
@@ -354,6 +364,21 @@ class PrivilegedMfaConfinementAcknowledgementIntegrationTest {
         workspaceMapper.addMember(workspace.getId(), administrator.getId(), "admin");
 
         setOrganizationRole(administrator, Map.of("orgRole", "admin")).andExpect(status().isNoContent());
+    }
+
+    /** A {@code null} acknowledgement is no acknowledgement, and is accepted whatever the switch. */
+    @Test
+    void aNullAcknowledgementAcknowledgesNothing() throws Exception {
+        Map<String, Object> body = new HashMap<>();
+        body.put("role", "admin");
+        body.put("acknowledgeConfinement", null);
+        User member = workspaceMember();
+
+        changeRole(member, body).andExpect(status().isConflict());
+
+        privilegedMfaProperties.setAttestationEnforced("false");
+        changeRole(member, body).andExpect(status().isOk());
+        assertEquals("admin", workspaceRole(member));
     }
 
     /** While attestation is not enforced, nothing is counted and nothing needs acknowledging. */
