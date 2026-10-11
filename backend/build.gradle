@@ -1,12 +1,13 @@
 buildscript {
-	// The Spring Boot Gradle plugin pulls spring-boot-buildpack-platform, whose POM pins
-	// httpclient5 5.6.1 -> httpcore5 5.4 onto the PLUGIN classpath. Project-level
-	// dependencyManagement (ext overrides below) cannot reach that configuration, so the
-	// dependency-submission graph kept reporting the vulnerable declared nodes and Dependabot
-	// alerts #113/#114/#117 stayed open after PR #1552. Build-time tooling only - never shipped -
-	// but constrained here so the submitted graph carries no vulnerable node at all. The same
-	// plugin puts tools.jackson 3.1.4 on that classpath (#1971); keep the Jackson pins equal to
-	// ext['jackson-bom.version'] below, which this block cannot read.
+	// The Spring Boot Gradle plugin pulls spring-boot-buildpack-platform onto the PLUGIN
+	// classpath; under Boot 4.1.0 its POM pinned httpclient5 5.6.1 -> httpcore5 5.4 there.
+	// Project-level dependencyManagement (the ext overrides below) cannot reach that
+	// configuration, so the dependency-submission graph kept reporting the vulnerable declared
+	// nodes and Dependabot alerts #113/#114/#117 stayed open after PR #1552. Build-time tooling
+	// only - never shipped - but constrained here so the submitted graph carries no vulnerable
+	// node, whatever a later plugin release declares. The same plugin put tools.jackson 3.1.4
+	// on that classpath (#1971); keep the Jackson pins equal to ext['jackson-bom.version']
+	// below, which this block cannot read.
 	configurations.classpath {
 		resolutionStrategy {
 			force 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
