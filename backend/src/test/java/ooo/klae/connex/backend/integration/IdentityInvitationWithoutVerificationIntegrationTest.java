@@ -124,6 +124,7 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
     void organizationRoleWriteStillAcceptsAnUnverifiedAccount() throws Exception {
         User legacy = unverifiedUser();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
+        workspaceMapper.addMember(target.getId(), legacy.getId(), "member");
 
         mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), legacy.getId())
                 .session(managerSession).with(csrf().asHeader())

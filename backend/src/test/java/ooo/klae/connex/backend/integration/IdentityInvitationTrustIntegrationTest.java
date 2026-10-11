@@ -716,6 +716,7 @@ class IdentityInvitationTrustIntegrationTest {
     void organizationAddByEmailRequiresMailboxVerification() throws Exception {
         Account account = preregister();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
+        workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
         String body = objectMapper.writeValueAsString(Map.of(
             "email", account.user().getEmail(), "orgRole", "admin"));
 
@@ -739,6 +740,7 @@ class IdentityInvitationTrustIntegrationTest {
     void organizationRoleWriteByIdRequiresMailboxVerification() throws Exception {
         Account account = preregister();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
+        workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
         String body = objectMapper.writeValueAsString(Map.of("orgRole", "admin"));
 
         mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
