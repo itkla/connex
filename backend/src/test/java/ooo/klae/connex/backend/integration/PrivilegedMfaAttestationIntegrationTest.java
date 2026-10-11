@@ -38,9 +38,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.MfaAttestationRefusedException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.integration.SoftwarePasskeys.SoftwarePasskey;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
@@ -76,6 +78,7 @@ class PrivilegedMfaAttestationIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
 
     private final List<Integer> workspaceIds = new ArrayList<>();
     private final List<Integer> organizationIds = new ArrayList<>();
@@ -85,9 +88,11 @@ class PrivilegedMfaAttestationIntegrationTest {
     private Workspace workspace;
     private User owner;
     private User member;
+    private String configuredAttestationEnforced;
 
     @BeforeEach
     void setUp() {
+        configuredAttestationEnforced = privilegedMfaProperties.getAttestationEnforced();
         organization = newOrganization();
         workspace = newWorkspace(organization);
         owner = newUser();
@@ -98,6 +103,7 @@ class PrivilegedMfaAttestationIntegrationTest {
 
     @AfterEach
     void tearDown() {
+        privilegedMfaProperties.setAttestationEnforced(configuredAttestationEnforced);
         SecurityContextHolder.clearContext();
         RequestContextHolder.resetRequestAttributes();
         for (int workspaceId : workspaceIds) {
@@ -128,6 +134,96 @@ class PrivilegedMfaAttestationIntegrationTest {
         assertNotNull(sessionSecurityService.recentStepUpProof(session.getSession(false), member.getId()));
         assertEquals(passkey.rowId(), sessionSecurityService
             .recentStepUpProof(session.getSession(false), member.getId()).credentialRowId());
+    }
+
+    /**
+     * With attestation enforced, a grantor vouches in an organization with any passkey covered
+     * there, even one that is not sufficient everywhere, while its privileged operations still need
+     * a sufficient passkey (#1534). Here the owner is privileged in two organizations, and one of
+     * its passkeys is covered in only one of them.
+     */
+    @Test
+    void anEnforcedGrantorVouchesWithAPasskeyCoveredInTheGrantsOrganizationAlone() {
+        Organization elsewhere = newOrganization();
+        Workspace elsewhereWorkspace = newWorkspace(elsewhere);
+        workspaceMapper.addMember(elsewhereWorkspace.getId(), owner.getId(), "owner");
+        workspaceMapper.addMember(elsewhereWorkspace.getId(), member.getId(), "member");
+        SoftwarePasskey everywhere = register(owner);
+        SoftwarePasskey hereOnly = register(owner);
+        cover(everywhere, organization);
+        cover(everywhere, elsewhere);
+        cover(hereOnly, organization);
+        privilegedMfaProperties.setAttestationEnforced("true");
+
+        steppedUpWith(owner, hereOnly);
+
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> sessionSecurityService.requireRecentAuthentication(owner.getId()));
+        assertNotNull(attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId()));
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> attestationService.issueForWorkspace(elsewhereWorkspace.getId(), owner.getId(), member.getId()));
+
+        steppedUpWith(owner, everywhere);
+
+        sessionSecurityService.requireRecentAuthentication(owner.getId());
+        assertNotNull(attestationService.issueForWorkspace(
+            elsewhereWorkspace.getId(), owner.getId(), member.getId()));
+    }
+
+    /**
+     * With attestation enforced, a code stops working once its grantor no longer holds a passkey
+     * covered in the code's organization (#1534), and nothing is covered by the refused redemption.
+     */
+    @Test
+    void anEnforcedGrantorWhoLostCoverageCanNoLongerPassItOn() {
+        SoftwarePasskey grantorPasskey = register(owner);
+        SoftwarePasskey memberPasskey = register(member);
+        cover(grantorPasskey, organization);
+        privilegedMfaProperties.setAttestationEnforced("true");
+        steppedUpWith(owner, grantorPasskey);
+        MfaAttestationCodeDto issued =
+            attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId());
+        jdbcTemplate.update(
+            "DELETE FROM privileged_credential_attestation WHERE credential_row_id = ?", grantorPasskey.rowId());
+
+        assertEquals("grantor_unattested", refusalOf(member, memberPasskey, issued.code()));
+        assertEquals(List.of(), coverage(memberPasskey.rowId()));
+    }
+
+    /**
+     * Issuing joins a caller's transaction rather than starting its own, and an isolation annotation
+     * cannot change that transaction, so issuing inside one is refused before anything is read or
+     * written (#1534).
+     */
+    @Test
+    void issuingInsideACallersTransactionIsRefused() {
+        steppedUp(owner);
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+
+        assertThrows(IllegalStateException.class, () -> outer.executeWithoutResult(status ->
+            attestationService.issueForWorkspace(workspace.getId(), owner.getId(), member.getId())));
+        assertEquals(0, openGrants(member));
+    }
+
+    /**
+     * With attestation enforced, a privileged account adds a passkey only when the step-up behind
+     * the ceremony was signed by a passkey that is sufficient, re-checked under the account locks
+     * (#1534). An account awaiting approval therefore cannot add passkeys.
+     */
+    @Test
+    void anEnforcedPrivilegedAccountAddsAPasskeyOnlyWithASufficientSigner() {
+        SoftwarePasskey first = register(owner);
+        privilegedMfaProperties.setAttestationEnforced("true");
+
+        EnrollmentEvidence signedWhileUnapproved = evidenceSignedBy(owner, first);
+        assertThrows(RecentAuthenticationRequiredException.class, () -> SoftwarePasskeys.register(
+            webAuthnService, userMapper, owner, signedWhileUnapproved, "Second"));
+        assertEquals(1, passkeyCount(owner));
+
+        cover(first, organization);
+        SoftwarePasskeys.register(webAuthnService, userMapper, owner, evidenceSignedBy(owner, first), "Second");
+
+        assertEquals(2, passkeyCount(owner));
     }
 
     @Test
@@ -292,7 +388,7 @@ class PrivilegedMfaAttestationIntegrationTest {
     void aDeletionReservationCommittedWhileIssuanceWaitsOnTheAccountRefusesTheCode() throws Exception {
         List<String> outcomes = commitWhileBlocked(
             () -> userMapper.reserveAccountDeletion(member.getId(), UUID.randomUUID().toString()),
-            "app_user", member.getId(), TransactionDefinition.ISOLATION_DEFAULT,
+            "app_user", member.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
             List.of(issuanceAs(owner, () -> attestationService.issueForWorkspace(
                 workspace.getId(), owner.getId(), member.getId()))));
 
@@ -309,7 +405,7 @@ class PrivilegedMfaAttestationIntegrationTest {
         List<String> outcomes = commitWhileBlocked(
             () -> jdbcTemplate.update(
                 "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", organization.getId()),
-            "organization", organization.getId(), TransactionDefinition.ISOLATION_DEFAULT,
+            "organization", organization.getId(), TransactionDefinition.ISOLATION_READ_COMMITTED,
             List.of(issuanceAs(owner, () -> attestationService.issueForOrganization(
                 organization.getId(), owner.getId(), orgAdmin.getId()))));
 
@@ -485,7 +581,7 @@ class PrivilegedMfaAttestationIntegrationTest {
 
     private int redeem(User grantee, SoftwarePasskey passkey, MockHttpServletRequest session, String code) {
         Authentication auth = SoftwarePasskeys.authenticate(grantee);
-        PublicKeyCredentialRequestOptions options = webAuthnService.createStepUpOptions(auth);
+        PublicKeyCredentialRequestOptions options = webAuthnService.createAttestationOptions(auth);
         return redemption.redeem(
             session, auth, grantee, options, SoftwarePasskeys.sign(passkey, options), code).orgId();
     }
@@ -501,6 +597,35 @@ class PrivilegedMfaAttestationIntegrationTest {
         sessionSecurityService.markStepUp(request, user.getId(), 0);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         SoftwarePasskeys.authenticate(user);
+    }
+
+    private void steppedUpWith(User user, SoftwarePasskey passkey) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markStepUp(request, user.getId(), passkey.rowId());
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        SoftwarePasskeys.authenticate(user);
+    }
+
+    private EnrollmentEvidence evidenceSignedBy(User user, SoftwarePasskey passkey) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        sessionSecurityService.markStepUp(request, user.getId(), passkey.rowId());
+        return new EnrollmentEvidence(
+            null, sessionSecurityService.recentStepUpProof(request.getSession(false), user.getId()));
+    }
+
+    private void cover(SoftwarePasskey passkey, Organization coveredIn) {
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'FOUNDER')",
+            passkey.rowId(), coveredIn.getId());
+    }
+
+    private int passkeyCount(User user) {
+        Integer count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM webauthn_credential c JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id"
+                + " WHERE e.user_id = ?",
+            Integer.class, user.getId());
+        assertNotNull(count);
+        return count;
     }
 
     private SoftwarePasskey register(User user) {

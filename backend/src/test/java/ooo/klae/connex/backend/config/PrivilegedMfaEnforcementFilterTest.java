@@ -52,7 +52,7 @@ class PrivilegedMfaEnforcementFilterTest {
     private final PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
     private final SessionSecurityService sessionSecurityService = spy(new SessionSecurityService(
             new SessionSecurityProperties(), properties, Clock.systemUTC(),
-            mock(UserMapper.class), mock(SpringSessionMapper.class)));
+            mock(UserMapper.class), mock(SpringSessionMapper.class), privilegedAccountService));
     private final AuditService auditService = mock(AuditService.class);
     private final DenialAuditRateLimiter denialAuditRateLimiter =
             new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry());

@@ -122,6 +122,34 @@ public interface UserMapper {
      */
     boolean hasOtherSufficientPasskey(
             @Param("userId") int userId, @Param("credentialRowId") int credentialRowId);
+    /**
+     * The credential ids of the account's sufficient passkeys (#1534), in row order.
+     *
+     * @param userId the account
+     * @return the raw WebAuthn credential ids; empty when none is sufficient
+     */
+    List<byte[]> sufficientPasskeyCredentialIds(@Param("userId") int userId);
+    /**
+     * Whether the passkey belongs to the account and vouches in the organization (#1534): it
+     * carries break-glass assurance or is covered there.
+     *
+     * @param userId the account that must own the passkey
+     * @param credentialRowId the passkey's {@code webauthn_credential.id}
+     * @param orgId the organization
+     * @return true only for the account's own passkey covered in that organization
+     */
+    boolean isPasskeyCoveredInOrganization(
+            @Param("userId") int userId,
+            @Param("credentialRowId") int credentialRowId,
+            @Param("orgId") int orgId);
+    /**
+     * Whether any of the account's passkeys vouches in the organization (#1534).
+     *
+     * @param userId the account
+     * @param orgId the organization
+     * @return true when one of its passkeys carries break-glass assurance or is covered there
+     */
+    boolean hasPasskeyCoveredInOrganization(@Param("userId") int userId, @Param("orgId") int orgId);
     /** Counts privileged accounts that hold passkeys but no sufficient one (#1534). */
     long countAttestationRequiredAccounts();
     /**

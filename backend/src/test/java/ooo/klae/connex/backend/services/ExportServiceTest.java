@@ -65,7 +65,7 @@ class ExportServiceTest {
         policy.setEnforced(Boolean.toString(enforced));
         SessionSecurityService sessionSecurity = new SessionSecurityService(
                 new SessionSecurityProperties(), policy, Clock.systemUTC(),
-                mock(UserMapper.class), mock(SpringSessionMapper.class));
+                mock(UserMapper.class), mock(SpringSessionMapper.class), mock(PrivilegedAccountService.class));
         ExportService service = new ExportService(sessionSecurity, workspaceService, dealService,
                 personMapper, companyMapper, productMapper, pipelineMapper, tagMapper,
                 customFieldDefinitionMapper, customFieldValueService, mock(DisqualificationReasonService.class),

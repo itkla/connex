@@ -336,7 +336,7 @@ public class WebAuthnController {
     @PostMapping(value = "/attestation/options", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> attestationOptions(HttpServletRequest req, HttpServletResponse res) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        PublicKeyCredentialRequestOptions options = webAuthnService.createStepUpOptions(auth);
+        PublicKeyCredentialRequestOptions options = webAuthnService.createAttestationOptions(auth);
         requestOptions.save(req, res, options);
         return ResponseEntity.ok(json.write(options));
     }

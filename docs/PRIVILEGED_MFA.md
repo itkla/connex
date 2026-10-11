@@ -480,7 +480,8 @@ then counts wherever the member is privileged in that organization.
 
 **Refusals:**
 - Every reason the code can't be used answers one `403 MFA_ATTESTATION_REFUSED`: wrong, expired,
-  revoked, used, exhausted, authority lost, or member gone.
+  revoked, used, exhausted, authority lost, member gone, or (once attestation is enforced) a grantor
+  that no longer holds a passkey covered in the code's organization.
 - After the refused redemption has rolled back, one refusal is counted against each of the member's
   redeemable codes. A code that reaches five refusals can't be redeemed.
 - The denial is audited at account scope with its reason.
@@ -527,6 +528,30 @@ any passkey is not confined.
 - removing the account's last sufficient passkey is refused, even while other passkeys remain,
   because the removal would confine the account. The refusal is audited as
   `auth.passkey.delete_denied` with reason `last_sufficient_credential`.
+
+**Proofs must come from a sufficient passkey, too.** Once it is `true`, a privileged account's
+step-up counts only when the session's stamp is bound to one of its own **sufficient** passkeys:
+- **Where it applies:** every recent-authentication gate (`requireRecentAuthentication`) and the
+  export gate. Otherwise they answer `403 RECENT_AUTHENTICATION_REQUIRED`.
+- **What doesn't count:** a stamp from passkey login or from redeeming an approval code counts only
+  if that passkey is sufficient, and a stamp that names no passkey never does.
+- **Step-up options** (`/api/auth/webauthn/step-up/options`) offer a privileged account only its
+  sufficient passkeys. With none, it gets `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED` rather than an
+  empty list.
+- **Approval-code options** (`/api/auth/webauthn/attestation/options`) offer every passkey the
+  account owns, since an unapproved passkey is what a code approves.
+- **Empty lists, always:** both refuse an empty list whatever the switch, because recovery can remove
+  every passkey between the existence check and the list being built, and an empty list would
+  admit any discoverable credential.
+- **Adding a passkey** to an account that already holds one is re-authorized under the account
+  locks. The step-up behind the ceremony must still be fresh, signed by a passkey the account still
+  owns and, for a privileged account, sufficient. An account awaiting approval therefore cannot add
+  passkeys. The first passkey is the exception, and operator recovery leads back to it.
+- **Grantors vouch org-locally.** Issuing or revoking a code checks only that the grantor's step-up
+  is fresh on entry. Under the authority locks it then requires the stamp's passkey to be the
+  grantor's own and covered in the code's organization (or `BREAK_GLASS`): vouching in one
+  organization rests on that organization alone. A code is refused at redemption, as
+  `grantor_unattested`, once its grantor no longer holds such a passkey there.
 
 `GET /api/auth/webauthn/register/requirements` stays reachable while confined. It reports the
 account's enforced `standing`, and `approvalGaps`: for each of the account's own passkeys without
