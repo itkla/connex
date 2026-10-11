@@ -159,6 +159,29 @@ class OrganizationTenancyAndExitIntegrationTest {
         assertNull(orgMemberMapper.getRole(organization.getId(), target.getId()));
     }
 
+    /** The add by email runs at its own isolation too, and refuses the same way. */
+    @Test
+    void aWorkspaceRemovalCommittedWhileAnAddByEmailWaitsRefusesTheAdd() throws Exception {
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        User owner = newUser();
+        User target = newUser();
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        workspaceMapper.addMember(workspace.getId(), target.getId(), "member");
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> {
+                userMapper.lockById(target.getId());
+                workspaceMapper.removeMember(workspace.getId(), target.getId());
+            },
+            "app_user", target.getId(), true,
+            List.of(() -> steppedUpAs(owner, () -> orgMemberService.setMemberByEmail(
+                organization.getId(), owner.getId(), target.getEmail(), "admin"))));
+
+        assertEquals(List.of(NOT_A_TENANT), outcomes);
+        assertNull(orgMemberMapper.getRole(organization.getId(), target.getId()));
+    }
+
     /** A teardown fence committed while an add or a leave waits on the organization refuses both. */
     @Test
     void aTeardownFenceCommittedWhileAnAddAndALeaveWaitRefusesBoth() throws Exception {
