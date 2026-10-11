@@ -149,6 +149,13 @@ class OrgMemberServiceTest extends AbstractServiceTest {
             assertNull(orgMemberMapper.getRole(orgId, refused.getId()));
         }
 
+        String unknownEmail = "nobody-" + unique() + "@example.com";
+        assertEquals(
+            assertThrows(BadRequestException.class, () -> orgMemberService.setMemberByEmail(
+                orgId, currentUser.getId(), unknownEmail, "bogus")).getMessage(),
+            assertThrows(BadRequestException.class, () -> orgMemberService.setMemberByEmail(
+                orgId, currentUser.getId(), outsider.getEmail(), "bogus")).getMessage());
+
         User tenant = newUser();
         workspaceMapper.addMember(tenantWorkspace.getId(), tenant.getId(), "member");
         orgMemberService.setMember(orgId, currentUser.getId(), tenant.getId(), "admin");

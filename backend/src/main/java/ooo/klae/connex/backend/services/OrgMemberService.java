@@ -158,17 +158,18 @@ public class OrgMemberService {
     public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        OrgRole role = parseRole(roleRaw);
         String email = emailRaw == null ? "" : emailRaw.trim().toLowerCase();
-        User target = userMapper.getUserByEmail(email);
-        if (target == null) {
+        Integer targetId = orgMemberMapper.findEligibleUserIdByEmail(orgId, email);
+        if (targetId == null) {
             throw notAnActiveTenant();
         }
-        lockMembershipUserRoots(actorId, target.getId());
-        User fresh = userMapper.getUserByIdForShare(target.getId());
+        lockMembershipUserRoots(actorId, targetId);
+        User fresh = userMapper.getUserByIdForShare(targetId);
         if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {
             throw new ConflictException("The account's email changed; refresh and try again");
         }
-        setMember(orgId, actorId, target.getId(), roleRaw);
+        applyMember(orgId, actorId, targetId, role);
     }
 
     /**
@@ -198,12 +199,24 @@ public class OrgMemberService {
      * shared account row at {@code READ COMMITTED}: every writer that removes or deactivates a
      * workspace membership takes that row exclusively, so it has committed already or waits. The
      * organization is locked only while active, so nothing joins one whose teardown has begun.
+     *
+     * <p>Before any lock, one organization-scoped read asks whether the target may be addressed at
+     * all: an existing member or an existing tenant. An unknown account and an outsider answer that
+     * read alike and are refused before taking any lock, so neither the refusal nor its cost tells
+     * them apart. The answer is revalidated under the locks.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
+        if (!orgMemberMapper.isEligibleForMembership(orgId, targetUserId)) {
+            throw notAnActiveTenant();
+        }
+        applyMember(orgId, actorId, targetUserId, role);
+    }
+
+    private void applyMember(int orgId, int actorId, int targetUserId, OrgRole role) {
         try {
             lockMembershipUserRoots(actorId, targetUserId);
         } catch (ResourceNotFoundException unknownTarget) {

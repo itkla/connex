@@ -580,7 +580,9 @@ holds over an account.
 - Every add that fails before the account is known to be a tenant answers with the same
   `400` "Only active members of a workspace in this organization can be added to it". That covers an
   unknown email or id, an outsider, a pending member and a member only of a workspace being torn
-  down, so the endpoints don't reveal which accounts exist.
+  down, so the endpoints don't reveal which accounts exist. The role is validated before anyone is
+  looked up, and one organization-scoped read refuses an unknown account and an outsider alike
+  before any lock is taken, so the cost of the answer doesn't tell them apart either.
 - Re-roling or removing an existing organization member is unaffected.
 - Founding an organization and the dev seeder write the founder's membership directly, and are the
   only exceptions.

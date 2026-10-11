@@ -386,8 +386,11 @@ SSO returning/existing-user paths discover non-locking then lock user, stored wo
 3. the owner rows;
 4. the target's own `org_member` row.
 
-When that row is absent, the tenancy check that a new membership needs is a plain read after these
-locks. It is current because:
+Before any of these locks, one non-locking, organization-scoped read
+(`isEligibleForMembership` / `findEligibleUserIdByEmail`) refuses a target that is neither a member
+nor a tenant. Unknown accounts and outsiders therefore cost the same and are refused alike. The
+answer is revalidated under the locks: when the target's own row is absent, the tenancy check that
+a new membership needs is a plain read after these locks. It is current because:
 - every writer that removes or deactivates a workspace membership (removal, leave, decline, account
   deletion) takes the target's `app_user` row exclusively, so it has committed before the read, or
   waits for this transaction;

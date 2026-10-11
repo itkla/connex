@@ -1,15 +1,19 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -20,7 +24,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,7 +34,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -48,6 +53,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.OrgMemberService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.UserDeletionTransaction;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
@@ -59,6 +65,11 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
  * organization serializes with every other writer of its owner rows, so an organization always keeps
  * an owner and departed authority backs no grant. Both exits audit strictly, so an exit that cannot
  * be recorded does not happen.
+ *
+ * <p>Every contender calls the production entry point itself, with no surrounding transaction, so
+ * each runs at the isolation its own annotation declares. A spied {@link UserMapper} records the
+ * contender's connection inside that transaction just before its first account lock, which lets the
+ * lock probe confirm the contender is really waiting on the held row before it is released.
  */
 @SpringBootTest
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -66,24 +77,44 @@ class OrganizationTenancyAndExitIntegrationTest {
     private static final String NOT_A_TENANT =
         "Only active members of a workspace in this organization can be added to it";
     private static final String LAST_OWNER = "An organization must keep at least one owner";
+    private static final String NOT_AN_OWNER = "Requires the organization owner role";
+    private static final String NOT_A_MEMBER = "You are not a member of this organization";
+    private static final String DELETION_REFUSED = "Transfer organization ownership before deleting your account";
     private static final String DONE = "done";
+
+    private static final ThreadLocal<ConnectionProbe> CONNECTION_PROBE = new ThreadLocal<>();
 
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private PrivilegedMfaAttestationService attestationService;
+    @Autowired private UserDeletionTransaction userDeletionTransaction;
     @Autowired private WebAuthnService webAuthnService;
     @Autowired private SessionSecurityService sessionSecurityService;
-    @Autowired private UserMapper userMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @MockitoSpyBean private UserMapper userMapper;
     @MockitoSpyBean private AuditService auditService;
 
     private final List<Integer> workspaceIds = new ArrayList<>();
     private final List<Integer> organizationIds = new ArrayList<>();
     private final List<Integer> userIds = new ArrayList<>();
+
+    @BeforeEach
+    void recordContenderConnectionsAtTheirFirstAccountLock() {
+        UserMapper real = sqlSessionTemplate.getMapper(UserMapper.class);
+        doAnswer(invocation -> {
+            recordConnection();
+            return real.lockByIdForShare(invocation.getArgument(0));
+        }).when(userMapper).lockByIdForShare(anyInt());
+        doAnswer(invocation -> {
+            recordConnection();
+            return real.lockById(invocation.getArgument(0));
+        }).when(userMapper).lockById(anyInt());
+    }
 
     @AfterEach
     void tearDown() {
@@ -102,7 +133,9 @@ class OrganizationTenancyAndExitIntegrationTest {
 
     /**
      * A removal that commits while an add waits on the target's account row is seen by the
-     * tenancy read, so the add is refused rather than granted to someone who just left.
+     * tenancy read, so the add is refused rather than granted to someone who just left. The add
+     * runs at its own isolation: under the default one, the read made before the wait would fix the
+     * snapshot and the add would see the removed membership.
      */
     @Test
     void aWorkspaceRemovalCommittedWhileAnAddWaitsRefusesTheAdd() throws Exception {
@@ -126,6 +159,35 @@ class OrganizationTenancyAndExitIntegrationTest {
         assertNull(orgMemberMapper.getRole(organization.getId(), target.getId()));
     }
 
+    /** A teardown fence committed while an add or a leave waits on the organization refuses both. */
+    @Test
+    void aTeardownFenceCommittedWhileAnAddAndALeaveWaitRefusesBoth() throws Exception {
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        User owner = newUser();
+        User tenant = newUser();
+        User admin = newUser();
+        orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), admin.getId(), "admin");
+        workspaceMapper.addMember(workspace.getId(), tenant.getId(), "member");
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> {
+                organizationMapper.lockById(organization.getId());
+                jdbcTemplate.update(
+                    "UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", organization.getId());
+            },
+            "organization", organization.getId(), false,
+            List.of(
+                () -> steppedUpAs(owner, () -> orgMemberService.setMember(
+                    organization.getId(), owner.getId(), tenant.getId(), "admin")),
+                () -> leave(organization, admin)));
+
+        assertEquals(List.of(NOT_AN_OWNER, NOT_A_MEMBER), outcomes);
+        assertEquals(0, membershipCount(organization, tenant));
+        assertEquals(1, membershipCount(organization, admin));
+    }
+
     /** Two owners leaving at once serialize on the organization, and one of them stays. */
     @Test
     void twoOwnersLeavingAtOnceLeaveTheOrganizationAnOwner() throws Exception {
@@ -146,8 +208,8 @@ class OrganizationTenancyAndExitIntegrationTest {
     }
 
     /**
-     * An owner leaving while a co-owner deletes their account cannot leave the organization
-     * ownerless either way round: account deletion takes the same organization row first.
+     * An owner leaving while the real account-deletion transaction removes a co-owner serializes on
+     * the organization row, so exactly one of them succeeds and an owner always remains.
      */
     @Test
     void anOwnerLeavingWhileACoOwnerIsDeletedLeavesTheOrganizationAnOwner() throws Exception {
@@ -156,23 +218,30 @@ class OrganizationTenancyAndExitIntegrationTest {
         User deleted = newUser();
         orgMemberMapper.addMember(organization.getId(), leaving.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), deleted.getId(), "owner");
+        String reservation = UUID.randomUUID().toString();
+        userDeletionTransaction.reserve(deleted.getId(), reservation);
 
         List<String> outcomes = commitWhileBlocked(
             () -> organizationMapper.lockById(organization.getId()),
             "organization", organization.getId(), false,
             List.of(() -> leave(organization, leaving), () -> {
-                orgMemberService.assertNotSoleOwnerOfAnyOrg(deleted.getId());
-                orgMemberMapper.removeMember(organization.getId(), deleted.getId());
+                userDeletionTransaction.delete(deleted.getId(), reservation);
                 return DONE;
             }));
 
-        assertEquals(1, outcomes.stream().filter(DONE::equals).count(), outcomes.toString());
+        assertTrue(Set.of(List.of(DONE, DELETION_REFUSED), List.of(LAST_OWNER, DONE)).contains(outcomes),
+            outcomes.toString());
         assertEquals(1, ownerCount(organization));
+        assertEquals(DONE.equals(outcomes.get(1)), userMapper.getUserById(deleted.getId()) == null);
     }
 
-    /** Authority given up by leaving no longer backs a code issued before the owner left. */
+    /**
+     * Issuing a code and leaving the organization serialize on it. Either the code was issued
+     * while the grantor still owned the organization, and it stops working once the grantor has
+     * left, or the grantor left first and nothing was issued.
+     */
     @Test
-    void aCodeIssuedBeforeItsGrantorLeftCannotBeRedeemed() {
+    void issuingAndLeavingAtOnceNeverLeaveAWorkingCodeFromADepartedOwner() throws Exception {
         Organization organization = newOrganization();
         User grantor = newUser();
         User coOwner = newUser();
@@ -180,18 +249,61 @@ class OrganizationTenancyAndExitIntegrationTest {
         orgMemberMapper.addMember(organization.getId(), grantor.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), coOwner.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), member.getId(), "admin");
-        SoftwarePasskey passkey = SoftwarePasskeys.register(
-            webAuthnService, userMapper, member, new EnrollmentEvidence(null, null), "Exit");
-        SecurityContextHolder.clearContext();
+        SoftwarePasskey passkey = register(member);
+        List<MfaAttestationCodeDto> issued = new ArrayList<>();
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> organizationMapper.lockById(organization.getId()),
+            "organization", organization.getId(), false,
+            List.of(
+                () -> steppedUpAs(grantor, () -> {
+                    issued.add(attestationService.issueForOrganization(
+                        organization.getId(), grantor.getId(), member.getId()));
+                    return DONE;
+                }),
+                () -> leave(organization, grantor)));
+
+        assertEquals(DONE, outcomes.get(1));
+        if (DONE.equals(outcomes.get(0))) {
+            assertEquals(1, grantCount(member));
+            assertEquals("authority_lost", refusalOf(member, passkey, issued.getFirst().code()));
+        } else {
+            assertEquals(NOT_AN_OWNER, outcomes.get(0));
+            assertEquals(0, grantCount(member));
+        }
+    }
+
+    /**
+     * Redeeming a code and its grantor leaving serialize on the organization. Coverage is recorded
+     * exactly when the redemption won, while the grantor still owned the organization.
+     */
+    @Test
+    void aRedemptionRacingItsGrantorsLeaveCoversOnlyIfItWon() throws Exception {
+        Organization organization = newOrganization();
+        User grantor = newUser();
+        User coOwner = newUser();
+        User member = newUser();
+        orgMemberMapper.addMember(organization.getId(), grantor.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), coOwner.getId(), "owner");
+        orgMemberMapper.addMember(organization.getId(), member.getId(), "admin");
+        SoftwarePasskey passkey = register(member);
         MfaAttestationCodeDto issued = steppedUpAs(grantor, () -> attestationService.issueForOrganization(
             organization.getId(), grantor.getId(), member.getId()));
-
-        orgMemberService.leave(organization.getId(), grantor.getId());
-
-        SoftwarePasskeys.authenticate(member);
         int epoch = userMapper.currentSessionEpoch(member.getId());
-        assertEquals("authority_lost", assertThrows(PrivilegedMfaAttestationService.AttestationRefusal.class,
-            () -> attestationService.redeem(member.getId(), epoch, passkey.rowId(), issued.code())).reason());
+
+        List<String> outcomes = commitWhileBlocked(
+            () -> organizationMapper.lockById(organization.getId()),
+            "organization", organization.getId(), false,
+            List.of(
+                () -> asMember(member, () -> {
+                    attestationService.redeem(member.getId(), epoch, passkey.rowId(), issued.code());
+                    return DONE;
+                }),
+                () -> leave(organization, grantor)));
+
+        assertEquals(DONE, outcomes.get(1));
+        assertTrue(Set.of(DONE, "authority_lost").contains(outcomes.get(0)), outcomes.toString());
+        assertEquals(DONE.equals(outcomes.get(0)) ? 1 : 0, coverageCount(passkey, organization));
     }
 
     @Test
@@ -232,6 +344,15 @@ class OrganizationTenancyAndExitIntegrationTest {
         assertEquals(leaving.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
     }
 
+    private void recordConnection() {
+        ConnectionProbe probe = CONNECTION_PROBE.get();
+        if (probe != null && probe.connectionId().get() == 0) {
+            Long connectionId = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
+            probe.connectionId().set(connectionId == null ? 0 : connectionId);
+            probe.known().countDown();
+        }
+    }
+
     private String leave(Organization organization, User member) {
         return asMember(member, () -> {
             orgMemberService.leave(organization.getId(), member.getId());
@@ -268,6 +389,21 @@ class OrganizationTenancyAndExitIntegrationTest {
         }
     }
 
+    private SoftwarePasskey register(User user) {
+        SoftwarePasskey passkey = SoftwarePasskeys.register(
+            webAuthnService, userMapper, user, new EnrollmentEvidence(null, null), "Exit");
+        SecurityContextHolder.clearContext();
+        return passkey;
+    }
+
+    private String refusalOf(User grantee, SoftwarePasskey passkey, String code) {
+        return asMember(grantee, () -> {
+            int epoch = userMapper.currentSessionEpoch(grantee.getId());
+            return assertThrows(PrivilegedMfaAttestationService.AttestationRefusal.class,
+                () -> attestationService.redeem(grantee.getId(), epoch, passkey.rowId(), code)).reason();
+        });
+    }
+
     private List<String> commitWhileBlocked(
             Runnable change,
             String table,
@@ -287,16 +423,15 @@ class OrganizationTenancyAndExitIntegrationTest {
             assertTrue(held.await(30, TimeUnit.SECONDS), "the change was never held");
             List<Future<String>> pending = new ArrayList<>();
             for (Supplier<String> contender : contenders) {
-                AtomicLong connection = new AtomicLong();
-                CountDownLatch started = new CountDownLatch(1);
-                pending.add(executor.submit(() -> contend(connection, started, contender)));
-                assertTrue(started.await(30, TimeUnit.SECONDS), "a contender never started");
+                ConnectionProbe probe = new ConnectionProbe(new AtomicLong(), new CountDownLatch(1));
+                pending.add(executor.submit(() -> contend(probe, contender)));
+                assertTrue(probe.known().await(30, TimeUnit.SECONDS), "a contender never reached its first lock");
                 if (sharedWait) {
                     MySqlLockWaitProbe.awaitSharedRecordLock(
-                        jdbcTemplate, connection.get(), table, Integer.toString(heldRowId));
+                        jdbcTemplate, probe.connectionId().get(), table, Integer.toString(heldRowId));
                 } else {
                     MySqlLockWaitProbe.awaitExclusiveRecordLock(
-                        jdbcTemplate, connection.get(), table, Integer.toString(heldRowId));
+                        jdbcTemplate, probe.connectionId().get(), table, Integer.toString(heldRowId));
                 }
             }
             release.countDown();
@@ -314,28 +449,43 @@ class OrganizationTenancyAndExitIntegrationTest {
     }
 
     /**
-     * Runs a contender in a {@code READ COMMITTED} transaction it owns, so the lock probe can name
-     * its connection and it reads at the isolation the production paths use.
+     * Runs a contender through its production entry point with no surrounding transaction, so it
+     * opens its own at the isolation it declares, and reports its connection to the probe.
      */
-    private String contend(AtomicLong connection, CountDownLatch started, Supplier<String> contender) {
-        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
-        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    private static String contend(ConnectionProbe probe, Supplier<String> contender) {
+        CONNECTION_PROBE.set(probe);
         try {
-            return transaction.execute(status -> {
-                connection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
-                started.countDown();
-                return contender.get();
-            });
+            return contender.get();
         } catch (RuntimeException refused) {
             return refused.getMessage();
+        } finally {
+            CONNECTION_PROBE.remove();
+            probe.known().countDown();
         }
     }
 
     private int ownerCount(Organization organization) {
-        Integer owners = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM org_member WHERE org_id = ? AND org_role = 'owner'",
-            Integer.class, organization.getId());
-        return owners == null ? 0 : owners;
+        return count("SELECT COUNT(*) FROM org_member WHERE org_id = ? AND org_role = 'owner'", organization.getId());
+    }
+
+    private int membershipCount(Organization organization, User user) {
+        return count("SELECT COUNT(*) FROM org_member WHERE org_id = ? AND user_id = ?",
+            organization.getId(), user.getId());
+    }
+
+    private int grantCount(User grantee) {
+        return count("SELECT COUNT(*) FROM privileged_mfa_attestation_grant WHERE grantee_user_id = ?", grantee.getId());
+    }
+
+    private int coverageCount(SoftwarePasskey passkey, Organization organization) {
+        return count("SELECT COUNT(*) FROM privileged_credential_attestation WHERE credential_row_id = ? AND org_id = ?",
+            passkey.rowId(), organization.getId());
+    }
+
+    private int count(String sql, Object... arguments) {
+        Integer counted = jdbcTemplate.queryForObject(sql, Integer.class, arguments);
+        assertNotNull(counted);
+        return counted;
     }
 
     private static void await(CountDownLatch latch) {
@@ -382,5 +532,14 @@ class OrganizationTenancyAndExitIntegrationTest {
         userMapper.insert(created);
         userIds.add(created.getId());
         return userMapper.getUserById(created.getId());
+    }
+
+    /**
+     * Where a contender reports the connection its own transaction runs on.
+     *
+     * @param connectionId the MySQL connection id, or zero until the contender reaches a lock
+     * @param known released once the contender reports, or finishes without reaching a lock
+     */
+    private record ConnectionProbe(AtomicLong connectionId, CountDownLatch known) {
     }
 }
