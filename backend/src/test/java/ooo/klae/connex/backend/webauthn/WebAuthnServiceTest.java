@@ -659,6 +659,14 @@ class WebAuthnServiceTest {
         assertEquals(NEW_PASSKEY_ROW_ID, sufficient.service().finishRegistration(
                 7, 3, false, new EnrollmentEvidence("session-a", proof),
                 sufficient.options(), sufficient.credential(), "Work key").credentialRowId());
+
+        InOrder order = inOrder(sufficient.userMapper(), sufficient.credentialMapper(),
+                sufficient.privilegedAccounts(), sufficient.relyingParty());
+        order.verify(sufficient.userMapper()).lockById(7);
+        order.verify(sufficient.userMapper()).lockAssignedCustomRoleIds(7);
+        order.verify(sufficient.credentialMapper()).findOwnedRowId(STEP_UP_PASSKEY_ROW_ID, 7);
+        order.verify(sufficient.privilegedAccounts()).isSufficientPasskey(7, STEP_UP_PASSKEY_ROW_ID);
+        order.verify(sufficient.relyingParty()).registerCredential(any());
     }
 
     /** The first passkey, and every passkey while attestation is off, are not re-authorized (#1534). */
