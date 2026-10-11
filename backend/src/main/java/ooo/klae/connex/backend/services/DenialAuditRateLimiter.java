@@ -17,8 +17,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Fixed-window JVM-local admission for access-denial audit rows, keyed by user, audit action and
- * client address (#1850).
+ * Fixed-window JVM-local admission for access-denial audit rows, keyed by user, audit action, denial
+ * reason and client address (#1850). The reason is part of the key so that an account whose
+ * confinement changes cause, for example from awaiting enrollment to awaiting passkey approval
+ * (#1534), records the new reason at once instead of after the previous reason's window.
  *
  * <p>A filter that records a denial before refusing a {@code GET} can be driven from another site. The
  * session cookie rides a cross-site top-level navigation under {@code SameSite=Lax}, and any cross-site
@@ -62,10 +64,12 @@ public class DenialAuditRateLimiter {
      *
      * @param userId denied user
      * @param action audit action the row records
+     * @param reason denial reason the row records
      * @param clientAddress client address the row was admitted for, empty when none was resolved
      * @param admittedAtMillis when the admission opened its window
      */
-    public record Admission(int userId, String action, String clientAddress, long admittedAtMillis) {
+    public record Admission(
+            int userId, String action, String reason, String clientAddress, long admittedAtMillis) {
     }
 
     public DenialAuditRateLimiter(
@@ -82,16 +86,17 @@ public class DenialAuditRateLimiter {
     }
 
     /**
-     * Admits at most one audit row for a user, action and client address during the window, and at
-     * most eight addresses for a user and action.
+     * Admits at most one audit row for a user, action, reason and client address during the window,
+     * and at most eight addresses for a user, action and reason.
      *
      * @param userId denied user
      * @param action audit action the row would record
+     * @param reason denial reason the row would record
      * @param clientAddress resolved client address, or null when none could be resolved
      * @return the admission when the caller may append the audit row, otherwise empty
      */
-    public Optional<Admission> acquire(int userId, String action, String clientAddress) {
-        Key key = new Key(userId, action);
+    public Optional<Admission> acquire(int userId, String action, String reason, String clientAddress) {
+        Key key = new Key(userId, action, reason);
         String address = Objects.requireNonNullElse(clientAddress, UNRESOLVED_ADDRESS);
         long now = clock.millis();
         AtomicBoolean accepted = new AtomicBoolean();
@@ -113,7 +118,7 @@ public class DenialAuditRateLimiter {
             meterRegistry.counter(SUPPRESSED_METRIC, "action", action).increment();
             return Optional.empty();
         }
-        return Optional.of(new Admission(userId, action, address, now));
+        return Optional.of(new Admission(userId, action, reason, address, now));
     }
 
     /**
@@ -124,7 +129,8 @@ public class DenialAuditRateLimiter {
      * @param admission the admission {@link #acquire} returned
      */
     public void release(Admission admission) {
-        windows.computeIfPresent(new Key(admission.userId(), admission.action()), (key, existing) -> {
+        Key admissionKey = new Key(admission.userId(), admission.action(), admission.reason());
+        windows.computeIfPresent(admissionKey, (key, existing) -> {
             List<Admitted> remaining = existing.admitted().stream()
                     .filter(admitted -> !admitted.address().equals(admission.clientAddress())
                             || admitted.admittedAtMillis() != admission.admittedAtMillis())
@@ -187,7 +193,7 @@ public class DenialAuditRateLimiter {
         return elapsed < 0 ? Long.MAX_VALUE : elapsed;
     }
 
-    private record Key(int userId, String action) {
+    private record Key(int userId, String action, String reason) {
     }
 
     private record Admitted(String address, long admittedAtMillis) {

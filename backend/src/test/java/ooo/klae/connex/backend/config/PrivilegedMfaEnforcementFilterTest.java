@@ -210,6 +210,32 @@ class PrivilegedMfaEnforcementFilterTest {
                 eq("attestation_required"));
     }
 
+    /**
+     * An account that enrolls an unapproved passkey while confined moves from awaiting enrollment to
+     * awaiting approval. The new reason is audited at once from the same address, not after the
+     * enrollment denial's window (#1534); repeats of either reason are still audited once.
+     */
+    @Test
+    void aChangedConfinementReasonIsAuditedWithinTheWindow() throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(
+                PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+                PrivilegedMfaStanding.ATTESTATION_REQUIRED,
+                PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
+        }
+
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"));
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending passkey approval"),
+                eq("attestation_required"));
+    }
+
     @Test
     void unattestedPrivilegedAccountMayRedeemAnApprovalCodeAndLeaveTheEnrollmentPaths() throws Exception {
         when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);

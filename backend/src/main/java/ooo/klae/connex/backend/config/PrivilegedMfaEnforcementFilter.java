@@ -26,14 +26,15 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
 /**
- * Confines unenrolled privileged accounts and applies WebAuthn step-up to uncovered export paths.
+ * Confines privileged accounts that hold no passkey or, once attestation is enforced, no approved
+ * one (#1534), and applies WebAuthn step-up to uncovered export paths.
  *
  * <p>Emailed-link recipient surfaces are exempt from the enrollment confinement: their authority is
  * the purpose-bound grant cookie, the session only supplies exchange lineage, and a signed-in
  * signer who has not yet enrolled a passkey must still be able to countersign or opt out.
  *
- * <p>Each denial is audited at most once per window for a user, action and client address, through
- * {@link DenialAuditRateLimiter}; every denied request is still refused.
+ * <p>Each denial is audited at most once per window for a user, action, reason and client address,
+ * through {@link DenialAuditRateLimiter}; every denied request is still refused.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
@@ -144,7 +145,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private void recordDenial(HttpServletRequest request, User user, String action, String summary,
             String reason) {
         Optional<DenialAuditRateLimiter.Admission> admission =
-                denialAuditRateLimiter.acquire(user.getId(), action, clientIpResolver.resolve(request));
+                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIpResolver.resolve(request));
         if (admission.isEmpty()) {
             return;
         }

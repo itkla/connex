@@ -60,7 +60,9 @@ fails closed.
 `enrollment_required`, or `attestation_required` for an account awaiting passkey approval) for a
 confined account and `auth.mfa.step_up.required` (reason
 `step_up_required`) for an export without recent verification, **at most once per hour for each user,
-action, and client address**, and for at most eight addresses per user and action. Every request is
+action, reason and client address**, and for at most eight addresses per user, action and reason.
+Keying on the reason means an account that moves from awaiting enrollment to awaiting approval
+records the new reason at once. Every request is
 still refused; only the audit row is admitted. A `GET` can trigger either refusal. The `SameSite=Lax`
 session cookie rides a cross-site top-level navigation, and where SAML sets it to `SameSite=None`, any
 cross-site subresource load (an image, a no-cors fetch) carries it silently. Without the bound another
