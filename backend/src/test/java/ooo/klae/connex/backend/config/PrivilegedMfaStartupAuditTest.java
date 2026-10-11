@@ -92,7 +92,9 @@ class PrivilegedMfaStartupAuditTest {
                 eq("Privileged MFA policy configured by change-456"),
                 eq(Map.of("actor", "change-456", "configuredValue", "true",
                         "enforced", true, "bootstrapConfirmationEnabled", false,
-                        "unenrolledPrivilegedCount", 0L, "unenrolledWithoutSelfServiceCount", 0L)));
+                        "configuredAttestationEnforcedValue", "false", "attestationEnforced", false,
+                        "unenrolledPrivilegedCount", 0L, "unenrolledWithoutSelfServiceCount", 0L,
+                        "attestationRequiredCount", 0L)));
     }
 
     @Test
@@ -105,6 +107,46 @@ class PrivilegedMfaStartupAuditTest {
         assertThrows(IllegalStateException.class, () -> runner.run(NO_ARGUMENTS));
 
         verifyNoInteractions(auditService);
+    }
+
+    /** A mistyped attestation switch refuses startup instead of silently leaving it off (#1534). */
+    @Test
+    void startupRejectsAnAttestationEnforcementValueOtherThanTrueOrFalse() {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setAttestationEnforced("yes");
+        AuditService auditService = mock(AuditService.class);
+        PrivilegedMfaStartupAudit runner = new PrivilegedMfaStartupAudit(
+                properties, confirmationPolicy(true), deliverable(true),
+                inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0)), auditService, CLOCK);
+
+        assertThrows(IllegalStateException.class, () -> runner.run(NO_ARGUMENTS));
+
+        verifyNoInteractions(auditService);
+    }
+
+    /**
+     * The posture records the attestation switch as configured and as applied, and counts the
+     * privileged accounts attestation enforcement confines, whether or not it is on yet (#1534).
+     */
+    @Test
+    void theAttestationSwitchAndTheAccountsItConfinesAreRecorded() {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setAttestationEnforced(" TRUE ");
+        PrivilegedAccountService privilegedAccounts = inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
+        when(privilegedAccounts.attestationRequiredAccountCount()).thenReturn(3L);
+        AuditService auditService = mock(AuditService.class);
+
+        start(new PrivilegedMfaStartupAudit(properties, confirmationPolicy(true), deliverable(true),
+                privilegedAccounts, auditService, CLOCK));
+
+        ArgumentCaptor<Object> captured = ArgumentCaptor.forClass(Object.class);
+        verify(auditService).recordStrictIndependentScoped(
+                eq("auth.mfa.policy.configured"), eq("security_policy"),
+                isNull(), isNull(), isNull(), eq("privileged-mfa"), any(), captured.capture());
+        Map<?, ?> posture = assertInstanceOf(Map.class, captured.getValue());
+        assertEquals("TRUE", posture.get("configuredAttestationEnforcedValue"));
+        assertEquals(true, posture.get("attestationEnforced"));
+        assertEquals(3L, posture.get("attestationRequiredCount"));
     }
 
     /**

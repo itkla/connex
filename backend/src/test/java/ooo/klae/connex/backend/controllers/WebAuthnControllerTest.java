@@ -20,6 +20,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
@@ -46,13 +47,16 @@ import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MfaAttestationRedemptionDto;
 import ooo.klae.connex.backend.dto.MfaAttestationRedemptionRequest;
+import ooo.klae.connex.backend.dto.PasskeyApprovalGapDto;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
+import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.MfaAttestationRefusedException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
@@ -61,7 +65,9 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -95,6 +101,7 @@ class WebAuthnControllerTest {
         mock(PrivilegedMfaAttestationRedemption.class);
     private final PasskeyBootstrapConfirmationService bootstrapConfirmationService =
         mock(PasskeyBootstrapConfirmationService.class);
+    private final PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
         attestationRedemption,
@@ -108,7 +115,8 @@ class WebAuthnControllerTest {
         sessionSecurityService,
         auditService,
         mfaRecoveryService,
-        bootstrapConfirmationService);
+        bootstrapConfirmationService,
+        privilegedAccountService);
 
     @AfterEach
     void clearSecurityContext() {
@@ -191,6 +199,28 @@ class WebAuthnControllerTest {
 
         assertFalse(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
         verify(authService, never()).hasPasswordCredential(anyInt());
+    }
+
+    /**
+     * The requirements route stays reachable while the account is confined, so it reports the
+     * enforced standing and, per passkey, the organizations still to approve it (#1534).
+     */
+    @Test
+    void registrationRequirements_reportStandingAndPerPasskeyApprovalGaps() {
+        User user = user(7);
+        List<PasskeyApprovalGapDto> gaps = List.of(
+            new PasskeyApprovalGapDto("cHJpbWFyeQ", 3, "Acme"),
+            new PasskeyApprovalGapDto("cHJpbWFyeQ", 4, "Globex"));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+        when(privilegedAccountService.passkeyApprovalGaps(7)).thenReturn(gaps);
+
+        PasskeyRegistrationRequirementsDto requirements =
+            controller.registrationRequirements(new MockHttpServletRequest());
+
+        assertEquals(PrivilegedMfaStanding.ATTESTATION_REQUIRED, requirements.standing());
+        assertEquals(gaps, requirements.approvalGaps());
     }
 
     @Test
@@ -448,6 +478,24 @@ class WebAuthnControllerTest {
                 eq("auth.passkey.delete_denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("User 7"), eq("Last passkey removal refused for privileged account"),
                 eq("last_credential"));
+    }
+
+    @Test
+    void deleteCredentialAuditsRefusalToRemoveTheLastSufficientCredentialDistinctly() {
+        User user = user(7);
+        when(authService.getCurrentUser()).thenReturn(user);
+        org.mockito.Mockito.doThrow(new LastSufficientPasskeyRemovalForbiddenException())
+                .when(webAuthnService).delete(7, "credential-id");
+
+        assertThrows(LastSufficientPasskeyRemovalForbiddenException.class,
+                () -> controller.deleteCredential("credential-id"));
+
+        verify(auditService).recordFailureScoped(
+                eq("auth.passkey.delete_denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("User 7"), eq("Last sufficient passkey removal refused for privileged account"),
+                eq("last_sufficient_credential"));
+        verify(auditService, times(1)).recordFailureScoped(
+                any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -926,7 +974,8 @@ class WebAuthnControllerTest {
             sessionSecurityService,
             auditService,
             mfaRecoveryService,
-            bootstrapConfirmationService);
+            bootstrapConfirmationService,
+            privilegedAccountService);
     }
 
     private static User user(int id) {

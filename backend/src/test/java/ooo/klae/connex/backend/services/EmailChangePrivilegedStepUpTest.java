@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -42,7 +43,6 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Pins the privileged-account gate on email-change requests (#1506 Part A).
@@ -69,7 +69,6 @@ class EmailChangePrivilegedStepUpTest {
     private final AuthService authService = mock(AuthService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
-    private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
     private final MockHttpServletRequest request = new MockHttpServletRequest();
 
     @AfterEach
@@ -81,8 +80,8 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void aPrivilegedAccountThatNeverEnrolledIsRefusedAndAuditedBeforeTheAccountLock(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(false);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         assertThrows(PasskeyEnrollmentRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
@@ -101,8 +100,8 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void aPrivilegedAccountWithoutAFreshStepUpIsRefusedAndAuditedBeforeTheAccountLock(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.SATISFIED);
 
         assertThrows(RecentAuthenticationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
@@ -118,8 +117,8 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void anExpiredStepUpIsRefused(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.SATISFIED);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
                 CLOCK.millis() - Duration.ofMinutes(11).toMillis());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, USER_ID);
@@ -135,18 +134,18 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void aPrivilegedAccountWithAFreshStepUpProceedsAndIsRecheckedUnderTheLock(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.SATISFIED);
         new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
                 userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
 
         assertDoesNotThrow(() -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
         InOrder order = inOrder(privilegedAccountService, userMapper, tokenMapper, emailService);
-        order.verify(privilegedAccountService).isPrivileged(USER_ID);
+        order.verify(privilegedAccountService).enforcedStanding(USER_ID);
         order.verify(userMapper).lockById(USER_ID);
         order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
-        order.verify(privilegedAccountService).isPrivileged(USER_ID);
+        order.verify(privilegedAccountService).enforcedStanding(USER_ID);
         order.verify(tokenMapper).invalidateForUser(USER_ID);
         order.verify(tokenMapper).insert(eq(USER_ID), eq(NEW_EMAIL), anyString(), eq("198.51.100.4"),
                 eq(30), eq(SESSION_EPOCH));
@@ -159,12 +158,12 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void anUnprivilegedAccountNeedsNoPasskeyOrStepUp(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.UNPRIVILEGED);
 
         assertDoesNotThrow(() -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        verify(privilegedAccountService, times(2)).isPrivileged(USER_ID);
-        verify(webAuthnService, never()).hasPasskey(anyInt());
+        verify(privilegedAccountService, times(2)).enforcedStanding(USER_ID);
         verify(tokenMapper).insert(eq(USER_ID), eq(NEW_EMAIL), anyString(), eq("198.51.100.4"),
                 anyInt(), eq(SESSION_EPOCH));
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
@@ -182,17 +181,16 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void aPromotionObservedOnlyUnderTheLockIsRefusedAndItsAuditDeferred(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false, true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(false);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.UNPRIVILEGED, PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         assertThrows(PasskeyEnrollmentRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        InOrder order = inOrder(userMapper, privilegedAccountService, webAuthnService, auditService);
+        InOrder order = inOrder(userMapper, privilegedAccountService, auditService);
         order.verify(userMapper).lockById(USER_ID);
         order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
-        order.verify(privilegedAccountService).isPrivileged(USER_ID);
-        order.verify(webAuthnService).hasPasskey(USER_ID);
+        order.verify(privilegedAccountService).enforcedStanding(USER_ID);
         order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
                 isNull(), eq("Email change refused for a privileged account"), eq("privileged_mfa_enrollment_required"));
         verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
@@ -205,8 +203,8 @@ class EmailChangePrivilegedStepUpTest {
     @ValueSource(strings = {"true", "false"})
     void aPromotedEnrolledAccountWithoutStepUpIsRefusedUnderTheLockAndItsAuditDeferred(String enforced) {
         EmailChangeService service = service(enforced);
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(false, true);
-        when(webAuthnService.hasPasskey(USER_ID)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.UNPRIVILEGED, PrivilegedMfaStanding.SATISFIED);
 
         assertThrows(RecentAuthenticationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
@@ -215,6 +213,58 @@ class EmailChangePrivilegedStepUpTest {
         order.verify(userMapper).lockById(USER_ID);
         order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
                 isNull(), eq("Email change refused for a privileged account"), eq("recent_authentication_required"));
+        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
+        verifyNoTokenIssued();
+    }
+
+    /**
+     * Once attestation is enforced, an account holding only unapproved passkeys is refused before
+     * the account lock with the attestation code, and the refusal names that reason (#1534).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"true", "false"})
+    void anAccountWithOnlyUnapprovedPasskeysIsRefusedAndAuditedBeforeTheAccountLock(String enforced) {
+        EmailChangeService service = service(enforced);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+
+        assertThrows(PrivilegedMfaAttestationRequiredException.class,
+                () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
+
+        verify(auditService).recordFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), eq("Email change refused for a privileged account"),
+                eq("privileged_mfa_attestation_required"));
+        verify(auditService, times(1)).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
+        verify(userMapper, never()).lockById(anyInt());
+        verifyNoTokenIssued();
+    }
+
+    /**
+     * A fresh step-up does not carry an account past an approval gap that first appears under the
+     * lock, for example a promotion into an organization where its passkey is not approved. The
+     * refusal audit is deferred like every refusal observed there (#1993).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"true", "false"})
+    void anApprovalGapObservedOnlyUnderTheLockIsRefusedDespiteAFreshStepUp(String enforced) {
+        EmailChangeService service = service(enforced);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.SATISFIED, PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+        new SessionSecurityService(sessionProperties(), properties(enforced), CLOCK,
+                userMapper, mock(SpringSessionMapper.class)).markStepUp(request, USER_ID, SIMULATED_STEP_UP_PASSKEY_ROW_ID);
+
+        assertThrows(PrivilegedMfaAttestationRequiredException.class,
+                () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
+
+        InOrder order = inOrder(userMapper, privilegedAccountService, auditService);
+        order.verify(userMapper).lockById(USER_ID);
+        order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
+        order.verify(privilegedAccountService).enforcedStanding(USER_ID);
+        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), eq("Email change refused for a privileged account"),
+                eq("privileged_mfa_attestation_required"));
         verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
@@ -247,8 +297,7 @@ class EmailChangePrivilegedStepUpTest {
                 sessionSecurityService,
                 auditService,
                 mock(LoginRateLimiter.class),
-                privilegedAccountService,
-                webAuthnService);
+                privilegedAccountService);
         ReflectionTestUtils.setField(service, "maxRequests", 5);
         ReflectionTestUtils.setField(service, "tokenExpiryMinutes", 30);
         ReflectionTestUtils.setField(service, "requestWindowSeconds", 900);

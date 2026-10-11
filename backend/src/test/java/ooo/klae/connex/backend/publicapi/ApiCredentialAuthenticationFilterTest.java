@@ -2,8 +2,10 @@ package ooo.klae.connex.backend.publicapi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,10 +48,10 @@ import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.Route
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.AuthenticatedCredential;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -77,7 +79,6 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             new PrivilegedMfaProperties(),
             mock(PrivilegedAccountService.class),
-            mock(WebAuthnService.class),
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
@@ -112,7 +113,6 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             new PrivilegedMfaProperties(),
             mock(PrivilegedAccountService.class),
-            mock(WebAuthnService.class),
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
@@ -269,68 +269,47 @@ class ApiCredentialAuthenticationFilterTest {
 
     @Test
     void privilegedAccountWithoutPasskeyGetsEnrollmentRequired401() throws Exception {
-        String token = token();
-        RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
-        User user = new User();
-        user.setId(binding.userId());
-        ApiCredentialPrincipal principal = new ApiCredentialPrincipal(
-            binding.credentialId(),
-            binding.userId(),
-            binding.workspaceId(),
-            binding.organizationId(),
-            "Enrollment required",
-            Set.of(ApiScope.CRM_READ),
-            Set.of(ApiScope.CRM_READ),
-            LocalDateTime.now().plusDays(1));
-        ApiCredentialService service = mock(ApiCredentialService.class);
-        ApiRateLimiter limiter = mock(ApiRateLimiter.class);
-        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
-        TenantCatalogResolver tenantCatalogResolver = mock(TenantCatalogResolver.class);
-        PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
-        WebAuthnService webAuthnService = mock(WebAuthnService.class);
-        PrivilegedMfaProperties mfaProperties = new PrivilegedMfaProperties();
-        mfaProperties.setEnforced("true");
-        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
-            .thenReturn("192.0.2.10");
-        when(limiter.acquireBeforeAuthentication("192.0.2.10", token))
-            .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
-        when(service.resolveRoutingBinding(token)).thenReturn(Optional.of(binding));
-        when(tenantCatalogResolver.resolveCatalog(binding.organizationId()))
-            .thenReturn("connexdb");
-        when(service.authenticate(binding))
-            .thenReturn(Optional.of(new AuthenticatedCredential(user, principal)));
-        when(privilegedAccountService.isPrivileged(binding.userId())).thenReturn(true);
-        when(webAuthnService.hasPasskey(binding.userId())).thenReturn(false);
-        ObjectMapper objectMapper = new ObjectMapper();
-        ApiCredentialAuthenticationFilter filter = new ApiCredentialAuthenticationFilter(
-            service,
-            limiter,
-            objectMapper,
-            mfaProperties,
-            privilegedAccountService,
-            webAuthnService,
-            clientIpResolver,
-            tenantCatalogResolver,
-            new TenantContext(),
-            request -> RouteTransactionMode.READ,
-            new TestTransactionManager());
+        assertConfined(
+            PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+            "privileged_mfa_enrollment_required",
+            "A passkey must be enrolled before this privileged account can continue");
+    }
+
+    @Test
+    void privilegedAccountWithoutApprovedPasskeyGetsAttestationRequired401() throws Exception {
+        assertConfined(
+            PrivilegedMfaStanding.ATTESTATION_REQUIRED,
+            "privileged_mfa_attestation_required",
+            "A passkey must be approved before this privileged account can continue");
+    }
+
+    @Test
+    void unprivilegedAndSatisfiedAccountsPassTheEnforcedGate() throws Exception {
+        for (PrivilegedMfaStanding standing : List.of(
+                PrivilegedMfaStanding.UNPRIVILEGED, PrivilegedMfaStanding.SATISFIED)) {
+            StandingFixture fixture = standingFixture("true", standing);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            fixture.filter().doFilter(authenticatedRequest("GET"), response, chain);
+
+            assertEquals(200, response.getStatus(), standing.name());
+            assertNotNull(chain.getRequest(), standing.name());
+            verify(fixture.limiter()).acquire(fixture.binding().credentialId());
+        }
+    }
+
+    @Test
+    void unenforcedGateNeverReadsStanding() throws Exception {
+        StandingFixture fixture = standingFixture("false", PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
-        filter.doFilter(authenticatedRequest("GET"), response, chain);
+        fixture.filter().doFilter(authenticatedRequest("GET"), response, chain);
 
-        JsonNode body = objectMapper.readTree(response.getContentAsByteArray());
-        assertEquals(401, response.getStatus());
-        assertEquals(
-            "privileged_mfa_enrollment_required",
-            body.path("error").path("code").textValue());
-        assertEquals(
-            "A passkey must be enrolled before this privileged account can continue",
-            body.path("error").path("message").textValue());
-        assertTrue(body.path("error").path("request_id").isTextual());
-        assertFalse(response.containsHeader(HttpHeaders.SET_COOKIE));
-        verify(limiter, never()).acquire(binding.credentialId());
-        assertNull(chain.getRequest());
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+        verify(fixture.privilegedAccountService(), never()).enforcedStanding(anyInt());
     }
 
     @Test
@@ -371,7 +350,6 @@ class ApiCredentialAuthenticationFilterTest {
             new ObjectMapper(),
             mfaProperties,
             mock(PrivilegedAccountService.class),
-            mock(WebAuthnService.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
@@ -427,7 +405,7 @@ class ApiCredentialAuthenticationFilterTest {
             .thenReturn("connexdb");
         when(service.authenticate(binding))
             .thenReturn(Optional.of(new AuthenticatedCredential(user, principal)));
-        when(privilegedAccountService.isPrivileged(binding.userId()))
+        when(privilegedAccountService.enforcedStanding(binding.userId()))
             .thenThrow(new TransientDataAccessResourceException("database detail must not escape"));
         ObjectMapper objectMapper = new ObjectMapper();
         ApiCredentialAuthenticationFilter filter = new ApiCredentialAuthenticationFilter(
@@ -436,7 +414,6 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             mfaProperties,
             privilegedAccountService,
-            mock(WebAuthnService.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
@@ -612,12 +589,78 @@ class ApiCredentialAuthenticationFilterTest {
             new ObjectMapper(),
             mfaProperties,
             mock(PrivilegedAccountService.class),
-            mock(WebAuthnService.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
             request -> transactionMode,
             transactionTemplate);
+    }
+
+    private static void assertConfined(
+            PrivilegedMfaStanding standing,
+            String code,
+            String message) throws Exception {
+        StandingFixture fixture = standingFixture("true", standing);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        fixture.filter().doFilter(authenticatedRequest("GET"), response, chain);
+
+        JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
+        assertEquals(401, response.getStatus());
+        assertEquals(code, body.path("error").path("code").textValue());
+        assertEquals(message, body.path("error").path("message").textValue());
+        assertTrue(body.path("error").path("request_id").isTextual());
+        assertFalse(response.containsHeader(HttpHeaders.SET_COOKIE));
+        verify(fixture.limiter(), never()).acquire(fixture.binding().credentialId());
+        assertNull(chain.getRequest());
+    }
+
+    private static StandingFixture standingFixture(String enforced, PrivilegedMfaStanding standing) {
+        String token = token();
+        RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
+        User user = new User();
+        user.setId(binding.userId());
+        ApiCredentialPrincipal principal = new ApiCredentialPrincipal(
+            binding.credentialId(),
+            binding.userId(),
+            binding.workspaceId(),
+            binding.organizationId(),
+            "Privileged standing",
+            Set.of(ApiScope.CRM_READ),
+            Set.of(ApiScope.CRM_READ),
+            LocalDateTime.now().plusDays(1));
+        ApiCredentialService service = mock(ApiCredentialService.class);
+        ApiRateLimiter limiter = mock(ApiRateLimiter.class);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        TenantCatalogResolver tenantCatalogResolver = mock(TenantCatalogResolver.class);
+        PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
+        PrivilegedMfaProperties mfaProperties = new PrivilegedMfaProperties();
+        mfaProperties.setEnforced(enforced);
+        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
+            .thenReturn("192.0.2.10");
+        when(limiter.acquireBeforeAuthentication("192.0.2.10", token))
+            .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
+        when(service.resolveRoutingBinding(token)).thenReturn(Optional.of(binding));
+        when(tenantCatalogResolver.resolveCatalog(binding.organizationId()))
+            .thenReturn("connexdb");
+        when(service.authenticate(binding))
+            .thenReturn(Optional.of(new AuthenticatedCredential(user, principal)));
+        when(privilegedAccountService.enforcedStanding(binding.userId())).thenReturn(standing);
+        when(limiter.acquire(binding.credentialId()))
+            .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
+        ApiCredentialAuthenticationFilter filter = new ApiCredentialAuthenticationFilter(
+            service,
+            limiter,
+            new ObjectMapper(),
+            mfaProperties,
+            privilegedAccountService,
+            clientIpResolver,
+            tenantCatalogResolver,
+            new TenantContext(),
+            request -> RouteTransactionMode.READ,
+            new TestTransactionManager());
+        return new StandingFixture(filter, limiter, privilegedAccountService, binding);
     }
 
     private static MockHttpServletRequest authenticatedRequest(String method) {
@@ -738,5 +781,12 @@ class ApiCredentialAuthenticationFilterTest {
     @FunctionalInterface
     private interface ThrowingAction {
         void run() throws Exception;
+    }
+
+    private record StandingFixture(
+            ApiCredentialAuthenticationFilter filter,
+            ApiRateLimiter limiter,
+            PrivilegedAccountService privilegedAccountService,
+            RoutingBinding binding) {
     }
 }

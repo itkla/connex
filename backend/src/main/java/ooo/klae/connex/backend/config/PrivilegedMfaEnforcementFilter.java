@@ -17,12 +17,13 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Confines unenrolled privileged accounts and applies WebAuthn step-up to uncovered export paths.
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+    public static final String ATTESTATION_REQUIRED_CODE = PrivilegedMfaAttestationRequiredException.CODE;
     private static final Logger log = LoggerFactory.getLogger(PrivilegedMfaEnforcementFilter.class);
     private static final String ENROLLMENT_DENIED_ACTION = "auth.mfa.policy.denied";
     private static final String RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
@@ -71,7 +73,6 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
 
     private final PrivilegedMfaProperties properties;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final DenialAuditRateLimiter denialAuditRateLimiter;
@@ -80,14 +81,12 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public PrivilegedMfaEnforcementFilter(
             PrivilegedMfaProperties properties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             SessionSecurityService sessionSecurityService,
             AuditService auditService,
             DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver) {
         this.properties = properties;
         this.privilegedAccountService = privilegedAccountService;
-        this.webAuthnService = webAuthnService;
         this.sessionSecurityService = sessionSecurityService;
         this.auditService = auditService;
         this.denialAuditRateLimiter = denialAuditRateLimiter;
@@ -104,15 +103,23 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
         }
         String path = RequestPathNormalizer.apiPath(request);
         if (properties.isEnforced()
-                && privilegedAccountService.isPrivileged(user.getId())
-                && !webAuthnService.hasPasskey(user.getId())
                 && !isEnrollmentPath(request.getMethod(), path)
                 && !isLinkFlowPath(path)) {
-            recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
-                    "Privileged account confined pending MFA enrollment", "enrollment_required");
-            deny(response, ENROLLMENT_REQUIRED_CODE,
-                    "A passkey must be enrolled before this privileged account can continue");
-            return;
+            PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(user.getId());
+            if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
+                recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
+                        "Privileged account confined pending MFA enrollment", "enrollment_required");
+                deny(response, ENROLLMENT_REQUIRED_CODE,
+                        "A passkey must be enrolled before this privileged account can continue");
+                return;
+            }
+            if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+                recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
+                        "Privileged account confined pending passkey approval", "attestation_required");
+                deny(response, ATTESTATION_REQUIRED_CODE,
+                        "A passkey must be approved before this privileged account can continue");
+                return;
+            }
         }
         if (requiresExportStepUp(request.getMethod(), path)
                 && !sessionSecurityService.isExportStepUpSatisfied(request.getSession(false), user.getId())) {

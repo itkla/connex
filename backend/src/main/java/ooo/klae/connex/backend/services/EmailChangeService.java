@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
@@ -29,7 +30,6 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Drives the verified account email-change flow. Changing an account email is a
@@ -46,6 +46,7 @@ public class EmailChangeService {
     private static final String REFUSED_ACTION = "auth.email_change.refused";
     private static final String REFUSED_SUMMARY = "Email change refused for a privileged account";
     private static final String ENROLLMENT_REQUIRED_REASON = "privileged_mfa_enrollment_required";
+    private static final String ATTESTATION_REQUIRED_REASON = "privileged_mfa_attestation_required";
     private static final String RECENT_AUTHENTICATION_REQUIRED_REASON = "recent_authentication_required";
 
     private final UserMapper userMapper;
@@ -60,7 +61,6 @@ public class EmailChangeService {
     private final AuditService auditService;
     private final LoginRateLimiter loginRateLimiter;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
 
     @Value("${connex.email-change.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -171,6 +171,9 @@ public class EmailChangeService {
         } catch (PasskeyEnrollmentRequiredException exception) {
             auditEmailChangeRefusal(userId, ENROLLMENT_REQUIRED_REASON);
             throw exception;
+        } catch (PrivilegedMfaAttestationRequiredException exception) {
+            auditEmailChangeRefusal(userId, ATTESTATION_REQUIRED_REASON);
+            throw exception;
         } catch (RecentAuthenticationRequiredException exception) {
             auditEmailChangeRefusal(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
             throw exception;
@@ -190,6 +193,9 @@ public class EmailChangeService {
         } catch (PasskeyEnrollmentRequiredException exception) {
             deferEmailChangeRefusalAudit(userId, ENROLLMENT_REQUIRED_REASON);
             throw exception;
+        } catch (PrivilegedMfaAttestationRequiredException exception) {
+            deferEmailChangeRefusalAudit(userId, ATTESTATION_REQUIRED_REASON);
+            throw exception;
         } catch (RecentAuthenticationRequiredException exception) {
             deferEmailChangeRefusalAudit(userId, RECENT_AUTHENTICATION_REQUIRED_REASON);
             throw exception;
@@ -200,15 +206,21 @@ public class EmailChangeService {
      * Requires a privileged account to hold a passkey and a fresh WebAuthn step-up. Unprivileged
      * accounts pass unchanged. Only a WebAuthn ceremony writes the step-up stamp, so an account
      * that has never enrolled cannot satisfy it and is refused with the enrollment code instead.
+     * Once attestation is enforced, an account whose passkeys are not yet approved is refused with
+     * the attestation code until a grantor's approval code covers one of them (#1534).
      *
      * @param userId the requesting account
      */
     private void requirePrivilegedStepUp(int userId) {
-        if (!privilegedAccountService.isPrivileged(userId)) {
+        PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(userId);
+        if (standing == PrivilegedMfaStanding.UNPRIVILEGED) {
             return;
         }
-        if (!webAuthnService.hasPasskey(userId)) {
+        if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
             throw new PasskeyEnrollmentRequiredException();
+        }
+        if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+            throw new PrivilegedMfaAttestationRequiredException();
         }
         sessionSecurityService.requireRecentAuthentication(userId);
     }

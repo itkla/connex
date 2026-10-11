@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -42,14 +43,13 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 class PrivilegedMfaEnforcementFilterTest {
     private final PrivilegedMfaProperties properties = mock(PrivilegedMfaProperties.class);
     private final PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
-    private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
     private final SessionSecurityService sessionSecurityService = spy(new SessionSecurityService(
             new SessionSecurityProperties(), properties, Clock.systemUTC(),
             mock(UserMapper.class), mock(SpringSessionMapper.class)));
@@ -65,7 +65,6 @@ class PrivilegedMfaEnforcementFilterTest {
         filter = new PrivilegedMfaEnforcementFilter(
                 properties,
                 privilegedAccountService,
-                webAuthnService,
                 sessionSecurityService,
                 auditService,
                 denialAuditRateLimiter,
@@ -84,7 +83,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void unenrolledPrivilegedAccountIsConfinedToEnrollment() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         MockHttpServletResponse response = execute("GET", "/api/companies");
 
         assertEquals(403, response.getStatus());
@@ -104,7 +103,7 @@ class PrivilegedMfaEnforcementFilterTest {
      */
     @Test
     void repeatedConfinementDenialsFromOneAddressAreAuditedOnce() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         for (int attempt = 0; attempt < 3; attempt++) {
             assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
@@ -119,7 +118,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void aConfinementDenialFromAnotherAddressIsAuditedAgain() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
         assertEquals(403, execute("GET", "/api/companies", "198.51.100.9").getStatus());
@@ -149,11 +148,10 @@ class PrivilegedMfaEnforcementFilterTest {
      */
     @Test
     void denialsAreKeyedOnTheResolvedClientAddressBehindATrustedProxy() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         PrivilegedMfaEnforcementFilter proxied = new PrivilegedMfaEnforcementFilter(
                 properties,
                 privilegedAccountService,
-                webAuthnService,
                 sessionSecurityService,
                 auditService,
                 new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry()),
@@ -180,7 +178,7 @@ class PrivilegedMfaEnforcementFilterTest {
      */
     @Test
     void aDenialWhoseAuditFailedIsAuditedByTheNextOne() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         doThrow(new IllegalStateException("audit unavailable"))
                 .doNothing()
                 .when(auditService).recordStrictFailureIndependentScoped(
@@ -197,8 +195,47 @@ class PrivilegedMfaEnforcementFilterTest {
     }
 
     @Test
+    void unattestedPrivilegedAccountIsConfinedPendingApproval() throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+
+        MockHttpServletResponse response = execute("GET", "/api/companies");
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains(
+                PrivilegedMfaEnforcementFilter.ATTESTATION_REQUIRED_CODE));
+        verify(filterChain, never()).doFilter(any(), any());
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending passkey approval"),
+                eq("attestation_required"));
+    }
+
+    @Test
+    void unattestedPrivilegedAccountMayRedeemAnApprovalCodeAndLeaveTheEnrollmentPaths() throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+
+        execute("POST", "/api/auth/webauthn/attestation/options");
+        execute("POST", "/api/auth/webauthn/attestation");
+        execute("GET", "/api/auth/webauthn/register/requirements");
+        execute("POST", "/api/auth/logout");
+
+        verify(filterChain, org.mockito.Mockito.times(4)).doFilter(any(), any());
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void allowlistedRequestsNeverReadStanding() throws Exception {
+        execute("GET", "/api/auth/me");
+        execute("POST", "/api/auth/webauthn/attestation");
+        execute("GET", "/api/document-acceptance");
+
+        verify(privilegedAccountService, never()).enforcedStanding(anyInt());
+        verify(filterChain, org.mockito.Mockito.times(3)).doFilter(any(), any());
+    }
+
+    @Test
     void unenrolledPrivilegedAccountMayUseEnrollmentAndAccountPaths() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         execute("POST", "/api/auth/webauthn/register/options");
         execute("GET", "/api/auth/me");
@@ -210,7 +247,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void unenrolledPrivilegedAccountMayReachTheEnrollmentConfirmationEndpoints() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         execute("POST", "/api/auth/webauthn/register/confirmation");
         execute("POST", "/api/auth/webauthn/register/confirmation/exchange");
@@ -221,7 +258,7 @@ class PrivilegedMfaEnforcementFilterTest {
     @ParameterizedTest
     @MethodSource("linkFlowPaths")
     void unenrolledPrivilegedAccountMayOpenEmailedLinkFlows(String method, String path) throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         MockHttpServletResponse response = execute(method, path);
 
@@ -244,7 +281,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void linkFlowExemptionDoesNotCoverPrefixLookalikes() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
 
         MockHttpServletResponse acceptance = execute("GET", "/api/document-acceptances");
         MockHttpServletResponse delivery = execute("GET", "/api/delivery/unsubscribed");
@@ -256,7 +293,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void nonPrivilegedAccountIsNotConfined() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(false);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.UNPRIVILEGED);
 
         execute("GET", "/api/companies");
 
@@ -265,20 +302,23 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void promotionAndDemotionApplyOnTheNextRequest() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(false, true, false);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(
+                PrivilegedMfaStanding.UNPRIVILEGED,
+                PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+                PrivilegedMfaStanding.UNPRIVILEGED);
 
         execute("GET", "/api/companies");
         MockHttpServletResponse promoted = execute("GET", "/api/companies");
         execute("GET", "/api/companies");
 
         assertEquals(403, promoted.getStatus());
-        verify(privilegedAccountService, org.mockito.Mockito.times(3)).isPrivileged(7);
+        verify(privilegedAccountService, org.mockito.Mockito.times(3)).enforcedStanding(7);
         verify(filterChain, org.mockito.Mockito.times(2)).doFilter(any(), any());
     }
 
     @Test
     void federatedSessionDoesNotSubstituteForWebauthnStepUp() throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
 
         MockHttpServletResponse response = execute("GET", "/api/exports/persons");
@@ -290,7 +330,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void freshPasskeyStepUpAllowsHighRiskExport() throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(true);
 
         execute("GET", "/api/reports/4/snapshots/8/export.csv");
@@ -300,7 +340,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void tenantSelectionContinuesToTheExistingIsolationLayer() throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         MockHttpServletRequest request = request("GET", "/api/companies");
         request.addHeader("X-Workspace-Id", "999");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -334,7 +374,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void nonDecimalIdentifierExportIsRefusedOverTheFilterChain() throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
 
         MockHttpServletResponse response = execute("GET", "/api/orgs/0x1/audit/export");
@@ -352,7 +392,7 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void campaignExportMetadataReadReachesTheChainWithoutStepUp() throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
 
         MockHttpServletResponse response = execute("GET", "/api/campaigns/3/exports");
 
@@ -363,7 +403,7 @@ class PrivilegedMfaEnforcementFilterTest {
     @ParameterizedTest
     @MethodSource("matrixSuffixedExportPaths")
     void matrixSuffixedExportPathsStillRequirePasskeyStepUp(String method, String path) throws Exception {
-        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.SATISFIED);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
 
         MockHttpServletResponse response = execute(method, path);
@@ -434,7 +474,7 @@ class PrivilegedMfaEnforcementFilterTest {
      */
     @Test
     void aDenialWhoseAuditWriteDiedWithAnErrorIsAuditedByTheNextOne() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         doThrow(new LinkageError("audit write died"))
                 .doNothing()
                 .when(auditService).recordStrictFailureIndependentScoped(

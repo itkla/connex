@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
@@ -47,6 +48,7 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationRedemption;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
@@ -98,9 +100,11 @@ public class WebAuthnController {
     private final AuditService auditService;
     private final MfaRecoveryService mfaRecoveryService;
     private final PasskeyBootstrapConfirmationService bootstrapConfirmationService;
+    private final PrivilegedAccountService privilegedAccountService;
 
     /**
-     * Reports whether the current account must confirm its password for first-passkey enrollment.
+     * Reports whether the current account must confirm its password for first-passkey enrollment,
+     * and its privileged-MFA standing with the approvals its passkeys still lack (#1534).
      */
     @GetMapping("/register/requirements")
     public PasskeyRegistrationRequirementsDto registrationRequirements(HttpServletRequest req) {
@@ -111,7 +115,11 @@ public class WebAuthnController {
         boolean emailConfirmationSatisfied = emailConfirmationRequired
                 && bootstrapConfirmationService.isSatisfiedFor(user, req);
         return new PasskeyRegistrationRequirementsDto(
-                currentPasswordRequired, emailConfirmationRequired, emailConfirmationSatisfied);
+                currentPasswordRequired,
+                emailConfirmationRequired,
+                emailConfirmationSatisfied,
+                privilegedAccountService.enforcedStanding(user.getId()),
+                privilegedAccountService.passkeyApprovalGaps(user.getId()));
     }
 
     /**
@@ -387,6 +395,12 @@ public class WebAuthnController {
         sessionSecurityService.requireRecentAuthentication(userId);
         try {
             webAuthnService.delete(userId, credentialId);
+        } catch (LastSufficientPasskeyRemovalForbiddenException exception) {
+            auditService.recordFailureScoped(
+                    "auth.passkey.delete_denied", "user", userId, null, null,
+                    user.getDisplayName(), "Last sufficient passkey removal refused for privileged account",
+                    "last_sufficient_credential");
+            throw exception;
         } catch (LastPasskeyRemovalForbiddenException exception) {
             auditService.recordFailureScoped(
                     "auth.passkey.delete_denied", "user", userId, null, null,
