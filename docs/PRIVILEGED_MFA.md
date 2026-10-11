@@ -31,7 +31,10 @@ so an unenrolled privileged creator cannot bypass browser confinement with an ex
 An unenrolled privileged account may read its own account and workspace-membership snapshot, read
 the public capability posture, obtain a CSRF token, list and enroll passkeys, use the recovery
 ceremony, and log out. Every other API request is refused by the backend with
-`PRIVILEGED_MFA_ENROLLMENT_REQUIRED` until enrollment completes.
+`PRIVILEGED_MFA_ENROLLMENT_REQUIRED` until enrollment completes. Once
+[attestation is enforced](#standing-and-attestation-enforcement), an account that holds passkeys
+but none approved in every organization where it is privileged is confined the same way, with
+`PRIVILEGED_MFA_ATTESTATION_REQUIRED`, until a grantor's approval code covers one of them.
 
 Password, OIDC, social login, and SAML establish an ordinary session but never a recent-MFA stamp.
 An OIDC or SAML assertion may serve as the existing-account proof for first enrollment because the
@@ -54,9 +57,12 @@ fails closed.
 ### Auditing the filter's own refusals
 
 `PrivilegedMfaEnforcementFilter` audits its two refusals, `auth.mfa.policy.denied` (reason
-`enrollment_required`) for a confined account and `auth.mfa.step_up.required` (reason
+`enrollment_required`, or `attestation_required` for an account awaiting passkey approval) for a
+confined account and `auth.mfa.step_up.required` (reason
 `step_up_required`) for an export without recent verification, **at most once per hour for each user,
-action, and client address**, and for at most eight addresses per user and action. Every request is
+action, reason and client address**, and for at most eight addresses per user, action and reason.
+Keying on the reason means an account that moves from awaiting enrollment to awaiting approval
+records the new reason at once. Every request is
 still refused; only the audit row is admitted. A `GET` can trigger either refusal. The `SameSite=Lax`
 session cookie rides a cross-site top-level navigation, and where SAML sets it to `SameSite=None`, any
 cross-site subresource load (an image, a no-cors fetch) carries it silently. Without the bound another
@@ -157,6 +163,12 @@ first-passkey confirmation values and the actor to the integrity-chained system 
 
 Disabling this flag is a staged-rollout exception, not an MFA recovery mechanism. It does not make
 password proof satisfy the existing high-risk service gates.
+
+`CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` defaults to `false` and switches
+[attestation enforcement](#standing-and-attestation-enforcement) on. Startup refuses any value other
+than `true` or `false` (case-insensitive), so a mistyped value cannot leave it silently off. The
+`auth.mfa.policy.configured` event records it as `configuredAttestationEnforcedValue` and
+`attestationEnforced`.
 
 ### Unenrolled privileged inventory
 
@@ -277,11 +289,14 @@ password when the account is privileged. The request is refused unless the accou
 and the session carries a fresh WebAuthn step-up:
 
 - **No passkey:** the request fails with `400 PASSKEY_ENROLLMENT_REQUIRED`.
+- **Passkeys awaiting approval,** once attestation is enforced: the request fails with
+  `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`.
 - **Passkey but no fresh step-up:** the request fails with `403 RECENT_AUTHENTICATION_REQUIRED`.
   The web client runs the passkey step-up and retries automatically.
 
-Both refusals are audited as `auth.email_change.refused`, with the reason
-`privileged_mfa_enrollment_required` or `recent_authentication_required`. Unprivileged accounts
+Each refusal is audited as `auth.email_change.refused`, with the reason
+`privileged_mfa_enrollment_required`, `privileged_mfa_attestation_required` or
+`recent_authentication_required`. Unprivileged accounts
 change their email with the current password alone, as before.
 
 The gate is independent of `CONNEX_PRIVILEGED_MFA_ENFORCED`. With enforcement on, confinement
@@ -391,9 +406,9 @@ of a privileged account's last credential.
 
 A passkey enrolled while an account held no privilege must not, on its own, satisfy this policy after
 a later promotion: an attacker holding only the password of an ordinary account could enroll one and
-wait. The remedy is grantor-mediated attestation per organization, delivered in slices. The first
-slice only records each passkey's provenance. **Nothing reads it for authorization yet**, so it
-changes no account's access.
+wait. The remedy is grantor-mediated attestation per organization, delivered in slices. Provenance
+is recorded for every passkey, and [standing](#standing-and-attestation-enforcement) reads it.
+**It only affects access once attestation is enforced**, which is off by default.
 
 ### What a passkey can carry
 
@@ -480,6 +495,51 @@ are not.
 **History** lives in the strict `auth.mfa.attestation.issued`, `.revoked`, `.redeemed` and `.denied`
 audits. A grant row goes with its organization, workspace, grantor or grantee, and coverage it
 produced keeps a null `grant_id`.
+
+### Standing and attestation enforcement
+
+Every account has one **standing**, read in a single statement:
+
+| Standing | Meaning |
+| --- | --- |
+| `UNPRIVILEGED` | The account holds no privilege. |
+| `SATISFIED` | The account is privileged and holds a sufficient passkey. |
+| `ENROLLMENT_REQUIRED` | The account is privileged and holds no passkey. |
+| `ATTESTATION_REQUIRED` | The account is privileged and holds passkeys, but none is sufficient. |
+
+A passkey is **sufficient** when it carries account-wide `BREAK_GLASS` assurance, or when it alone
+is covered in **every** organization where the account is privileged. Grandfathering is
+per-organization coverage, so `GRANDFATHERED` assurance, which nothing writes, does not count.
+Coverage split across passkeys does not count: one covering organization A and another covering B
+leave the account `ATTESTATION_REQUIRED`. An organization or workspace being torn down confers no
+privilege, so it needs no coverage either.
+
+**While `CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` is `false`** (the default), `ATTESTATION_REQUIRED`
+is enforced as `SATISFIED` everywhere. Behavior is then exactly as before: a privileged account with
+any passkey is not confined.
+
+**Once it is `true`**, an `ATTESTATION_REQUIRED` account is refused wherever an unenrolled one is:
+- the browser API confines it with `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`, audited as
+  `auth.mfa.policy.denied` with reason `attestation_required`, behind the same allowlist (including
+  the two approval-code redemption routes);
+- the public API refuses its tokens with `401 privileged_mfa_attestation_required`;
+- an email change is refused, as above;
+- removing the account's last sufficient passkey is refused, even while other passkeys remain,
+  because the removal would confine the account. The refusal is audited as
+  `auth.passkey.delete_denied` with reason `last_sufficient_credential`.
+
+`GET /api/auth/webauthn/register/requirements` stays reachable while confined. It reports the
+account's enforced `standing`, and `approvalGaps`: for each of the account's own passkeys without
+`BREAK_GLASS` assurance, every organization where the account is privileged and that passkey is not yet
+approved (`credentialId` in the base64url form the passkey list uses, `orgId`, `orgName`). A client
+re-reads it after each ceremony, and releases confinement only on `SATISFIED` or `UNPRIVILEGED`.
+
+The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
+holding passkeys of which none is sufficient. These are the accounts that enforcement confines. It
+is counted whether or not enforcement is on, so the population can be drained before switching on.
+
+**Do not switch it on yet.** Enforcement ships dark. It is switched on by its own release, after
+the cutover below, ownership offers, and the web client's approval flow have shipped.
 
 ### Rollback and the cutover
 

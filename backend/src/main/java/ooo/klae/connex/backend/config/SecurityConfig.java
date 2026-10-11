@@ -98,7 +98,6 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Spring Security configuration.
@@ -255,7 +254,6 @@ public class SecurityConfig {
             WebSocketSessionRegistry webSocketSessions,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             AuditService auditService,
             DenialAuditRateLimiter denialAuditRateLimiter,
             BusinessCardRateLimiter businessCardRateLimiter,
@@ -295,7 +293,6 @@ public class SecurityConfig {
             new PrivilegedMfaEnforcementFilter(
                 privilegedMfaProperties,
                 privilegedAccountService,
-                webAuthnService,
                 sessionSecurityService,
                 auditService,
                 denialAuditRateLimiter,

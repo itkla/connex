@@ -42,9 +42,9 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.databind.ObjectMapper;
 
 /** Exercises literal encoded request targets over Tomcat with persisted sessions and real routing. */
@@ -57,7 +57,6 @@ abstract class AbstractEncodedSecurityPathIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
     @MockitoBean private PrivilegedAccountService privilegedAccountService;
-    @MockitoBean private WebAuthnService webAuthnService;
     @LocalServerPort private int port;
     @Value("${server.servlet.context-path:}") private String contextPath;
 
@@ -82,8 +81,8 @@ abstract class AbstractEncodedSecurityPathIntegrationTest {
         account = AuthenticatedSessions.account(userMapper, "encoded-path");
         assertNotNull(account);
         workspaceMapper.addMember(workspace.getId(), account.getId(), "member");
-        when(privilegedAccountService.isPrivileged(account.getId())).thenReturn(true);
-        when(webAuthnService.hasPasskey(account.getId())).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(account.getId()))
+                .thenReturn(PrivilegedMfaStanding.SATISFIED);
     }
 
     @AfterEach

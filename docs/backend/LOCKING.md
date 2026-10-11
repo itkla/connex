@@ -1241,13 +1241,15 @@ account root.
   confirmation, then re-reads the account under the exclusive root and refuses when the password
   hash or `session_epoch` moved since the proof.
 - `EmailChangeService.requestChange` also gates privileged accounts on an enrolled passkey and a
-  fresh WebAuthn step-up (#1506). It evaluates the gate first before taking the account root and
+  fresh WebAuthn step-up (#1506) and, once attestation is enforced, on a passkey approved in every
+  organization where the account is privileged (#1534). It evaluates the gate first before taking
+  the account root and
   audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
   assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
   against committed state. That statement is mapped with `flushCache="true"`: the request is one
-  MyBatis session, so without the flush the re-check would return the privilege and passkey answers
-  cached by the pre-lock evaluation. A refusal that appears only under the root is audited once the
+  MyBatis session, so without the flush the re-check would return the standing answer cached by
+  the pre-lock evaluation. A refusal that appears only under the root is audited once the
   transaction completes (see below).
 - `WebAuthnService.finishRegistration` takes the account root exclusively (`lockById`), checks the
   `session_epoch`, locks the assigned custom roles `FOR SHARE`, and then evaluates the first-passkey
@@ -1319,6 +1321,18 @@ account root.
     It takes no tenant parent. Its denial audit is appended afterwards at account scope, so it can
     neither wait on the redemption it follows nor invert teardown.
 
+- `WebAuthnService.delete` runs at `READ COMMITTED`: the account root exclusively (`lockById`), its
+  assigned custom roles `FOR SHARE` (flushing the MyBatis cache), then its credential rows
+  `FOR UPDATE`. Once attestation is enforced (#1534), it then reads whether the target is the
+  account's last sufficient passkey. Those reads are current, because each input's writers wait on
+  a lock this transaction holds:
+  - coverage is written by founding, registration and redemption, which take this account's root;
+  - org and workspace memberships and roles change under this account's root
+    (`lockMembershipUserRoots`, `lockRoleMutation`);
+  - the permissions of its assigned custom roles change under those role rows.
+
+  Teardown removes privilege and coverage together. It can only shrink the set of organizations a
+  passkey must cover, so at worst it makes a refusal stricter than needed.
 - `ScheduleService.create`, `update`, and `delete` run at `READ COMMITTED` (#1897): audited
   step-up pre-check → `app_user FOR SHARE` (`lockByIdForShare`) → `workspace FOR SHARE`
   (`lockWorkspaceForShare`) → assigned custom-role rows `FOR SHARE`

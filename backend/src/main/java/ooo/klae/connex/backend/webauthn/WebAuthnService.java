@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PrivilegedCredentialAttestationMapper;
@@ -318,7 +319,9 @@ public class WebAuthnService {
      *
      * <p>Runs at READ COMMITTED and locks the account row and its assigned custom roles before the
      * last-credential privilege check, so a promotion that commits while this transaction is waiting
-     * is observed rather than read from a stale snapshot.
+     * is observed rather than read from a stale snapshot. Once attestation is enforced, the same
+     * locks also hold still the approvals that decide whether this is the account's last sufficient
+     * passkey (#1534).
      *
      * @param callerUserId the authenticated account
      * @param credentialId the target credential (base64url)
@@ -336,12 +339,15 @@ public class WebAuthnService {
         List<WebauthnCredentialRow> credentials =
                 credentialMapper.findByUserEntityUserIdForUpdate(entity.getId());
         WebauthnCredentialRow row = credentials.stream()
-                .filter(candidate -> MessageDigest.isEqual(
+                .filter(candidate -> candidate.getId() != null && MessageDigest.isEqual(
                         candidate.getCredentialId(), Bytes.fromBase64(credentialId).getBytes()))
                 .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Passkey not found"));
         if (credentials.size() == 1 && privilegedAccountService.isPrivileged(callerUserId)) {
             throw new LastPasskeyRemovalForbiddenException();
+        }
+        if (privilegedAccountService.isLastSufficientPasskey(callerUserId, row.getId())) {
+            throw new LastSufficientPasskeyRemovalForbiddenException();
         }
         userCredentials.delete(Bytes.fromBase64(credentialId));
         User user = requireUser(callerUserId);

@@ -41,7 +41,6 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.databind.ObjectMapper;
 
 /** Isolated stateless Spring Security chain for the versioned public API. */
@@ -93,7 +92,6 @@ public class PublicApiSecurityConfig {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
@@ -106,7 +104,6 @@ public class PublicApiSecurityConfig {
                 objectMapper,
                 privilegedMfaProperties,
                 privilegedAccountService,
-                webAuthnService,
                 clientIpResolver,
                 tenantCatalogResolver,
                 tenantContext,

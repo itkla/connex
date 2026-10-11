@@ -99,8 +99,11 @@ class PrivilegedMfaStartupConfigurationTest {
                             eq("Privileged MFA policy configured by security-change-123"),
                             eq(Map.of("actor", "security-change-123", "configuredValue", "true",
                                     "enforced", true, "bootstrapConfirmationEnabled", false,
+                                    "configuredAttestationEnforcedValue", "false",
+                                    "attestationEnforced", false,
                                     "unenrolledPrivilegedCount", 0L,
-                                    "unenrolledWithoutSelfServiceCount", 0L)));
+                                    "unenrolledWithoutSelfServiceCount", 0L,
+                                    "attestationRequiredCount", 0L)));
                 });
     }
 

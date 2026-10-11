@@ -110,7 +110,6 @@ import ooo.klae.connex.backend.sso.SsoTransportSaturatedException;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 @SpringJUnitWebConfig(SecurityConfigOAuthTest.TestConfig.class)
 class SecurityConfigOAuthTest {
@@ -581,7 +580,7 @@ class SecurityConfigOAuthTest {
             SecurityFilterChain chain = config.chain(security, new SessionRegistryImpl(), registrations, social, http,
                     mock(DbRelyingPartyRegistrationRepository.class), success,
                     mock(SessionSecurityService.class), mock(UserMapper.class), mock(WebSocketSessionRegistry.class),
-                    new PrivilegedMfaProperties(), mock(PrivilegedAccountService.class), mock(WebAuthnService.class),
+                    new PrivilegedMfaProperties(), mock(PrivilegedAccountService.class),
                     mock(AuditService.class), mock(DenialAuditRateLimiter.class), mock(BusinessCardRateLimiter.class),
                     mock(CapabilityEntitlement.class),
                     mock(WorkspaceRequestResolver.class), mock(WorkspaceService.class), mock(WorkspaceCookie.class),

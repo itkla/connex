@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -53,6 +54,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -91,7 +93,6 @@ import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
 import ooo.klae.connex.backend.tenant.Permission;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -117,7 +118,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
     @MockitoBean private CapabilityRegistry capabilityRegistry;
     @MockitoBean private ConnectorSecretCipher connectorSecretCipher;
     @MockitoBean private DeliveryProviderRouter deliveryProviderRouter;
-    @MockitoBean private WebAuthnService webAuthnService;
+    @MockitoSpyBean private PrivilegedAccountService privilegedAccountService;
 
     private AudienceSyncConnector connector;
     private MockMvc mockMvc;
@@ -141,7 +142,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         when(connectorSecretCipher.decryptCredential(workspace.getId(), credentialRef))
                 .thenReturn("integration-api-key");
         when(deliveryProviderRouter.connectorFor(CONNECTOR)).thenReturn(connector);
-        when(webAuthnService.hasPasskey(anyInt())).thenReturn(true);
+        doReturn(PrivilegedMfaStanding.SATISFIED).when(privilegedAccountService).enforcedStanding(anyInt());
     }
 
     @Test

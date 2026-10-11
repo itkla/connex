@@ -37,11 +37,13 @@ import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 @SpringBootTest
 class PrivilegedMfaHttpEnforcementIntegrationTest {
     private static final int USER_ID = 9137;
+    private static final int UNAPPROVED_USER_ID = 9138;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -67,7 +69,8 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         privilegedUser.setUsername("unenrolled-privileged-integration");
         privilegedUser.setDisplayName("Unenrolled Privileged Integration");
         authentication = new UsernamePasswordAuthenticationToken(privilegedUser, null, List.of());
-        when(privilegedAccountService.isPrivileged(USER_ID)).thenReturn(true);
+        when(privilegedAccountService.enforcedStanding(USER_ID))
+                .thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
         when(webAuthnService.hasPasskey(USER_ID)).thenReturn(false);
         when(authService.getCurrentUser()).thenReturn(privilegedUser);
         when(authService.hasPasswordCredential(USER_ID)).thenReturn(true);
@@ -106,7 +109,9 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         mockMvc.perform(get("/api/auth/webauthn/register/requirements")
                         .session(stampedSession()).with(authentication(authentication)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.currentPasswordRequired").value(true));
+                .andExpect(jsonPath("$.currentPasswordRequired").value(true))
+                .andExpect(jsonPath("$.standing").value("ENROLLMENT_REQUIRED"))
+                .andExpect(jsonPath("$.approvalGaps").isArray());
 
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 "auth.mfa.policy.denied",
@@ -117,6 +122,40 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 "Unenrolled Privileged Integration",
                 "Privileged account confined pending MFA enrollment",
                 "enrollment_required");
+    }
+
+    /**
+     * Through the real filter chain, a privileged account whose passkeys are not yet approved in
+     * every organization where it is privileged is confined with the attestation code, and the
+     * refusal is audited with its own reason (#1534). It uses its own account, so the shared
+     * denial-audit limiter cannot suppress the row.
+     */
+    @Test
+    void anUnapprovedPrivilegedAccountIsConfinedWithTheAttestationCode() throws Exception {
+        User unapproved = new User();
+        unapproved.setId(UNAPPROVED_USER_ID);
+        unapproved.setUsername("unapproved-privileged-integration");
+        unapproved.setDisplayName("Unapproved Privileged Integration");
+        when(privilegedAccountService.enforcedStanding(UNAPPROVED_USER_ID))
+                .thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
+        when(authService.getCurrentUser()).thenReturn(unapproved);
+        when(userMapper.currentSessionEpoch(UNAPPROVED_USER_ID)).thenReturn(0);
+        UsernamePasswordAuthenticationToken unapprovedAuthentication =
+                new UsernamePasswordAuthenticationToken(unapproved, null, List.of());
+
+        mockMvc.perform(get("/api/companies").session(stampedSession()).with(authentication(unapprovedAuthentication)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ATTESTATION_REQUIRED"));
+
+        verify(auditService, times(1)).recordStrictFailureIndependentScoped(
+                "auth.mfa.policy.denied",
+                "user",
+                UNAPPROVED_USER_ID,
+                null,
+                null,
+                "Unapproved Privileged Integration",
+                "Privileged account confined pending passkey approval",
+                "attestation_required");
     }
 
     /**

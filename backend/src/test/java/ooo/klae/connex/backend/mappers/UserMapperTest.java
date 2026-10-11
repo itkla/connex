@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
+import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
@@ -567,6 +569,233 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(webauthnCredentialMapper.existsByUserId(user.getId()));
     }
 
+    /**
+     * Standing is read in one statement (#1534): privilege, any passkey, and a passkey that is
+     * approved in every organization where the account is privileged. A new privileged
+     * organization reopens the gap until the same passkey is approved there too.
+     */
+    @Test
+    void standingTracksPrivilegePasskeysAndApprovalInEveryPrivilegedOrganization() {
+        Workspace first = freshWorkspace();
+        Workspace second = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        assertEquals(new PrivilegedMfaStandingRow(false, false, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+
+        orgMemberMapper.addMember(first.getOrgId(), user.getId(), "admin");
+        sqlSession.clearCache();
+        assertEquals(new PrivilegedMfaStandingRow(true, false, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+
+        int passkey = addPasskey(user);
+        assertEquals(new PrivilegedMfaStandingRow(true, true, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+
+        approve(passkey, first.getOrgId());
+        assertEquals(new PrivilegedMfaStandingRow(true, true, true),
+                userMapper.privilegedMfaStanding(user.getId()));
+
+        orgMemberMapper.addMember(second.getOrgId(), user.getId(), "admin");
+        sqlSession.clearCache();
+        assertEquals(new PrivilegedMfaStandingRow(true, true, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+
+        approve(passkey, second.getOrgId());
+        assertEquals(new PrivilegedMfaStandingRow(true, true, true),
+                userMapper.privilegedMfaStanding(user.getId()));
+    }
+
+    /**
+     * One passkey has to cover every privileged organization. Approvals split across two passkeys
+     * leave the account without a sufficient one, and each passkey reports its own missing
+     * organization (#1534).
+     */
+    @Test
+    void approvalsSplitAcrossTwoPasskeysAreNotSufficientAndAreReportedPerPasskey() {
+        Workspace first = freshWorkspace();
+        Workspace second = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(first.getOrgId(), user.getId(), "admin");
+        orgMemberMapper.addMember(second.getOrgId(), user.getId(), "admin");
+        int coversFirst = addPasskey(user);
+        int coversSecond = addPasskey(user);
+        approve(coversFirst, first.getOrgId());
+        approve(coversSecond, second.getOrgId());
+
+        assertEquals(new PrivilegedMfaStandingRow(true, true, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+        assertFalse(userMapper.isSufficientPasskey(user.getId(), coversFirst));
+        assertFalse(userMapper.isSufficientPasskey(user.getId(), coversSecond));
+        assertEquals(List.of(
+                        List.of(coversFirst, second.getOrgId(), organizationName(second.getOrgId())),
+                        List.of(coversSecond, first.getOrgId(), organizationName(first.getOrgId()))),
+                gapSummary(user));
+
+        approve(coversFirst, second.getOrgId());
+
+        assertEquals(new PrivilegedMfaStandingRow(true, true, true),
+                userMapper.privilegedMfaStanding(user.getId()));
+        assertTrue(userMapper.isSufficientPasskey(user.getId(), coversFirst));
+        assertFalse(userMapper.isSufficientPasskey(user.getId(), coversSecond));
+        assertTrue(userMapper.hasOtherSufficientPasskey(user.getId(), coversSecond));
+        assertFalse(userMapper.hasOtherSufficientPasskey(user.getId(), coversFirst));
+        assertEquals(List.of(List.of(coversSecond, first.getOrgId(), organizationName(first.getOrgId()))),
+                gapSummary(user));
+    }
+
+    /**
+     * Every privilege branch names the organization the approval must come from: an organization
+     * role, a built-in workspace administrator role, and a custom role holding an administrative
+     * permission each map to the organization that owns the membership (#1534).
+     */
+    @Test
+    void eachPrivilegeBranchRequiresApprovalFromItsOwnOrganization() {
+        Workspace viaOrgRole = freshWorkspace();
+        Workspace viaWorkspaceAdmin = freshWorkspace();
+        Workspace viaCustomRole = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(viaOrgRole.getOrgId(), user.getId(), "admin");
+        workspaceMapper.addMember(viaWorkspaceAdmin.getId(), user.getId(), "admin");
+        workspaceMapper.addMember(viaCustomRole.getId(), user.getId(), "member");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(viaCustomRole.getId());
+        role.setName("standing-member-manager-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(viaCustomRole.getId(), user.getId(), role.getId());
+        roleMapper.insertPermissions(viaCustomRole.getId(), role.getId(), List.of("MEMBER_MANAGE"));
+        int passkey = addPasskey(user);
+
+        assertEquals(List.of(
+                        List.of(passkey, viaOrgRole.getOrgId(), organizationName(viaOrgRole.getOrgId())),
+                        List.of(passkey, viaWorkspaceAdmin.getOrgId(), organizationName(viaWorkspaceAdmin.getOrgId())),
+                        List.of(passkey, viaCustomRole.getOrgId(), organizationName(viaCustomRole.getOrgId()))),
+                gapSummary(user));
+    }
+
+    /**
+     * Privilege reached through several branches in one organization still asks for that
+     * organization's approval once per passkey (#1534).
+     */
+    @Test
+    void privilegeThroughSeveralBranchesInOneOrganizationIsOneGapPerPasskey() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+        workspaceMapper.addMember(fresh.getId(), user.getId(), "admin");
+        int passkey = addPasskey(user);
+
+        assertEquals(List.of(List.of(passkey, fresh.getOrgId(), organizationName(fresh.getOrgId()))),
+                gapSummary(user));
+
+        approve(passkey, fresh.getOrgId());
+
+        assertEquals(List.of(), userMapper.passkeyApprovalGaps(user.getId()));
+        assertTrue(userMapper.isSufficientPasskey(user.getId(), passkey));
+    }
+
+    /**
+     * Break-glass assurance makes a passkey sufficient without per-organization approval, and such a
+     * passkey is never listed as missing approval (#1534).
+     */
+    @Test
+    void breakGlassAssuranceIsSufficientWithoutApproval() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+        int passkey = addPasskey(user);
+        jdbcTemplate.update(
+                "UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS', privileged_assured_at = NOW(3) WHERE id = ?",
+                passkey);
+        sqlSession.clearCache();
+
+        assertEquals(new PrivilegedMfaStandingRow(true, true, true),
+                userMapper.privilegedMfaStanding(user.getId()));
+        assertTrue(userMapper.isSufficientPasskey(user.getId(), passkey));
+        assertEquals(List.of(), userMapper.passkeyApprovalGaps(user.getId()));
+    }
+
+    /**
+     * Grandfathering is per-organization coverage (#1534), so account-wide GRANDFATHERED assurance,
+     * which nothing writes, never stands in for approval.
+     */
+    @Test
+    void grandfatheredAssuranceAloneIsNotSufficient() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+        int passkey = addPasskey(user);
+        jdbcTemplate.update(
+                "UPDATE webauthn_credential SET privileged_assurance = 'GRANDFATHERED', privileged_assured_at = NOW(3) WHERE id = ?",
+                passkey);
+        sqlSession.clearCache();
+
+        assertEquals(new PrivilegedMfaStandingRow(true, true, false),
+                userMapper.privilegedMfaStanding(user.getId()));
+        assertFalse(userMapper.isSufficientPasskey(user.getId(), passkey));
+        assertEquals(List.of(List.of(passkey, fresh.getOrgId(), organizationName(fresh.getOrgId()))),
+                gapSummary(user));
+    }
+
+    /**
+     * Privilege held only in an organization being torn down asks for no approval there, matching
+     * the privilege predicate's lifecycle exclusion (#1534).
+     */
+    @Test
+    void privilegeInAnOrganizationBeingTornDownNeedsNoApprovalThere() {
+        Workspace approved = freshWorkspace();
+        Workspace tornDown = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(approved.getOrgId(), user.getId(), "admin");
+        orgMemberMapper.addMember(tornDown.getOrgId(), user.getId(), "admin");
+        int passkey = addPasskey(user);
+        approve(passkey, approved.getOrgId());
+        assertFalse(userMapper.isSufficientPasskey(user.getId(), passkey));
+
+        jdbcTemplate.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+                tornDown.getOrgId());
+        sqlSession.clearCache();
+
+        assertTrue(userMapper.isSufficientPasskey(user.getId(), passkey));
+        assertEquals(List.of(), userMapper.passkeyApprovalGaps(user.getId()));
+    }
+
+    /** Sufficiency is only ever answered for the account's own passkey (#1534). */
+    @Test
+    void anotherAccountsSufficientPasskeyIsNeverSufficientForThisAccount() {
+        Workspace fresh = freshWorkspace();
+        User owner = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        User other = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), owner.getId(), "admin");
+        orgMemberMapper.addMember(fresh.getOrgId(), other.getId(), "admin");
+        int ownersPasskey = addPasskey(owner);
+        approve(ownersPasskey, fresh.getOrgId());
+
+        assertTrue(userMapper.isSufficientPasskey(owner.getId(), ownersPasskey));
+        assertFalse(userMapper.isSufficientPasskey(other.getId(), ownersPasskey));
+        assertFalse(userMapper.hasOtherSufficientPasskey(other.getId(), -1));
+    }
+
+    /**
+     * The startup count covers privileged accounts holding passkeys none of which is sufficient;
+     * an account without any passkey is the enrollment inventory's, not this count's (#1534).
+     */
+    @Test
+    void attestationRequiredCountCoversOnlyEnrolledAccountsWithoutASufficientPasskey() {
+        long before = userMapper.countAttestationRequiredAccounts();
+        Workspace fresh = freshWorkspace();
+        User unapproved = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        User unenrolled = inventoryUser("hash_" + unique(), unique() + "@standing.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), unapproved.getId(), "admin");
+        orgMemberMapper.addMember(fresh.getOrgId(), unenrolled.getId(), "admin");
+        int passkey = addPasskey(unapproved);
+
+        assertEquals(before + 1, userMapper.countAttestationRequiredAccounts());
+
+        approve(passkey, fresh.getOrgId());
+
+        assertEquals(before, userMapper.countAttestationRequiredAccounts());
+    }
+
     private UnenrolledPrivilegedAccount unenrolledEntry(int userId) {
         return userMapper.listUnenrolledPrivilegedAccounts(Integer.MAX_VALUE).stream()
                 .filter(account -> account.id() == userId)
@@ -599,6 +828,49 @@ class UserMapperTest extends AbstractMapperTest {
         user.setTimezone("UTC");
         userMapper.insert(user);
         return user;
+    }
+
+    private int addPasskey(User user) {
+        String handle = jdbcTemplate.query(
+                "SELECT id FROM webauthn_user_entity WHERE user_id = ?",
+                rows -> rows.next() ? rows.getString(1) : null,
+                user.getId());
+        if (handle == null) {
+            handle = "standing-handle-" + unique();
+            jdbcTemplate.update(
+                    "INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES (?, ?, ?, ?)",
+                    handle, user.getId(), user.getUsername(), user.getDisplayName());
+        }
+        byte[] credentialId = ("standing-credential-" + unique()).getBytes(StandardCharsets.UTF_8);
+        jdbcTemplate.update(
+                "INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key) VALUES (?, ?, ?)",
+                credentialId, handle, new byte[] {9, 9, 9});
+        Integer rowId = jdbcTemplate.queryForObject(
+                "SELECT id FROM webauthn_credential WHERE credential_id = ?", Integer.class, credentialId);
+        assertNotNull(rowId);
+        sqlSession.clearCache();
+        return rowId;
+    }
+
+    private void approve(int credentialRowId, int orgId) {
+        jdbcTemplate.update(
+                "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'FOUNDER')",
+                credentialRowId, orgId);
+        sqlSession.clearCache();
+    }
+
+    private String organizationName(int orgId) {
+        return jdbcTemplate.queryForObject("SELECT name FROM organization WHERE id = ?", String.class, orgId);
+    }
+
+    private List<List<Object>> gapSummary(User user) {
+        List<PasskeyApprovalGap> gaps = userMapper.passkeyApprovalGaps(user.getId());
+        for (PasskeyApprovalGap gap : gaps) {
+            assertNotNull(gap.credentialId());
+        }
+        return gaps.stream()
+                .map(gap -> List.<Object>of(gap.credentialRowId(), gap.orgId(), gap.orgName()))
+                .toList();
     }
 
     private void enrollPasskey(User user) {

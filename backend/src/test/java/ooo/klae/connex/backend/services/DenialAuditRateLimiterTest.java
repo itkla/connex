@@ -28,6 +28,7 @@ class DenialAuditRateLimiterTest {
     private static final String STEP_UP = AuditService.EXPORT_STEP_UP_ACTION;
     private static final String VICTIM_ADDRESS = "203.0.113.5";
     private static final String OTHER_ADDRESS = "198.51.100.9";
+    private static final String REASON = "enrollment_required";
 
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
@@ -38,6 +39,22 @@ class DenialAuditRateLimiterTest {
         assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
         assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
         assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+    }
+
+    /**
+     * A new denial reason for the same action is admitted at once rather than suppressed until the
+     * previous reason's window ends (#1534): an account awaiting enrollment that enrolls an
+     * unapproved passkey records that it now awaits approval.
+     */
+    @Test
+    void aNewReasonForTheSameActionIsAdmittedWithinTheWindow() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+
+        assertTrue(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS).isPresent());
+        assertTrue(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS).isPresent());
+        assertFalse(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS).isPresent());
+        assertFalse(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS).isPresent());
+        assertEquals(2.0, suppressed(CONFINED));
     }
 
     /**
@@ -136,7 +153,7 @@ class DenialAuditRateLimiterTest {
     void releasingAnUnwrittenRowReadmitsTheNextDenial() {
         DenialAuditRateLimiter limiter = limiter(new TestClock(0));
         DenialAuditRateLimiter.Admission admission =
-                limiter.acquire(7, CONFINED, VICTIM_ADDRESS).orElseThrow();
+                limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS).orElseThrow();
 
         limiter.release(admission);
 
@@ -147,7 +164,7 @@ class DenialAuditRateLimiterTest {
     @Test
     void releasingOneAddressLeavesTheOtherAddressesWindowsInPlace() {
         DenialAuditRateLimiter limiter = limiter(new TestClock(1));
-        DenialAuditRateLimiter.Admission victim = limiter.acquire(7, STEP_UP, VICTIM_ADDRESS).orElseThrow();
+        DenialAuditRateLimiter.Admission victim = limiter.acquire(7, STEP_UP, REASON, VICTIM_ADDRESS).orElseThrow();
         assertTrue(admits(limiter, 7, STEP_UP, OTHER_ADDRESS));
 
         limiter.release(victim);
@@ -196,7 +213,7 @@ class DenialAuditRateLimiterTest {
     void aLateReleaseDropsOnlyTheWindowItOpened() {
         TestClock clock = new TestClock(0);
         DenialAuditRateLimiter limiter = limiter(clock);
-        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, VICTIM_ADDRESS).orElseThrow();
+        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS).orElseThrow();
         clock.advance(Duration.ofSeconds(WINDOW_SECONDS));
         assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
 
@@ -312,7 +329,7 @@ class DenialAuditRateLimiterTest {
     }
 
     private static boolean admits(DenialAuditRateLimiter limiter, int userId, String action, String address) {
-        return limiter.acquire(userId, action, address).isPresent();
+        return limiter.acquire(userId, action, REASON, address).isPresent();
     }
 
     /** Settable clock that also steps by a fixed amount per reading, so every window can start apart. */

@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
+import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
@@ -85,6 +87,43 @@ public interface UserMapper {
     User getUserByEmail(String email);
     /** Current account-wide administrative privilege from active control-plane memberships. */
     boolean isPrivilegedAccount(int id);
+    /**
+     * The facts privileged-MFA standing is derived from, in one statement (#1534): whether the
+     * account is privileged, whether it holds any passkey, and whether one of its passkeys is
+     * sufficient, meaning it carries break-glass assurance or is covered in every organization where
+     * the account is privileged.
+     *
+     * @param id the account
+     * @return the three facts; never null
+     */
+    PrivilegedMfaStandingRow privilegedMfaStanding(int id);
+    /**
+     * Whether the passkey belongs to the account and is sufficient for its privileged MFA (#1534).
+     *
+     * @param userId the account
+     * @param credentialRowId the passkey's {@code webauthn_credential.id}
+     * @return true only for the account's own sufficient passkey
+     */
+    boolean isSufficientPasskey(@Param("userId") int userId, @Param("credentialRowId") int credentialRowId);
+    /**
+     * For each of the account's passkeys without break-glass assurance, the organizations where the
+     * account is privileged and that passkey still needs approval (#1534).
+     *
+     * @param userId the account
+     * @return one row per passkey and missing organization, ordered by passkey then organization
+     */
+    List<PasskeyApprovalGap> passkeyApprovalGaps(@Param("userId") int userId);
+    /**
+     * Whether the account holds a sufficient passkey other than the given one (#1534).
+     *
+     * @param userId the account
+     * @param credentialRowId the passkey to leave out, by {@code webauthn_credential.id}
+     * @return true when another of the account's passkeys is sufficient
+     */
+    boolean hasOtherSufficientPasskey(
+            @Param("userId") int userId, @Param("credentialRowId") int credentialRowId);
+    /** Counts privileged accounts that hold passkeys but no sufficient one (#1534). */
+    long countAttestationRequiredAccounts();
     /**
      * Privileged accounts with no enrolled passkey, in ascending id, capped at {@code limit}. Uses
      * the same privilege predicate as {@link #isPrivilegedAccount(int)}.

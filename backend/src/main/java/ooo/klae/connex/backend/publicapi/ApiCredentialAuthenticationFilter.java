@@ -29,8 +29,8 @@ import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
 import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.util.ClientIpResolver;
-import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
@@ -52,7 +52,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final PrivilegedAccountService privilegedAccountService;
-    private final WebAuthnService webAuthnService;
     private final ClientIpResolver clientIpResolver;
     private final TenantCatalogResolver tenantCatalogResolver;
     private final TenantContext tenantContext;
@@ -66,7 +65,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
@@ -78,7 +76,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             objectMapper,
             privilegedMfaProperties,
             privilegedAccountService,
-            webAuthnService,
             clientIpResolver,
             tenantCatalogResolver,
             tenantContext,
@@ -92,7 +89,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
-            WebAuthnService webAuthnService,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
@@ -103,7 +99,6 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         this.objectMapper = objectMapper;
         this.privilegedMfaProperties = privilegedMfaProperties;
         this.privilegedAccountService = privilegedAccountService;
-        this.webAuthnService = webAuthnService;
         this.clientIpResolver = clientIpResolver;
         this.tenantCatalogResolver = tenantCatalogResolver;
         this.tenantContext = tenantContext;
@@ -218,21 +213,30 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         }
 
         AuthenticatedCredential authenticated = resolved.get();
-        boolean enrollmentRequired;
+        PrivilegedMfaStanding standing;
         try {
-            enrollmentRequired = privilegedMfaProperties.isEnforced()
-                && privilegedAccountService.isPrivileged(authenticated.user().getId())
-                && !webAuthnService.hasPasskey(authenticated.user().getId());
+            standing = privilegedMfaProperties.isEnforced()
+                ? privilegedAccountService.enforcedStanding(authenticated.user().getId())
+                : PrivilegedMfaStanding.UNPRIVILEGED;
         } catch (RuntimeException exception) {
             throw new AuthenticationLookupException(exception);
         }
-        if (enrollmentRequired) {
+        if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
             writePublicError(
                 request,
                 response,
                 HttpStatus.UNAUTHORIZED,
                 PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE,
                 "A passkey must be enrolled before this privileged account can continue");
+            return null;
+        }
+        if (standing == PrivilegedMfaStanding.ATTESTATION_REQUIRED) {
+            writePublicError(
+                request,
+                response,
+                HttpStatus.UNAUTHORIZED,
+                PrivilegedMfaEnforcementFilter.ATTESTATION_REQUIRED_CODE,
+                "A passkey must be approved before this privileged account can continue");
             return null;
         }
         ApiRateLimiter.Decision rateLimit = apiRateLimiter.acquire(

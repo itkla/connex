@@ -6,6 +6,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastSufficientPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.beans.User;
 
 import java.util.List;
@@ -112,9 +114,11 @@ class WebAuthnServiceTest {
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId("handle");
         WebauthnCredentialRow target = new WebauthnCredentialRow();
+        target.setId(11);
         target.setCredentialId(credentialId.getBytes());
         target.setLabel("Work key");
         WebauthnCredentialRow retained = new WebauthnCredentialRow();
+        retained.setId(12);
         retained.setCredentialId(Bytes.random().getBytes());
         when(userMapper.lockById(7)).thenReturn(7);
         when(userEntities.findByUserId(7)).thenReturn(entity);
@@ -488,6 +492,7 @@ class WebAuthnServiceTest {
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId("handle");
         WebauthnCredentialRow credential = new WebauthnCredentialRow();
+        credential.setId(11);
         credential.setCredentialId(credentialId.getBytes());
         User user = new User();
         user.setId(7);
@@ -521,9 +526,11 @@ class WebAuthnServiceTest {
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId("handle");
         WebauthnCredentialRow target = new WebauthnCredentialRow();
+        target.setId(11);
         target.setCredentialId(credentialId.getBytes());
         target.setLabel("Work key");
         WebauthnCredentialRow retained = new WebauthnCredentialRow();
+        retained.setId(12);
         retained.setCredentialId(Bytes.random().getBytes());
         User user = new User();
         user.setId(7);
@@ -545,6 +552,51 @@ class WebAuthnServiceTest {
                 org.mockito.ArgumentMatchers.eq("Admin"),
                 org.mockito.ArgumentMatchers.eq("Passkey removed"),
                 any());
+    }
+
+    /**
+     * Once attestation is enforced, a privileged account keeps its last sufficient passkey even
+     * while another, unapproved passkey would remain (#1534). The decision is read after the
+     * account, role and credential locks, and nothing is removed.
+     */
+    @Test
+    void deleteRefusesThePrivilegedAccountsLastSufficientCredentialEvenWithAnotherLeft() {
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
+        AuditService auditService = mock(AuditService.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class), credentials, userEntities,
+                credentialMapper, mock(PrivilegedCredentialAttestationMapper.class), mock(SessionSecurityService.class), userMapper, privilegedAccounts,
+                mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
+        Bytes credentialId = Bytes.random();
+        WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
+        entity.setId("handle");
+        WebauthnCredentialRow target = new WebauthnCredentialRow();
+        target.setId(11);
+        target.setCredentialId(credentialId.getBytes());
+        WebauthnCredentialRow unapproved = new WebauthnCredentialRow();
+        unapproved.setId(12);
+        unapproved.setCredentialId(Bytes.random().getBytes());
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userEntities.findByUserId(7)).thenReturn(entity);
+        when(credentialMapper.findByUserEntityUserIdForUpdate("handle"))
+                .thenReturn(List.of(target, unapproved));
+        when(privilegedAccounts.isPrivileged(7)).thenReturn(true);
+        when(privilegedAccounts.isLastSufficientPasskey(7, 11)).thenReturn(true);
+
+        assertThrows(LastSufficientPasskeyRemovalForbiddenException.class,
+                () -> service.delete(7, credentialId.toBase64UrlString()));
+
+        InOrder order = inOrder(userMapper, credentialMapper, privilegedAccounts);
+        order.verify(userMapper).lockById(7);
+        order.verify(userMapper).lockAssignedCustomRoleIds(7);
+        order.verify(credentialMapper).findByUserEntityUserIdForUpdate("handle");
+        order.verify(privilegedAccounts).isLastSufficientPasskey(7, 11);
+        verify(credentials, never()).delete(any());
+        verifyNoInteractions(auditService);
     }
 
     private record RegistrationFixture(
