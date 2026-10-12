@@ -265,6 +265,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
+    /**
+     * A role edit that would leave members without a passkey approved in the organization (#1534):
+     * {@code 409} with how many, so the client can ask the actor to acknowledge it.
+     */
+    @ExceptionHandler(PrivilegedMfaConfinementAcknowledgementRequiredException.class)
+    public ResponseEntity<Map<String, Object>> confinementAcknowledgementRequired(
+            PrivilegedMfaConfinementAcknowledgementRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "code", ex.getCode(),
+                "message", ex.getMessage(),
+                "affectedCount", ex.getAffectedCount()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));

@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -78,6 +79,7 @@ public class WorkspaceService {
     private final AuditService auditService;
     private final SystemActor systemActor;
     private final SessionSecurityService sessionSecurityService;
+    private final PrivilegedAccountService privilegedAccountService;
     private final AccountDeletionReservationRead accountDeletionReservationRead;
     private final RegistrationVerificationService registrationVerificationService;
 
@@ -1301,12 +1303,26 @@ public class WorkspaceService {
     }
 
     /**
+     * Assigns a custom role without acknowledging confinement; see
+     * {@link #assignCustomRole(int, int, int, int, boolean)}.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
+        return assignCustomRole(workspaceId, actorId, targetUserId, roleId, false);
+    }
+
+    /**
      * Assigns a custom role with ROLE_MANAGE authority. Overlaying an owner requires owner
      * authority, and may not narrow that owner unless another owner can still restore full
-     * workspace authority.
+     * workspace authority. Once attestation is enforced, an assignment that makes the member newly
+     * privileged in the organization without a passkey approved there is refused unless
+     * acknowledged (#1534). Runs at {@code READ COMMITTED} so that check reads current state.
+     *
+     * @param acknowledgeConfinement whether the actor accepts that the member may be confined
      */
-    @Transactional
-    public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberDto assignCustomRole(
+            int workspaceId, int actorId, int targetUserId, int roleId, boolean acknowledgeConfinement) {
         requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         LockedRoleMutation locks = lockRoleMutation(
@@ -1323,7 +1339,10 @@ public class WorkspaceService {
         }
         requireGrantable(locks.actorPermissions(), locks.permissionsForRole(roleId));
         MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
+        ConfinementBaseline baseline =
+            privilegedAccountService.confinementBaseline(() -> getOrgId(workspaceId), List.of(targetUserId));
         workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
+        privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Assigned a custom role to " + target.getDisplayName(), null);
         return workspaceMapper.getMember(workspaceId, targetUserId);
@@ -1359,14 +1378,30 @@ public class WorkspaceService {
     }
 
     /**
+     * Changes a member's role without acknowledging confinement; see
+     * {@link #changeMemberRole(int, int, int, String, boolean)}.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
+        return changeMemberRole(workspaceId, actorId, targetUserId, roleRaw, false);
+    }
+
+    /**
      * Changes a member's role. Admins manage member/admin; only an owner may grant
      * ownership, and the last owner able to restore full authority cannot be demoted. The actor may only assign a
      * built-in role whose entire permission bundle they themselves hold, so a
      * delegate holding {@code MEMBER_MANAGE} alone cannot promote anyone (including
-     * themselves) to a role that confers permissions they lack.
+     * themselves) to a role that confers permissions they lack. Once attestation is enforced, a
+     * change that makes the member newly privileged in the organization without a passkey approved
+     * there is refused unless acknowledged (#1534); a built-in role clears any custom overlay, so
+     * even a nominal demotion can do that. Runs at {@code READ COMMITTED} so that check reads
+     * current state.
+     *
+     * @param acknowledgeConfinement whether the actor accepts that the member may be confined
      */
-    @Transactional
-    public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberDto changeMemberRole(
+            int workspaceId, int actorId, int targetUserId, String roleRaw, boolean acknowledgeConfinement) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         Role newRole = parseAssignableRole(roleRaw);
@@ -1391,7 +1426,10 @@ public class WorkspaceService {
         }
         requireGrantable(locks.actorPermissions(), builtInPermissions(newRole));
         MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
+        ConfinementBaseline baseline =
+            privilegedAccountService.confinementBaseline(() -> getOrgId(workspaceId), List.of(targetUserId));
         workspaceMapper.updateMemberRole(workspaceId, targetUserId, newRole.name().toLowerCase());
+        privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Changed " + target.getDisplayName() + " to " + newRole.name().toLowerCase(), null);
         return workspaceMapper.getMember(workspaceId, targetUserId);
@@ -1473,8 +1511,12 @@ public class WorkspaceService {
         requireGrantable(locks.actorPermissions(), requestedPermissions);
     }
 
-    /** Locks an existing role and enforces owner authority, retained recovery, and the grant ceiling. */
-    void lockRoleMutationAuthorization(
+    /**
+     * Locks an existing role and enforces owner authority, retained recovery, and the grant ceiling.
+     *
+     * @return the role's assignees, whose memberships are now locked
+     */
+    List<Integer> lockRoleMutationAuthorization(
             int workspaceId,
             int actorId,
             int roleId,
@@ -1491,6 +1533,7 @@ public class WorkspaceService {
             locks.ownerRecovery(),
             locks.ownerRecovery().withRolePermissions(roleId, requestedPermissions));
         requireGrantable(locks.actorPermissions(), requestedPermissions);
+        return locks.roleAssignees().stream().map(WorkspaceMember::getUserId).toList();
     }
 
     private static void requireRoleOwnerAuthority(LockedRoleMutation locks) {

@@ -394,6 +394,28 @@
     )
   </select>
 
+  <select id="privilegedInOrganizationAmong" resultType="int" flushCache="true">
+    SELECT u.id
+    FROM app_user u
+    WHERE u.id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
+      AND EXISTS (
+        <include refid="privilegedOrgBranches">
+          <property name="privilegedUserId" value="u.id"/>
+          <property name="privilegedOrgCondition" value="AND o.id = #{orgId}"/>
+        </include>
+      )
+  </select>
+
+  <select id="coveredInOrganizationAmong" resultType="int" flushCache="true">
+    SELECT DISTINCT e.user_id
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
+      AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+  </select>
+
   <select id="passkeyApprovalGaps" resultType="ooo.klae.connex.backend.beans.PasskeyApprovalGap">
     SELECT DISTINCT c.id AS credentialRowId,
            c.credential_id AS credentialId,

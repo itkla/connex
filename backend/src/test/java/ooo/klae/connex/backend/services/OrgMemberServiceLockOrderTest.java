@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -11,9 +13,12 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Set;
+import java.util.function.IntSupplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -22,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -40,6 +46,7 @@ class OrgMemberServiceLockOrderTest {
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private RegistrationVerificationService registrationVerificationService;
     @Mock private PrivilegedCredentialAttestationMapper attestationMapper;
+    @Mock private PrivilegedAccountService privilegedAccountService;
 
     @InjectMocks private OrgMemberService service;
 
@@ -69,6 +76,44 @@ class OrgMemberServiceLockOrderTest {
         order.verify(orgMemberMapper).isActiveWorkspaceTenant(7, 1);
         order.verify(orgMemberMapper).addMemberClearingFounder(7, 1, "admin");
         verify(orgMemberMapper, never()).addMember(7, 1, "admin");
+    }
+
+    /**
+     * The confinement baseline is read in this organization after every lock and before the write;
+     * the check runs after the write and before the success audit, carrying the request's
+     * acknowledgement (#1534).
+     */
+    @Test
+    void theConfinementCheckBracketsTheWriteAndPrecedesTheSuccessAudit() {
+        stubAddableTarget();
+        ConfinementBaseline baseline = new ConfinementBaseline(7, List.of(1), Set.of());
+        when(privilegedAccountService.confinementBaseline(any(), eq(List.of(1)))).thenReturn(baseline);
+
+        service.setMember(7, 9, 1, "admin", true);
+
+        ArgumentCaptor<IntSupplier> organization = ArgumentCaptor.forClass(IntSupplier.class);
+        InOrder order = inOrder(orgMemberMapper, privilegedAccountService, auditService);
+        order.verify(orgMemberMapper).isActiveWorkspaceTenant(7, 1);
+        order.verify(privilegedAccountService).confinementBaseline(organization.capture(), eq(List.of(1)));
+        order.verify(orgMemberMapper).addMemberClearingFounder(7, 1, "admin");
+        order.verify(privilegedAccountService).requireConfinementAcknowledged(baseline, true);
+        order.verify(auditService).record("org.member.set", "organization", 7, "Target",
+                "Set Target to org admin", null);
+        assertEquals(7, organization.getValue().getAsInt());
+    }
+
+    /** A refused confinement writes no success audit; the transaction rolls the write back (#1534). */
+    @Test
+    void aRefusedConfinementWritesNoSuccessAudit() {
+        stubAddableTarget();
+        doThrow(new PrivilegedMfaConfinementAcknowledgementRequiredException(1))
+                .when(privilegedAccountService).requireConfinementAcknowledged(any(), eq(false));
+
+        assertThrows(PrivilegedMfaConfinementAcknowledgementRequiredException.class,
+                () -> service.setMember(7, 9, 1, "admin"));
+
+        verify(orgMemberMapper).addMemberClearingFounder(7, 1, "admin");
+        verifyNoInteractions(auditService);
     }
 
     /** An owner re-roling themselves keeps any founder attribution they hold (#1534). */
@@ -313,6 +358,17 @@ class OrgMemberServiceLockOrderTest {
         order.verify(organizationMapper).lockByIdForShare(11);
         order.verify(orgMemberMapper).lockOwnerIds(3);
         order.verify(orgMemberMapper).lockOwnerIds(7);
+    }
+
+    private void stubAddableTarget() {
+        when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");
+        when(orgMemberMapper.isEligibleForMembership(7, 1)).thenReturn(true);
+        when(userMapper.lockByIdForShare(1)).thenReturn(1);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(organizationMapper.lockActiveById(7)).thenReturn(7);
+        when(userMapper.getUserByIdForShare(1)).thenReturn(targetUser(1));
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
+        when(orgMemberMapper.isActiveWorkspaceTenant(7, 1)).thenReturn(true);
     }
 
     private static User targetUser(int userId) {

@@ -50,6 +50,7 @@ public class OrgMemberService {
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
     private final RegistrationVerificationService registrationVerificationService;
+    private final PrivilegedAccountService privilegedAccountService;
 
     /**
      * Records a user as the founding owner of a freshly created organization and covers the
@@ -156,6 +157,20 @@ public class OrgMemberService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
+        setMemberByEmail(orgId, actorId, emailRaw, roleRaw, false);
+    }
+
+    /**
+     * Adds an org administrator by email, or changes their role, as
+     * {@link #setMemberByEmail(int, int, String, String)} does. Once attestation is enforced, an
+     * add or role change that makes the account newly privileged here without a passkey approved
+     * here is refused unless acknowledged (#1534).
+     *
+     * @param acknowledgeConfinement whether the actor accepts that the account may be confined
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void setMemberByEmail(
+            int orgId, int actorId, String emailRaw, String roleRaw, boolean acknowledgeConfinement) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
@@ -169,7 +184,7 @@ public class OrgMemberService {
         if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {
             throw new ConflictException("The account's email changed; refresh and try again");
         }
-        applyMember(orgId, actorId, targetId, role);
+        applyMember(orgId, actorId, targetId, role, acknowledgeConfinement);
     }
 
     /**
@@ -207,16 +222,30 @@ public class OrgMemberService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
+        setMember(orgId, actorId, targetUserId, roleRaw, false);
+    }
+
+    /**
+     * Adds a user to the organization or changes their org role, as
+     * {@link #setMember(int, int, int, String)} does. Once attestation is enforced, an add or role
+     * change that makes the account newly privileged here without a passkey approved here is
+     * refused unless acknowledged (#1534).
+     *
+     * @param acknowledgeConfinement whether the actor accepts that the account may be confined
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void setMember(
+            int orgId, int actorId, int targetUserId, String roleRaw, boolean acknowledgeConfinement) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
         if (!orgMemberMapper.isEligibleForMembership(orgId, targetUserId)) {
             throw notAnActiveTenant();
         }
-        applyMember(orgId, actorId, targetUserId, role);
+        applyMember(orgId, actorId, targetUserId, role, acknowledgeConfinement);
     }
 
-    private void applyMember(int orgId, int actorId, int targetUserId, OrgRole role) {
+    private void applyMember(int orgId, int actorId, int targetUserId, OrgRole role, boolean acknowledgeConfinement) {
         try {
             lockMembershipUserRoots(actorId, targetUserId);
         } catch (ResourceNotFoundException unknownTarget) {
@@ -241,11 +270,14 @@ public class OrgMemberService {
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }
+        ConfinementBaseline baseline =
+                privilegedAccountService.confinementBaseline(() -> orgId, List.of(targetUserId));
         if (actorId == targetUserId) {
             orgMemberMapper.addMember(orgId, targetUserId, role.name().toLowerCase());
         } else {
             orgMemberMapper.addMemberClearingFounder(orgId, targetUserId, role.name().toLowerCase());
         }
+        privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
         auditService.record("org.member.set", "organization", orgId, target.getDisplayName(),
                 "Set " + target.getDisplayName() + " to org " + role.name().toLowerCase(), null);
     }

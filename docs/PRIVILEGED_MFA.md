@@ -598,6 +598,51 @@ Both routes stay reachable while confined, whatever the standing. Both exits are
 After either exit the client re-reads standing, since other memberships may still confer
 privilege.
 
+### Acknowledging confinement in role edits
+
+Once enforcement is on, a role edit can make an account privileged in an organization that has
+approved none of its passkeys. That account is confined from its next request. These edits refuse
+to do that silently:
+- `PATCH /api/workspaces/{id}/members/{userId}`, with a built-in role or a custom `roleId`;
+- `PUT /api/workspaces/{workspaceId}/roles/{roleId}`, which counts every assignee of the role;
+- `POST /api/orgs/{orgId}/members` and `PUT /api/orgs/{orgId}/members/{userId}`.
+
+**What is counted.** The accounts the edit makes **newly privileged in the organization** (privileged
+there after the write but not before) that hold no passkey approved there and none with
+`BREAK_GLASS` assurance. Such an account will be confined, or stays confined, until this
+organization approves one of its passkeys.
+- Pending members never count: they hold no privilege until they accept.
+- A built-in role clears any custom overlay. Moving an owner whose overlay grants nothing privileged
+  to built-in admin makes them privileged, so even an apparent demotion can count.
+
+**Only this organization's facts decide.** Standing is account-wide, but the count is not. Counting
+accounts that would become *confined* would tell this organization's administrators whether
+another organization already confines a member. The count uses only privilege and approvals in
+this organization, which its administrators can see. So it is not a prediction of standing:
+- a member another organization already confines counts exactly like one it does not;
+- a member with a passkey approved here does not count, even when their approvals are split
+  across passkeys and the edit leaves them confined.
+
+**The refusal.** The edit answers `409` and is rolled back whole: role, permissions, membership and
+success audit.
+
+```json
+{
+  "code": "PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED",
+  "message": "This change leaves members without a passkey approved in this organization; they will be confined until one is approved",
+  "affectedCount": 1
+}
+```
+
+Sending the same edit again with `"acknowledgeConfinement": true` applies it. The check runs after
+the write and before the success audit, and reads current state: the three workspace edits run at
+`READ COMMITTED` for it (see [LOCKING.md](backend/LOCKING.md)). It is advisory. Confinement itself
+is decided per request from standing, so an approval revoked after the edit can still confine an
+account the edit did not count.
+
+While the switch is `false`, nothing is read or counted, no edit answers `409`, and
+`acknowledgeConfinement` is accepted and ignored.
+
 ### Rollback and the cutover
 
 Provenance is additive evidence, not a complete history. An older backend serving after a rollback

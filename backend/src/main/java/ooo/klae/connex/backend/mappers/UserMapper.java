@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
@@ -150,6 +151,26 @@ public interface UserMapper {
      * @return true when one of its passkeys carries break-glass assurance or is covered there
      */
     boolean hasPasskeyCoveredInOrganization(@Param("userId") int userId, @Param("orgId") int orgId);
+    /**
+     * The accounts among {@code userIds} that are privileged in the organization (#1534), read with
+     * one statement however many there are. The list must not be empty.
+     *
+     * @param orgId the organization
+     * @param userIds the accounts to test
+     * @return those privileged in the organization
+     */
+    List<Integer> privilegedInOrganizationAmong(
+            @Param("orgId") int orgId, @Param("userIds") Collection<Integer> userIds);
+    /**
+     * The accounts among {@code userIds} holding a passkey that vouches in the organization: one
+     * covered there or carrying break-glass assurance (#1534). The list must not be empty.
+     *
+     * @param orgId the organization
+     * @param userIds the accounts to test
+     * @return those holding such a passkey
+     */
+    List<Integer> coveredInOrganizationAmong(
+            @Param("orgId") int orgId, @Param("userIds") Collection<Integer> userIds);
     /** Counts privileged accounts that hold passkeys but no sufficient one (#1534). */
     long countAttestationRequiredAccounts();
     /**
