@@ -173,6 +173,8 @@ public interface UserMapper {
             @Param("orgId") int orgId, @Param("userIds") Collection<Integer> userIds);
     /** Counts privileged accounts that hold passkeys but no sufficient one (#1534). */
     long countAttestationRequiredAccounts();
+    /** Counts per-organization coverage rows trusted by the privileged-MFA cutover (#1534). */
+    long countGrandfatheredCoverage();
     /**
      * Privileged accounts with no enrolled passkey, in ascending id, capped at {@code limit}. Uses
      * the same privilege predicate as {@link #isPrivilegedAccount(int)}.

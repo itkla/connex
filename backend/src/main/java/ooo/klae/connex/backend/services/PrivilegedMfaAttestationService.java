@@ -34,7 +34,8 @@ import ooo.klae.connex.backend.util.MfaAttestationCode;
  * organization owner for an org member; the member redeems it with a passkey assertion and that
  * passkey gains grantor coverage in the grant's organization. Every operation takes the grant's
  * authority locks before touching a grant, so an issue, a revoke, a redemption and a burn of the
- * same grantee serialize. Nothing reads the coverage for authorization yet.
+ * same grantee serialize. Grantors must vouch in the grant's organization whatever the attestation
+ * enforcement switch, so dark-period approvals cannot establish unvetted coverage.
  */
 @Service
 @RequiredArgsConstructor
@@ -127,9 +128,9 @@ public class PrivilegedMfaAttestationService {
      * transaction. It takes the grant's authority locks, re-checks under them that the grantor still
      * holds the authority, that the grantee is still a member, that the session's epoch is current
      * and that the passkey is still the grantee's, then claims the grant and records the coverage.
-     * Once attestation is enforced it also re-checks that the grantor still holds a passkey that
-     * vouches in the grant's organization (#1534), so a grantor who lost that coverage after issuing
-     * can no longer pass it on.
+     * Whatever the attestation enforcement switch, it also re-checks that the grantor holds a
+     * passkey that vouches in the grant's organization (#1534), so a grantor who lost that coverage
+     * after issuing can no longer pass it on.
      *
      * @param granteeId the authenticated account redeeming the code
      * @param expectedSessionEpoch the epoch stamped into the redeeming session
@@ -152,9 +153,8 @@ public class PrivilegedMfaAttestationService {
             throw new AttestationRefusal("code_mismatch");
         }
         lockGrantAuthority(grant);
-        if (privilegedAccountService.isAttestationEnforced()
-                && !privilegedAccountService.hasPasskeyCoveredInOrganization(
-                        grant.getGrantorUserId(), grant.getOrgId())) {
+        if (!privilegedAccountService.hasPasskeyCoveredInOrganization(
+                grant.getGrantorUserId(), grant.getOrgId())) {
             throw new AttestationRefusal("grantor_unattested");
         }
         Integer currentEpoch = userMapper.currentSessionEpoch(granteeId);
@@ -202,12 +202,10 @@ public class PrivilegedMfaAttestationService {
      * the grantor still owns and that vouches in the grant's organization (#1534). Vouching rests on
      * that organization alone, not on the grantor's standing elsewhere. The locks hold the grantor's
      * account row, which every writer of that passkey's ownership and coverage takes first, so the
-     * answer stays current until this transaction ends.
+     * answer stays current until this transaction ends. This applies whatever the attestation
+     * enforcement switch.
      */
     private void requireGrantorVouches(int orgId, int grantorId) {
-        if (!privilegedAccountService.isAttestationEnforced()) {
-            return;
-        }
         StepUpProof proof = sessionSecurityService.currentStepUpProof(grantorId);
         if (proof == null || !privilegedAccountService.isPasskeyCoveredInOrganization(
                 grantorId, proof.credentialRowId(), orgId)) {
