@@ -1292,6 +1292,13 @@ prove adjacent-chain continuity, detect deletion of entire rows/chains, compare 
 or scan unread history/system-scope rows. The separate append-only trigger readiness warning is
 not proof of HMAC verification. A complete historic chain audit remains operator-owned.
 
+Account-wide privileged email-change refusals (`auth.email_change.refused`) use explicit null
+`workspace_id` and `org_id` on the `system` chain (`chain_scope_id = 0`), like export and schedule
+step-up refusals (#1997). Readers and alerting must include that chain; the workspace/org reads
+below do not return those rows. Previously recorded tenant-scoped refusals remain in their original
+chains. The refusal reasons and immediate pre-lock versus deferred under-lock timing are described
+in [Privileged MFA](PRIVILEGED_MFA.md#email-change-on-a-privileged-account).
+
 For unattended recent-row coverage, schedule the following once per minute for **each** workspace
 and organization the operator is authorized to audit. Use a locally protected curl config with a
 current session cookie and the approved base URL; no credentials belong in crontab, command history

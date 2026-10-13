@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
@@ -19,10 +20,13 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.servlet.Filter;
+import jakarta.servlet.http.Cookie;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -42,6 +46,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -53,6 +58,7 @@ import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
@@ -136,8 +142,8 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
      * one MyBatis session, so the re-check must not be answered from the pre-lock reads. The refusal
      * is audited once the request's transaction completes: an immediate independent append would
      * wait on the request's own exclusive account lock until the InnoDB timeout, which the bound
-     * below catches (#1993). The row carries the request's workspace scope, as the pre-lock refusal
-     * does.
+     * below catches (#1993). The row carries explicit null workspace and organization scope on the
+     * system chain, as the pre-lock refusal does (#1997).
      */
     @Test
     void aPromotionCommittedBeforeTheAccountLockIsRefusedUnderItAndAuditedAfterCompletion()
@@ -174,11 +180,89 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
         assertEquals(member.getId(), ((Number) refusal.get("actor_id")).intValue());
         assertEquals("failure", refusal.get("outcome"));
         assertTrue(String.valueOf(refusal.get("context")).contains("privileged_mfa_enrollment_required"));
-        assertEquals(workspaceId, ((Number) refusal.get("workspace_id")).intValue());
-        assertEquals(count("SELECT org_id FROM workspace WHERE id = ?", workspaceId),
-                ((Number) refusal.get("org_id")).intValue());
-        assertEquals("workspace", refusal.get("chain_scope_type"));
-        assertEquals(workspaceId, ((Number) refusal.get("chain_scope_id")).intValue());
+        assertNull(refusal.get("workspace_id"));
+        assertNull(refusal.get("org_id"));
+        assertEquals("system", refusal.get("chain_scope_type"));
+        assertEquals(0, ((Number) refusal.get("chain_scope_id")).intValue());
+    }
+
+    /**
+     * Account-wide privilege must not be disclosed to the caller-selected workspace's audit
+     * readers. Across two organizations, every selection source and either workspace's role keep
+     * the immediate refusal on the system chain (#1997).
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "header, true", "header, false",
+        "cookie, true", "cookie, false",
+        "remembered, true", "remembered, false",
+        "first, true", "first, false"
+    })
+    void aMultiOrganizationAccountsRefusalUsesTheSystemChainRegardlessOfWorkspaceSelection(
+            String selection, boolean selectedWorkspaceIsPrivileged) throws Exception {
+        assertFalse(privilegedMfaProperties.isEnforced());
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        List<Integer> workspaceIds = freshWorkspacePair(suffix);
+        int selectedWorkspaceId = workspaceIds.getFirst();
+        int otherWorkspaceId = workspaceIds.getLast();
+        User account = passwordAccount(suffix);
+        jdbcTemplate.update("""
+                INSERT INTO workspace_member (workspace_id, user_id, role)
+                VALUES (?, ?, ?), (?, ?, ?)
+                """, selectedWorkspaceId, account.getId(), selectedWorkspaceIsPrivileged ? "admin" : "member",
+                otherWorkspaceId, account.getId(), selectedWorkspaceIsPrivileged ? "member" : "admin");
+        assertEquals(2, count("""
+                SELECT COUNT(DISTINCT w.org_id)
+                FROM workspace_member wm JOIN workspace w ON w.id = wm.workspace_id
+                WHERE wm.user_id = ? AND wm.status = 'active'
+                """, account.getId()));
+        assertTrue(userMapper.isPrivilegedAccount(account.getId()));
+        assertFalse(webAuthnService.hasPasskey(account.getId()));
+        MockHttpSession session = authenticatedSession(account);
+        workspaceMapper.clearLastActiveWorkspaceId(account.getId());
+        MockHttpServletRequestBuilder request = emailChangeRequest(session, suffix);
+        switch (selection) {
+            case "header" -> {
+                workspaceMapper.setLastActiveWorkspaceId(account.getId(), otherWorkspaceId);
+                request.header("X-Workspace-Id", String.valueOf(selectedWorkspaceId))
+                        .cookie(new Cookie(WorkspaceCookie.NAME, String.valueOf(otherWorkspaceId)));
+            }
+            case "cookie" -> {
+                workspaceMapper.setLastActiveWorkspaceId(account.getId(), otherWorkspaceId);
+                request.cookie(new Cookie(WorkspaceCookie.NAME, String.valueOf(selectedWorkspaceId)));
+            }
+            case "remembered" -> workspaceMapper.setLastActiveWorkspaceId(account.getId(), selectedWorkspaceId);
+            case "first" -> assertEquals(selectedWorkspaceId,
+                    workspaceMapper.getWorkspacesForUser(account.getId()).getFirst().getId());
+            default -> throw new IllegalArgumentException("Unknown workspace selection: " + selection);
+        }
+
+        assertTimeoutPreemptively(NO_SELF_LOCK, () -> mockMvc.perform(request)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSKEY_ENROLLMENT_REQUIRED")));
+
+        assertEquals(0, count("SELECT COUNT(*) FROM email_change_token WHERE user_id = ?", account.getId()));
+        List<Map<String, Object>> refusals = jdbcTemplate.queryForList("""
+                SELECT actor_id, summary, outcome, context, workspace_id, org_id, chain_scope_type, chain_scope_id
+                FROM audit_log
+                WHERE action = 'auth.email_change.refused' AND entity_id = ?
+                """, account.getId());
+        assertEquals(1, refusals.size(), "the pre-lock refusal must be audited exactly once");
+        Map<String, Object> refusal = refusals.getFirst();
+        assertEquals(account.getId(), ((Number) refusal.get("actor_id")).intValue());
+        assertEquals("Email change refused for a privileged account", refusal.get("summary"));
+        assertEquals("failure", refusal.get("outcome"));
+        assertTrue(String.valueOf(refusal.get("context")).contains("privileged_mfa_enrollment_required"));
+        assertNull(refusal.get("workspace_id"));
+        assertNull(refusal.get("org_id"));
+        assertEquals("system", refusal.get("chain_scope_type"));
+        assertEquals(0, ((Number) refusal.get("chain_scope_id")).intValue());
+        assertEquals(0, count("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE action = 'auth.email_change.refused' AND entity_id = ?
+                  AND (workspace_id IS NOT NULL OR org_id IS NOT NULL
+                       OR chain_scope_type <> 'system' OR chain_scope_id <> 0)
+                """, account.getId()));
     }
 
     private void promoteInIndependentTransaction(int workspaceId, int userId) {
@@ -191,19 +275,38 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
 
     private ResultActions requestEmailChange(MockHttpSession session, int workspaceId, String suffix)
             throws Exception {
-        return mockMvc.perform(post("/api/users/me/email-change")
+        return mockMvc.perform(emailChangeRequest(session, suffix)
+                .header("X-Workspace-Id", String.valueOf(workspaceId)));
+    }
+
+    private MockHttpServletRequestBuilder emailChangeRequest(MockHttpSession session, String suffix) {
+        return post("/api/users/me/email-change")
                 .session(session)
                 .with(csrf().asHeader())
-                .header("X-Workspace-Id", String.valueOf(workspaceId))
                 .contentType("application/json")
                 .content("{\"newEmail\":\"moved_" + suffix + "@example.com\",\"currentPassword\":\""
-                        + PASSWORD + "\"}"));
+                        + PASSWORD + "\"}");
     }
 
     private int count(String sql, int userId) {
         Integer count = jdbcTemplate.queryForObject(sql, Integer.class, userId);
         assertNotNull(count);
         return count;
+    }
+
+    private List<Integer> freshWorkspacePair(String suffix) {
+        String selectedSlug = "pec-selected-" + suffix;
+        String otherSlug = "pec-other-" + suffix;
+        jdbcTemplate.update("INSERT INTO organization (name, slug) VALUES (?, ?), (?, ?)",
+                "Selected org " + suffix, selectedSlug, "Other org " + suffix, otherSlug);
+        jdbcTemplate.update("""
+                INSERT INTO workspace (name, slug, org_id)
+                SELECT name, slug, id FROM organization WHERE slug IN (?, ?) ORDER BY id
+                """, selectedSlug, otherSlug);
+        List<Integer> workspaceIds = jdbcTemplate.queryForList(
+                "SELECT id FROM workspace WHERE slug IN (?, ?) ORDER BY id", Integer.class, selectedSlug, otherSlug);
+        assertEquals(2, workspaceIds.size());
+        return workspaceIds;
     }
 
     private int freshWorkspace(String suffix) {

@@ -296,8 +296,14 @@ and the session carries a fresh WebAuthn step-up:
 
 Each refusal is audited as `auth.email_change.refused`, with the reason
 `privileged_mfa_enrollment_required`, `privileged_mfa_attestation_required` or
-`recent_authentication_required`. Unprivileged accounts
-change their email with the current password alone, as before.
+`recent_authentication_required`. Because privilege is account-wide, these rows use explicit null
+`workspace_id` and `org_id` and land on the `system` chain (`chain_scope_id = 0`), regardless of
+workspace selection by header, cookie, remembered workspace or first membership (#1997). Readers
+and alerting must look for these refusals on the `system` chain. Existing tenant-scoped rows remain
+in their original chains; the append-only log is not backfilled. Pre-lock refusals are appended
+immediately; refusals first observed under the account lock are appended after the request's
+transaction completes. Unprivileged accounts change their email with the current password alone,
+as before.
 
 The gate is independent of `CONNEX_PRIVILEGED_MFA_ENFORCED`. With enforcement on, confinement
 already refuses the endpoint for an unenrolled privileged account. With enforcement off, this gate

@@ -104,7 +104,8 @@ public class EmailChangeService {
      * custom roles are locked. That role lock also clears this transaction's mapper read cache, so
      * the second evaluation re-reads privilege and passkey state instead of reusing the pre-lock
      * answers, and a promotion committed while this request waited is observed.
-     * The refusal audit is an independent append that takes the actor's {@code app_user} row
+     * The refusal audit uses explicit null workspace and organization scope because privilege is
+     * account-wide (#1997). It is an independent append that takes the actor's {@code app_user} row
      * shared. A pre-lock refusal is audited at once. A refusal that first appears under the lock is
      * audited once the transaction completes, because appending there would wait on this
      * transaction's own exclusive lock until the InnoDB timeout (#1993).
@@ -226,11 +227,13 @@ public class EmailChangeService {
     }
 
     private void auditEmailChangeRefusal(int userId, String reason) {
-        auditService.recordFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
+        auditService.recordFailureScoped(REFUSED_ACTION, "user", userId, null, null, null,
+                REFUSED_SUMMARY, reason);
     }
 
     private void deferEmailChangeRefusalAudit(int userId, String reason) {
-        auditService.deferFailure(REFUSED_ACTION, "user", userId, null, REFUSED_SUMMARY, reason);
+        auditService.deferFailureScoped(REFUSED_ACTION, "user", userId, null, null, null,
+                REFUSED_SUMMARY, reason);
     }
 
     private void validateRequest(User user, String newEmail) {

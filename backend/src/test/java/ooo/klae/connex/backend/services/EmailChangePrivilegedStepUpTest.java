@@ -51,7 +51,9 @@ import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
  * account may only move it with a passkey and a fresh WebAuthn step-up. The gate must hold with
  * confinement on and off: each case runs against a real {@link SessionSecurityService} under both
  * {@code privileged-mfa.enforced} values. Refusal audits are independent appends that take the
- * actor's {@code app_user} row shared, so they may only run before this transaction locks it.
+ * actor's {@code app_user} row shared, so they run before this transaction locks it or after it
+ * completes. Both paths use explicit null workspace and organization scope on the system chain
+ * because privilege is account-wide (#1997).
  */
 class EmailChangePrivilegedStepUpTest {
     private static final int SIMULATED_STEP_UP_PASSKEY_ROW_ID = 0;
@@ -88,10 +90,12 @@ class EmailChangePrivilegedStepUpTest {
 
         InOrder order = inOrder(authService, auditService, userMapper);
         order.verify(authService).requireCurrentPassword(USER_ID, PASSWORD, CLIENT_IP);
-        order.verify(auditService).recordFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), anyString(), eq("privileged_mfa_enrollment_required"));
+        order.verify(auditService).recordFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
+                eq("privileged_mfa_enrollment_required"));
         verify(userMapper, never()).lockById(anyInt());
-        verify(auditService, times(1)).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, times(1)).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
@@ -106,8 +110,10 @@ class EmailChangePrivilegedStepUpTest {
         assertThrows(RecentAuthenticationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        verify(auditService).recordFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), anyString(), eq("recent_authentication_required"));
+        verify(auditService).recordFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
+                eq("recent_authentication_required"));
+        verify(auditService, never()).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
         verify(userMapper, never()).lockById(anyInt());
         verifyNoTokenIssued();
@@ -151,7 +157,9 @@ class EmailChangePrivilegedStepUpTest {
         order.verify(tokenMapper).insert(eq(USER_ID), eq(NEW_EMAIL), anyString(), eq("198.51.100.4"),
                 eq(30), eq(SESSION_EPOCH));
         order.verify(emailService).sendVerificationEmail(any(), eq(NEW_EMAIL), anyString());
+        verify(auditService, never()).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
     }
 
@@ -167,7 +175,9 @@ class EmailChangePrivilegedStepUpTest {
         verify(privilegedAccountService, times(2)).enforcedStanding(USER_ID);
         verify(tokenMapper).insert(eq(USER_ID), eq(NEW_EMAIL), anyString(), eq("198.51.100.4"),
                 anyInt(), eq(SESSION_EPOCH));
+        verify(auditService, never()).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
     }
 
@@ -192,9 +202,11 @@ class EmailChangePrivilegedStepUpTest {
         order.verify(userMapper).lockById(USER_ID);
         order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
         order.verify(privilegedAccountService).enforcedStanding(USER_ID);
-        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), eq("Email change refused for a privileged account"), eq("privileged_mfa_enrollment_required"));
-        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
+        order.verify(auditService).deferFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
+                eq("privileged_mfa_enrollment_required"));
+        verify(auditService, times(1)).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
@@ -212,9 +224,11 @@ class EmailChangePrivilegedStepUpTest {
 
         InOrder order = inOrder(userMapper, auditService);
         order.verify(userMapper).lockById(USER_ID);
-        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), eq("Email change refused for a privileged account"), eq("recent_authentication_required"));
-        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
+        order.verify(auditService).deferFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
+                eq("recent_authentication_required"));
+        verify(auditService, times(1)).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
@@ -233,10 +247,11 @@ class EmailChangePrivilegedStepUpTest {
         assertThrows(PrivilegedMfaAttestationRequiredException.class,
                 () -> service.requestChange(NEW_EMAIL, PASSWORD, CLIENT_IP));
 
-        verify(auditService).recordFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), eq("Email change refused for a privileged account"),
+        verify(auditService).recordFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
                 eq("privileged_mfa_attestation_required"));
-        verify(auditService, times(1)).recordFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, times(1)).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).deferFailure(any(), any(), any(), any(), any(), any());
         verify(userMapper, never()).lockById(anyInt());
         verifyNoTokenIssued();
@@ -264,10 +279,11 @@ class EmailChangePrivilegedStepUpTest {
         order.verify(userMapper).lockById(USER_ID);
         order.verify(userMapper).lockAssignedCustomRoleIds(USER_ID);
         order.verify(privilegedAccountService).enforcedStanding(USER_ID);
-        order.verify(auditService).deferFailure(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
-                isNull(), eq("Email change refused for a privileged account"),
+        order.verify(auditService).deferFailureScoped(eq("auth.email_change.refused"), eq("user"), eq(USER_ID),
+                isNull(), isNull(), isNull(), eq("Email change refused for a privileged account"),
                 eq("privileged_mfa_attestation_required"));
-        verify(auditService, times(1)).deferFailure(any(), any(), any(), any(), any(), any());
+        verify(auditService, times(1)).deferFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(auditService, never()).recordFailureScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(auditService, never()).recordFailure(any(), any(), any(), any(), any(), any());
         verifyNoTokenIssued();
     }
