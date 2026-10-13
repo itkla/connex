@@ -460,6 +460,12 @@
       )
   </select>
 
+  <select id="countGrandfatheredCoverage" resultType="long">
+    SELECT COUNT(*)
+    FROM privileged_credential_attestation
+    WHERE source = 'GRANDFATHERED'
+  </select>
+
   <select id="listUnenrolledPrivilegedAccounts"
       resultType="ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount">
     SELECT u.id,

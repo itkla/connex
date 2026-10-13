@@ -232,6 +232,15 @@ public class PrivilegedAccountService {
     }
 
     /**
+     * Counts per-organization coverage rows trusted by the cutover, for the startup posture (#1534).
+     *
+     * @return the number of coverage rows with the grandfathered source
+     */
+    public long grandfatheredCoverageCount() {
+        return userMapper.countGrandfatheredCoverage();
+    }
+
+    /**
      * Lists accounts that confinement will hold at enrollment: privileged under
      * {@link #isPrivileged(int)} and holding no passkey. Read-only; takes no locks.
      *

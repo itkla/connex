@@ -1371,7 +1371,8 @@ account root.
   - **Isolation:** issuing, revoking and redeeming run at `READ COMMITTED`. Each asserts on entry,
     before any read, that it runs in an active `READ COMMITTED` transaction, because a method's
     isolation annotation cannot change a caller's transaction that it joins.
-  - **Grantor re-checks** (once attestation is enforced) read after the authority locks:
+  - **Grantor re-checks** apply whatever the attestation enforcement switch and read after the
+    authority locks:
     - issuing and revoking read whether the grantor's step-up passkey is still the grantor's and
       covered in the grant's organization;
     - redeeming reads whether the grantor still holds any such passkey.

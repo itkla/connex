@@ -29,7 +29,8 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
  * (#1533), so an operator can see which accounts confinement holds at enrollment, and how many of
  * those cannot enroll on their own, before they surface as support tickets. It also counts the
  * privileged accounts whose passkeys are not yet approved in every organization where they are
- * privileged, which attestation enforcement confines (#1534). The inventory is
+ * privileged, which attestation enforcement confines (#1534), and the per-organization coverage
+ * rows grandfathered at the cutover. The inventory is
  * rollout guidance, not a control: a non-empty population, or an inventory query that fails, never
  * prevents startup. The policy audit itself remains strict.
  *
@@ -121,9 +122,11 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
         long withoutSelfService;
         List<Integer> sampleIds;
         long attestationRequired;
+        long grandfatheredCoverage;
         try {
             counts = privilegedAccountService.unenrolledPrivilegedAccountCounts();
             attestationRequired = privilegedAccountService.attestationRequiredAccountCount();
+            grandfatheredCoverage = privilegedAccountService.grandfatheredCoverageCount();
             withoutSelfService = withoutSelfService(counts, bootstrapConfirmationEnabled,
                     bootstrapConfirmationEnabled && bootstrapConfirmationEmailService.canDeliver());
             sampleIds = counts.total() == 0
@@ -140,6 +143,7 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
         posture.put("unenrolledPrivilegedCount", counts.total());
         posture.put("unenrolledWithoutSelfServiceCount", withoutSelfService);
         posture.put("attestationRequiredCount", attestationRequired);
+        posture.put("grandfatheredCoverageCount", grandfatheredCoverage);
         if (counts.total() > 0) {
             log.warn("{} privileged accounts have no passkey and {} of them cannot self-enroll; "
                     + "first {} account ids: {}",

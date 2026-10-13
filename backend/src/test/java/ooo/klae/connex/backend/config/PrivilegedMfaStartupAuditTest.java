@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.dao.QueryTimeoutException;
@@ -94,7 +96,7 @@ class PrivilegedMfaStartupAuditTest {
                         "enforced", true, "bootstrapConfirmationEnabled", false,
                         "configuredAttestationEnforcedValue", "false", "attestationEnforced", false,
                         "unenrolledPrivilegedCount", 0L, "unenrolledWithoutSelfServiceCount", 0L,
-                        "attestationRequiredCount", 0L)));
+                        "attestationRequiredCount", 0L, "grandfatheredCoverageCount", 0L)));
     }
 
     @Test
@@ -128,12 +130,14 @@ class PrivilegedMfaStartupAuditTest {
      * The posture records the attestation switch as configured and as applied, and counts the
      * privileged accounts attestation enforcement confines, whether or not it is on yet (#1534).
      */
-    @Test
-    void theAttestationSwitchAndTheAccountsItConfinesAreRecorded() {
+    @ParameterizedTest
+    @ValueSource(strings = {" TRUE ", " FALSE "})
+    void theAttestationSwitchAndCoverageInventoriesAreRecorded(String configured) {
         PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
-        properties.setAttestationEnforced(" TRUE ");
+        properties.setAttestationEnforced(configured);
         PrivilegedAccountService privilegedAccounts = inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
         when(privilegedAccounts.attestationRequiredAccountCount()).thenReturn(3L);
+        when(privilegedAccounts.grandfatheredCoverageCount()).thenReturn(17L);
         AuditService auditService = mock(AuditService.class);
 
         start(new PrivilegedMfaStartupAudit(properties, confirmationPolicy(true), deliverable(true),
@@ -144,9 +148,11 @@ class PrivilegedMfaStartupAuditTest {
                 eq("auth.mfa.policy.configured"), eq("security_policy"),
                 isNull(), isNull(), isNull(), eq("privileged-mfa"), any(), captured.capture());
         Map<?, ?> posture = assertInstanceOf(Map.class, captured.getValue());
-        assertEquals("TRUE", posture.get("configuredAttestationEnforcedValue"));
-        assertEquals(true, posture.get("attestationEnforced"));
+        assertEquals(configured.trim(), posture.get("configuredAttestationEnforcedValue"));
+        assertEquals(Boolean.parseBoolean(configured.trim()), posture.get("attestationEnforced"));
         assertEquals(3L, posture.get("attestationRequiredCount"));
+        assertEquals(17L, posture.get("grandfatheredCoverageCount"));
+        verify(privilegedAccounts).grandfatheredCoverageCount();
     }
 
     /**
@@ -254,6 +260,26 @@ class PrivilegedMfaStartupAuditTest {
                 argThat(value -> value instanceof Map<?, ?> posture
                         && "unavailable".equals(posture.get("unenrolledPrivilegedInventory"))
                         && !posture.containsKey("unenrolledPrivilegedCount")));
+    }
+
+    /** A failing cutover count follows the inventory's existing non-blocking failure contract. */
+    @Test
+    void aFailingGrandfatheredInventoryDoesNotBlockStartup() {
+        AuditService auditService = mock(AuditService.class);
+        PrivilegedAccountService privilegedAccounts = inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
+        when(privilegedAccounts.grandfatheredCoverageCount())
+                .thenThrow(new QueryTimeoutException("cutover inventory timed out"));
+
+        assertDoesNotThrow(() -> start(new PrivilegedMfaStartupAudit(
+                new PrivilegedMfaProperties(), confirmationPolicy(true), deliverable(true),
+                privilegedAccounts, auditService, CLOCK)));
+
+        verify(auditService).recordStrictIndependentScoped(
+                eq("auth.mfa.policy.configured"), eq("security_policy"),
+                isNull(), isNull(), isNull(), eq("privileged-mfa"), any(),
+                argThat(value -> value instanceof Map<?, ?> posture
+                        && "unavailable".equals(posture.get("unenrolledPrivilegedInventory"))
+                        && !posture.containsKey("grandfatheredCoverageCount")));
     }
 
     private static Map<?, ?> recordedPosture(

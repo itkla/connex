@@ -294,7 +294,7 @@ class PrivilegedCredentialProvenanceIntegrationTest {
     }
 
     @Test
-    void theSchemaRejectsAnUnknownSourceAndAssuranceWithoutItsTime() {
+    void theSchemaAdmitsGrandfatheredButRejectsAnUnknownSourceAndAssuranceWithoutItsTime() {
         User user = newUser();
         int rowId = insertCredential(newHandle(user));
         Organization organization = newOrganization();
@@ -310,6 +310,12 @@ class PrivilegedCredentialProvenanceIntegrationTest {
             .contains("chk_privileged_credential_attestation_source"));
         assertTrue(untimedAssurance.getMostSpecificCause().getMessage()
             .contains("chk_webauthn_credential_privileged_assured_at"));
+
+        assertEquals(1, jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'GRANDFATHERED')",
+            rowId, organization.getId()));
+        assertEquals(List.of(new Coverage(organization.getId(), "GRANDFATHERED")), coverage(rowId));
     }
 
     /**

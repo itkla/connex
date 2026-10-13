@@ -408,7 +408,8 @@ A passkey enrolled while an account held no privilege must not, on its own, sati
 a later promotion: an attacker holding only the password of an ordinary account could enroll one and
 wait. The remedy is grantor-mediated attestation per organization, delivered in slices. Provenance
 is recorded for every passkey, and [standing](#standing-and-attestation-enforcement) reads it.
-**It only affects access once attestation is enforced**, which is off by default.
+Standing confines accounts only once attestation is enforced, which is off by default.
+[Grantor vouching](#attestation-codes) applies whatever that switch from the release carrying V225.
 
 ### What a passkey can carry
 
@@ -417,7 +418,6 @@ sources:
 - `BREAK_GLASS` is recorded when the operator recovery session itself enrolls the replacement
   passkey. The enrolling session's `SPRING_SESSION.PRIMARY_ID` and epoch must match the restamp grant
   that recovery issued, so another session of the same account cannot claim it by enrolling first.
-- `GRANDFATHERED` is reserved for the cutover that switches enforcement on.
 
 **Per-organization coverage** sits in `privileged_credential_attestation`:
 - **`FOUNDER`** covers the passkeys of an organization's founding owner.
@@ -431,10 +431,12 @@ sources:
   to the account. The step-up stamp names its passkey in a binding tied to the stamp's account and
   time, so a stamp refreshed without that binding yields no inheritance.
 - **`GRANTOR`** is written when the account redeems an attestation code with that passkey (below).
+- **`GRANDFATHERED`** records the per-organization trust assigned by V225 to passkeys of accounts
+  privileged in that active organization at cutover.
 
 **Rules:**
-- A direct source (`FOUNDER`, `GRANTOR`) is never replaced by `INHERITED`. A `GRANTOR` redemption
-  replaces an `INHERITED` row and leaves an existing direct row exactly as it was.
+- A direct source (`FOUNDER`, `GRANTOR`, `GRANDFATHERED`) is never replaced by `INHERITED`.
+  A `GRANTOR` redemption replaces an `INHERITED` row and leaves an existing direct row exactly as it was.
 - An organization already being torn down receives no new coverage.
 - Coverage is deleted with its passkey or its organization.
 
@@ -458,6 +460,18 @@ Both need a fresh step-up, and nobody can issue a code to themselves. The author
 *local* role: a delegate who could grant that role there can attest the member, and the coverage
 then counts wherever the member is privileged in that organization.
 
+**Grantors vouch org-locally.** From the release carrying V225, this applies whatever
+`CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` says. Issuing or revoking checks that the grantor's
+step-up is fresh on entry. Under the authority locks it then requires the stamp's passkey to be the
+grantor's own and covered in the code's organization (or `BREAK_GLASS`): vouching rests on that
+organization alone. Redemption refuses `grantor_unattested` once the grantor holds no such passkey
+there. V225 grandfathers every passkey of every account privileged at cutover in each active
+organization where it is privileged, so legitimate cutover grantors can vouch from the first request.
+A new organization's founder also receives coverage. Requiring vouching during the dark period
+prevents later promotions from creating permanent `GRANTOR` coverage through unapproved passkeys.
+Until the web approval flow ships, an uncovered grantor receives today's
+`403 RECENT_AUTHENTICATION_REQUIRED` at issuance or revocation.
+
 **The code:**
 - It is 80 random bits, shown to the grantor once as four groups of Crockford base32. It is never
   stored, logged or audited, only a SHA-256 digest bound to the grantee, so it can't match anyone
@@ -472,6 +486,7 @@ then counts wherever the member is privileged in that organization.
 2. A redemption transaction takes the grant's authority locks and re-checks, under them, that:
    - the grantor still holds the authority;
    - the member is still a member;
+   - the grantor still holds a covered passkey in the organization or one carrying `BREAK_GLASS`;
    - the session's epoch is current;
    - the passkey is still the member's.
 
@@ -480,7 +495,7 @@ then counts wherever the member is privileged in that organization.
 
 **Refusals:**
 - Every reason the code can't be used answers one `403 MFA_ATTESTATION_REFUSED`: wrong, expired,
-  revoked, used, exhausted, authority lost, member gone, or (once attestation is enforced) a grantor
+  revoked, used, exhausted, authority lost, member gone, or a grantor
   that no longer holds a passkey covered in the code's organization.
 - After the refused redemption has rolled back, one refusal is counted against each of the member's
   redeemable codes. A code that reaches five refusals can't be redeemed.
@@ -516,8 +531,8 @@ leave the account `ATTESTATION_REQUIRED`. An organization or workspace being tor
 privilege, so it needs no coverage either.
 
 **While `CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` is `false`** (the default), `ATTESTATION_REQUIRED`
-is enforced as `SATISFIED` everywhere. Behavior is then exactly as before: a privileged account with
-any passkey is not confined.
+is enforced as `SATISFIED` everywhere. A privileged account with any passkey is not confined.
+Grantor vouching still applies to approval issuance, revocation and redemption, as described above.
 
 **Once it is `true`**, an `ATTESTATION_REQUIRED` account is refused wherever an unenrolled one is:
 - the browser API confines it with `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`, audited as
@@ -547,11 +562,6 @@ step-up counts only when the session's stamp is bound to one of its own **suffic
   locks. The step-up behind the ceremony must still be fresh, signed by a passkey the account still
   owns and, for a privileged account, sufficient. An account awaiting approval therefore cannot add
   passkeys. The first passkey is the exception, and operator recovery leads back to it.
-- **Grantors vouch org-locally.** Issuing or revoking a code checks only that the grantor's step-up
-  is fresh on entry. Under the authority locks it then requires the stamp's passkey to be the
-  grantor's own and covered in the code's organization (or `BREAK_GLASS`): vouching in one
-  organization rests on that organization alone. A code is refused at redemption, as
-  `grantor_unattested`, once its grantor no longer holds such a passkey there.
 
 `GET /api/auth/webauthn/register/requirements` stays reachable while confined. It reports the
 account's enforced `standing`, and `approvalGaps`: for each of the account's own passkeys without
@@ -560,8 +570,15 @@ approved (`credentialId` in the base64url form the passkey list uses, `orgId`, `
 re-reads it after each ceremony, and releases confinement only on `SATISFIED` or `UNPRIVILEGED`.
 
 The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
-holding passkeys of which none is sufficient. These are the accounts that enforcement confines. It
-is counted whether or not enforcement is on, so the population can be drained before switching on.
+holding passkeys of which none is sufficient. These are the accounts that enforcement confines.
+Beside it, `grandfatheredCoverageCount` counts the per-organization coverage rows whose source is
+`GRANDFATHERED`, recording how far the cutover reached. Both are counted whether or not enforcement
+is on, so the confined population can be drained before switching on.
+
+A workspace-only owner who is not an organization member and held no passkey at cutover gains no
+founder coverage by enrolling later. If no covered co-owner can approve that passkey through the
+workspace route, the approval path is [operator break-glass recovery](#break-glass-recovery): its
+replacement passkey carries `BREAK_GLASS` assurance and satisfies standing in every organization.
 
 **Do not switch it on yet.** Enforcement ships dark. It is switched on by its own release, after
 the cutover below, ownership offers, and the web client's approval flow have shipped.
@@ -645,19 +662,34 @@ While the switch is `false`, nothing is read or counted, no edit answers `409`, 
 
 ### Rollback and the cutover
 
-Provenance is additive evidence, not a complete history. An older backend serving after a rollback
+Provenance is additive evidence, not a complete history. A backend that predates provenance (slice 1)
 records none of it. It:
 - clears a recovery grant without recording break-glass assurance;
 - refreshes step-up stamps without naming their passkey;
 - changes org roles without clearing the founder flag.
 
-The first two only leave coverage unrecorded, which fails safe. The stale founder flag is narrowed
-because founder coverage also requires the account to still own the organization. The cutover that
-switches enforcement on must recompute founder flags from current owner rows, not trust the flags
-written before it.
+**The cutover (V224, V225).** The release carrying these migrations applies them in a coordinated
+restart, before the new backend serves (see [UPGRADING.md](UPGRADING.md)). It trusts exactly the
+passkeys of the accounts that are privileged when it runs:
+- V224 admits `GRANDFATHERED` as a coverage source.
+- V225, in one transaction:
+  1. recomputes every founder flag from the current owner rows, so existing organization owners are
+     founders and nobody else is;
+  2. deletes every coverage row whose passkey's account is not privileged in that organization at
+     the cutover, whatever its source;
+  3. covers every passkey of every account privileged at the cutover, in each organization where it
+     is, with `GRANDFATHERED` where no row exists, keeping existing provenance;
+  4. revokes every approval code still open.
 
-The cutover must also:
-1. fence issuance and redemption with a maintenance barrier, so no pre-cutover instance serves them;
-2. revoke every attestation code still open, since those codes were issued before "sufficient" was
-   enforced;
-3. only then switch enforcement on.
+From the same release, issuing, revoking and redeeming require the grantor's passkey to vouch in the
+code's organization whatever the switch, so every coverage row written after the cutover traces back
+to it. Account-wide `BREAK_GLASS` assurance comes from operator recovery, not a grantor, and is kept.
+
+**Rollback floor.** After V225, no backend older than that release may serve. An older one skips
+grantor vouching while the switch is off, so it could write coverage that nothing would remove, and
+the oldest ones change roles without clearing the founder flag. If one did serve, follow the
+reconciliation in [UPGRADING.md](UPGRADING.md) before reopening approvals.
+
+**Switching on** is a later release that only changes the default. Before it, drain the accounts the
+startup event counts in `attestationRequiredCount`: privileged after the cutover, or enrolled since,
+without a passkey approved where they are privileged.

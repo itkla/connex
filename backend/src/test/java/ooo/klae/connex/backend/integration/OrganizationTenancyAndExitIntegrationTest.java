@@ -272,6 +272,10 @@ class OrganizationTenancyAndExitIntegrationTest {
         orgMemberMapper.addMember(organization.getId(), grantor.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), coOwner.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), member.getId(), "admin");
+        SoftwarePasskey grantorPasskey = register(grantor);
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'FOUNDER')", grantorPasskey.rowId(), organization.getId());
         SoftwarePasskey passkey = register(member);
         List<MfaAttestationCodeDto> issued = new ArrayList<>();
 
@@ -279,7 +283,7 @@ class OrganizationTenancyAndExitIntegrationTest {
             () -> organizationMapper.lockById(organization.getId()),
             "organization", organization.getId(), false,
             List.of(
-                () -> steppedUpAs(grantor, () -> {
+                () -> steppedUpAs(grantor, grantorPasskey.rowId(), () -> {
                     issued.add(attestationService.issueForOrganization(
                         organization.getId(), grantor.getId(), member.getId()));
                     return DONE;
@@ -309,8 +313,12 @@ class OrganizationTenancyAndExitIntegrationTest {
         orgMemberMapper.addMember(organization.getId(), grantor.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), coOwner.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), member.getId(), "admin");
+        SoftwarePasskey grantorPasskey = register(grantor);
+        jdbcTemplate.update(
+            "INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source)"
+                + " VALUES (?, ?, 'FOUNDER')", grantorPasskey.rowId(), organization.getId());
         SoftwarePasskey passkey = register(member);
-        MfaAttestationCodeDto issued = steppedUpAs(grantor, () -> attestationService.issueForOrganization(
+        MfaAttestationCodeDto issued = steppedUpAs(grantor, grantorPasskey.rowId(), () -> attestationService.issueForOrganization(
             organization.getId(), grantor.getId(), member.getId()));
         int epoch = userMapper.currentSessionEpoch(member.getId());
 
@@ -384,8 +392,12 @@ class OrganizationTenancyAndExitIntegrationTest {
     }
 
     private <T> T steppedUpAs(User user, Supplier<T> action) {
+        return steppedUpAs(user, 0, action);
+    }
+
+    private <T> T steppedUpAs(User user, int credentialRowId, Supplier<T> action) {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        sessionSecurityService.markStepUp(request, user.getId(), 0);
+        sessionSecurityService.markStepUp(request, user.getId(), credentialRowId);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         SoftwarePasskeys.authenticate(user);
         try {

@@ -24,6 +24,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
@@ -33,6 +35,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import ooo.klae.connex.backend.beans.PrivilegedMfaAttestationGrant;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -83,6 +86,7 @@ class PrivilegedMfaAttestationServiceTest {
 
     @Test
     void issuingThroughAWorkspaceStepsUpLocksSupersedesAndAuditsWithoutTheCode() {
+        stubVouchingStepUp();
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
         when(grantMapper.revokeOpen(GRANTEE_ID, ORG_ID, GRANTOR_ID)).thenReturn(1);
         stubStoredGrant();
@@ -119,6 +123,7 @@ class PrivilegedMfaAttestationServiceTest {
 
     @Test
     void anOrganizationOwnersCodeTakesTheOrgAuthorityAndNamesNoWorkspace() {
+        stubVouchingStepUp();
         stubStoredGrant();
 
         service.issueForOrganization(ORG_ID, GRANTOR_ID, GRANTEE_ID);
@@ -180,13 +185,18 @@ class PrivilegedMfaAttestationServiceTest {
     }
 
     /**
-     * Once attestation is enforced, a grantor vouches in an organization only with a step-up
+     * Whatever the switch, a grantor vouches in an organization only with a step-up
      * passkey it still owns that is covered there, re-checked after the authority locks (#1534).
      * The grant's organization alone matters: the passkey need not be sufficient everywhere.
      */
-    @Test
-    void anEnforcedGrantorMustStepUpWithAPasskeyCoveredInTheGrantsOrganization() {
-        when(privilegedAccountService.isAttestationEnforced()).thenReturn(true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aGrantorMustStepUpWithAPasskeyCoveredInTheGrantsOrganization(boolean enforced) {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setAttestationEnforced(Boolean.toString(enforced));
+        PrivilegedAccountService accounts = new PrivilegedAccountService(userMapper, properties);
+        service = new PrivilegedMfaAttestationService(workspaceService, orgMemberService, grantMapper,
+            attestationMapper, credentialMapper, userMapper, sessionSecurityService, auditService, accounts);
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
         when(sessionSecurityService.currentStepUpProof(GRANTOR_ID)).thenReturn(new StepUpProof(PASSKEY_ROW_ID, 1L));
 
@@ -194,25 +204,23 @@ class PrivilegedMfaAttestationServiceTest {
             () -> service.issueForWorkspace(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID));
         verifyNoInteractions(grantMapper, auditService);
 
-        when(privilegedAccountService.isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID))
+        when(userMapper.isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID))
             .thenReturn(true);
         stubStoredGrant();
         when(userMapper.getUserById(GRANTEE_ID)).thenReturn(user(GRANTEE_ID));
 
         service.issueForWorkspace(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID);
 
-        InOrder order = inOrder(sessionSecurityService, workspaceService, privilegedAccountService, grantMapper);
+        InOrder order = inOrder(sessionSecurityService, workspaceService, userMapper, grantMapper);
         order.verify(sessionSecurityService).requireFreshStepUp(GRANTOR_ID);
         order.verify(workspaceService).lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID);
-        order.verify(privilegedAccountService).isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID);
+        order.verify(userMapper).isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID);
         order.verify(grantMapper).insert(any(PrivilegedMfaAttestationGrant.class));
         verify(sessionSecurityService, never()).requireRecentAuthentication(anyInt());
     }
 
     @Test
-    void anEnforcedGrantorWhoseStampNamesNoPasskeyCannotRevoke() {
-        when(privilegedAccountService.isAttestationEnforced()).thenReturn(true);
-
+    void aGrantorWhoseStampNamesNoPasskeyCannotRevokeEvenWhileAttestationIsOff() {
         assertThrows(RecentAuthenticationRequiredException.class,
             () -> service.revokeForOrganization(ORG_ID, GRANTOR_ID, GRANTEE_ID));
 
@@ -221,21 +229,23 @@ class PrivilegedMfaAttestationServiceTest {
         verify(privilegedAccountService, never()).isPasskeyCoveredInOrganization(anyInt(), anyInt(), anyInt());
     }
 
-    /** While attestation is off, grants rest on authority alone, as before (#1534). */
+    /** Dark-period issuance cannot turn an unapproved grantor's passkey into permanent trust. */
     @Test
-    void withAttestationOffTheGrantorsPasskeyIsNotReChecked() {
+    void withAttestationOffTheGrantorsPasskeyIsStillReChecked() {
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
-        stubStoredGrant();
-        when(userMapper.getUserById(GRANTEE_ID)).thenReturn(user(GRANTEE_ID));
+        when(sessionSecurityService.currentStepUpProof(GRANTOR_ID)).thenReturn(new StepUpProof(PASSKEY_ROW_ID, 1L));
 
-        service.issueForWorkspace(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID);
+        assertThrows(RecentAuthenticationRequiredException.class,
+            () -> service.issueForWorkspace(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID));
 
-        verify(sessionSecurityService, never()).currentStepUpProof(anyInt());
-        verify(privilegedAccountService, never()).isPasskeyCoveredInOrganization(anyInt(), anyInt(), anyInt());
+        verify(sessionSecurityService).currentStepUpProof(GRANTOR_ID);
+        verify(privilegedAccountService).isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID);
+        verifyNoInteractions(grantMapper, auditService);
     }
 
     @Test
     void revokingAuditsOnlyWhenACodeWasOpen() {
+        stubVouchingStepUp();
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
         when(grantMapper.revokeOpen(GRANTEE_ID, ORG_ID, GRANTOR_ID)).thenReturn(0, 1);
         when(userMapper.getUserById(GRANTEE_ID)).thenReturn(user(GRANTEE_ID));
@@ -290,6 +300,7 @@ class PrivilegedMfaAttestationServiceTest {
 
     @Test
     void anOrganizationGrantIsRedeemedUnderTheOwnersAuthority() {
+        when(privilegedAccountService.hasPasskeyCoveredInOrganization(GRANTOR_ID, ORG_ID)).thenReturn(true);
         PrivilegedMfaAttestationGrant grant = grant(null);
         when(grantMapper.findByDigest(digest())).thenReturn(grant);
         when(userMapper.currentSessionEpoch(GRANTEE_ID)).thenReturn(SESSION_EPOCH);
@@ -327,14 +338,13 @@ class PrivilegedMfaAttestationServiceTest {
     }
 
     /**
-     * Once attestation is enforced, a grantor who no longer holds a passkey covered in the grant's
+     * Whatever the switch, a grantor who no longer holds a passkey covered in the grant's
      * organization can no longer pass coverage on (#1534); the code answers like every refusal.
      */
     @Test
-    void anEnforcedGrantorWhoLostCoverageInTheOrganizationIsARefusal() {
+    void aGrantorWhoLostCoverageInTheOrganizationIsARefusalEvenWhileAttestationIsOff() {
         when(grantMapper.findByDigest(digest())).thenReturn(grant(WORKSPACE_ID));
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
-        when(privilegedAccountService.isAttestationEnforced()).thenReturn(true);
 
         assertRefused("grantor_unattested");
 
@@ -346,6 +356,7 @@ class PrivilegedMfaAttestationServiceTest {
 
     @Test
     void aSessionWhoseEpochMovedIsRefusedBeforeTheGrantIsClaimed() {
+        when(privilegedAccountService.hasPasskeyCoveredInOrganization(GRANTOR_ID, ORG_ID)).thenReturn(true);
         when(grantMapper.findByDigest(digest())).thenReturn(grant(WORKSPACE_ID));
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
         when(userMapper.currentSessionEpoch(GRANTEE_ID)).thenReturn(SESSION_EPOCH + 1);
@@ -394,9 +405,16 @@ class PrivilegedMfaAttestationServiceTest {
     }
 
     private void stubRedeemableWorkspaceGrant() {
+        when(privilegedAccountService.hasPasskeyCoveredInOrganization(GRANTOR_ID, ORG_ID)).thenReturn(true);
         when(grantMapper.findByDigest(digest())).thenReturn(grant(WORKSPACE_ID));
         when(workspaceService.lockAttestationAuthority(WORKSPACE_ID, GRANTOR_ID, GRANTEE_ID)).thenReturn(ORG_ID);
         when(userMapper.currentSessionEpoch(GRANTEE_ID)).thenReturn(SESSION_EPOCH);
+    }
+
+    private void stubVouchingStepUp() {
+        when(sessionSecurityService.currentStepUpProof(GRANTOR_ID)).thenReturn(new StepUpProof(PASSKEY_ROW_ID, 1L));
+        when(privilegedAccountService.isPasskeyCoveredInOrganization(GRANTOR_ID, PASSKEY_ROW_ID, ORG_ID))
+            .thenReturn(true);
     }
 
     private void stubStoredGrant() {

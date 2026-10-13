@@ -103,7 +103,7 @@ class PrivilegedMfaStartupConfigurationTest {
                                     "attestationEnforced", false,
                                     "unenrolledPrivilegedCount", 0L,
                                     "unenrolledWithoutSelfServiceCount", 0L,
-                                    "attestationRequiredCount", 0L)));
+                                    "attestationRequiredCount", 0L, "grandfatheredCoverageCount", 0L)));
                 });
     }
 
