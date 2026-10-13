@@ -662,19 +662,34 @@ While the switch is `false`, nothing is read or counted, no edit answers `409`, 
 
 ### Rollback and the cutover
 
-Provenance is additive evidence, not a complete history. An older backend serving after a rollback
+Provenance is additive evidence, not a complete history. A backend that predates provenance (slice 1)
 records none of it. It:
 - clears a recovery grant without recording break-glass assurance;
 - refreshes step-up stamps without naming their passkey;
 - changes org roles without clearing the founder flag.
 
-The first two only leave coverage unrecorded, which fails safe. The stale founder flag is narrowed
-because founder coverage also requires the account to still own the organization. The cutover that
-switches enforcement on must recompute founder flags from current owner rows, not trust the flags
-written before it.
+**The cutover (V224, V225).** The release carrying these migrations applies them in a coordinated
+restart, before the new backend serves (see [UPGRADING.md](UPGRADING.md)). It trusts exactly the
+passkeys of the accounts that are privileged when it runs:
+- V224 admits `GRANDFATHERED` as a coverage source.
+- V225, in one transaction:
+  1. recomputes every founder flag from the current owner rows, so existing organization owners are
+     founders and nobody else is;
+  2. deletes every coverage row whose passkey's account is not privileged in that organization at
+     the cutover, whatever its source;
+  3. covers every passkey of every account privileged at the cutover, in each organization where it
+     is, with `GRANDFATHERED` where no row exists, keeping existing provenance;
+  4. revokes every approval code still open.
 
-The cutover must also:
-1. fence issuance and redemption with a maintenance barrier, so no pre-cutover instance serves them;
-2. revoke every attestation code still open, since those codes were issued before "sufficient" was
-   enforced;
-3. only then switch enforcement on.
+From the same release, issuing, revoking and redeeming require the grantor's passkey to vouch in the
+code's organization whatever the switch, so every coverage row written after the cutover traces back
+to it. Account-wide `BREAK_GLASS` assurance comes from operator recovery, not a grantor, and is kept.
+
+**Rollback floor.** After V225, no backend older than that release may serve. An older one skips
+grantor vouching while the switch is off, so it could write coverage that nothing would remove, and
+the oldest ones change roles without clearing the founder flag. If one did serve, follow the
+reconciliation in [UPGRADING.md](UPGRADING.md) before reopening approvals.
+
+**Switching on** is a later release that only changes the default. Before it, drain the accounts the
+startup event counts in `attestationRequiredCount`: privileged after the cutover, or enrolled since,
+without a passkey approved where they are privileged.
