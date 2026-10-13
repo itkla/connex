@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -236,17 +237,32 @@ class PrivilegedMfaCutoverMigrationIntegrationTest {
                 (3, 1, 'Teardown workspace', 'teardown-w', 'tearing_down'),
                 (4, 3, 'Teardown organization', 'teardown-o', 'active')
             """);
-        for (int userId = 1; userId <= 12; userId++) {
-            statement.executeUpdate("INSERT INTO app_user (id, username, display_name, email) VALUES ("
-                + userId + ", 'cutover-" + userId + "', 'Cutover fixture', 'cutover-" + userId + "@example.com')");
-            if (userId != 11) {
-                statement.executeUpdate("INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES ('h"
-                    + userId + "', " + userId + ", 'Cutover fixture', 'Cutover fixture')");
-                for (int offset = 0; offset < 2; offset++) {
-                    int credentialId = userId * 10 + offset;
-                    statement.executeUpdate("INSERT INTO webauthn_credential"
-                        + " (id, credential_id, user_entity_user_id, public_key) VALUES ("
-                        + credentialId + ", X'" + String.format("%02x", credentialId) + "', 'h" + userId + "', X'01')");
+        Connection connection = statement.getConnection();
+        try (PreparedStatement users = connection.prepareStatement(
+                    "INSERT INTO app_user (id, username, display_name, email) VALUES (?, ?, 'Cutover fixture', ?)");
+                PreparedStatement entities = connection.prepareStatement(
+                    "INSERT INTO webauthn_user_entity (id, user_id, name, display_name)"
+                        + " VALUES (?, ?, 'Cutover fixture', 'Cutover fixture')");
+                PreparedStatement credentials = connection.prepareStatement(
+                    "INSERT INTO webauthn_credential (id, credential_id, user_entity_user_id, public_key)"
+                        + " VALUES (?, ?, ?, ?)")) {
+            for (int userId = 1; userId <= 12; userId++) {
+                users.setInt(1, userId);
+                users.setString(2, "cutover-" + userId);
+                users.setString(3, "cutover-" + userId + "@example.com");
+                users.executeUpdate();
+                if (userId != 11) {
+                    entities.setString(1, "h" + userId);
+                    entities.setInt(2, userId);
+                    entities.executeUpdate();
+                    for (int offset = 0; offset < 2; offset++) {
+                        int credentialId = userId * 10 + offset;
+                        credentials.setInt(1, credentialId);
+                        credentials.setBytes(2, new byte[] {(byte) credentialId});
+                        credentials.setString(3, "h" + userId);
+                        credentials.setBytes(4, new byte[] {1});
+                        credentials.executeUpdate();
+                    }
                 }
             }
         }
