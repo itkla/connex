@@ -39,7 +39,7 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * <p>Provider callers carry no session, so {@code TenantResolutionInterceptor} leaves the request
  * thread unresolved and every workspace-scoped statement would otherwise be refused by the
  * {@code TenantScopeInterceptor} backstop (#994). Token resolution, signature verification and
- * translation touch no tenant data and run first; everything that does runs inside
+ * translation run before event application. The signing-secret read and tenant data access run inside
  * {@link AutomationExecutor#runAs} for the workspace the token identified, mirroring the public
  * unsubscribe path.
  *
@@ -83,7 +83,9 @@ public class DeliveryWebhookService {
      * @return the number of events newly applied
      */
     public int ingest(String provider, String rawToken, byte[] rawBody, Map<String, String> headers) {
-        ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken);
+        ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken,
+                (workspaceId, read) -> automationExecutor.runAs(
+                        workspaceId, systemActor.user(), "system", read));
         if (!target.providerId().equals(normalize(provider))) {
             throw new DeliveryProviderException("Webhook provider does not match the token");
         }

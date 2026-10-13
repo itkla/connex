@@ -138,6 +138,15 @@ Secret use, failed use, and rewrap operations are audited with scope, purpose,
 secret id, and key ids where relevant. Audit entries never include plaintext,
 ciphertext, wrapped data keys, or key material.
 
+Secret-use rows name the principal installed when the secret is read, including
+when their append is deferred until transaction completion. Campaign dispatch
+provider resolution and delivery webhook signing-secret reads run as the seeded
+non-login system actor (`__connex_system__`), so their `secret_store.secret.use`
+rows name that actor. Only those reads receive this dispatch-time attribution;
+the rest of the dispatch path keeps its existing context. If the system user is
+not provisioned, provider resolution fails that send inside its existing failure
+boundary and the worker continues processing later sends.
+
 Readiness and expired-claim recovery check secret metadata without decrypting
 (#1938): the row's scope, algorithms, and that its own key is configured and
 enabled. A delivery credential whose ciphertext or key material is damaged, or

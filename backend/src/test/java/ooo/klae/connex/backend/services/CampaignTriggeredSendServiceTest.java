@@ -83,6 +83,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private RuleActionExecutor ruleActionExecutor;
     @Autowired private CampaignTriggeredSendService triggeredSendService;
     @Autowired private CampaignDispatchService campaignDispatchService;
+    @Autowired private AutomationExecutor automationExecutor;
+    @Autowired private SystemActor systemActor;
     @Autowired private CampaignFrequencyAdmissionService frequencyAdmissionService;
     @Autowired private CampaignSendWorker campaignSendWorker;
     @Autowired private SuppressionService suppressionService;
@@ -900,7 +902,9 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 new WorkflowTriggeredSendGate(enabled, 200, 200),
                 workflowRunMapper,
                 new CampaignDispatchClaimBoundary(),
-                frequencyAdmissionService);
+                frequencyAdmissionService,
+                automationExecutor,
+                systemActor);
     }
 
     private DeliveryProviderConfig deliveryConfig(String endpoint, String credentialRef) {

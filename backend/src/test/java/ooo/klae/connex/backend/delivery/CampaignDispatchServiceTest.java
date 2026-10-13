@@ -23,6 +23,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,6 +41,7 @@ import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
@@ -47,6 +49,8 @@ import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.AudienceEligibilityService;
+import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 class CampaignDispatchServiceTest {
@@ -125,7 +129,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admission);
+                admission, automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -222,7 +226,8 @@ class CampaignDispatchServiceTest {
         CampaignDispatchService service = new CampaignDispatchService(
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
-                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
+                automationExecutor(), systemActor());
         ReflectionTestUtils.setField(service, "nanoTimeSource", (java.util.function.LongSupplier) now::get);
 
         assertTrue(service.processSend(7, 11));
@@ -278,7 +283,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admittedFrequency());
+                admittedFrequency(), automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -811,7 +816,8 @@ class CampaignDispatchServiceTest {
         return new CampaignDispatchService(
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
-                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
+                automationExecutor(), systemActor());
     }
 
     private static CampaignDispatchService audienceDispatch(
@@ -840,7 +846,23 @@ class CampaignDispatchServiceTest {
         return new CampaignDispatchService(
                 sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
                 providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
-                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission);
+                mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
+                automationExecutor(), systemActor());
+    }
+
+    private static AutomationExecutor automationExecutor() {
+        AutomationExecutor executor = mock(AutomationExecutor.class);
+        when(executor.runAs(anyInt(), any(), eq("system"), any())).thenAnswer(
+                invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        return executor;
+    }
+
+    private static SystemActor systemActor() {
+        SystemActor actor = mock(SystemActor.class);
+        User user = new User();
+        user.setId(1);
+        when(actor.user()).thenReturn(user);
+        return actor;
     }
 
     private static CampaignFrequencyAdmissionService admittedFrequency() {
@@ -943,6 +965,6 @@ class CampaignDispatchServiceTest {
                 gate,
                 mock(WorkflowRunMapper.class),
                 mock(CampaignDispatchClaimBoundary.class),
-                admittedFrequency());
+                admittedFrequency(), automationExecutor(), systemActor());
     }
 }
