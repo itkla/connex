@@ -30,6 +30,8 @@ import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.AudienceEligibilityService;
+import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 /**
@@ -80,6 +82,8 @@ public class CampaignDispatchService {
     private final WorkflowRunMapper workflowRunMapper;
     private final CampaignDispatchClaimBoundary claimBoundary;
     private final CampaignFrequencyAdmissionService frequencyAdmissionService;
+    private final AutomationExecutor automationExecutor;
+    private final SystemActor systemActor;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
     /**
@@ -185,7 +189,8 @@ public class CampaignDispatchService {
         MessageDispatcher dispatcher;
         try {
             channel = DeliveryChannel.fromToken(send.getChannel());
-            target = deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel);
+            target = automationExecutor.runAs(workspaceId, systemActor.user(), "system",
+                    () -> deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel));
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
             log.warn("Campaign send {} has no usable provider: {}", sendId, exception.getMessage());

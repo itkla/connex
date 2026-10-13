@@ -8,12 +8,14 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
@@ -79,9 +81,17 @@ class DeliveryWebhookServiceTest {
     }
 
     private void resolveTo(int workspaceId, List<DeliveryEvent> events) {
-        when(configService.resolveByWebhookToken("tok")).thenReturn(target(workspaceId));
+        resolveTokenTo(workspaceId);
         when(router.eventSourceFor(PROVIDER)).thenReturn(eventSource);
         when(eventSource.translate(any())).thenReturn(events);
+    }
+
+    private void resolveTokenTo(int workspaceId) {
+        when(configService.resolveByWebhookToken(eq("tok"), any())).thenAnswer(invocation -> {
+            BiFunction<Integer, Supplier<String>, String> secretReader = invocation.getArgument(1);
+            assertEquals("whsec", secretReader.apply(workspaceId, () -> "whsec"));
+            return target(workspaceId);
+        });
     }
 
     private CampaignDelivery delivery(int workspaceId) {
@@ -115,7 +125,7 @@ class DeliveryWebhookServiceTest {
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
         InOrder ordered = inOrder(automationExecutor, transactionTemplate, campaignDeliveryMapper);
-        ordered.verify(automationExecutor).runAs(eq(WORKSPACE_A), any(), eq("system"), any());
+        ordered.verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_A), any(), eq("system"), any());
         ordered.verify(transactionTemplate).execute(any());
         ordered.verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_A, PROVIDER, "m1");
     }
@@ -209,7 +219,7 @@ class DeliveryWebhookServiceTest {
 
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
-        verify(automationExecutor).runAs(eq(WORKSPACE_B), any(), eq("system"), any());
+        verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_B), any(), eq("system"), any());
         verify(automationExecutor, never()).runAs(eq(WORKSPACE_A), any(), any(), any());
         verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_B, PROVIDER, "m1");
         verify(campaignDeliveryMapper, never()).findByProviderMessage(eq(WORKSPACE_A), any(), any());
@@ -228,7 +238,12 @@ class DeliveryWebhookServiceTest {
 
     @Test
     void ingest_rejectsAProviderThatDoesNotMatchTheToken() {
-        when(configService.resolveByWebhookToken("tok")).thenReturn(target(WORKSPACE_A));
+        resolveTokenTo(WORKSPACE_A);
+        User system = new User();
+        system.setId(1);
+        when(systemActor.user()).thenReturn(system);
+        when(automationExecutor.runAs(eq(WORKSPACE_A), eq(system), eq("system"), any())).thenAnswer(
+                invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
 
         assertThrows(DeliveryProviderException.class,
                 () -> service().ingest("other_esp", "tok", new byte[0], Map.of()));
