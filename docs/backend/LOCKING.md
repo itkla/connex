@@ -1481,10 +1481,12 @@ own: `MfaRecoveryService.recover` calls it while holding that row exclusively, s
 would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
-The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
-re-check of the privileged gate audits its refusal through `AuditService.deferFailure` instead: the
-entry, with its tenant scope, actor and request metadata, is built at the call and appended after the
-request's transaction completes, once its own exclusive lock is released (#1993). That append is
+The same rule places the `auth.email_change.refused` audit ahead of `lockById`, through
+`AuditService.recordFailureScoped`. Both refusal paths use explicit null workspace and organization
+scope on the `system` chain because privilege is account-wide (#1997). The under-lock re-check of
+the privileged gate audits its refusal through `AuditService.deferFailureScoped` instead: the
+entry, with its explicit null scope, actor and request metadata, is built at the call and appended
+after the request's transaction completes, once its own exclusive lock is released (#1993). That append is
 best-effort with the bounds of the step-up deferral (#1986): `created_at` is the append time, and a
 row appended after its account was deleted keeps the actor only in `entity_id` and its actor label.
 
