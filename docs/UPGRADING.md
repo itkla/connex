@@ -246,6 +246,272 @@ of a purged id remains a no-op. Provider deadlines are capped at one hour and le
 The daily usage breakdown labels ledger consumption absent from successful-call audits as
 `Conservative / unattributed charges`; this can also include successful settlements awaiting audit.
 
+### V224/V225 privileged-MFA cutover
+
+`V224__privileged_coverage_grandfathered_source.sql` admits per-organization
+`GRANDFATHERED` coverage. `V225__privileged_mfa_cutover.sql` implements owner decision 1 (2026-09-27, trust the passkeys of
+accounts privileged at cutover) as scoped by decision 2 (2026-10-08, per active organization where
+they are privileged). In one transaction it recomputes every `org_member.founder` flag to
+`org_role = 'owner'`, deletes coverage outside that population regardless of source, inserts
+missing population pairs as `GRANDFATHERED` without replacing provenance or grant references,
+and revokes every open approval code without an account revoker. Pending workspace memberships,
+inert role overlays, and workspaces or organizations undergoing teardown confer no coverage.
+Account-wide `BREAK_GLASS` assurance is untouched. The durable cutover marker is the coverage's
+source/time plus Flyway history; startup posture records `grandfatheredCoverageCount`. A SQL
+migration cannot append the Java-computed audit integrity chain.
+
+Treat this release as a **coordinated restart**, as for V185: close ingress, stop every old backend
+replica and other writers, then start the new backend and let Flyway finish before reopening.
+Do not serve an old binary while founder flags and coverage are reset. Grantor vouching applies
+with `attestation-enforced` either false or true in this release; enforcement itself still defaults
+to false. No second approval-code revocation is needed at switch-on. Before enabling enforcement,
+drain `attestationRequiredCount` for accounts promoted or enrolled after the cutover.
+
+**Rollback floor:** after V225, no backend older than this release may serve. Roll back only to a
+release that carries V225 and its switch-independent grantor checks. Coverage is readable by older
+code, but its dark-period issuance/redemption can manufacture trust and its role writes can leave
+stale founder flags. Application compatibility alone is insufficient. Restoring the database as
+well uses the full backup/restore policy below.
+
+**Failure recovery:** V224's drop/re-add CHECK and comment change are one atomic, re-runnable DDL.
+If a process dies before its Flyway history write, the next start can execute it again without
+repair. V225 contains only DML: process death rolls its transaction back; if no history row was
+written, restart to retry. A caught SQL failure on MySQL leaves a failed Flyway row: keep ingress
+closed, inspect the failed statement and confirm rollback, fix the cause, run `flyway repair`
+using the shipped locations and database configuration, then restart. Do not remove successful
+history or reverse either migration. If death happened after commit, inspect history and rows;
+a completed version is not re-applied, and repeating V225 after a rolled-back attempt is safe.
+
+**Read-only preflight.** Run against the control catalog before sizing the window. These are exact
+counts, including all redeemed/revoked grant history, rather than estimated `TABLE_ROWS`. Run on a
+representative snapshot if the scans would disrupt a serving database. The population predicate
+is V225's pinned three branches; retain it when interpreting this release's workload.
+
+```sql
+WITH privileged AS (
+    SELECT om.user_id, o.id AS org_id
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    WHERE wm.status = 'active'
+      AND wm.role_id IS NULL
+      AND wm.role IN ('admin', 'owner')
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+    WHERE wm.status = 'active'
+      AND wrp.permission IN (
+        'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+        'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+        'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+        'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
+      )
+), population_passkeys AS (
+    SELECT DISTINCT c.id AS credential_row_id, p.org_id
+    FROM webauthn_credential c
+    JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id
+    JOIN privileged p ON p.user_id = e.user_id
+)
+SELECT 'organization' AS input_table, (SELECT COUNT(*) FROM organization) AS total_rows,
+       'scan' AS step, NULL AS rows_to_change
+UNION ALL SELECT 'workspace', COUNT(*), 'scan', NULL FROM workspace
+UNION ALL SELECT 'org_member', COUNT(*), 'recompute founders',
+    COALESCE(SUM(founder <> (org_role = 'owner')), 0) FROM org_member
+UNION ALL SELECT 'workspace_member', COUNT(*), 'scan', NULL FROM workspace_member
+UNION ALL SELECT 'workspace_role_permission', COUNT(*), 'scan', NULL FROM workspace_role_permission
+UNION ALL SELECT 'webauthn_user_entity', COUNT(*), 'scan', NULL FROM webauthn_user_entity
+UNION ALL SELECT 'webauthn_credential', COUNT(*), 'population passkey pairs',
+    (SELECT COUNT(*) FROM population_passkeys) FROM webauthn_credential
+UNION ALL SELECT 'privileged_credential_attestation', COUNT(*), 'delete outside population',
+    (SELECT COUNT(*) FROM privileged_credential_attestation a
+     WHERE NOT EXISTS (SELECT 1 FROM population_passkeys p
+                       WHERE p.credential_row_id = a.credential_row_id AND p.org_id = a.org_id))
+    FROM privileged_credential_attestation
+UNION ALL SELECT 'privileged_credential_attestation',
+    (SELECT COUNT(*) FROM privileged_credential_attestation), 'insert missing coverage', COUNT(*)
+    FROM population_passkeys p
+    WHERE NOT EXISTS (SELECT 1 FROM privileged_credential_attestation a
+                      WHERE a.credential_row_id = p.credential_row_id AND a.org_id = p.org_id)
+UNION ALL SELECT 'privileged_mfa_attestation_grant', COUNT(*), 'revoke open codes',
+    COALESCE(SUM(redeemed_at IS NULL AND revoked_at IS NULL), 0) FROM privileged_mfa_attestation_grant;
+```
+
+List active workspace-only owners with no passkey, per organization. Owners whose custom overlay
+removes privileged permissions are excluded. Without a vouching co-owner, their approval path is
+**operator break-glass recovery**: the recovery session enrolls a replacement passkey carrying
+`BREAK_GLASS`, satisfying standing everywhere. V225 grants them no organization founder flag.
+
+```sql
+SELECT DISTINCT wm.user_id, w.org_id, wm.workspace_id
+FROM workspace_member wm
+JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+WHERE wm.status = 'active' AND wm.role = 'owner'
+  AND (wm.role_id IS NULL OR EXISTS (
+      SELECT 1 FROM workspace_role_permission wrp WHERE wrp.workspace_role_id = wm.role_id
+        AND wrp.permission IN (
+          'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+          'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+          'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS')))
+  AND NOT EXISTS (SELECT 1 FROM org_member om WHERE om.user_id = wm.user_id AND om.org_id = w.org_id)
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_user_entity e
+      JOIN webauthn_credential c ON c.user_entity_user_id = e.id WHERE e.user_id = wm.user_id)
+ORDER BY wm.user_id, w.org_id, wm.workspace_id;
+```
+
+**Rehearsal threshold and startup deadlines.** When any preflight input-table count or changed-row
+count exceeds the corresponding rehearsed 10% population below, rehearse at that scale on
+production-class storage before closing ingress. Include all grant history, even when almost
+every grant is already redeemed or revoked.
+Do not extrapolate only from the changed rows: V225 also scans membership, credential and history
+inputs. The supplemental empty-coverage run measures the insertion step separately.
+
+**Measured 10% rehearsal (2026-10-13 UTC).** These measurements used a development host whose disk
+was saturated by other work, MySQL 8.4.10, Flyway 12.4.0, a 128 MiB InnoDB buffer pool, and enabled
+ROW binary logging. The full amended population could not be generated on this host: its earlier
+million-row membership and historical-grant loads took 18,568.883 and 19,399.063 seconds,
+respectively, about 54 and 52 rows/s. The orchestrator stopped that run during its next load;
+it produced no full-scale migration measurements.
+
+The 10% rehearsal uses real `SHOW CREATE TABLE` definitions, retaining CHECK constraints, indexes,
+and foreign keys between its copied tables. Its synthetic population spans the organization,
+built-in workspace and custom-role privilege branches; custom roles each hold two privileged
+permissions. The additional ordinary workspace memberships and closed grant history remain
+present during every timed cutover pass.
+Generation was set-based, with 50,000-row committed batches for the large tables and one
+whole-table batch for smaller tables. Loading 390,100 application rows took 342.273 seconds,
+or **1,139.733 rows/s**, including numbers-table setup and statistics refresh. The two ordinary
+membership batches achieved 4,377.592 and 3,988.166 rows/s; the four historical-grant batches
+achieved 2,429.539, 1,744.275, 2,672.754 and 1,112.570 rows/s. Generation time is separate from
+the migration outage. The scratch catalog was dropped after all ten count assertions passed.
+
+| Input or changed population | Rows |
+| --- | ---: |
+| Organizations / workspaces | 1,000 each |
+| Users / workspace roles | 10,100 / 1,000 |
+| Organization memberships | 4,000 |
+| Privileged workspace memberships | 6,000 |
+| Ordinary workspace memberships | 100,000 |
+| Total workspace memberships | 106,000 |
+| Workspace-role permissions | 2,000 |
+| WebAuthn user entities / credentials | 10,000 / 20,000 |
+| Existing coverage / outside the population | 30,000 / 10,000 |
+| Approval grants / open grants | 205,000 / 5,000 |
+| Redeemed or revoked grant history | 200,000 |
+| Founder flags recomputed | 2,000 |
+| Eligible passkey/organization pairs | 20,000 |
+| Missing coverage inserted in the main / supplemental pass | 0 / 20,000 |
+
+| Timed operation | Measured at 10% | Full amended population: linear estimate (10×) |
+| --- | ---: | ---: |
+| V224 ALTER, Flyway execution time | 22.968 s | 229.680 s |
+| V225 transaction, Flyway execution time | 9.932 s | 99.320 s |
+| V224 / V225 Flyway wall time | 31.565 / 10.247 s | 315.650 / 102.470 s |
+| Same four V225 statements before rollback | 8.565 s | 85.650 s |
+| ROLLBACK of those writes | 0.258 s | 2.580 s |
+| Supplemental empty-coverage transaction, including commit | 5.722 s | 57.220 s |
+| V224 ALTER repeated over grandfathered coverage | 25.036 s | 250.360 s |
+
+The rollback pass's four statements took 0.011, 7.987, 0.346 and 0.220 seconds, respectively;
+its active transaction reported 17,000 modified rows. Existing coverage remained unchanged by
+the insert: JDBC's matched-row count includes its 20,000 no-op duplicates. The supplemental pass
+inserted 20,000 genuinely missing `GRANDFATHERED` rows.
+
+**The full-scale numbers are estimates, not measurements or an outage bound.** Simple linear
+extrapolation does not account for changing working sets, index sizes, row widths, fixed Flyway
+overhead, or competing I/O. The full population still requires a rehearsal on production-class
+storage under the threshold rule above.
+
+The following storage snapshots exclude numbers-table helpers and include Flyway history once
+created. Data/index lengths are `information_schema.TABLES` sums across the copied input tables;
+file lengths are the catalog's `INNODB_TABLESPACES.FILE_SIZE` sum. All values are bytes.
+
+| Snapshot | Data length | Index length | Tablespace file length |
+| --- | ---: | ---: | ---: |
+| Populated, before V224 | 49,037,312 | 82,542,592 | 180,649,984 |
+| After V224 | 48,005,120 | 82,542,592 | 178,683,904 |
+| After V225 commit | 47,742,976 | 82,149,376 | 178,683,904 |
+| Restored workload, before / after ROLLBACK | 48,791,552 | 82,165,760 | 180,781,056 |
+| Before supplemental empty-coverage pass | 46,432,256 | 79,413,248 | 180,781,056 |
+| After supplemental empty-coverage pass | 48,005,120 | 81,444,864 | 180,781,056 |
+
+V224's observed catalog file-length delta was −1,966,080 bytes; V225, the rollback pass and the
+supplemental pass each added zero file bytes. The supplemental pass reused existing allocation
+while data/index lengths grew by 1,572,864 / 2,031,616 bytes. Allocated file-size snapshots tracked
+the file lengths above plus 45,056 bytes. Deletion and rollback do not imply files will shrink.
+
+Undo files stayed allocated at 33,554,432 and 50,331,648 bytes (80 MiB total; zero growth).
+History-list-length snapshots were 22 → 11 → 14 across V224/V225; the rollback pass was
+16 → 18 → 16. The active-undo-size metric returned zero throughout and did not measure generated
+undo bytes. Observed binary-log size deltas were +5,422 bytes for V224, +1,464,492 for V225,
++2,255 across the rollback pass, and +1,805,071 for the supplemental pass. Undo and binary-log
+counters are server-wide, include concurrent work and bookkeeping/statistics refresh, and cannot
+isolate the cutover's undo or binlog volume on this host.
+
+Budget readiness/startup gates for V224 plus V225, normal startup/backfills, and an operational
+margin above the measured duration. The linear full-scale migration-only estimate is 329.000
+seconds of Flyway execution, or 418.120 seconds using observed wall time, before normal startup
+and margin. Both exceed the nominal 300-second window provided by the standard Compose runbook's
+`--wait-timeout 300` and the backend healthcheck's 60 retries at 5-second intervals. Raise those
+budgets (for example with a backend `start_period` override) using the production-scale
+rehearsal and normal startup timings before the window.
+The checked-in Flyway configuration sets no statement-duration deadline for this migration; any operator-set JDBC
+socket timeout, database/proxy query limit or Flyway process deadline must cover the entire single
+transaction. Connection retries and schema-history lock retries do not extend a statement deadline.
+Keep ingress closed until `/api/health/ready` succeeds; TCP availability is insufficient.
+
+**Reconciliation if the rollback floor was broken.** Keep approval issuance and redemption closed
+on every replica (closing ingress and stopping backends is sufficient). Establish each UTC interval
+an older binary served; widen its boundaries to include clock uncertainty and millisecond coverage
+timestamps. Preserve the affected account/organization list before deletion for re-approval and
+incident evidence. With all writers stopped, execute the following in the control catalog for
+each interval; replace the example bounds with the incident's inclusive start and exclusive end.
+Reconciliation only narrows trust. Do not re-run V225's population statements: they would
+grandfather accounts privileged now but not at the cutover, and recomputing founders from the
+current owner rows would make owners promoted after the cutover founders. This is recovery work
+and must not be implemented by editing or re-running a successful Flyway version.
+
+```sql
+SET @legacy_window_start = '2026-10-01 00:00:00.000';
+SET @legacy_window_end = '2026-10-01 01:00:00.000';
+SELECT DISTINCT e.user_id, a.org_id
+FROM privileged_credential_attestation a
+JOIN webauthn_credential c ON c.id = a.credential_row_id
+JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id
+WHERE a.source IN ('GRANTOR', 'INHERITED')
+  AND a.attested_at >= @legacy_window_start AND a.attested_at < @legacy_window_end;
+
+START TRANSACTION;
+UPDATE privileged_mfa_attestation_grant
+SET revoked_at = UTC_TIMESTAMP(6)
+WHERE redeemed_at IS NULL AND revoked_at IS NULL;
+DELETE FROM privileged_credential_attestation
+WHERE source IN ('GRANTOR', 'INHERITED')
+  AND attested_at >= @legacy_window_start AND attested_at < @legacy_window_end;
+UPDATE org_member
+SET founder = FALSE
+WHERE founder = TRUE AND org_role <> 'owner';
+COMMIT;
+```
+
+The last statement clears founder flags that an older binary's role writes left on non-owners. An
+owner an older binary demoted and later restored keeps a stale flag that no query can detect; check
+the window's `org.member.set` audit rows for such owners and re-role them through the new release,
+which clears the flag.
+
+Restart only a release at or above the rollback floor. Have affected accounts re-approve through a
+vouching grantor, or use operator break-glass recovery where that route is unavailable, before
+reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close
