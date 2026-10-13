@@ -470,43 +470,47 @@ transaction. Connection retries and schema-history lock retries do not extend a 
 Keep ingress closed until `/api/health/ready` succeeds; TCP availability is insufficient.
 
 **Reconciliation if the rollback floor was broken.** Keep approval issuance and redemption closed
-on every replica (closing ingress and stopping backends is sufficient). Establish each UTC interval
-an older binary served; widen its boundaries to include clock uncertainty and millisecond coverage
-timestamps. Preserve the affected account/organization list before deletion for re-approval and
-incident evidence. With all writers stopped, execute the following in the control catalog for
-each interval; replace the example bounds with the incident's inclusive start and exclusive end.
-Reconciliation only narrows trust. Do not re-run V225's population statements: they would
-grandfather accounts privileged now but not at the cutover, and recomputing founders from the
-current owner rows would make owners promoted after the cutover founders. This is recovery work
-and must not be implemented by editing or re-running a successful Flyway version.
+on every replica (closing ingress and stopping backends is sufficient). Find the earliest moment
+any older binary served, widened for clock uncertainty and millisecond coverage timestamps; that is
+`@violation_start`. Reconciliation has no end bound. Coverage written after the older binary stopped
+can still descend from window coverage, through inheritance or a grantor's vouch, so everything
+attested since the start is re-approved. With all writers stopped, run the following in the control
+catalog. Preserve the first query's output for re-approval and incident evidence.
+
+Reconciliation only narrows trust:
+- It deletes every `GRANTOR`, `INHERITED` and `FOUNDER` row attested since the start.
+- It clears every founder flag. An older binary's role writes can leave a stale flag that no query
+  can tell apart, so no founder is re-derived. Owners' new passkeys then need an approval, or
+  inherit coverage through a step-up from a covered passkey.
+- It keeps `GRANDFATHERED` rows, which only V225 writes, before any violation, and account-wide
+  `BREAK_GLASS` assurance.
+- Never re-run V225's population statements: they would grandfather accounts privileged now but
+  not at the cutover. Never edit or re-run a successful Flyway version either.
 
 ```sql
-SET @legacy_window_start = '2026-10-01 00:00:00.000';
-SET @legacy_window_end = '2026-10-01 01:00:00.000';
-SELECT DISTINCT e.user_id, a.org_id
+SET @violation_start = '2026-10-01 00:00:00.000';
+SELECT DISTINCT e.user_id, a.org_id, a.source, a.attested_at
 FROM privileged_credential_attestation a
 JOIN webauthn_credential c ON c.id = a.credential_row_id
 JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id
-WHERE a.source IN ('GRANTOR', 'INHERITED')
-  AND a.attested_at >= @legacy_window_start AND a.attested_at < @legacy_window_end;
+WHERE a.source IN ('GRANTOR', 'INHERITED', 'FOUNDER')
+  AND a.attested_at >= @violation_start
+ORDER BY e.user_id, a.org_id;
 
+-- BEGIN RECONCILIATION
 START TRANSACTION;
 UPDATE privileged_mfa_attestation_grant
 SET revoked_at = UTC_TIMESTAMP(6)
 WHERE redeemed_at IS NULL AND revoked_at IS NULL;
 DELETE FROM privileged_credential_attestation
-WHERE source IN ('GRANTOR', 'INHERITED')
-  AND attested_at >= @legacy_window_start AND attested_at < @legacy_window_end;
+WHERE source IN ('GRANTOR', 'INHERITED', 'FOUNDER')
+  AND attested_at >= @violation_start;
 UPDATE org_member
 SET founder = FALSE
-WHERE founder = TRUE AND org_role <> 'owner';
+WHERE founder = TRUE;
 COMMIT;
+-- END RECONCILIATION
 ```
-
-The last statement clears founder flags that an older binary's role writes left on non-owners. An
-owner an older binary demoted and later restored keeps a stale flag that no query can detect; check
-the window's `org.member.set` audit rows for such owners and re-role them through the new release,
-which clears the flag.
 
 Restart only a release at or above the rollback floor. Have affected accounts re-approve through a
 vouching grantor, or use operator break-glass recovery where that route is unavailable, before

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.sql.DataSource;
 
@@ -116,7 +119,8 @@ class PrivilegedMfaCutoverMigrationIntegrationTest {
         List<List<String>> closedGrantsBefore;
         try (Connection connection = connection()) {
             credentialBefore = rows(connection, "SELECT * FROM webauthn_credential ORDER BY id");
-            closedGrantsBefore = rows(connection, "SELECT * FROM privileged_mfa_attestation_grant WHERE id IN (2, 3) ORDER BY id");
+            closedGrantsBefore = rows(connection,
+                "SELECT * FROM privileged_mfa_attestation_grant WHERE id IN (2, 3) ORDER BY id");
         }
 
         Flyway flyway = migrate("classpath:db/migration/control");
@@ -161,6 +165,63 @@ class PrivilegedMfaCutoverMigrationIntegrationTest {
             assertEquals(List.of(List.of("1")), rows(connection,
                 "SELECT success FROM flyway_schema_history WHERE version = '225'"));
         }
+    }
+
+    /**
+     * The runbook's reconciliation for a broken rollback floor only narrows trust. It removes every
+     * grantor, inherited and founder row attested since the violation began, including one that
+     * propagated after the older binary stopped, clears every founder flag and revokes open codes.
+     * The cutover's own coverage survives and nothing new is trusted.
+     */
+    @Test
+    void theRunbookReconciliationRemovesEverythingSinceTheViolationAndTrustsNothingNew() throws Exception {
+        migrate("classpath:db/migration/control");
+        try (Connection connection = connection(); Statement statement = connection.createStatement()) {
+            String coverage = "SELECT credential_row_id, org_id, source, COALESCE(grant_id, ''), attested_at"
+                + " FROM privileged_credential_attestation ORDER BY credential_row_id, org_id";
+            List<List<String>> trustedAtCutover = rows(connection, coverage);
+            statement.execute("SET @violation_start ="
+                + " (SELECT MAX(attested_at) + INTERVAL 1 MINUTE FROM privileged_credential_attestation)");
+            statement.executeUpdate(
+                "UPDATE workspace_member SET role = 'admin' WHERE workspace_id = 1 AND user_id = 10");
+            statement.executeUpdate("""
+                INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source, attested_at)
+                VALUES (100, 1, 'GRANTOR', @violation_start + INTERVAL 10 MINUTE),
+                       (101, 1, 'INHERITED', @violation_start + INTERVAL 2 HOUR)
+                """);
+            statement.executeUpdate(
+                "UPDATE org_member SET org_role = 'owner', founder = TRUE WHERE org_id = 2 AND user_id = 3");
+            statement.executeUpdate("""
+                INSERT INTO webauthn_credential (id, credential_id, user_entity_user_id, public_key)
+                VALUES (32, X'20', 'h3', X'01')
+                """);
+            statement.executeUpdate("""
+                INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source, attested_at)
+                VALUES (32, 2, 'FOUNDER', @violation_start + INTERVAL 3 HOUR)
+                """);
+            statement.executeUpdate("""
+                INSERT INTO privileged_mfa_attestation_grant
+                    (id, org_id, grantor_user_id, grantee_user_id, code_digest, expires_at, created_at)
+                VALUES (5, 1, 1, 10, REPEAT('e', 64), '2099-01-01', @violation_start + INTERVAL 5 MINUTE)
+                """);
+
+            for (String sql : reconciliationStatements()) {
+                statement.execute(sql);
+            }
+
+            assertEquals(trustedAtCutover, rows(connection, coverage));
+            assertEquals(List.of(List.of("0")), rows(connection, "SELECT COUNT(*) FROM org_member WHERE founder"));
+            assertEquals(List.of(List.of("1", "")), rows(connection, "SELECT revoked_at IS NOT NULL,"
+                + " COALESCE(revoked_by_user_id, '') FROM privileged_mfa_attestation_grant WHERE id = 5"));
+        }
+    }
+
+    private static List<String> reconciliationStatements() throws IOException {
+        Matcher matcher = Pattern.compile("-- BEGIN RECONCILIATION\\n(.*?)-- END RECONCILIATION", Pattern.DOTALL)
+            .matcher(Files.readString(Path.of("../docs/UPGRADING.md")));
+        assertTrue(matcher.find(), "the runbook's reconciliation block is missing");
+        return Pattern.compile(";").splitAsStream(matcher.group(1))
+            .map(String::strip).filter(statement -> !statement.isEmpty()).toList();
     }
 
     private static void seed(Statement statement) throws SQLException {
