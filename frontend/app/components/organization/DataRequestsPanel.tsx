@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { EllipsisVerticalIcon, ArrowDownTrayIcon, PencilSquareIcon, PlusIcon } from "@heroicons/react/24/outline";
 
 import type { DataSubjectRequest, DataSubjectRequestStatus } from "@/app/lib/types";
-import { ApiError, getDataSubjectRequests, getDataSubjectDisclosure } from "@/app/lib/api";
+import { ApiError, assembleDataSubjectDisclosure, getDataSubjectRequests } from "@/app/lib/api";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -148,7 +148,7 @@ export default function DataRequestsPanel({
         if (!orgId || downloadingId != null) return;
         setDownloadingId(request.id);
         try {
-            const disclosure = await getDataSubjectDisclosure(orgId, request.id);
+            const disclosure = await assembleDataSubjectDisclosure(orgId, request.id);
             const blob = new Blob([JSON.stringify(disclosure, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");

@@ -57,7 +57,12 @@ public class DataSubjectRequestController {
             orgId, requestId, authService.getCurrentUser().getId(), request);
     }
 
-    @GetMapping("/{requestId}/disclosure")
+    /**
+     * Assembles disclosure through an authenticated, CSRF-protected POST with no required body.
+     * Returns the disclosure only after its strict access audit commits; each explicit retry
+     * assembles again and records another access event.
+     */
+    @PostMapping("/{requestId}/disclosure")
     public DataSubjectDisclosureDto disclosure(@PathVariable int orgId, @PathVariable long requestId) {
         return dataSubjectRequestService.disclosure(
             orgId, requestId, authService.getCurrentUser().getId());
