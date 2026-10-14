@@ -48,6 +48,18 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void assignmentMaintenanceHasExactExemptionsAndAControlOnlyIdentityLookup() {
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(NS + "AssignmentSweepMapper"));
+        for (String method : Set.of("findWatermark", "findReferencesAnywhere", "lockParent", "clearOwner",
+                "removeCollaborator", "unassignTask", "clearInterventionOwner", "clearCampaignOwner",
+                "clearPersonPassOwners")) {
+            assertFalse(interceptor.requiresResolvedContext(NS + "AssignmentSweepMapper." + method));
+        }
+        assertTrue(interceptor.requiresResolvedContext(NS + "AssignmentSweepMapper.futureStatement"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.findExistingIds"));
+    }
+
+    @Test
     void routedModeRequiresACatalogScopeOffTheRequestThread() {
         TenantScopeInterceptor routed = new TenantScopeInterceptor(tenantContext, true, true);
 
@@ -163,6 +175,44 @@ class TenantScopeInterceptorTest {
             NS + "NotificationMapper.deleteHistoricalNotificationBaselinesForRecipient",
             NS + "NotificationMapper.deleteAllForRecipient",
             NS + "DealMapper.removeCollaboratorFromWorkspace",
+        }) {
+            assertFalse(interceptor.requiresResolvedContext(id), id);
+            assertDoesNotThrow(() -> interceptor.enforce(id), id);
+        }
+    }
+
+    @Test
+    void departureStatementsKeepMembershipScopeWhileCatalogErasureCanRunWithoutAWorkspace() {
+        bindRequest();
+        for (String id : new String[] {
+            NS + "GoalMapper.findDepartureReferences",
+            NS + "GoalMapper.deleteDepartingOwner",
+            NS + "ApprovalPolicyMapper.findActiveStepsForDeparture",
+            NS + "ApprovalPolicyMapper.findDepartureReferences",
+            NS + "ApprovalPolicyMapper.deleteDepartingApprover",
+            NS + "DocumentApprovalMapper.findOpenStepsForDeparture",
+            NS + "DocumentApprovalMapper.findDepartureReferences",
+            NS + "DocumentApprovalMapper.deleteDepartingApprover",
+        }) {
+            assertTrue(interceptor.requiresResolvedContext(id), id);
+            assertThrows(ForbiddenException.class, () -> interceptor.enforce(id), id);
+        }
+        for (String id : new String[] {
+            NS + "GoalMapper.findDepartureReferencesAnywhere",
+            NS + "GoalMapper.deleteDepartingOwnerAnywhere",
+            NS + "GoalMapper.clearDepartingCreatorAnywhere",
+            NS + "ApprovalPolicyMapper.findActiveStepsForDepartureAnywhere",
+            NS + "ApprovalPolicyMapper.findDepartureReferencesAnywhere",
+            NS + "ApprovalPolicyMapper.deleteDepartingApproverAnywhere",
+            NS + "DocumentApprovalMapper.findOpenStepsForDepartureAnywhere",
+            NS + "DocumentApprovalMapper.findDepartureReferencesAnywhere",
+            NS + "DocumentApprovalMapper.deleteDepartingApproverAnywhere",
+            NS + "AiChatMapper.clearParticipantInvitersAnywhere",
+            NS + "RecordCommentMapper.clearAuthorsAnywhere",
+            NS + "RecordCommentMapper.clearDeletersAnywhere",
+            NS + "RecordCommentMapper.clearThreadCreatorsAnywhere",
+            NS + "RecordCommentMapper.clearThreadResolversAnywhere",
+            NS + "RecordCommentMapper.deleteReactionsAnywhere",
         }) {
             assertFalse(interceptor.requiresResolvedContext(id), id);
             assertDoesNotThrow(() -> interceptor.enforce(id), id);
