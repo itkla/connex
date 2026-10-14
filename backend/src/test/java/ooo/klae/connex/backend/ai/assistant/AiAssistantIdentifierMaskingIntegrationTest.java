@@ -1204,7 +1204,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         String authored = "x".repeat(490) + " [Prior Member Label](user:" + actor.getId() + ") "
                 + "[Other Prior Label](user:" + actor.getId() + ") "
                 + "[Pending Member Label](user:" + pending.getId() + ") "
-                + "[Pending Alias][invite]\n[invite]: user:" + pending.getId();
+                + "[Pending Alias][invite]\n\n[invite]: user:" + pending.getId();
         note.setContent(authored);
         noteMapper.insert(note);
         referenceService.syncReferences(workspace.getId(), note.getId(), authored);

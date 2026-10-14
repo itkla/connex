@@ -81,10 +81,12 @@ over-includes the covered [CommonMark member-link readings](https://spec.commonm
 an independent canonical-token pass runs everywhere, and the structural collector considers every
 bracket without code-span suppression and unions code/HTML-aware readings. Covered readings include
 inline, full, collapsed and shortcut links; failed-inline and failed-definition shortcut fallbacks; prose shortcuts followed
-by a colon; entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
+by a colon, including paragraph continuations inside containers and lazy continuations;
+entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
 continuations; blockquote and list-item definitions, including continued keys with container markers;
 and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets
 inside paired code spans opaque and stop backtick pairing at paragraph and block boundaries.
+Definition keys are suppressed only at paragraph boundaries, container starts or after another definition.
 Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
 Rarer CommonMark constructs outside these covered readings are a bounded residual tracked in
 [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser for both

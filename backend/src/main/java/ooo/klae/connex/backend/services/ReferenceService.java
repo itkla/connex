@@ -677,17 +677,20 @@ public class ReferenceService {
             }
         }
         Set<Integer> definitionLineStarts = memberDefinitionLineStarts(content);
-        Set<Integer> validDefinitionStarts = new HashSet<>();
+        Map<Integer, Integer> definitionEnds = new HashMap<>();
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
-            if (definitionLineStarts.contains(definitions.start())
-                    && validReferenceDefinitionRemainder(content, definitions.end())) {
-                validDefinitionStarts.add(definitions.start());
+            if (definitionLineStarts.contains(definitions.start())) {
+                int end = referenceDefinitionEnd(content, definitions.end());
+                if (end >= 0) {
+                    definitionEnds.put(definitions.start(), end);
+                }
             }
             if (isMemberReferenceDestination(memberDefinitionDestination(content, definitions.end()), true)) {
                 memberDefinitions.addAll(memberReferenceKeys(definitions.group(1)));
             }
         }
+        Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
         collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, false));
         collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, true, false, true));
         collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, true, true, true));
@@ -747,21 +750,21 @@ public class ReferenceService {
     }
 
     /** Validates source syntax only for key suppression; member discovery never depends on title content. */
-    private static boolean validReferenceDefinitionRemainder(String content, int offset) {
+    private static int referenceDefinitionEnd(String content, int offset) {
         int start = skipDefinitionSpaces(content, offset);
         if (isDefinitionLineEnd(content, start) && start < content.length()) {
             start = skipDefinitionSpaces(content, memberLineContentStart(content, afterDefinitionLineEnd(content, start)));
         }
         int end = referenceDefinitionDestinationEnd(content, start);
         if (end < 0) {
-            return false;
+            return -1;
         }
         int title = skipDefinitionSpaces(content, end);
         if (isDefinitionLineEnd(content, title)) {
-            return true;
+            return title;
         }
         if (title == end) {
-            return false;
+            return -1;
         }
         char opening = content.charAt(title);
         char closing = switch (opening) {
@@ -770,25 +773,26 @@ public class ReferenceService {
             default -> 0;
         };
         if (closing == 0) {
-            return false;
+            return -1;
         }
         for (int index = title + 1; index < content.length(); index++) {
             char value = content.charAt(index);
             if (isReferenceEscape(content, index)) {
                 index++;
             } else if (value == closing) {
-                return isDefinitionLineEnd(content, skipDefinitionSpaces(content, index + 1));
+                int lineEnd = skipDefinitionSpaces(content, index + 1);
+                return isDefinitionLineEnd(content, lineEnd) ? lineEnd : -1;
             } else if (opening == '(' && value == '(') {
-                return false;
+                return -1;
             } else if (isDefinitionLineEnd(content, index)) {
                 int next = skipDefinitionSpaces(content, memberLineContentStart(content, afterDefinitionLineEnd(content, index)));
                 if (isDefinitionLineEnd(content, next)) {
-                    return false;
+                    return -1;
                 }
                 index = next - 1;
             }
         }
-        return false;
+        return -1;
     }
 
     private static int referenceDefinitionDestinationEnd(String content, int start) {
@@ -918,6 +922,9 @@ public class ReferenceService {
         return keys;
     }
 
+    private record MemberOrderedListContext(long quoteDepth, int indent, char delimiter) {
+    }
+
     private record MemberLabelSpan(int start, int end) {
     }
 
@@ -935,6 +942,90 @@ public class ReferenceService {
             }
         }
         return starts;
+    }
+
+    /**
+     * Definitions cannot interrupt an open paragraph, including lazy container continuations.
+     * Ambiguous continuations keep their usage reading; complete definitions leave the context open
+     * for another definition rather than starting a paragraph with their destination or title lines.
+     */
+    private static Set<Integer> memberDefinitionStartsOutsideParagraphs(
+            String content, Map<Integer, Integer> definitionEnds) {
+        Set<Integer> starts = new HashSet<>();
+        boolean paragraphOpen = false;
+        Map<MemberOrderedListContext, Integer> orderedLists = new HashMap<>();
+        long activeQuoteDepth = 0;
+        int definitionEnd = -1;
+        for (int lineStart = 0; lineStart < content.length();) {
+            int lineEnd = lineStart;
+            while (lineEnd < content.length() && !isDefinitionLineEnd(content, lineEnd)) {
+                lineEnd++;
+            }
+            int bodyStart = memberLineContentStart(content, lineStart);
+            Matcher quotePrefix = MEMBER_QUOTE_CONTENT.matcher(content).region(lineStart, lineEnd);
+            int ruleStart = quotePrefix.lookingAt() ? quotePrefix.end() : lineStart;
+            String prefix = content.substring(lineStart, bodyStart);
+            long quoteDepth = prefix.chars().filter(value -> value == '>').count();
+            String itemMarker = prefix.replace(">", "").strip();
+            boolean ordered = itemMarker.length() >= 2 && ".)".indexOf(itemMarker.charAt(itemMarker.length() - 1)) >= 0
+                    && itemMarker.substring(0, itemMarker.length() - 1).chars().allMatch(value -> value >= '0' && value <= '9');
+            int containerStart = prefix.lastIndexOf('>') + 1;
+            int indent = memberColumn(prefix, containerStart, prefix.indexOf(itemMarker));
+            var listContext = ordered ? new MemberOrderedListContext(quoteDepth, indent, itemMarker.charAt(itemMarker.length() - 1)) : null;
+            boolean itemStart = itemMarker.length() == 1 && "-+*".indexOf(itemMarker.charAt(0)) >= 0
+                    || ordered && (!paragraphOpen || Integer.parseInt(itemMarker.substring(0, itemMarker.length() - 1)) == 1
+                            || orderedLists.containsKey(listContext));
+            boolean blank = content.substring(bodyStart, lineEnd).chars().allMatch(value -> value == ' ' || value == '\t');
+            boolean boundary = memberDefinitionParagraphBoundary(content, ruleStart, lineEnd, paragraphOpen)
+                    || ruleStart != bodyStart && memberDefinitionParagraphBoundary(content, bodyStart, lineEnd, paragraphOpen)
+                    || MEMBER_CODE_BLOCK_START.matcher(content).region(bodyStart, lineEnd).lookingAt();
+            boolean newContainer = itemStart || quoteDepth > activeQuoteDepth;
+            if (lineStart > definitionEnd) {
+                if (!blank && (!paragraphOpen || boundary || quoteDepth > activeQuoteDepth)) {
+                    int whitespaceEnd = skipDefinitionSpaces(content, lineStart + containerStart);
+                    int continuationIndent = memberColumn(content, lineStart + containerStart, whitespaceEnd);
+                    orderedLists.entrySet().removeIf(entry -> !entry.getKey().equals(listContext)
+                            && (entry.getKey().quoteDepth() != quoteDepth || continuationIndent < entry.getValue()));
+                }
+                if (itemStart) {
+                    orderedLists.keySet().removeIf(context -> context.quoteDepth() == quoteDepth && context.indent() >= indent);
+                    if (ordered) {
+                        orderedLists.put(listContext, memberColumn(prefix, containerStart, prefix.length()));
+                    }
+                }
+                Integer end = definitionEnds.get(bodyStart);
+                if (end != null && (!paragraphOpen || newContainer)) {
+                    starts.add(bodyStart);
+                    definitionEnd = end;
+                    paragraphOpen = false;
+                } else {
+                    paragraphOpen = !blank && !boundary;
+                }
+            }
+            activeQuoteDepth = blank || boundary || itemStart ? quoteDepth : Math.max(activeQuoteDepth, quoteDepth);
+            lineStart = lineEnd == content.length() ? lineEnd : afterDefinitionLineEnd(content, lineEnd);
+        }
+        return starts;
+    }
+
+    private static int memberColumn(String content, int start, int end) {
+        int column = 0;
+        for (int index = start; index < end; index++) {
+            column += content.charAt(index) == '\t' ? 4 - column % 4 : 1;
+        }
+        return column;
+    }
+
+    /** A setext underline closes an existing paragraph; a thematic break can stand alone. */
+    private static boolean memberDefinitionParagraphBoundary(String content, int start, int end, boolean paragraphOpen) {
+        if (!memberRuleLine(content, start, end)) {
+            return false;
+        }
+        if (paragraphOpen) {
+            return true;
+        }
+        char marker = content.charAt(start);
+        return marker != '=' && content.substring(start, end).chars().filter(value -> value == marker).count() >= 3;
     }
 
     private static int memberLineContentStart(String content, int lineStart) {

@@ -511,7 +511,7 @@ class AiAssistantMemberExposureTest {
     void encodedLabelDelimitersAreMaskedInActualPayload(
             boolean nativeProtocol, boolean referenceStyle, String sourceLabel, String decodedLabel) throws Exception {
         String text = referenceStyle
-                ? "[" + sourceLabel + "][member&#93;key]\n[member&#93;key]: user&#58;42"
+                ? "[" + sourceLabel + "][member&#93;key]\n\n[member&#93;key]: user&#58;42"
                 : "[" + sourceLabel + "](user&#58;42)";
         var context = new MaskingContext();
         AiAssistantMemberIdentifiers.seedReferenceText(text, context);
@@ -540,8 +540,8 @@ class AiAssistantMemberExposureTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void encodedDefinitionTitleLineBreaksCannotExposeMemberLabels(boolean nativeProtocol) throws Exception {
-        String text = "[Alice &amp; Bob][m]\n[m]: user:42 \"a&#10;b\"\n"
-                + "[Pending &amp; Member][pending]\n[pending]: <user:43> (a&#13;b)";
+        String text = "[Alice &amp; Bob][m]\n\n[m]: user:42 \"a&#10;b\"\n\n"
+                + "[Pending &amp; Member][pending]\n\n[pending]: <user:43> (a&#13;b)";
         var context = new MaskingContext();
         AiAssistantMemberIdentifiers.seedReferenceText(text, context);
         assertTrue(context.tokenBindings().isEmpty());
@@ -653,6 +653,33 @@ class AiAssistantMemberExposureTest {
         assertFalse(payload.contains("Pending"));
         assertFalse(payload.contains("Public Label"));
         assertTrue(payload.contains("m remains ordinary"));
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void paragraphContinuationShortcutsAreMaskedWhileConsecutiveDefinitionKeysRemainOrdinary(boolean nativeProtocol) throws Exception {
+        String text = "Hello\n[Alice Former]: welcome.\n\n[Alice Former]: user:42\n\n"
+                + "> Hello\n> [Pending Former]: welcome.\n\n[Pending Former]: user:43\n\n"
+                + "[Public Label][m]\n\n[m]: user:44\n[n]: user:45\n\nm and n remain ordinary";
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(text, context);
+        var identifiers = AiAssistantMemberIdentifiers.referenceIdentifiers(text);
+        assertEquals(List.of(new Identifier("member", "Alice Former"), new Identifier("member", "Pending Former"),
+                new Identifier("member", "Public Label")), identifiers);
+        var result = new AiAssistantToolResult(Map.of("description", text), identifiers);
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("Alice"));
+        assertFalse(payload.contains("Pending"));
+        assertFalse(payload.contains("Public Label"));
+        assertTrue(payload.contains("m and n remain ordinary"));
         assertEquals(0, capture.warnings());
     }
 

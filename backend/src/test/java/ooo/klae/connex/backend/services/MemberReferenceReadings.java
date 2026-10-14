@@ -99,6 +99,23 @@ public final class MemberReferenceReadings {
             readings.add(new Reading("definition-fallback", "invalid definition " + remainder,
                     "[Alice Former]: " + remainder + "\n\n[Alice Former]: user:42", "Alice Former"));
         }
+        for (String prefix : List.of("Hello\n", "> Hello\n> ", "> Hello\n", "- Hello\n  ", "- Hello\n",
+                "1. Hello\n   ", "1. Hello\n", "> - Hello\n>   ", "> - Hello\n", "Hello\n-=\n", "Hello\n=-\n",
+                "===\n", "> Hello\n> -=\n> ", "Hello\n2. ", "- Hello\n2. ", "1. Hello\n   2. ", "1. First\n\nOutside paragraph\n2. ")) {
+            readings.add(new Reading("paragraph-context", "definition cannot interrupt " + prefix,
+                    prefix + "[Alice Former]: welcome.\n\n[Alice Former]: user:42", "Alice Former"));
+        }
+        readings.add(new Reading("paragraph-context", "consecutive definitions remain definitions",
+                "[m]: user:42\n[n]: user:43\n\n[Alice Former][m] and [Pending Former][n]", "Alice Former"));
+        readings.add(new Reading("paragraph-context", "blank line permits definition",
+                "Hello\n\n[m]: user:42\n\n[Alice Former][m]", "Alice Former"));
+        for (String label : List.of("Al&#93;ice", "Al&#91;ice", "Alice &amp; Bob")) {
+            readings.add(new Reading("paragraph-context", "encoded reference key is a paragraph shortcut " + label,
+                    "[" + label + "][member&#93;key]\n[member&#93;key]: user&#58;42", label));
+        }
+        readings.add(new Reading("paragraph-context", "encoded titled definition in paragraph",
+                "[Alice &amp; Bob][m]\n[m]: user:42 \"a&#10;b\"\n"
+                        + "[Pending &amp; Member][pending]\n[pending]: <user:43> (a&#13;b)", "Alice &amp; Bob"));
         return List.copyOf(readings);
     }
 

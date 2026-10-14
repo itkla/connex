@@ -297,7 +297,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(List.of("Old Alice", "Other Old Label", "Pending Invitee", "Shortcut"),
                 ReferenceService.memberLabelsFromReaderVisibleContent(
                         "[Old Alice](user:42) and [Other Old Label](user:42) "
-                                + "[Pending Invitee][pending] and [Shortcut]\n"
+                                + "[Pending Invitee][pending] and [Shortcut]\n\n"
                                 + "[pending]: user:43\n[Shortcut]: user:44"));
         assertEquals(List.of("Nested [Alice]"), ReferenceService.memberLabelsFromReaderVisibleContent(
                 "[Nested [Alice]](user:42)"));
@@ -309,7 +309,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
     void readerAuthorizedMemberCandidatesKeepEncodedSourceLabelsAndDecodedLabels() {
         assertEquals(List.of("Alice & Bob", "Pending <Name>", "Alice &amp; Bob", "Pending &lt;Name&gt;"),
                 ReferenceService.memberLabelsFromReaderVisibleContent(
-                        "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43"));
+                        "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n\n[invite]: user:43"));
     }
 
     @Test
@@ -323,7 +323,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
                             "[" + label.getKey() + "](user&#58;42)"));
             assertEquals(List.of(label.getValue(), label.getKey()),
                     ReferenceService.memberLabelsFromReaderVisibleContent(
-                            "[" + label.getKey() + "][member&#93;key]\n[member&#93;key]: user&#58;42"));
+                            "[" + label.getKey() + "][member&#93;key]\n\n[member&#93;key]: user&#58;42"));
         }
     }
 
@@ -334,7 +334,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
                 for (String destination : List.of("user&#58;42", "<user&#58;42>", "&#32;user&#58;42&#32;")) {
                     assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
                             ReferenceService.memberLabelsFromReaderVisibleContent(
-                                    "[Alice &amp; Bob][m]\n[m]: " + destination + " " + title),
+                                    "[Alice &amp; Bob][m]\n\n[m]: " + destination + " " + title),
                             destination + " " + title);
                     assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
                             ReferenceService.memberLabelsFromReaderVisibleContent(

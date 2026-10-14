@@ -174,6 +174,26 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void paragraphBoundariesAndConsecutiveDefinitionsKeepValidKeysOutOfCandidates() {
+        for (String prefix : java.util.List.of("", "Hello\n\n", "Hello\n---\n", "Hello\n===\n", "# Heading\n",
+                "> ", "- ", "1. ")) {
+            String content = prefix + "[m]: user:42\n[n]: user:43\n\n[Public Label][m] and [Pending Label][n]";
+            assertEquals(java.util.List.of("Public Label", "Pending Label"),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(content), prefix);
+        }
+        for (String prefix : java.util.List.of("1. Hello\n2. ", "1) Hello\n2) ", "> 1. Hello\n> 2. ", "001. Hello\n2. ", "1. First\n\n   Second paragraph\n2. ",
+                "> 1. First\n>\n>    Second paragraph\n> 2. ", "1. First\n   # Heading\n   Second paragraph\n2. ")) {
+            String content = prefix + "[m]: user:42\n\n[Public Label][m]";
+            assertEquals(java.util.List.of("Public Label"), ReferenceService.memberLabelsFromReaderVisibleContent(content), prefix);
+        }
+        for (String definitions : java.util.List.of("[m]: user:42\n[n]: user:43", "> [m]: user:42\n> [n]: user:43",
+                "- [m]: user:42\n  [n]: user:43", "[m]:\nuser:42\n[n]: user:43",
+                "[m\n n]: user:42\n[k]: user:43", "[m]: user:42 \"first\nsecond\"\n[n]: user:43")) {
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(definitions), definitions);
+        }
+    }
+
+    @Test
     void memberRuleRunsFinishInLinearTimeWithOrWithoutATrailingLetter() {
         for (String marker : java.util.List.of("-", "=", "*", "_")) {
             for (String suffix : java.util.List.of("", "x")) {
