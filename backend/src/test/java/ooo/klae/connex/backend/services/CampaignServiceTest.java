@@ -12,6 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +44,40 @@ class CampaignServiceTest extends CampaignRealDbTestSupport {
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void ownerValidationRetainsInactiveOrganizationRefusal() {
+        User owner = newUser();
+        CampaignRequest request = new CampaignRequest("Lifecycle", null, "event", "draft",
+            owner.getId(), null, null, null, null, null);
+        CampaignDto campaign = campaignService.create(request);
+        jdbcTemplate.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", workspace.getOrgId());
+        try {
+            assertThrows(ForbiddenException.class, () -> campaignService.create(request));
+            assertThrows(ForbiddenException.class, () -> campaignService.update(campaign.id(), request));
+            CampaignService target = AopTestUtils.getTargetObject(campaignService);
+            assertThrows(BadRequestException.class, () -> target.create(request));
+            assertThrows(BadRequestException.class, () -> target.update(campaign.id(), request));
+            assertEquals(owner.getId(), campaignMapper.getCampaign(workspace.getId(), campaign.id()).getOwnerUserId());
+        } finally {
+            jdbcTemplate.update("UPDATE organization SET lifecycle_state = 'active' WHERE id = ?", workspace.getOrgId());
+        }
+    }
+
+    @Test
+    void ownersMustBeActiveButAReservedActiveTargetRemainsAdmissibleUntilTheCascade() {
+        User owner = newUser();
+        userMapper.reserveAccountDeletion(owner.getId(), "campaign-sweep-test");
+        CampaignRequest request = new CampaignRequest("Owner barrier", null, "event", "draft",
+            owner.getId(), null, null, null, null, null);
+        CampaignDto campaign = campaignService.create(request);
+        assertEquals(owner.getId(), campaign.ownerUserId());
+        assertEquals(owner.getId(), campaignService.update(campaign.id(), request).ownerUserId());
+        jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), owner.getId());
+        assertThrows(BadRequestException.class, () -> campaignService.create(request));
+        assertThrows(BadRequestException.class, () -> campaignService.update(campaign.id(), request));
+    }
 
     @Test
     void crudAndTerminalStatusGuard() {

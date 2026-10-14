@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 
 public interface UserMapper {
     List<User> getAllUsers();
+    /** Existing control-plane identities only; callers supply a bounded, nonempty set. */
+    List<Integer> findExistingIds(@Param("ids") List<Integer> ids);
     /** Current display labels for the requested control-plane user ids. */
     List<UserDisplayNameDto> getDisplayNamesByIds(@Param("ids") List<Integer> ids);
     /** Authenticated destination identities for a bounded assistant fanout recipient set. */

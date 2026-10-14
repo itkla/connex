@@ -37,6 +37,9 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Exact membership lock that refuses contention while a caller retains the workspace root. */
+    WorkspaceMember lockAuthorizationMembershipWithoutWaiting(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /** Retains exact membership authority without excluding other authorized readers. */
     WorkspaceMember lockAuthorizationMembershipForShare(
         @Param("workspaceId") int workspaceId,

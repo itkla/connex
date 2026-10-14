@@ -83,7 +83,10 @@ public class CampaignService {
         Campaign campaign = new Campaign();
         campaign.setWorkspaceId(workspaceId);
         campaign.setCreatedById(authService.getCurrentUser().getId());
-        applyRequest(campaign, request, workspaceId, null);
+        Set<Integer> owners = request != null && request.ownerUserId() != null
+                && workspaceService.lockActiveMemberWithoutWaiting(workspaceId, request.ownerUserId())
+                ? Set.of(request.ownerUserId()) : Set.of();
+        applyRequest(campaign, request, workspaceId, null, owners);
         campaignMapper.insertCampaign(campaign);
         auditService.record("campaign.create", "campaign", campaign.getId(), campaign.getName(),
                 "Created campaign " + campaign.getName(), null);
@@ -95,9 +98,11 @@ public class CampaignService {
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignDto update(int id, CampaignRequest request) {
         int workspaceId = requireResolvedWorkspaceId();
-        Campaign campaign = lockCampaignForManage(workspaceId, id).campaign();
+        LockedCampaign locked = lockCampaignForManage(
+                workspaceId, id, request == null ? null : request.ownerUserId());
+        Campaign campaign = locked.campaign();
         String previousStatus = campaign.getStatus();
-        applyRequest(campaign, request, workspaceId, id);
+        applyRequest(campaign, request, workspaceId, id, locked.activeMembershipIds());
         if (TERMINAL_STATUSES.contains(previousStatus) && !previousStatus.equals(campaign.getStatus())) {
             throw new BadRequestException("A completed or archived campaign cannot change status");
         }
@@ -349,7 +354,9 @@ public class CampaignService {
                 snapshot.getCreatedById(), snapshot.getCreatedAt(), members);
     }
 
-    private void applyRequest(Campaign campaign, CampaignRequest request, int workspaceId, Integer currentId) {
+    private void applyRequest(
+            Campaign campaign, CampaignRequest request, int workspaceId, Integer currentId,
+            Set<Integer> activeMembershipIds) {
         if (request == null || request.name() == null || request.name().isBlank()) {
             throw new BadRequestException("Campaign name is required");
         }
@@ -368,7 +375,8 @@ public class CampaignService {
                 && request.startAt().isAfter(request.endAt())) {
             throw new BadRequestException("Campaign start must not be after its end");
         }
-        if (request.ownerUserId() != null && !workspaceService.isMember(workspaceId, request.ownerUserId())) {
+        if (request.ownerUserId() != null && (!activeMembershipIds.contains(request.ownerUserId())
+                || !workspaceService.isMember(workspaceId, request.ownerUserId()))) {
             throw new BadRequestException("Campaign owner must be an active workspace member");
         }
         if (currentId != null && currentId.equals(request.parentCampaignId())) {
@@ -426,8 +434,23 @@ public class CampaignService {
     }
 
     private LockedCampaign lockCampaignForManage(int workspaceId, int id) {
-        Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(
-                workspaceId, workspaceService.getCurrentUserId());
+        return lockCampaignForManage(workspaceId, id, null);
+    }
+
+    private LockedCampaign lockCampaignForManage(int workspaceId, int id, Integer ownerId) {
+        Set<Permission> permissions;
+        Set<Integer> activeMembershipIds;
+        if (ownerId == null) {
+            permissions = workspaceService.lockedMemberPermissionsFor(
+                    workspaceId, workspaceService.getCurrentUserId());
+            activeMembershipIds = Set.of();
+        } else {
+            WorkspaceService.LockedMemberPermissionsAndMemberships authority =
+                    workspaceService.lockedMemberPermissionsAndMemberships(
+                            workspaceId, workspaceService.getCurrentUserId(), Set.of(ownerId));
+            permissions = authority.permissions();
+            activeMembershipIds = authority.activeMembershipIds();
+        }
         Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, id);
         if (campaign == null) {
             throw new ResourceNotFoundException("Campaign not found with id: " + id);
@@ -435,7 +458,7 @@ public class CampaignService {
         if (!permissions.contains(Permission.CAMPAIGN_MANAGE)) {
             throw new ForbiddenException("Requires the CAMPAIGN_MANAGE permission in this workspace");
         }
-        return new LockedCampaign(campaign, permissions);
+        return new LockedCampaign(campaign, permissions, activeMembershipIds);
     }
 
     private int requireResolvedWorkspaceId() {
@@ -563,7 +586,8 @@ public class CampaignService {
     private record ClassifiedRecord(int recordId, String status, String exclusionReason) {
     }
 
-    private record LockedCampaign(Campaign campaign, Set<Permission> permissions) {
+    private record LockedCampaign(
+            Campaign campaign, Set<Permission> permissions, Set<Integer> activeMembershipIds) {
     }
 
     private record AudienceEvaluation(

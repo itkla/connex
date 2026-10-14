@@ -112,6 +112,8 @@ public final class ProcessingRestrictionRegistry {
             "Retained task associations remain reachable for compliance and erasure operations.");
         entries.put(MAPPERS + "TenantLifecycleMapper",
             "Offboarding export and teardown deliberately reach restricted people and their managed images.");
+        entries.put(MAPPERS + "AssignmentSweepMapper",
+            "Catalog-pinned account erasure reads numeric keys only and must reach restricted people.");
         return Map.copyOf(entries);
     }
 
