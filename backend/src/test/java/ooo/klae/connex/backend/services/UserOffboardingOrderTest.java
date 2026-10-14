@@ -28,6 +28,8 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Team;
+import ooo.klae.connex.backend.beans.ReportGoal;
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
@@ -48,6 +50,7 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
@@ -118,17 +121,44 @@ class UserOffboardingOrderTest {
     @Spy private TenantContext tenantContext = new TenantContext();
 
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
-    @Mock private ooo.klae.connex.backend.mappers.OrganizationMapper ownershipOfferOrganizationMapper;
+    @Mock private OrganizationMapper ownershipOfferOrganizationMapper;
     @InjectMocks private UserOffboardingService service;
 
     @org.junit.jupiter.api.BeforeEach
     void ownershipScopeMetadata() {
-        org.mockito.Mockito.lenient().when(workspaceMapper.getOrgId(7)).thenReturn(13);
+        org.mockito.Mockito.lenient().when(workspaceMapper.lockWorkspaceOrgIdForShare(7)).thenReturn(13);
     }
 
     @AfterEach
     void clearTenantContext() {
         tenantContext.clear();
+    }
+
+    @Test
+    void departureDeletesOnlyIdsCapturedBeforeTheGuard() {
+        ReportGoal goal = new ReportGoal();
+        goal.setId(21);
+        ApprovalStepApprover template = new ApprovalStepApprover();
+        template.setId(22);
+        ApprovalStepApprover frozen = new ApprovalStepApprover();
+        frozen.setId(23);
+        when(goalMapper.findDepartureReferences(7, 9)).thenReturn(List.of(goal));
+        when(approvalPolicyMapper.findDepartureReferences(7, 9)).thenReturn(List.of(template));
+        when(documentApprovalMapper.findDepartureReferences(7, 9)).thenReturn(List.of(frozen));
+
+        var references = service.captureDepartureReferences(7, 9);
+        service.assertCanDepart(7, 9);
+        service.cleanupDepartureReferences(references);
+
+        InOrder order = inOrder(goalMapper, approvalPolicyMapper, documentApprovalMapper, departureApprovalGuard);
+        order.verify(goalMapper).findDepartureReferences(7, 9);
+        order.verify(approvalPolicyMapper).findDepartureReferences(7, 9);
+        order.verify(documentApprovalMapper).findDepartureReferences(7, 9);
+        order.verify(departureApprovalGuard).assertCanDepart(7, 9);
+        order.verify(goalMapper).deleteDepartingOwner(7, 21, 9);
+        order.verify(approvalPolicyMapper).deleteDepartingApprover(7, 22, 9);
+        order.verify(documentApprovalMapper).deleteDepartingApprover(7, 23, 9);
+        order.verifyNoMoreInteractions();
     }
 
     @Test
@@ -152,14 +182,16 @@ class UserOffboardingOrderTest {
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
-            tenantWorkScope, workspaceMapper, providerCapturePurgeService,
+            tenantWorkScope, workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             notificationMapper, dealMapper, relationshipSignalMapper, teamMapper,
             apiCredentialLifecycleService);
         order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
+        order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
@@ -230,13 +262,15 @@ class UserOffboardingOrderTest {
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
-            providerCapturePurgeService, notificationMapper,
+            workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
             personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper,
             teamMapper, apiCredentialLifecycleService);
+        order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
+        order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);

@@ -22,6 +22,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
@@ -40,6 +41,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
     @Autowired private OwnershipOfferDeliveryService delivery;
     @Autowired private OwnershipOfferAccountCleanupService cleanup;
     @Autowired private UserDeletionTransaction deletion;
+    @Autowired private UserAccountCatalogOffboardingService catalogOffboarding;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private SqlSessionTemplate sql;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -57,7 +59,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         authenticateAs(user, workspace.getId());
         String token = "ownership-erasure-" + unique();
         deletion.reserve(user.getId(), token);
-        cleanup.eraseBeforeCatalogs(user.getId());
+        cleanup.eraseAfterCatalogs(user.getId());
         deletion.delete(user.getId(), token);
         assertNull(userMapper.getUserById(user.getId()));
     }
@@ -69,6 +71,36 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE dedupe_key = ?", Integer.class, "ownership.offer:" + id));
         assertTrue(ledger.discoverAccount(target.getId()).isEmpty());
     }
+    @Test void guardedCatalogErasureToleratesAnAlreadyDeletedNoticeAndRetainsTheReservation() {
+        User target = newUser();
+        long id = create(target);
+        delivery.deliver(ledger.findById(id));
+        String token = "ownership-erasure-" + unique();
+        deletion.reserve(target.getId(), token);
+        assertTrue(userMapper.isAccountDeletionReserved(target.getId()));
+        assertThrows(ResourceNotFoundException.class, () -> create(target));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE dedupe_key = ?",
+            Integer.class, "ownership.offer:" + id));
+        var realLedger = sql.getMapper(OwnershipOfferMapper.class);
+        doAnswer(call -> {
+            assertTrue(userMapper.isAccountDeletionReserved(target.getId()));
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE dedupe_key = ?",
+                Integer.class, "ownership.offer:" + id));
+            return realLedger.close(call.getArgument(0), call.getArgument(1),
+                call.getArgument(2), call.getArgument(3));
+        }).when(ledger).close(eq(id), eq("INVALIDATED"), isNull(), eq("account_erasure"));
+
+        catalogOffboarding.eraseReferences(target.getId());
+
+        assertNull(ledger.findById(id));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE dedupe_key = ?",
+            Integer.class, "ownership.offer:" + id));
+        assertTrue(userMapper.isAccountDeletionReserved(target.getId()));
+        assertNotNull(userMapper.getUserById(target.getId()));
+        deletion.delete(target.getId(), token);
+        assertNull(userMapper.getUserById(target.getId()));
+    }
+
     @Test void offerorErasureClosesAndErasesConsentWithACoOwnerStillPresent() {
         User target = newUser(); User coOwner = newUser(); workspaceMapper.updateMemberRole(workspace.getId(), coOwner.getId(), "owner");
         long id = create(target); delivery.deliver(ledger.findById(id)); erase(currentUser);
@@ -108,7 +140,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         String token = "ownership-erasure-" + unique(); deletion.reserve(target.getId(), token);
         assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class, () -> deletion.delete(target.getId(), token));
         assertNotNull(userMapper.getUserById(target.getId()));
-        cleanup.eraseBeforeCatalogs(target.getId()); deletion.delete(target.getId(), token);
+        cleanup.eraseAfterCatalogs(target.getId()); deletion.delete(target.getId(), token);
         assertNull(userMapper.getUserById(target.getId()));
     }
 
@@ -167,7 +199,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         try {
             new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
                 users.lockById(target.getId());
-                var erased = worker.submit(() -> cleanup.eraseBeforeCatalogs(currentUser.getId()));
+                var erased = worker.submit(() -> cleanup.eraseAfterCatalogs(currentUser.getId()));
                 try {
                     assertTrue(started.await(30, TimeUnit.SECONDS));
                     if (!reached.await(10, TimeUnit.SECONDS)) {
@@ -207,9 +239,9 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         }).when(users).lockById(target.getId());
         var workers = Executors.newFixedThreadPool(2);
         try {
-            var offerorErased = workers.submit(() -> cleanup.eraseBeforeCatalogs(currentUser.getId()));
+            var offerorErased = workers.submit(() -> cleanup.eraseAfterCatalogs(currentUser.getId()));
             assertTrue(rootHeld.await(30, TimeUnit.SECONDS));
-            var offereeErased = workers.submit(() -> cleanup.eraseBeforeCatalogs(target.getId()));
+            var offereeErased = workers.submit(() -> cleanup.eraseAfterCatalogs(target.getId()));
             assertTrue(accountHeld.await(30, TimeUnit.SECONDS));
             MySqlLockWaitProbe.awaitSharedRecordLock(jdbc, offereeConnection.get(),
                 "workspace", Integer.toString(workspace.getId()));

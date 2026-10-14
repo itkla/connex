@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -29,6 +30,7 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
@@ -122,7 +124,7 @@ public class UserOffboardingService {
     private final SequenceMapper sequenceMapper;
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
     private final OwnershipOfferWriter ownershipOfferWriter;
-    private final ooo.klae.connex.backend.mappers.OrganizationMapper ownershipOfferOrganizationMapper;
+    private final OrganizationMapper ownershipOfferOrganizationMapper;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -164,17 +166,44 @@ public class UserOffboardingService {
         departureApprovalGuard.assertCanDepart(workspaceId, userId);
     }
 
+    /** Captured before the departure guard so concurrent references remain for reconciliation. */
+    public record DepartureReferences(
+            int workspaceId,
+            int userId,
+            List<Integer> goalIds,
+            List<Integer> policyApproverIds,
+            List<Integer> documentApproverIds) {
+        public DepartureReferences {
+            goalIds = List.copyOf(goalIds);
+            policyApproverIds = List.copyOf(policyApproverIds);
+            documentApproverIds = List.copyOf(documentApproverIds);
+        }
+    }
+
+    /** Discovers exact reference ids before the sole named approver guard, without new locks. */
+    public DepartureReferences captureDepartureReferences(int workspaceId, int userId) {
+        return new DepartureReferences(workspaceId, userId,
+            goalMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(goal -> goal.getId()).toList(),
+            approvalPolicyMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(approver -> approver.getId()).toList(),
+            documentApprovalMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(approver -> approver.getId()).toList());
+    }
+
     /**
-     * Deletes personal goals and template/frozen approver rows after the departure's entire existing
-     * cleanup, audit, and selection-update tail. Surviving goal provenance and assignment history stay.
+     * Deletes only captured personal goals and template/frozen approvers after the departure's
+     * cleanup, audit and selection-update tail. Concurrently committed references survive at every
+     * isolation level; conditional deletes also retain references reassigned since discovery.
      */
-    public void cleanupDepartureReferences(int workspaceId, int userId) {
-        goalMapper.findDepartureReferences(workspaceId, userId).forEach(goal ->
-            goalMapper.deleteDepartingOwner(workspaceId, goal.getId(), userId));
-        approvalPolicyMapper.findDepartureReferences(workspaceId, userId).forEach(approver ->
-            approvalPolicyMapper.deleteDepartingApprover(workspaceId, approver.getId(), userId));
-        documentApprovalMapper.findDepartureReferences(workspaceId, userId).forEach(approver ->
-            documentApprovalMapper.deleteDepartingApprover(workspaceId, approver.getId(), userId));
+    public void cleanupDepartureReferences(DepartureReferences references) {
+        int workspaceId = references.workspaceId();
+        int userId = references.userId();
+        references.goalIds().forEach(id -> goalMapper.deleteDepartingOwner(workspaceId, id, userId));
+        references.policyApproverIds().forEach(id ->
+            approvalPolicyMapper.deleteDepartingApprover(workspaceId, id, userId));
+        references.documentApproverIds().forEach(id ->
+            documentApprovalMapper.deleteDepartingApprover(workspaceId, id, userId));
     }
 
     /**
@@ -204,7 +233,10 @@ public class UserOffboardingService {
     }
 
     private void prepareFreshMembershipInWorkspace(int workspaceId, int userId) {
-        int orgId = Objects.requireNonNull(tenantContext.getOrgId(), "fresh membership organization");
+        Integer orgId = workspaceMapper.lockWorkspaceOrgIdForShare(workspaceId);
+        if (orgId == null) {
+            throw new ResourceNotFoundException("Workspace not found");
+        }
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
             ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
             ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
@@ -282,16 +314,15 @@ public class UserOffboardingService {
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction. Callers check
      * {@link #assertCanDepart(int, int)} after their existing lock prefix and append
-     * {@link #cleanupDepartureReferences(int, int)} after their audit and selection-update tail.
+     * {@link #cleanupDepartureReferences(DepartureReferences)} after their audit and selection-update tail.
      *
      * @param workspaceId the workspace the member is leaving
      * @param userId the departing member
      */
     public void detachMemberContent(int workspaceId, int userId) {
-        Integer orgId = tenantContext.isResolved() && Integer.valueOf(workspaceId).equals(tenantContext.getWorkspaceId())
-            ? tenantContext.getOrgId() : workspaceMapper.getOrgId(workspaceId);
+        Integer orgId = workspaceMapper.lockWorkspaceOrgIdForShare(workspaceId);
         if (orgId == null) {
-            throw new ooo.klae.connex.backend.exceptions.ResourceNotFoundException("Workspace not found");
+            throw new ResourceNotFoundException("Workspace not found");
         }
         ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
         ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);

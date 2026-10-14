@@ -22,8 +22,11 @@ public class OwnershipOfferAccountCleanupService {
     private final TenantLifecycleAccess lifecycleAccess;
     private final OwnershipOfferAccountCleanupTransaction transaction;
 
-    /** Discovers routes before locks; each closure and its notice resolution commit together. */
-    public void eraseBeforeCatalogs(int userId) {
+    /**
+     * Erases offers only after all guarded tenant catalog erasures succeed. The account reservation
+     * fences new references throughout route discovery, closure and notice resolution.
+     */
+    public void eraseAfterCatalogs(int userId) {
         List<OwnershipOffer> discovered = workScope.unroutedRead(() -> mapper.discoverAccount(userId));
         Map<Route, List<OwnershipOffer>> groups = new LinkedHashMap<>();
         List<OwnershipOffer> control = new ArrayList<>();

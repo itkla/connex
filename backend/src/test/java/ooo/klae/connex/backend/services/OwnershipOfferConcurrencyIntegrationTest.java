@@ -89,8 +89,8 @@ class OwnershipOfferConcurrencyIntegrationTest extends AbstractServiceTest {
             case "decline" -> { as(target); offers.decline(offerId, target.getId()); }
             case "revoke" -> { as(currentUser); offers.revoke("WORKSPACE", workspace.getId(), offerId, currentUser.getId()); }
             case "expiry" -> offers.expire();
-            case "offeror-erasure" -> cleanup.eraseBeforeCatalogs(currentUser.getId());
-            case "offeree-erasure" -> cleanup.eraseBeforeCatalogs(target.getId());
+            case "offeror-erasure" -> cleanup.eraseAfterCatalogs(currentUser.getId());
+            case "offeree-erasure" -> cleanup.eraseAfterCatalogs(target.getId());
             default -> throw new IllegalArgumentException(action);
         }
     }

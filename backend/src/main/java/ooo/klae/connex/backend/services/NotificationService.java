@@ -14,6 +14,7 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -30,8 +31,10 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.work.InvalidWorkItemSourceRowsException;
 import ooo.klae.connex.backend.work.WorkItemStateHash;
 import tools.jackson.databind.JsonNode;
@@ -59,6 +62,8 @@ public class NotificationService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final OwnershipOfferTransaction ownershipOfferTransaction;
+    private final OwnershipOfferMapper ownershipOfferMapper;
+    private final TenantWorkScope tenantWorkScope;
 
     @Transactional(readOnly = true)
     public NotificationPageDto getPage(
@@ -203,7 +208,7 @@ public class NotificationService {
         return new NotificationWorkPage(List.copyOf(items), matchingTotal, overallTotal, asOf);
     }
 
-    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public NotificationDto markRead(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
@@ -215,7 +220,7 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public NotificationDto markUnread(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
@@ -227,7 +232,7 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public NotificationDto dismiss(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
@@ -330,7 +335,7 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public NotificationDto snooze(int id, SnoozeRequest request) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
@@ -383,7 +388,7 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public NotificationDto unsnooze(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
@@ -408,16 +413,38 @@ public class NotificationService {
     public NotificationCountsDto markAllRead() {
         int recipientId = currentRecipientId();
         String asOf = notificationMapper.getDatabaseUtcTimestamp();
+        long cutoffId = notificationMapper.getInboxCutoffId(recipientId);
+        long afterId = 0;
         List<Notification> offerNotices;
         do {
             offerNotices = notificationMapper.findPage(recipientId, "unread",
-                List.of(OwnershipOfferWriter.NOTICE_TYPE), null, null, null, null, null, asOf, 100, 0);
+                List.of(OwnershipOfferWriter.NOTICE_TYPE), null, null, null, null, null,
+                asOf, 100, 0, afterId, cutoffId);
             for (Notification notice : offerNotices) {
-                ownershipOfferTransaction.mutateNotice(ownershipOfferId(notice), recipientId,
-                    () -> markRead(notice.getId()));
+                long offerId = ownershipOfferId(notice);
+                try {
+                    ownershipOfferTransaction.mutateNotice(offerId, recipientId,
+                        () -> markRead(notice.getId()));
+                } catch (ResourceNotFoundException missing) {
+                    if (!ownershipNoticeDeleted(offerId, recipientId, notice)) {
+                        throw missing;
+                    }
+                }
+                afterId = notice.getId();
             }
-        } while (offerNotices.size() == 100);
+        } while (offerNotices.size() == 100 && afterId < cutoffId);
         return approvalMutationRetryService.execute(this::markOrdinaryNotificationsRead);
+    }
+
+    private boolean ownershipNoticeDeleted(long offerId, int recipientId, Notification notice) {
+        if (tenantWorkScope.unroutedRead(() -> ownershipOfferMapper.findById(offerId) == null)) {
+            return true;
+        }
+        return tenantWorkScope.inLifecycleWorkspace(notice.getWorkspaceId(), () -> {
+            Notification current = notificationMapper.findByDedupe(
+                notice.getWorkspaceId(), recipientId, notice.getDedupeKey());
+            return current == null || current.getId() != notice.getId();
+        });
     }
 
     private NotificationCountsDto markOrdinaryNotificationsRead() {

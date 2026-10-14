@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.OwnershipOfferDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -246,7 +247,7 @@ class WorkspaceNotificationLockOrderTest {
         when(workspaceMapper.getActiveById(7)).thenReturn(workspace(7, 3));
         when(organizationMapper.lockActiveByIdForShare(3)).thenReturn(3);
         when(ownershipOfferWriter.createLocked(3, 7, 1, 9)).thenReturn(
-            new ooo.klae.connex.backend.dto.OwnershipOfferDto("101", "WORKSPACE", 3, 7, 1, 9, "OPEN",
+            new OwnershipOfferDto("101", "WORKSPACE", 3, 7, 1, 9, "OPEN",
                 "2026-10-13T00:00:00Z", "2026-10-20T00:00:00Z", null, null, null, null, null, null, null));
         var result = service.changeMemberRole(7, 1, 9, "owner");
         assertEquals("101", result.offer().id());

@@ -383,7 +383,15 @@
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
     <include refid="inboxFilters"/>
-    ORDER BY n.triggered_at DESC, n.id DESC
+    <choose>
+      <when test="_parameter.containsKey('afterId')">
+        AND n.id &gt; #{afterId} AND n.id &lt;= #{cutoffId}
+        ORDER BY n.id
+      </when>
+      <otherwise>
+        ORDER BY n.triggered_at DESC, n.id DESC
+      </otherwise>
+    </choose>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 

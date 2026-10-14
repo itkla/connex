@@ -25,7 +25,7 @@ public class OwnershipOfferAccountCleanupTransaction {
     private final OwnershipOfferWriter writer;
     private final OwnershipOfferNotificationStateVersionService stateVersionService;
 
-    /** Removes one catalog's party references and nullable attribution before tenant erasure. */
+    /** Removes party references and nullable attribution after guarded tenant erasure succeeds. */
     @Transactional
     public void erase(int userId, List<OwnershipOffer> discovered) {
         if (userMapper.lockById(userId) == null) {

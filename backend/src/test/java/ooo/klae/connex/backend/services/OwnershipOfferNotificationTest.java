@@ -3,12 +3,18 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,11 +22,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.notifications.NotificationRealtimePublisher;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import tools.jackson.databind.ObjectMapper;
@@ -34,19 +42,68 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
     @Autowired private OwnershipOfferMapper ledger;
     @Autowired private NotificationService inbox;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private SqlSessionTemplate sql;
     @Autowired private ObjectMapper json;
     @MockitoBean private NotificationRealtimePublisher realtime;
+    @MockitoSpyBean private NotificationMapper inboxMapper;
     private final List<Integer> accounts = new ArrayList<>();
 
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void freshOwner() { OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); clearInvocations(realtime); }
-    @AfterEach void clean() { accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear(); }
+    @AfterEach void clean() { reset(inboxMapper); accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear(); }
 
     private long create(User target) { return Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id()); }
     private Notification delivered(long id, User target) {
         delivery.deliver(ledger.findById(id));
         authenticateAs(target, workspace.getId());
         return notificationMapper.findByDedupe(workspace.getId(), target.getId(), "ownership.offer:" + id);
+    }
+
+    @Test
+    void deletedOfferAndNoticeAfterDiscoveryDoNotAbortOrdinaryMarkAllRead() {
+        OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser);
+        User target = newUser();
+        long offerId = Long.parseLong(workspaces.changeMemberRole(
+            workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id());
+        delivery.deliver(ledger.findById(offerId));
+        authenticateAs(target, workspace.getId());
+        Notification offerNotice = inboxMapper.findByDedupe(
+            workspace.getId(), target.getId(), "ownership.offer:" + offerId);
+        assertNotNull(offerNotice);
+
+        Notification ordinary = new Notification();
+        ordinary.setWorkspaceId(workspace.getId());
+        ordinary.setRecipientId(target.getId());
+        ordinary.setType("workspace.member_added");
+        ordinary.setCategory("workspace");
+        ordinary.setSeverity("info");
+        ordinary.setTemplateVersion(1);
+        ordinary.setTitle("Workspace membership changed");
+        ordinary.setDedupeKey("ownership-read-all-ordinary:" + target.getId());
+        ordinary.setTriggeredAt(inboxMapper.getDatabaseUtcTimestamp());
+        inboxMapper.upsert(ordinary);
+        assertNull(inboxMapper.findById(target.getId(), ordinary.getId()).getReadAt());
+
+        NotificationMapper realInbox = sql.getMapper(NotificationMapper.class);
+        doAnswer(invocation -> {
+            List<Notification> candidates = realInbox.findPage(
+                target.getId(), "unread", List.of(OwnershipOfferWriter.NOTICE_TYPE),
+                null, null, null, null, null, invocation.getArgument(8), 100, 0, 0L,
+                invocation.getArgument(12));
+            assertEquals(1, candidates.size());
+            assertEquals(offerNotice.getId(), candidates.getFirst().getId());
+            assertEquals(1, jdbc.update("DELETE FROM notification WHERE id = ?", offerNotice.getId()));
+            assertEquals(1, jdbc.update("DELETE FROM ownership_offer WHERE id = ?", offerId));
+            return candidates;
+        }).when(inboxMapper).findPage(eq(target.getId()), eq("unread"),
+            eq(List.of(OwnershipOfferWriter.NOTICE_TYPE)), isNull(), isNull(), isNull(),
+            isNull(), isNull(), anyString(), eq(100), eq(0), eq(0L), anyLong());
+
+        assertEquals(0, inbox.markAllRead().getUnread());
+
+        assertNull(ledger.findById(offerId));
+        assertNull(inboxMapper.findById(target.getId(), offerNotice.getId()));
+        assertNotNull(inboxMapper.findById(target.getId(), ordinary.getId()).getReadAt());
     }
 
     @Test void inboxPagesCountsFindByIdAndRealtimeUseTheOrdinaryMembershipGate() throws Exception {

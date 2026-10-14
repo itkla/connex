@@ -55,6 +55,23 @@ public interface NotificationMapper {
         @Param("offset") int offset
     );
 
+    /** Traverses a bounded inbox snapshot by ID without depending on mutation success. */
+    List<Notification> findPage(
+        @Param("recipientId") int recipientId,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
+        @Param("contextType") String contextType,
+        @Param("contextId") Integer contextId,
+        @Param("asOf") String asOf,
+        @Param("limit") int limit,
+        @Param("offset") int offset,
+        @Param("afterId") long afterId,
+        @Param("cutoffId") long cutoffId
+    );
+
     default List<Notification> findPage(
         int recipientId,
         String status,

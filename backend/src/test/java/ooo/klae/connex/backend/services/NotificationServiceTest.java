@@ -9,6 +9,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -17,6 +19,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,11 +28,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.OwnershipOffer;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
@@ -40,8 +46,11 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.work.InvalidWorkItemSourceRowsException;
 import ooo.klae.connex.backend.work.WorkItemStateHash;
 import tools.jackson.databind.ObjectMapper;
@@ -54,6 +63,9 @@ class NotificationServiceTest {
     @Mock private NotificationQuietHoursService quietHoursService;
     @Mock private WorkspaceService workspaceService;
     @Mock private DocumentApprovalService documentApprovalService;
+    @Mock private OwnershipOfferTransaction ownershipOfferTransaction;
+    @Mock private OwnershipOfferMapper ownershipOfferMapper;
+    @Mock private TenantWorkScope tenantWorkScope;
 
     private NotificationService service;
 
@@ -74,7 +86,9 @@ class NotificationServiceTest {
             new ImmediateApprovalMutationRetryService(),
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC),
-            org.mockito.Mockito.mock(OwnershipOfferTransaction.class)
+            ownershipOfferTransaction,
+            ownershipOfferMapper,
+            tenantWorkScope
         );
         User user = new User();
         user.setId(42);
@@ -82,6 +96,10 @@ class NotificationServiceTest {
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(quietHoursService.evaluateForUser(42, Instant.parse("2026-06-25T00:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
+        lenient().when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation ->
+            ((ControlPlaneRead<?>) invocation.getArgument(0)).read());
+        lenient().when(tenantWorkScope.inLifecycleWorkspace(eq(7), ArgumentMatchers.<Supplier<Boolean>>any())).thenAnswer(invocation ->
+            ((Supplier<?>) invocation.getArgument(1)).get());
     }
 
     @Test
@@ -338,6 +356,110 @@ class NotificationServiceTest {
         assertEquals(91L, result.getStateVersion());
         assertSame(counts, result);
         verify(stateVersionService).bumpNow(42);
+    }
+
+    @Test
+    void markAllReadContinuesWhenTheDiscoveredOfferWasDeleted() {
+        NotificationCountsDto counts = ordinaryReadResult();
+        discoveredOwnershipNotice(ownershipNotice(11));
+        when(ownershipOfferTransaction.mutateNotice(eq(11L), eq(42), any()))
+            .thenThrow(new ResourceNotFoundException("Ownership offer not found"));
+
+        assertSame(counts, service.markAllRead());
+
+        verify(ownershipOfferMapper).findById(11L);
+        verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
+        verify(notificationMapper, never()).findByDedupe(7, 42, "ownership.offer:11");
+    }
+
+    @Test
+    void markAllReadContinuesWhenOnlyTheDiscoveredNoticeWasDeleted() {
+        NotificationCountsDto counts = ordinaryReadResult();
+        discoveredOwnershipNotice(ownershipNotice(11));
+        when(ownershipOfferTransaction.mutateNotice(eq(11L), eq(42), any()))
+            .thenThrow(new ResourceNotFoundException("Notification not found"));
+        when(ownershipOfferMapper.findById(11L)).thenReturn(new OwnershipOffer());
+
+        assertSame(counts, service.markAllRead());
+
+        verify(notificationMapper).findByDedupe(7, 42, "ownership.offer:11");
+        verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Scope no longer active", "Account deletion is reserved"})
+    void markAllReadPropagatesNotFoundWhenTheOfferAndNoticeStillExist(String message) {
+        Notification notice = ownershipNotice(11);
+        discoveredOwnershipNotice(notice);
+        ResourceNotFoundException failure = new ResourceNotFoundException(message);
+        when(ownershipOfferTransaction.mutateNotice(eq(11L), eq(42), any())).thenThrow(failure);
+        when(ownershipOfferMapper.findById(11L)).thenReturn(new OwnershipOffer());
+        when(notificationMapper.findByDedupe(7, 42, "ownership.offer:11")).thenReturn(notice);
+
+        assertSame(failure, assertThrows(ResourceNotFoundException.class, service::markAllRead));
+
+        verify(notificationMapper, never()).markAllRead(42, 81L, "2026-06-25 00:00:00");
+    }
+
+    @Test
+    void markAllReadPropagatesOtherMutationFailuresWithoutAnAbsenceLookup() {
+        discoveredOwnershipNotice(ownershipNotice(11));
+        ConflictException failure = new ConflictException("Ownership notice is unavailable");
+        when(ownershipOfferTransaction.mutateNotice(eq(11L), eq(42), any())).thenThrow(failure);
+
+        assertSame(failure, assertThrows(ConflictException.class, service::markAllRead));
+
+        verify(ownershipOfferMapper, never()).findById(11L);
+        verify(notificationMapper, never()).markAllRead(42, 81L, "2026-06-25 00:00:00");
+    }
+
+    @Test
+    void markAllReadAdvancesTheBoundedWatermarkEvenWhenAFullPageDoesNotChange() {
+        NotificationCountsDto counts = ordinaryReadResult();
+        when(notificationMapper.getInboxCutoffId(42)).thenReturn(200L, 81L);
+        List<Notification> unchanged = IntStream.rangeClosed(1, 100)
+            .mapToObj(NotificationServiceTest::ownershipNotice).toList();
+        AtomicInteger firstPageReads = new AtomicInteger();
+        when(notificationMapper.findPage(42, "unread", List.of(OwnershipOfferWriter.NOTICE_TYPE),
+            null, null, null, null, null, "2026-06-25 00:00:00", 100, 0, 0L, 200L))
+            .thenAnswer(invocation -> {
+                assertEquals(1, firstPageReads.incrementAndGet(), "An unchanged page must not be rediscovered");
+                return unchanged;
+            });
+
+        assertSame(counts, service.markAllRead());
+
+        verify(notificationMapper).findPage(42, "unread", List.of(OwnershipOfferWriter.NOTICE_TYPE),
+            null, null, null, null, null, "2026-06-25 00:00:00", 100, 0, 100L, 200L);
+        verify(notificationMapper).markAllRead(42, 81L, "2026-06-25 00:00:00");
+    }
+
+    private void discoveredOwnershipNotice(Notification notice) {
+        when(notificationMapper.getInboxCutoffId(42)).thenReturn(81L);
+        when(notificationMapper.getDatabaseUtcTimestamp()).thenReturn("2026-06-25 00:00:00");
+        when(notificationMapper.findPage(42, "unread", List.of(OwnershipOfferWriter.NOTICE_TYPE),
+            null, null, null, null, null, "2026-06-25 00:00:00", 100, 0, 0L, 81L))
+            .thenReturn(List.of(notice));
+    }
+
+    private NotificationCountsDto ordinaryReadResult() {
+        NotificationCountsDto counts = new NotificationCountsDto();
+        when(notificationMapper.getInboxCutoffId(42)).thenReturn(81L);
+        when(notificationMapper.getDatabaseUtcTimestamp()).thenReturn("2026-06-25 00:00:00");
+        when(notificationMapper.markAllRead(42, 81L, "2026-06-25 00:00:00")).thenReturn(1);
+        when(notificationMapper.getUnreadCounts(42, "2026-06-25 00:00:00")).thenReturn(counts);
+        return counts;
+    }
+
+    private static Notification ownershipNotice(int id) {
+        Notification notice = new Notification();
+        notice.setId(id);
+        notice.setWorkspaceId(7);
+        notice.setRecipientId(42);
+        notice.setType(OwnershipOfferWriter.NOTICE_TYPE);
+        notice.setDedupeKey("ownership.offer:" + id);
+        notice.setData("{\"offerId\":\"" + id + "\"}");
+        return notice;
     }
 
     @Test

@@ -64,9 +64,8 @@ public class UserAccountCatalogOffboardingService {
         }
     }
 
-    /** Erases user references once per distinct tenant catalog. */
+    /** Erases guarded tenant references before removing control-plane ownership offers. */
     public void eraseReferences(int userId) {
-        ownershipOfferCleanupService.eraseBeforeCatalogs(userId);
         for (String catalog : placementRegistry.activeCatalogs()) {
             tenantWorkScope.withCatalog(
                 catalog,
@@ -86,6 +85,7 @@ public class UserAccountCatalogOffboardingService {
                     return null;
                 });
         }
+        ownershipOfferCleanupService.eraseAfterCatalogs(userId);
     }
 
     /**

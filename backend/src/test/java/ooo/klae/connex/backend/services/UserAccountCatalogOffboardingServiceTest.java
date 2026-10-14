@@ -1,12 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -22,6 +24,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
@@ -75,7 +78,7 @@ class UserAccountCatalogOffboardingServiceTest {
         service.assertNoAuthoredContent(9);
         service.eraseReferences(9);
 
-        InOrder order = inOrder(tenantWorkScope, guard, offboarding, capturePurge);
+        InOrder order = inOrder(tenantWorkScope, guard, offboarding, capturePurge, ownershipOfferCleanup);
         for (String handle : List.of("catalog_a", "catalog_b")) {
             order.verify(tenantWorkScope).withCatalog(eq(handle), any());
             order.verify(offboarding).assertNoAuthoredContent(9);
@@ -90,6 +93,8 @@ class UserAccountCatalogOffboardingServiceTest {
             order.verify(offboarding).assertNoAuthoredContent(9);
             order.verify(offboarding).eraseOrgDataReferences(9);
         }
+        order.verify(ownershipOfferCleanup).eraseAfterCatalogs(9);
+        order.verifyNoMoreInteractions();
     }
 
     @Test
@@ -103,7 +108,7 @@ class UserAccountCatalogOffboardingServiceTest {
 
         assertThrows(ConflictException.class, () -> service.eraseReferences(9));
 
-        InOrder order = inOrder(tenantWorkScope, guard, offboarding, capturePurge);
+        InOrder order = inOrder(tenantWorkScope, guard, offboarding, capturePurge, ownershipOfferCleanup);
         order.verify(tenantWorkScope).withCatalog(eq("catalog_a"), any());
         order.verify(guard).assertCanErase(9);
         order.verify(capturePurge).purgeAccountCatalog(9, "google");
@@ -113,6 +118,56 @@ class UserAccountCatalogOffboardingServiceTest {
         order.verify(offboarding).eraseOrgDataReferences(9);
         order.verify(tenantWorkScope).withCatalog(eq("catalog_b"), any());
         order.verify(guard).assertCanErase(9);
+        order.verifyNoMoreInteractions();
+        verifyNoInteractions(ownershipOfferCleanup);
+    }
+
+    @Test
+    void aFirstCatalogGuardRefusalRetainsEveryOwnershipOfferAndNotice() {
+        doAnswer(invocation -> {
+            throw new ConflictException("Reassign first");
+        }).when(guard).assertCanErase(9);
+
+        assertThrows(ConflictException.class, () -> service.eraseReferences(9));
+
+        verifyNoInteractions(offboarding, capturePurge, ownershipOfferCleanup);
+    }
+
+    @Test
+    void guardedCatalogErasureRetainsTheExistingDefaultIsolation() {
+        when(transactionManager.getTransaction(any())).thenAnswer(invocation -> {
+            TransactionDefinition definition = invocation.getArgument(0);
+            assertEquals(TransactionDefinition.ISOLATION_DEFAULT, definition.getIsolationLevel());
+            return mock(TransactionStatus.class);
+        });
+
+        service.eraseReferences(9);
+    }
+
+    @Test
+    void ownershipErasureRunsOnlyAfterEveryCatalogTransactionHasCommitted() {
+        AtomicInteger commits = new AtomicInteger();
+        doAnswer(invocation -> {
+            commits.incrementAndGet();
+            return null;
+        }).when(transactionManager).commit(any());
+        doAnswer(invocation -> {
+            assertEquals(2, commits.get());
+            assertNull(catalog.get());
+            return null;
+        }).when(ownershipOfferCleanup).eraseAfterCatalogs(9);
+
+        service.eraseReferences(9);
+
+        InOrder order = inOrder(guard, offboarding, transactionManager, ownershipOfferCleanup);
+        for (int catalogIndex = 0; catalogIndex < 2; catalogIndex++) {
+            order.verify(transactionManager).getTransaction(any());
+            order.verify(guard).assertCanErase(9);
+            order.verify(offboarding).assertNoAuthoredContent(9);
+            order.verify(offboarding).eraseOrgDataReferences(9);
+            order.verify(transactionManager).commit(any());
+        }
+        order.verify(ownershipOfferCleanup).eraseAfterCatalogs(9);
         order.verifyNoMoreInteractions();
     }
 }

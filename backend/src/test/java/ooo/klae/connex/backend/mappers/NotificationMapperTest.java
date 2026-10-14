@@ -43,6 +43,34 @@ class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private TaskMapper taskMapper;
 
     @Test
+    void boundedInboxCursorAdvancesUnchangedRowsWithoutChangingOrdinaryPageOrder() {
+        User recipient = newUser();
+        Notification first = reminder(recipient, "info", "2026-01-03 00:00:00", 1);
+        Notification second = reminder(recipient, "info", "2026-01-01 00:00:00", 2);
+        Notification afterCutoff = reminder(recipient, "info", "2026-01-02 00:00:00", 3);
+        for (Notification notice : List.of(first, second, afterCutoff)) {
+            notice.setType("ownership.offer");
+            notice.setDedupeKey("ownership.offer:" + unique());
+            notificationMapper.upsert(notice);
+        }
+        String asOf = notificationMapper.getDatabaseUtcTimestamp();
+        List<String> types = List.of("ownership.offer");
+
+        assertEquals(List.of(first.getId()), notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, 0L, second.getId())
+            .stream().map(Notification::getId).toList());
+        assertEquals(List.of(second.getId()), notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, first.getId(), second.getId())
+            .stream().map(Notification::getId).toList());
+        assertTrue(notificationMapper.findPage(recipient.getId(), "unread",
+            types, null, null, null, null, null, asOf, 1, 0, second.getId(), second.getId()).isEmpty());
+        assertEquals(List.of(first.getId(), afterCutoff.getId(), second.getId()),
+            notificationMapper.findPage(recipient.getId(), "unread",
+                types, null, null, null, null, null, asOf, 100, 0)
+                .stream().map(Notification::getId).toList());
+    }
+
+    @Test
     void stableUpsertPreservesOrResetsLifecycleByPhase() {
         User recipient = newUser();
         Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
