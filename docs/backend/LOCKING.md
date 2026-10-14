@@ -1132,7 +1132,12 @@ enters `campaign_delivery_unsubscribe_token`. Every attempt's digest, including 
 digests and unused attempts, remains valid until its delivery is deleted. The bearer lives only in
 the rendered message and provider request; export contains digests alone. Provider diagnostics are
 scrubbed of the exact attempt bearer and all 64-hex runs before truncation, error/event persistence,
-or logging. Named Angus SMTP loggers also scrub library diagnostics before forwarding to handlers.
+or logging. Native Angus and Connex transport package loggers scrub SMTP diagnostics before
+forwarding to handlers.
+The native Angus transport suppresses MIME DATA tracing when its `data()` stream returns after
+354, then serializes the original message once without a copy or pre-egress serialization. The
+`bdat()` stream is protected too, while `mail.smtp.chunksize=0` disables chunking. Tracing the dot
+terminator resumes final-response diagnostics, and send/close finally blocks clear suppression.
 Provider message ids replace only the exact attempt bearer, preserving unrelated opaque hex ids
 for webhook correlation and the resulting suppression and consent revocation.
 

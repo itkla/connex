@@ -1,49 +1,48 @@
 package ooo.klae.connex.backend.delivery.provider.smtp;
 
-import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Objects;
 
 import jakarta.mail.Address;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
-import jakarta.mail.Transport;
-import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.URLName;
+
+import org.eclipse.angus.mail.smtp.SMTPTransport;
 
 /**
  * Keeps SMTP commands and responses observable while suppressing all MIME DATA tracing.
- * Suppression begins when the provider serializes MIME, after its DATA response. Dot stuffing
+ * Suppression begins when Angus returns the DATA stream after its successful 354 response, without
+ * copying or pre-serializing the message. BDAT streams receive the same protection. Dot stuffing
  * distinguishes the standalone terminator from every body line, so logging resumes before the
  * final server response without inspecting MIME encodings.
  */
-public final class BodySafeSmtpTransport extends Transport {
-    private final Transport delegate;
+public final class BodySafeSmtpTransport extends SMTPTransport {
 
-    /** Wraps the configured provider transport without changing connection or TLS selection. */
-    public BodySafeSmtpTransport(Session session, Transport delegate) {
-        super(session, null);
-        this.delegate = Objects.requireNonNull(delegate, "delegate");
+    /** Uses the SMTP session's native connection, TLS, socket, and cancellation settings. */
+    public BodySafeSmtpTransport(Session session, URLName url) {
+        super(session, url);
         SmtpDiagnosticLogFilter.install();
     }
 
     @Override
-    protected boolean protocolConnect(String host, int port, String user, String password)
-            throws MessagingException {
-        delegate.connect(host, port, user, password);
-        return true;
+    protected OutputStream data() throws MessagingException {
+        OutputStream stream = super.data();
+        SmtpDiagnosticLogFilter.beginDataBody();
+        return stream;
     }
 
     @Override
-    public synchronized boolean isConnected() {
-        return delegate.isConnected();
+    protected OutputStream bdat() throws MessagingException {
+        OutputStream stream = super.bdat();
+        SmtpDiagnosticLogFilter.beginDataBody();
+        return stream;
     }
 
     @Override
-    public void sendMessage(Message message, Address[] addresses) throws MessagingException {
+    public synchronized void sendMessage(Message message, Address[] addresses) throws MessagingException {
         try {
-            delegate.sendMessage(message instanceof MimeMessage mime ? new BodySafeMimeMessage(mime) : message,
-                    addresses);
+            super.sendMessage(message, addresses);
         } finally {
             SmtpDiagnosticLogFilter.endDataBody();
         }
@@ -52,22 +51,9 @@ public final class BodySafeSmtpTransport extends Transport {
     @Override
     public synchronized void close() throws MessagingException {
         try {
-            delegate.close();
+            super.close();
         } finally {
             SmtpDiagnosticLogFilter.endDataBody();
-            super.close();
-        }
-    }
-
-    private static final class BodySafeMimeMessage extends MimeMessage {
-        private BodySafeMimeMessage(MimeMessage source) throws MessagingException {
-            super(source);
-        }
-
-        @Override
-        public void writeTo(OutputStream stream, String[] ignoredHeaders) throws IOException, MessagingException {
-            SmtpDiagnosticLogFilter.beginDataBody();
-            super.writeTo(stream, ignoredHeaders);
         }
     }
 }

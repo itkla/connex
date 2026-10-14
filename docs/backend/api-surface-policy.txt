@@ -1,6 +1,6 @@
 # Generated perimeter and authorization source SHA-256 ledger
 ../frontend/next.config.ts	ce3ed2cdd54bd5dc01fe3d1207b5ba1aad5c14ba373c63d5dffe2de05ee9d4b9
-build.gradle	edbca41497e57047f61b49cd56e70afad1ee55e2cf1810e4694244d5c591c841
+build.gradle	b7acb72770938bfdbf86abce0d1bddf928730c625b26f6864a30cf5195b48257
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlAccess.java	fcc5f6751f1678b33f54198095adff37b4126717ae7813093a31d067f3c6e1e7
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlOperations.java	33f580c9fb3f51439d7359bf8d2f433f091ec91f72d35b79860f52347e1018f8
 src/main/java/ooo/klae/connex/backend/ai/AiFeatureGate.java	5e2602bee1b85d6f0a27b991ba3d323254f89b2d42ef21867551d7b88c57e6b9
@@ -284,7 +284,7 @@ src/main/java/ooo/klae/connex/backend/delivery/ProviderEventSource.java	56e5494c
 src/main/java/ooo/klae/connex/backend/delivery/provider/esp/HttpEspDeliveryProvider.java	cb52edb1cd16e3c6db06d6c7343bcee27aff57062297b7c12cf24ee226dfa174
 src/main/java/ooo/klae/connex/backend/delivery/provider/list/HttpListConnector.java	dbf5d2102b287f13d2909ece194af39b66ddcf8142d3c9b1e0db2aed544ef1a0
 src/main/java/ooo/klae/connex/backend/delivery/provider/sms/SmsHttpDeliveryProvider.java	b32f0b2b267bbbe3bbdf4f52e001b17dcebb1860e3a20fd1e8f276008b0f38a0
-src/main/java/ooo/klae/connex/backend/delivery/provider/smtp/SmtpDiagnosticLogFilter.java	64d53ebab94ade91706cfaa36d2e0f4dd83eadac31c70b1a0aa2e6a6885bfe4d
+src/main/java/ooo/klae/connex/backend/delivery/provider/smtp/SmtpDiagnosticLogFilter.java	9168a0c8ba72e4b92d6a37fd8e9ce0c486539b118a92669fecff983c0e212b50
 src/main/java/ooo/klae/connex/backend/dto/AiAssistantSkillDto.java	046450f1ff8b7347cc798b99f4c9a461339cace89df52873dfb3262a4ff8c79c
 src/main/java/ooo/klae/connex/backend/dto/AiAssistantToolCallReadDto.java	6728b8fdb05eead9ba4000fdd7d67e704b3cb7b943dbdca905f345282d785516
 src/main/java/ooo/klae/connex/backend/dto/AiChatQueryScopeDto.java	c0ab82b5ca6808794a9fa1ffcd6406fc437dbba0725bc9651b95628aa22743a8

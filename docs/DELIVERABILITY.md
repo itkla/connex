@@ -377,9 +377,20 @@ storage in delivery errors or event details, or logging, Connex replaces the att
 any 64-hex run with `[redacted]`, keeping the remaining diagnostic text. Returned provider message
 ids replace only the exact attempt bearer: unrelated opaque ids, including 64-hex ids, must survive
 unchanged so later bounce and complaint webhooks can correlate, suppress, and revoke consent.
-Named Angus SMTP loggers receive the free-text scrubbing before their
-diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
-TRACE, regardless of body encoding; command and response diagnostics remain available.
+Both the native Angus SMTP loggers and Connex's transport package loggers receive the free-text
+scrubbing before their diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
+TRACE, regardless of body encoding; command and response diagnostics remain available. The native
+Angus transport starts suppression when `data()` returns its stream after the 354 response, and
+serializes the original message directly to that stream once. It performs no message copy or
+pre-egress serialization. `mail.smtp.chunksize=0` keeps BDAT disabled; the `bdat()` stream hook also
+starts suppression if chunking is ever enabled. The dot terminator resumes response tracing, and
+send/close cleanup clears suppression even on failure. Socket abort still precedes synchronized
+transport close at the deadline, releasing a blocked send before cross-thread close acquires its
+monitor.
+Angus names its loggers after the transport class's package, so SMTP diagnostics and protocol
+traces now log under `ooo.klae.connex.backend.delivery.provider.smtp` and
+`ooo.klae.connex.backend.delivery.provider.smtp.protocol`; enable those, not the
+`org.eclipse.angus.mail.smtp` names, when tracing SMTP commands.
 
 **An idempotent replay re-renders the unsubscribe link under the unchanged
 `send:{sendId}:{deliveryId}` key.** An endpoint that compares request bodies under a key (such as

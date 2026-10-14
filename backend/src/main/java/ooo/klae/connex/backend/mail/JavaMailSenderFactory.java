@@ -14,6 +14,7 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.NoSuchProviderException;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
+import jakarta.mail.URLName;
 import jakarta.mail.internet.MimeMessage;
 
 import org.springframework.mail.javamail.JavaMailSender;
@@ -215,7 +216,14 @@ public class JavaMailSenderFactory {
 
         @Override
         protected Transport getTransport(Session session) throws NoSuchProviderException {
-            return new BodySafeSmtpTransport(session, super.getTransport(session));
+            String protocol = getProtocol();
+            if (protocol == null) {
+                protocol = session.getProperty("mail.transport.protocol");
+            }
+            if (protocol == null || "smtp".equals(protocol)) {
+                return new BodySafeSmtpTransport(session, new URLName("smtp", null, -1, null, null, null));
+            }
+            return super.getTransport(session);
         }
     }
 

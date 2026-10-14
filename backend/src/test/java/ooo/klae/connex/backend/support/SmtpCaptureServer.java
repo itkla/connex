@@ -30,6 +30,7 @@ public final class SmtpCaptureServer implements AutoCloseable {
     private final Future<byte[]> message;
     private final boolean rejectWithBearer;
     private volatile Socket connection;
+    private volatile boolean dataReceived;
 
     /** Opens an ephemeral loopback port with bounded accept, read, and capture time. */
     public SmtpCaptureServer() throws IOException {
@@ -47,6 +48,11 @@ public final class SmtpCaptureServer implements AutoCloseable {
     /** Returns the ephemeral SMTP port. */
     public int port() {
         return server.getLocalPort();
+    }
+
+    /** Reports whether the relay has received DATA, before replying with 354. */
+    public boolean hasReceivedData() {
+        return dataReceived;
     }
 
     /** Waits at most ten seconds and decodes the captured SMTP DATA as MIME. */
@@ -90,6 +96,7 @@ public final class SmtpCaptureServer implements AutoCloseable {
                 } else if (line.startsWith("MAIL FROM") || line.startsWith("RCPT TO")) {
                     reply(output, "250 accepted");
                 } else if ("DATA".equals(line)) {
+                    dataReceived = true;
                     readingData = true;
                     reply(output, "354 end with dot");
                 } else if ("QUIT".equals(line)) {

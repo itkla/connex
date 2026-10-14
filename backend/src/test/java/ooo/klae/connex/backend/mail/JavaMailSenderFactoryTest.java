@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.reflect.Field;
@@ -27,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
@@ -38,9 +41,11 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 
+import org.eclipse.angus.mail.smtp.SMTPOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -51,6 +56,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
+import ooo.klae.connex.backend.delivery.provider.smtp.BodySafeSmtpTransport;
 import ooo.klae.connex.backend.support.SmtpCaptureServer;
 
 class JavaMailSenderFactoryTest {
@@ -60,13 +66,54 @@ class JavaMailSenderFactoryTest {
     private static final long STALL_MARGIN_MILLIS = 6_000L;
 
     @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void originalMessageSerializesExactlyOnceToTheSmtpStreamAfterData(boolean deadline) throws Exception {
+        try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+            JavaMailSenderFactory factory = new JavaMailSenderFactory();
+            JavaMailSenderFactory.DeadlineBoundSender bounded = deadline
+                    ? factory.deadlineBoundForConfig(config, InetAddress.getLoopbackAddress(), false,
+                            TimeUnit.SECONDS.toNanos(5)) : null;
+            JavaMailSender sender = deadline ? bounded.sender() : factory.forConfig(config);
+            AtomicInteger serializations = new AtomicInteger();
+            AtomicReference<MimeMessage> serialized = new AtomicReference<>();
+            MimeMessage message = new MimeMessage(((JavaMailSenderImpl) sender).getSession()) {
+                @Override
+                public void writeTo(OutputStream stream, String[] ignoredHeaders) throws IOException, MessagingException {
+                    serialized.set(this);
+                    serializations.incrementAndGet();
+                    assertTrue(smtp.hasReceivedData());
+                    assertInstanceOf(SMTPOutputStream.class, stream);
+                    super.writeTo(stream, ignoredHeaders);
+                }
+            };
+            message.setFrom(new InternetAddress(config.fromAddress()));
+            message.setRecipient(Message.RecipientType.TO, new InternetAddress("recipient@example.test"));
+            message.setSubject("Original message");
+            String body = "SMTP serialization sentinel\r\n";
+            message.setText(body);
+            if (deadline) {
+                bounded.connectAndSend(message, () -> {});
+            } else {
+                sender.send(message);
+            }
+
+            assertSame(message, serialized.get());
+            assertEquals(1, serializations.get());
+            assertEquals(body, smtp.awaitMessage().getContent());
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"base64, false", "base64, true", "quoted-printable, false", "quoted-printable, true"})
     void protocolTraceSuppressesEncodedDataButKeepsCommandsAndReplies(String encoding, boolean deadline)
             throws Exception {
         String bearer = "0123456789abcdef".repeat(4);
         Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
         Level previousLevel = logger.getLevel();
-        java.util.logging.Logger protocolLogger = java.util.logging.Logger.getLogger("org.eclipse.angus.mail.smtp.protocol");
+        java.util.logging.Logger protocolLogger = java.util.logging.Logger.getLogger(
+                BodySafeSmtpTransport.class.getPackageName() + ".protocol");
         java.util.logging.Level previousProtocolLevel = protocolLogger.getLevel();
         boolean bridgeInstalled = SLF4JBridgeHandler.isInstalled();
         if (!bridgeInstalled) {

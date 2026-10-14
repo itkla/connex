@@ -11,27 +11,30 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Exercises library log records before JUL handlers and the SLF4J bridge see them. */
 class SmtpDiagnosticLogFilterTest {
-    @Test
-    void dataSuppressionDropsEncodedRecordsAndResumesAtTheDotStuffedTerminator() {
+    @ParameterizedTest
+    @ValueSource(strings = {"org.eclipse.angus.mail.smtp", "ooo.klae.connex.backend.delivery.provider.smtp"})
+    void dataSuppressionDropsEncodedRecordsAndResumesAtTheDotStuffedTerminator(String loggerName) {
         SmtpDiagnosticLogFilter filter = new SmtpDiagnosticLogFilter(null);
         SmtpDiagnosticLogFilter.beginDataBody();
         try {
             for (String body : new String[] {"YWJjZGVmZ2hpamtsbW5vcA==", "split=\r\nencoded body", ".."}) {
                 LogRecord record = new LogRecord(Level.FINEST, body);
-                record.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+                record.setLoggerName(loggerName + ".protocol");
                 assertFalse(filter.isLoggable(record));
             }
             LogRecord diagnostic = new LogRecord(Level.FINE, "connection diagnostic retained");
-            diagnostic.setLoggerName("org.eclipse.angus.mail.smtp");
+            diagnostic.setLoggerName(loggerName);
             assertTrue(filter.isLoggable(diagnostic));
             LogRecord terminator = new LogRecord(Level.FINEST, ".");
-            terminator.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+            terminator.setLoggerName(loggerName + ".protocol");
             assertTrue(filter.isLoggable(terminator));
             LogRecord response = new LogRecord(Level.FINEST, "554 rejected " + "a".repeat(64));
-            response.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+            response.setLoggerName(loggerName + ".protocol");
             assertTrue(filter.isLoggable(response));
             assertEquals("554 rejected [redacted]", response.getMessage());
         } finally {

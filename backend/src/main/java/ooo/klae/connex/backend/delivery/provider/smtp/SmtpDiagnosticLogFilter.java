@@ -8,12 +8,14 @@ import java.util.logging.Logger;
 
 import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 
-/** Scrubs Angus diagnostics and suppresses MIME DATA before JUL handlers can publish them. */
+/** Scrubs native and Connex SMTP diagnostics and suppresses MIME DATA before JUL handlers publish them. */
 final class SmtpDiagnosticLogFilter implements Filter {
     private static final ThreadLocal<Boolean> DATA_BODY = new ThreadLocal<>();
     private static final Logger[] LOGGERS = {
             Logger.getLogger("org.eclipse.angus.mail.smtp"),
-            Logger.getLogger("org.eclipse.angus.mail.smtp.protocol")
+            Logger.getLogger("org.eclipse.angus.mail.smtp.protocol"),
+            Logger.getLogger(BodySafeSmtpTransport.class.getPackageName()),
+            Logger.getLogger(BodySafeSmtpTransport.class.getPackageName() + ".protocol")
     };
     private final Filter previous;
 

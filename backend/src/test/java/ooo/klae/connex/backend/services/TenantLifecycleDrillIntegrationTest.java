@@ -69,6 +69,7 @@ import ooo.klae.connex.backend.delivery.DeliveryEvent;
 import ooo.klae.connex.backend.delivery.DeliveryEventType;
 import ooo.klae.connex.backend.delivery.ProviderEventSource;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.smtp.BodySafeSmtpTransport;
 import ooo.klae.connex.backend.delivery.MessageDispatcher;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
@@ -298,10 +299,14 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending' WHERE id = ?", deliveryId);
         Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
         Level previousLevel = logger.getLevel();
+        java.util.logging.Logger smtpLogger = java.util.logging.Logger.getLogger(
+                BodySafeSmtpTransport.class.getPackageName());
+        java.util.logging.Level previousSmtpLevel = smtpLogger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         logger.setLevel(Level.DEBUG);
+        smtpLogger.setLevel(java.util.logging.Level.FINE);
         try (SmtpCaptureServer smtp = new SmtpCaptureServer(true)) {
             ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
                     "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
@@ -329,7 +334,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                     new String(bytes, StandardCharsets.UTF_8).contains(bearer)));
             assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == Level.DEBUG));
             assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == Level.DEBUG
-                    && "org.eclipse.angus.mail.smtp".equals(event.getLoggerName())
+                    && BodySafeSmtpTransport.class.getPackageName().equals(event.getLoggerName())
                     && event.getFormattedMessage().contains("554 rejected [redacted] diagnostic [redacted] retained")));
             for (ILoggingEvent event : appender.list) {
                 assertFalse(event.getFormattedMessage().contains(bearer));
@@ -345,6 +350,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             }
         } finally {
             logger.setLevel(previousLevel);
+            smtpLogger.setLevel(previousSmtpLevel);
             logger.detachAppender(appender);
             appender.stop();
         }
