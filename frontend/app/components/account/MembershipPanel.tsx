@@ -5,19 +5,15 @@ import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
-import type { OwnershipOffer, Workspace } from "@/app/lib/types";
+import type { Workspace } from "@/app/lib/types";
 import {
-    acceptOwnershipOffer,
     acceptWorkspace,
-    ApiError,
-    declineOwnershipOffer,
     declineWorkspace,
-    getMyOwnershipOffers,
     getPendingWorkspaces,
     leaveWorkspace,
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
-import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -34,11 +30,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import OwnershipConfinementDialog from "@/app/components/account/OwnershipConfinementDialog";
 
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
     const showApiError = useApiErrorToast("AccountInvites");
-    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const format = useFormatter();
     const router = useRouter();
     const { activeWorkspaceId, activeWorkspace, runSelectionChange, switching } = useWorkspace();
@@ -48,60 +44,8 @@ export default function MembershipPanel() {
     const [busyId, setBusyId] = useState<number | null>(null);
     const [leaveOpen, setLeaveOpen] = useState(false);
     const [leaving, setLeaving] = useState(false);
-    const [offers, setOffers] = useState<OwnershipOffer[]>([]);
-    const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
-    const [confinementOffer, setConfinementOffer] = useState<OwnershipOffer | null>(null);
-
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const loaded = await getMyOwnershipOffers();
-                if (!cancelled) setOffers(loaded.filter((offer) => offer.state === "OPEN"));
-            } catch {
-                if (!cancelled) toastError(t("offersLoadFailed"));
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [t]);
-
-    const scopeLabel = (offer: OwnershipOffer) =>
-        offer.scopeName?.trim()
-        || (offer.scopeKind === "ORGANIZATION" ? t("ownershipScopeOrganization") : t("ownershipScopeWorkspace"));
-
-    const acceptOffer = async (offer: OwnershipOffer, acknowledgeConfinement = false) => {
-        setBusyOfferId(offer.id);
-        try {
-            await acceptOwnershipOffer(offer.id, acknowledgeConfinement);
-            setOffers((prev) => prev.filter((existing) => existing.id !== offer.id));
-            setConfinementOffer(null);
-            toastSuccess(t("ownershipAccepted", { scope: scopeLabel(offer) }));
-            router.refresh();
-        } catch (err) {
-            if (err instanceof ApiError && err.code === "PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED") {
-                setConfinementOffer(offer);
-            } else if (!handlePasskeyStepUpError(err)) {
-                showApiError(err, "ownershipAcceptFailed");
-            }
-        } finally {
-            setBusyOfferId(null);
-        }
-    };
-
-    const declineOffer = async (offer: OwnershipOffer) => {
-        setBusyOfferId(offer.id);
-        try {
-            await declineOwnershipOffer(offer.id);
-            setOffers((prev) => prev.filter((existing) => existing.id !== offer.id));
-            toastSuccess(t("ownershipDeclined"));
-        } catch (err) {
-            showApiError(err, "ownershipDeclineFailed");
-        } finally {
-            setBusyOfferId(null);
-        }
-    };
+    const ownershipOffers = useSelfOwnershipOffers();
+    const { offers, busyOfferId, scopeLabel } = ownershipOffers;
 
     useEffect(() => {
         let cancelled = false;
@@ -200,10 +144,10 @@ export default function MembershipPanel() {
                                                 : t("ownershipOfferExpires", { date: expires })}
                                         </p>
                                     </div>
-                                    <Button size="toolbar" variant="outline" disabled={busy} onClick={() => declineOffer(offer)}>
+                                    <Button size="toolbar" variant="outline" disabled={busy} onClick={() => ownershipOffers.decline(offer)}>
                                         {t("decline")}
                                     </Button>
-                                    <Button size="toolbar" variant="brand" disabled={busy} onClick={() => acceptOffer(offer)}>
+                                    <Button size="toolbar" variant="brand" disabled={busy} onClick={() => ownershipOffers.accept(offer)}>
                                         {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
                                     </Button>
                                 </li>
@@ -283,41 +227,7 @@ export default function MembershipPanel() {
                 </div>
             </Rise>
 
-            <Dialog
-                open={confinementOffer !== null}
-                onOpenChange={(open) => {
-                    if (!open && busyOfferId === null) setConfinementOffer(null);
-                }}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>
-                            {t("ownershipConfinementTitle", {
-                                scope: confinementOffer ? scopeLabel(confinementOffer) : "",
-                            })}
-                        </DialogTitle>
-                        <DialogDescription>{t("ownershipConfinementBody")}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={busyOfferId !== null}>
-                                {t("cancel")}
-                            </Button>
-                        </DialogClose>
-                        <Button
-                            variant="brand"
-                            disabled={busyOfferId !== null || confinementOffer === null}
-                            onClick={() => {
-                                if (confinementOffer) void acceptOffer(confinementOffer, true);
-                            }}
-                        >
-                            {busyOfferId !== null
-                                ? <Loader2Icon className="size-4 animate-spin" />
-                                : t("ownershipConfinementAccept")}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <OwnershipConfinementDialog offers={ownershipOffers} />
 
             <Dialog open={leaveOpen} onOpenChange={(open) => !leaving && setLeaveOpen(open)}>
                 <DialogContent>

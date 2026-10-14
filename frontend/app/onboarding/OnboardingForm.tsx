@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
+import { Loader2Icon } from "lucide-react";
 
 import {
     createWorkspace,
@@ -12,15 +13,21 @@ import {
     WorkspaceSelectionUnavailableError,
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
+import OwnershipConfinementDialog from "@/app/components/account/OwnershipConfinementDialog";
+import { Button } from "@/components/ui/button";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 
 export default function OnboardingForm() {
     const t = useTranslations("Onboarding");
+    const tOffers = useTranslations("AccountInvites");
+    const format = useFormatter();
     const showApiError = useApiErrorToast("Onboarding");
+    const ownershipOffers = useSelfOwnershipOffers();
     const router = useRouter();
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
@@ -143,11 +150,61 @@ export default function OnboardingForm() {
                                 </button>
                             </form>
                         </div>
+
+                        {ownershipOffers.offers.length > 0 && (
+                            <section aria-labelledby="onboarding-ownership-offers" className="mt-8 border-t border-neutral-200 pt-6">
+                                <h2 id="onboarding-ownership-offers" className="text-sm font-medium text-neutral-700">
+                                    {tOffers("ownershipTitle")}
+                                </h2>
+                                <p className="mt-1 text-sm text-neutral-500 text-pretty">{tOffers("ownershipSubtitle")}</p>
+                                <ul className="mt-3 space-y-2">
+                                    {ownershipOffers.offers.map((offer) => {
+                                        const busy = ownershipOffers.busyOfferId === offer.id;
+                                        const scope = ownershipOffers.scopeLabel(offer);
+                                        const expires = format.dateTime(new Date(offer.expiresAt), { dateStyle: "medium" });
+                                        return (
+                                            <li
+                                                key={offer.id}
+                                                className="flex flex-wrap items-center gap-3 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5"
+                                            >
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-sm font-medium text-neutral-900">
+                                                        {tOffers("ownershipOfferTitle", { scope })}
+                                                    </p>
+                                                    <p className="truncate text-xs text-neutral-500">
+                                                        {offer.offerorDisplayName
+                                                            ? tOffers("ownershipOfferMeta", { name: offer.offerorDisplayName, date: expires })
+                                                            : tOffers("ownershipOfferExpires", { date: expires })}
+                                                    </p>
+                                                </div>
+                                                <Button
+                                                    size="toolbar"
+                                                    variant="outline"
+                                                    disabled={busy}
+                                                    onClick={() => ownershipOffers.decline(offer)}
+                                                >
+                                                    {tOffers("decline")}
+                                                </Button>
+                                                <Button
+                                                    size="toolbar"
+                                                    variant="brand"
+                                                    disabled={busy}
+                                                    onClick={() => ownershipOffers.accept(offer)}
+                                                >
+                                                    {busy ? <Loader2Icon className="size-4 animate-spin" /> : tOffers("accept")}
+                                                </Button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </section>
+                        )}
                     </motion.div>
                 </div>
             </div>
 
             <AuthBrandPanel className="hidden lg:block lg:h-full" />
+            <OwnershipConfinementDialog offers={ownershipOffers} />
         </div>
     );
 }
