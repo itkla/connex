@@ -88,6 +88,10 @@ and Unicode case-folded, whitespace-collapsed reference keys. Code-aware reading
 inside paired code spans opaque and stop backtick pairing at paragraph and block boundaries.
 Definition keys are suppressed only at paragraph boundaries, container starts or after another definition.
 Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
+Every candidate source label, including canonical inline readings, is bounded to 999 Unicode
+characters before copying or normalization. Longer spans are outside this recognition contract.
+The canonical scan and fixed-number reading merge stay linear in the stored prose length; nested
+brackets cannot cause unbounded label extraction before truncation.
 Rarer CommonMark constructs outside these covered readings are a bounded residual tracked in
 [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser for both
 reference readers; the owner decision is pending.
@@ -137,10 +141,21 @@ on such a refusal and defer the malformed-output exception until completion, pre
 reset through the transport. Context-free bare-placeholder checks require braces for MEMBER, so
 ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
-Field projections are built once and reused across the complete candidate dictionary. Provenance
+Final server-authored masking markers `[redacted]` and `[omitted by policy]` are excluded by
+position from MEMBER leak matching. Genuine source occurrences are replaced before these markers
+are inserted; a member named “Redacted” receives no label-wide exemption. Strict provider-authored
+scanning keeps its existing checks. Field projections are built once per scanned segment and reused
+across the complete candidate dictionary. Provenance
 includes exact demask replacements independently of adjacency, supplemented by all matching raw
 candidates, so joined short labels such as `Bob_team` and `xBob` retain protection after a rename
-and a fresh-context replay. Exposure controls demasking only, never replay provenance.
+and a fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
+raw MEMBER provenance of persisted follow-up suggestions, using their original parsed paths even
+when filtering trims, removes or deduplicates suggestions. When the next user text exactly equals a
+persisted suggestion of the session's latest answer, queueing copies its contained member provenance
+into that user message's `memberIdentifiers`, within the combined 20-identifier limit. This survives
+rename, offboarding, compaction and fresh-context replay without inferring a suggestion click from
+similar or edited text. The latest-answer read uses the existing authorized session mutex and exact
+workspace/session predicates, with no additional row lock or transaction boundary.
 
 Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
 Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary

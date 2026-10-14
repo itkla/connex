@@ -81,6 +81,7 @@ public class ReferenceService {
     static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
+    private static final int MAX_MEMBER_LABEL_CHARACTERS = 999;
     private static final int BATCH_SIZE = 500;
     private static final String REFERENCE_SEPARATOR = "(?::|&colon;|\\\\:)";
     private static final String REFERENCE_TYPE_PATTERN =
@@ -92,8 +93,10 @@ public class ReferenceService {
         "(?im)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
             + ":(\\d+)>?(?:[ \\t].*)?$");
+    private static final Pattern MEMBER_CANONICAL_DESTINATION = Pattern.compile(
+        "\\]\\(" + REFERENCE_TYPE_PATTERN + REFERENCE_SEPARATOR + "(\\d++)\\)");
     private static final Pattern MEMBER_REFERENCE_DEFINITION = Pattern.compile(
-        "\\[((?:\\\\.|[^\\[\\]\\\\])++)\\]:");
+        "\\[((?:\\\\.|[^\\[\\]\\\\]){1,999}+)\\]:");
     private static final Pattern MEMBER_REFERENCE_DESTINATION = Pattern.compile(
         "(?i)<?user:(\\d+)>?(?:[ \\t].*)?");
     private static final Pattern MEMBER_DEFINITION_DESTINATION = Pattern.compile("(?i)<?user:(\\d+)>?");
@@ -669,17 +672,14 @@ public class ReferenceService {
         String content = readerVisibleContent;
         List<MemberLabelSpan> labels = new ArrayList<>();
         Set<String> memberDefinitions = new HashSet<>();
-        Matcher canonical = TOKEN.matcher(content);
-        while (canonical.find()) {
-            if (TYPE_USER.equals(canonical.group(2))
-                    && parseReferenceTarget(TYPE_USER, canonical.group(3)).isPresent()) {
-                labels.add(new MemberLabelSpan(canonical.start(1), canonical.end(1)));
-            }
-        }
+        collectCanonicalMemberLabels(content, labels);
         Set<Integer> definitionLineStarts = memberDefinitionLineStarts(content);
         Map<Integer, Integer> definitionEnds = new HashMap<>();
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
+            if (!memberLabelWithinLimit(content, definitions.start(1), definitions.end(1))) {
+                continue;
+            }
             if (definitionLineStarts.contains(definitions.start())) {
                 int end = referenceDefinitionEnd(content, definitions.end());
                 if (end >= 0) {
@@ -691,14 +691,69 @@ public class ReferenceService {
             }
         }
         Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
-        collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, false));
-        collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, true, false, true));
-        collectMemberLabels(content, memberDefinitions, validDefinitionStarts, labels, matchingLabelEnds(content, true, true, true));
-        labels.sort(java.util.Comparator.comparingInt(MemberLabelSpan::start).thenComparingInt(MemberLabelSpan::end));
+        List<List<MemberLabelSpan>> readings = new ArrayList<>();
+        readings.add(labels);
+        for (int mode = 0; mode < 3; mode++) {
+            List<MemberLabelSpan> spans = new ArrayList<>();
+            collectMemberLabels(content, memberDefinitions, validDefinitionStarts, spans,
+                    matchingLabelEnds(content, mode != 0, mode == 2, true));
+            readings.add(spans);
+        }
+        labels = mergeMemberLabelReadings(readings);
         var candidates = new java.util.LinkedHashSet<String>();
         labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
         labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
         return List.copyOf(candidates);
+    }
+
+    /** Scans canonical destinations once, retaining only bounded source-label windows. */
+    private static void collectCanonicalMemberLabels(String content, List<MemberLabelSpan> labels) {
+        Matcher destination = MEMBER_CANONICAL_DESTINATION.matcher(content);
+        int precedingClose = -1;
+        for (int end = content.indexOf(']'); end >= 0; end = content.indexOf(']', end + 1)) {
+            if (destination.region(end, content.length()).lookingAt()
+                    && TYPE_USER.equals(destination.group(1))
+                    && parseReferenceTarget(TYPE_USER, destination.group(2)).isPresent()) {
+                int first = Math.max(precedingClose + 1, end - MAX_MEMBER_LABEL_CHARACTERS * 2 - 1);
+                for (int start = first; start < end - 1; start++) {
+                    if (content.charAt(start) == '[' && memberLabelWithinLimit(content, start + 1, end)) {
+                        labels.add(new MemberLabelSpan(start + 1, end));
+                    }
+                }
+            }
+            precedingClose = end;
+        }
+    }
+
+    /** Rejects oversized spans before allocation; the UTF-16 gate bounds code-point counting too. */
+    private static boolean memberLabelWithinLimit(String content, int start, int end) {
+        return end - start <= MAX_MEMBER_LABEL_CHARACTERS * 2
+                && content.codePointCount(start, end) <= MAX_MEMBER_LABEL_CHARACTERS;
+    }
+
+    /** Merges the fixed number of source-ordered readings in linear time without re-normalizing duplicates. */
+    private static List<MemberLabelSpan> mergeMemberLabelReadings(List<List<MemberLabelSpan>> readings) {
+        int[] positions = new int[readings.size()];
+        var merged = new java.util.LinkedHashSet<MemberLabelSpan>();
+        while (true) {
+            MemberLabelSpan first = null;
+            int selected = -1;
+            for (int index = 0; index < readings.size(); index++) {
+                if (positions[index] < readings.get(index).size()) {
+                    MemberLabelSpan next = readings.get(index).get(positions[index]);
+                    if (first == null || next.start() < first.start()
+                            || next.start() == first.start() && next.end() < first.end()) {
+                        first = next;
+                        selected = index;
+                    }
+                }
+            }
+            if (selected < 0) {
+                return List.copyOf(merged);
+            }
+            merged.add(first);
+            positions[selected]++;
+        }
     }
 
     /**
@@ -711,7 +766,7 @@ public class ReferenceService {
         Set<Integer> referenceKeys = new HashSet<>();
         for (int index = 0; index < content.length(); index++) {
             int end = labelEnds[index];
-            if (end < 0 || isEscaped(content, index)) {
+            if (end < 0 || !memberLabelWithinLimit(content, index + 1, end) || isEscaped(content, index)) {
                 continue;
             }
             String label = content.substring(index + 1, end);
@@ -736,7 +791,8 @@ public class ReferenceService {
                 labels.add(new MemberLabelSpan(index + 1, end));
             }
             if (next == end + 1 && next < content.length()
-                    && content.charAt(next) == '[' && labelEnds[next] >= 0) {
+                    && content.charAt(next) == '[' && labelEnds[next] >= 0
+                    && memberLabelWithinLimit(content, next + 1, labelEnds[next])) {
                 String explicit = content.substring(next + 1, labelEnds[next]);
                 String key = explicit.isBlank() ? label : explicit;
                 if (memberDefinitionMatches(memberDefinitions, key)) {

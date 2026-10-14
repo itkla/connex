@@ -1071,4 +1071,60 @@ class AiChatTurnPersistenceServiceTest {
         assertFalse(metadata.toString().contains("{{M"));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"Ask Former Member to follow up.", "Ask former member to follow up.",
+            "Ask Former Member to follow up. ", " Ask Former Member to follow up.", "A different request"})
+    void exactLatestSuggestionsCarryTheirProvenanceIntoTheQueuedUserMessage(String content) {
+        String suggestion = "Ask Former Member to follow up.";
+        var answer = new ooo.klae.connex.backend.beans.AiChatMessage();
+        answer.setStructuredJson("{\"suggestions\":[\"" + suggestion
+                + "\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"},"
+                + "{\"kind\":\"member\",\"value\":\"Unrelated Member\"}]}");
+        when(chatMapper.getLatestAnswer(TURN.workspaceId(), TURN.sessionId())).thenReturn(answer);
+        when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+        service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(content, List.of()), TURN.restrictionEpoch());
+        var message = ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.AiChatMessage.class);
+        InOrder order = inOrder(chatMapper);
+        order.verify(chatMapper).getSessionByIdForUpdate(TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getLatestAnswer(TURN.workspaceId(), TURN.sessionId());
+        order.verify(chatMapper).insertMessage(message.capture());
+        var metadata = JsonMapper.builder().build().readTree(message.getValue().getStructuredJson());
+        assertEquals(0, metadata.path("identifiers").size());
+        assertEquals(suggestion.equals(content) ? 1 : 0, metadata.path("memberIdentifiers").size());
+        if (suggestion.equals(content)) {
+            assertEquals("Former Member", metadata.path("memberIdentifiers").get(0).path("value").asString());
+        }
+        assertFalse(metadata.toString().contains("{{M"));
+        verify(identifierResolver).resolve(content);
+    }
+
+    @Test
+    void suggestionProvenanceKeepsTheCombinedIdentifierLimitAndExactDeduplication() {
+        var answer = new ooo.klae.connex.backend.beans.AiChatMessage();
+        String text = "Ask Former Member";
+        answer.setStructuredJson("{\"suggestions\":[\"Ask Former Member\"],\"memberIdentifiers\":["
+                + "{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        when(chatMapper.getLatestAnswer(TURN.workspaceId(), TURN.sessionId())).thenReturn(answer);
+        var identifiers = java.util.stream.IntStream.range(0, 20).mapToObj(index ->
+                new AiAssistantIdentifierResolver.Identifier(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER,
+                        "Other Member " + index)).toList();
+        when(identifierResolver.resolve(text)).thenReturn(new AiAssistantIdentifierResolver.Resolution(List.of(), identifiers));
+        var failure = assertThrows(AiAssistantLoopException.class, () -> service.queue(TURN.sessionId(),
+                new AiChatTurnCreateRequest(text, List.of()), TURN.restrictionEpoch()));
+        assertEquals("malformed_output", failure.terminalReason());
+        assertEquals("identifier_limit_exceeded", failure.detailReason());
+        verify(chatMapper, never()).insertMessage(any());
+        when(identifierResolver.resolve(text)).thenReturn(new AiAssistantIdentifierResolver.Resolution(List.of(),
+                java.util.Collections.nCopies(20, identifiers.getFirst())));
+        assertEquals("identifier_limit_exceeded", assertThrows(AiAssistantLoopException.class,
+                () -> service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(text, List.of()), TURN.restrictionEpoch())).detailReason());
+        verify(chatMapper, never()).insertMessage(any());
+        when(identifierResolver.resolve(text)).thenReturn(new AiAssistantIdentifierResolver.Resolution(List.of(),
+                List.of(new AiAssistantIdentifierResolver.Identifier(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Former Member"))));
+        service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(text, List.of()), TURN.restrictionEpoch());
+        var message = ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.AiChatMessage.class);
+        verify(chatMapper).insertMessage(message.capture());
+        assertEquals(1, JsonMapper.builder().build().readTree(message.getValue().getStructuredJson()).path("memberIdentifiers").size());
+    }
+
 }

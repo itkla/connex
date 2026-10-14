@@ -41,6 +41,85 @@ class AiAssistantMemberExposureTest {
         support.releaseFixtureMocks();
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,Redacted", "true,Redacted", "false,[redacted]", "true,[redacted]",
+            "false,Omitted by policy", "true,Omitted by policy"})
+    void maskingSentinelsCannotPoisonDispatchOrExemptSourceMemberMentions(boolean nativeProtocol, String label) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(label);
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Ask " + label + " to follow up. Contact alice@example.test");
+        var result = new AiAssistantToolResult(Map.of("description", "The note includes a diagnosis from last week.",
+                "notes", "Call +1 202 555 0199 or https://example.test/secret"), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertTrue(payload.contains("Ask {{M1}} to follow up."));
+        assertTrue(payload.contains("[redacted]"));
+        assertTrue(payload.contains("[omitted by policy]"));
+        assertFalse(payload.contains("Ask " + label + " to follow up."));
+        assertFalse(payload.contains("alice@example.test"));
+        assertEquals(label, Demasker.demask("{{M1}}", context).text());
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void exactSuggestionClickMasksFormerMemberAfterRenameInAFreshContext(boolean nativeProtocol) throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Former Member");
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seed(List.of(member), context);
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Discuss Former Member");
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        String finalAnswer = "{\"text\":\"Ready\",\"suggestions\":[\"Ask {{M1}} to follow up.\"],\"citations\":[],\"title\":null}";
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                nativeProtocol ? finalAnswer : "{\"tool\":null,\"final\":" + finalAnswer + "}", false, null);
+        assertEquals(0, capture.warnings());
+        var provenance = capture.memberIdentifiers().get(nativeProtocol ? "/suggestions/0" : "/final/suggestions/0");
+        assertEquals(List.of("Former Member"), provenance);
+        String suggestion = Demasker.demask("Ask {{M1}} to follow up.", context).text();
+        var stored = mapper.readTree(assembler.finalMetadata(1, List.of(), List.of(suggestion), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), provenance));
+        member.setDisplayName("Renamed Member");
+        var fresh = new MaskingContext();
+        AiAssistantMemberIdentifiers.seed(List.of(member), fresh);
+        assertFalse(fresh.identifierDictionary().contains("Former Member"));
+        assertTrue(AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, suggestion + " ").isEmpty());
+        assertTrue(AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, "A different request").isEmpty());
+        var clickedIdentifiers = AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, suggestion);
+        assertEquals(List.of(new Identifier("member", "Former Member")), clickedIdentifiers);
+        var click = new AiChatMessage();
+        click.setAuthorKind("user");
+        click.setContent(suggestion);
+        click.setStructuredJson(mapper.writeValueAsString(Map.of("kind", "user_message", "resources", List.of(),
+                "identifiers", List.of(), "memberIdentifiers", clickedIdentifiers)));
+        var freshResources = new AiChatResourceRegistry(fresh);
+        var replay = nativeProtocol
+                ? assembler.assembleNative(List.of(click), empty, List.of(), fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(click), empty, List.of(), fresh, freshResources, AiAssistantToolCatalog.ALL);
+        var replayCapture = support.captureAssistantPayload(replay, fresh, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(replayCapture.request().messages());
+        assertFalse(payload.contains("Former Member"));
+        assertTrue(payload.contains("Ask {{M1}} to follow up."));
+        assertEquals("Former Member", Demasker.demask("{{M1}}", fresh).text());
+        assertEquals(0, replayCapture.warnings());
+    }
+
     static Stream<Arguments> guesses() {
         return Stream.of(false, true).flatMap(nativeProtocol ->
                 Stream.of("unused_directory", "dropped_row", "oversized_attachment", "redaction", "omitted_replay")

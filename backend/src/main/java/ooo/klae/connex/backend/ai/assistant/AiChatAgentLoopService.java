@@ -707,8 +707,8 @@ public class AiChatAgentLoopService {
                         skillReference,
                         omitted ? List.of() : List.copyOf(narration),
                         omitted ? List.of() : List.copyOf(state.todos),
-                        omitted ? List.of() : parsed.memberIdentifiers().getOrDefault(
-                                nativeTools ? "/text" : "/final/text", List.of()));
+                        omitted ? List.of() : retainedMemberIdentifiers(
+                                parsed.memberIdentifiers(), nativeTools, finalAnswer.suggestions(), suggestions));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);
@@ -764,6 +764,22 @@ public class AiChatAgentLoopService {
             stopHeartbeat(heartbeat);
             runLeaseService.forgetLocalToken(lease);
         }
+    }
+
+    /** Retains original parsed paths after suggestion filtering changes their indexes or spelling. */
+    private static List<String> retainedMemberIdentifiers(
+            Map<String, List<String>> provenance, boolean nativeTools, List<String> supplied, List<String> retained) {
+        String prefix = nativeTools ? "" : "/final";
+        var members = new java.util.LinkedHashSet<>(provenance.getOrDefault(prefix + "/text", List.of()));
+        if (supplied != null) {
+            for (int index = 0; index < supplied.size(); index++) {
+                String suggestion = supplied.get(index);
+                if (suggestion != null && retained.contains(suggestion.strip())) {
+                    members.addAll(provenance.getOrDefault(prefix + "/suggestions/" + index, List.of()));
+                }
+            }
+        }
+        return List.copyOf(members);
     }
 
     /**

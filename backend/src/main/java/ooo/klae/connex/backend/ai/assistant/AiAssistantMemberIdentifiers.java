@@ -87,6 +87,19 @@ public final class AiAssistantMemberIdentifiers {
         return checked(List.copyOf(identifiers));
     }
 
+    /** Restores contained raw labels only for an exact click on a persisted suggestion. */
+    public static List<AiAssistantToolResult.Identifier> suggestionIdentifiers(JsonNode answer, String message) {
+        JsonNode suggestions = answer.get("suggestions");
+        if (suggestions == null || !suggestions.isArray() || suggestions.valueStream().noneMatch(
+                suggestion -> suggestion.isString() && message.equals(suggestion.asString()))) {
+            return List.of();
+        }
+        MaskingContext context = new MaskingContext();
+        stored(answer).forEach(identifier -> identifier.seed(context));
+        return context.memberCandidatesIn(message).stream()
+                .map(value -> new AiAssistantToolResult.Identifier("member", value)).toList();
+    }
+
     private static List<AiAssistantToolResult.Identifier> checked(List<AiAssistantToolResult.Identifier> identifiers) {
         if (identifiers.size() > 200 || identifiers.stream().anyMatch(identifier ->
                 identifier.value().isBlank() || identifier.value().length() > 1_000)) {

@@ -6,6 +6,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
@@ -42,6 +44,7 @@ public final class OutboundLeakScan {
     static final int MIN_IDENTIFIER_LENGTH = 4;
 
     private static final String ROLE_PROPERTY = "role";
+    private static final Pattern MASKING_SENTINEL = Pattern.compile("\\[redacted]|\\[omitted by policy]");
 
     private OutboundLeakScan() {
     }
@@ -109,25 +112,26 @@ public final class OutboundLeakScan {
                         .map(text -> new PreparedField(MaskingEngine.screenText(text),
                                 providerAuthored || !field.staticPosition() && !ctx.isTrustedStaticField(field.text()))))
                 .toList();
-        List<PreparedField> memberFields = preparedFields.stream().filter(PreparedField::memberBearing).toList();
+        List<MaskingEngine.ScreenText> allFields = preparedFields.stream().map(PreparedField::input).toList();
+        List<MaskingEngine.ScreenText> memberFields = preparedFields.stream().filter(PreparedField::memberBearing)
+                .flatMap(field -> memberSegments(field.input(), providerAuthored).stream()).toList();
         Set<String> leakedIdentifiers = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
             boolean member = ctx.isMemberIdentifier(entry.rawValue());
-            List<PreparedField> matchingFields = member
-                    ? memberFields : preparedFields;
+            List<MaskingEngine.ScreenText> matchingFields = member ? memberFields : allFields;
             String identifier = entry.canonicalValue();
             boolean containment = member && ctx.requiresMemberContainment(entry.rawValue());
             boolean canonicalLeak = (containment || identifier.length() >= MIN_IDENTIFIER_LENGTH)
                     && !identifier.isEmpty()
-                    && matchingFields.stream().anyMatch(field -> field.input().literal().value().contains(identifier));
+                    && matchingFields.stream().anyMatch(field -> field.literal().value().contains(identifier));
             boolean labelLeak = entry.labelEligible()
                     && (containment || entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH)
-                    && matchingFields.stream().anyMatch(field -> field.input().labels().value().contains(entry.labelValue()));
+                    && matchingFields.stream().anyMatch(field -> field.labels().value().contains(entry.labelValue()));
             boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && matchingFields.stream().anyMatch(field -> field.input().original().contains(entry.rawValue()));
+                    && matchingFields.stream().anyMatch(field -> field.original().contains(entry.rawValue()));
             boolean shortMemberLeak = member && matchingFields.stream().anyMatch(field ->
-                    MaskingEngine.containsShortMemberMatch(field.input(), entry));
+                    MaskingEngine.containsShortMemberMatch(field, entry));
             if ((canonicalLeak || labelLeak || exactRawLeak || shortMemberLeak)
                     && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedIdentifiers.add(entry.rawValue());
@@ -137,6 +141,25 @@ public final class OutboundLeakScan {
         if (!leakedIdentifiers.isEmpty()) {
             throw new MaskingLeakException(leakedKinds, leakedIdentifiers.size());
         }
+    }
+
+    /** Only final server-authored marker positions are exempt; source text is masked before insertion. */
+    private static List<MaskingEngine.ScreenText> memberSegments(MaskingEngine.ScreenText input, boolean providerAuthored) {
+        if (providerAuthored) {
+            return List.of(input);
+        }
+        Matcher marker = MASKING_SENTINEL.matcher(input.original());
+        if (!marker.find()) {
+            return List.of(input);
+        }
+        List<MaskingEngine.ScreenText> segments = new ArrayList<>();
+        int end = 0;
+        do {
+            segments.add(MaskingEngine.screenText(input.original().substring(end, marker.start())));
+            end = marker.end();
+        } while (marker.find());
+        segments.add(MaskingEngine.screenText(input.original().substring(end)));
+        return List.copyOf(segments);
     }
 
     /** Visits every key and non-null scalar separately, including earlier values of duplicate keys. */

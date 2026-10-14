@@ -194,6 +194,32 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void deeplyNestedAndOversizedMemberLabelsRemainBoundedBeforeCopyingOrNormalization() {
+        String nested = "[".repeat(25_000) + "]".repeat(25_000);
+        String oversized = "[" + "a".repeat(50_000) + "](user:42)";
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(nested));
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(oversized));
+        });
+    }
+
+    @Test
+    void memberLabelLimitCountsUnicodeCharactersAcrossEveryReading() {
+        for (String character : java.util.List.of("a", "😀")) {
+            String accepted = character.repeat(999);
+            String rejected = character.repeat(1_000);
+            assertEquals(java.util.List.of(accepted),
+                    ReferenceService.memberLabelsFromReaderVisibleContent("[" + accepted + "](user:42)"));
+            assertEquals(java.util.List.of(),
+                    ReferenceService.memberLabelsFromReaderVisibleContent("[" + rejected + "](user:42)"));
+            assertEquals(java.util.List.of(accepted), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + accepted + "][m]\n\n[m]: user:42"));
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[Public Label][" + rejected + "]\n\n[" + rejected + "]: user:42"));
+        }
+    }
+
+    @Test
     void memberRuleRunsFinishInLinearTimeWithOrWithoutATrailingLetter() {
         for (String marker : java.util.List.of("-", "=", "*", "_")) {
             for (String suffix : java.util.List.of("", "x")) {

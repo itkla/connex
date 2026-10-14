@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -58,6 +59,7 @@ public class AiChatTurnPersistenceService {
     private static final String TIMED_OUT = "timed_out";
     private static final String GENERATION_TIMEOUT = "generation_timeout";
     private static final int RESOLVE_TIMEOUT_SECONDS = 30;
+    private static final int MAX_USER_IDENTIFIERS = 20;
     private static final String USER = "user";
     private static final String ASSISTANT = "assistant";
     private static final String SYSTEM = "system";
@@ -169,8 +171,28 @@ public class AiChatTurnPersistenceService {
                 identifierResolver.resolve(request.content());
         identifierResolution.resources().forEach(resource ->
                 messageResources.register(resource.kind(), resource.id()));
+        var identifiers = new ArrayList<>(identifierResolution.identifiers());
+        AiChatMessage latestAnswer = chatMapper.getLatestAnswer(workspaceId, sessionId);
+        if (latestAnswer != null && latestAnswer.getStructuredJson() != null) {
+            try {
+                AiAssistantMemberIdentifiers.suggestionIdentifiers(
+                        objectMapper.readTree(latestAnswer.getStructuredJson()), request.content())
+                        .forEach(identifier -> {
+                            var member = new AiAssistantIdentifierResolver.Identifier(
+                                    ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, identifier.value());
+                            if (!identifiers.contains(member)) {
+                                identifiers.add(member);
+                            }
+                        });
+            } catch (JacksonException exception) {
+                throw new IllegalStateException("Assistant suggestion provenance could not be read", exception);
+            }
+        }
+        if (identifiers.size() > MAX_USER_IDENTIFIERS) {
+            throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+        }
         message.setStructuredJson(userMessageMetadata(
-                messageResources.snapshot(), identifierResolution.identifiers()));
+                messageResources.snapshot(), List.copyOf(identifiers)));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();

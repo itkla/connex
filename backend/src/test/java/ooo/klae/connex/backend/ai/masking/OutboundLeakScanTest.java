@@ -256,6 +256,35 @@ class OutboundLeakScanTest {
     }
 
     @Test
+    void maskingMarkersAreExemptOnlyInFinalServerMemberScanningAfterSourceReplacement() throws Exception {
+        for (String label : List.of("Redacted", "[redacted]", "Omitted by policy")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(label);
+            String email = MaskingEngine.maskFreeText("Contact alice@example.test", context);
+            assertEquals("Contact [redacted]", email);
+            assertTrue(context.tokenBindings().isEmpty());
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(Map.of("content", email)), context, objectMapper));
+            String source = "Ask " + label + " to follow up.";
+            String masked = MaskingEngine.maskFreeText(source, context);
+            assertEquals("Ask {{M1}} to follow up.", masked);
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+            context.exposeDispatchedPayload(masked);
+            assertEquals(source, Demasker.demask(masked, context).text());
+            assertThrows(MaskingLeakException.class,
+                    () -> OutboundLeakScan.assertNoLeakStrict(source, context, objectMapper));
+        }
+        var omitted = new MaskingContext();
+        omitted.registerMemberCandidate("Omitted by policy");
+        String marker = MaskingEngine.maskFreeText("The note includes a diagnosis from last week.", omitted);
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY, marker);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(marker, omitted));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict(marker, omitted, objectMapper));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakInReplay(marker + " Omitted by policy", omitted));
+    }
+
+    @Test
     void largeMemberDirectoryBuildsEachFieldProjectionOnceWithoutSkippingCandidates() {
         MaskingContext context = new MaskingContext();
         for (int index = 0; index < 1_000; index++) {
