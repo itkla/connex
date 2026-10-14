@@ -83,7 +83,8 @@ class AuditServiceTest {
             objectMapper,
             tenantContext,
             new ClientIpResolver(""),
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            new AutomationScope());
         lenient().when(tenantContext.getWorkspaceId()).thenReturn(7);
         lenient().when(tenantContext.getOrgId()).thenReturn(8);
     }

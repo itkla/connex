@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.secrets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,6 +22,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.services.AbstractServiceTest;
 import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.OrgMemberService;
 
 /**
@@ -57,6 +59,7 @@ class SecretUseAuditActorIntegrationTest extends AbstractServiceTest {
 
         String used = new TransactionTemplate(transactionManager).execute(status ->
                 automationExecutor.runAs(freshWorkspaceId, automationPrincipal, "member",
+                        AutomationScope.Origin.workflow(73, 931L, "user"),
                         () -> secretStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, freshWorkspaceId,
                                 reference)));
 
@@ -80,6 +83,35 @@ class SecretUseAuditActorIntegrationTest extends AbstractServiceTest {
                 WHERE action = 'secret_store.secret.use'
                   AND workspace_id = ?
                 """, String.class, freshWorkspaceId));
+        assertEquals("workflow", originField("source"));
+        assertEquals("true", originField("automation"));
+        assertEquals("user", originField("executionMode"));
+        assertEquals("73", originField("workflowId"));
+        assertEquals("931", originField("workflowRunId"));
+
+        authenticateAs(automationPrincipal, freshWorkspaceId);
+        assertEquals(plaintext, secretStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD,
+                freshWorkspaceId, reference));
+        assertNull(jdbcTemplate.queryForObject("""
+                SELECT JSON_EXTRACT(context, '$.executionOrigin')
+                FROM audit_log
+                WHERE action = 'secret_store.secret.use' AND workspace_id = ?
+                ORDER BY id DESC LIMIT 1
+                """, String.class, freshWorkspaceId));
+        assertEquals(Integer.valueOf(automationPrincipal.getId()), jdbcTemplate.queryForObject("""
+                SELECT actor_id
+                FROM audit_log
+                WHERE action = 'secret_store.secret.use' AND workspace_id = ?
+                ORDER BY id DESC LIMIT 1
+                """, Integer.class, freshWorkspaceId));
+    }
+
+    private String originField(String key) {
+        return jdbcTemplate.queryForObject("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(context, ?))
+                FROM audit_log
+                WHERE action = 'secret_store.secret.use' AND workspace_id = ?
+                """, String.class, "$.executionOrigin." + key, freshWorkspaceId);
     }
 
     @AfterEach

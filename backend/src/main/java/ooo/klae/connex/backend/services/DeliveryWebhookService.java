@@ -85,7 +85,8 @@ public class DeliveryWebhookService {
     public int ingest(String provider, String rawToken, byte[] rawBody, Map<String, String> headers) {
         ResolvedDeliveryProvider target = deliveryProviderConfigService.resolveByWebhookToken(rawToken,
                 (workspaceId, read) -> automationExecutor.runAs(
-                        workspaceId, systemActor.user(), "system", read));
+                        workspaceId, systemActor.user(), "system",
+                        AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system"), read));
         if (!target.providerId().equals(normalize(provider))) {
             throw new DeliveryProviderException("Webhook provider does not match the token");
         }
@@ -93,6 +94,7 @@ public class DeliveryWebhookService {
         eventSource.verifySignature(target, rawBody, headers);
         List<DeliveryEvent> events = eventSource.translate(rawBody);
         Integer applied = automationExecutor.runAs(target.workspaceId(), systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system"),
                 () -> transactionTemplate.execute(status -> applyEvents(target, events)));
         return Objects.requireNonNull(applied, "webhook ingestion result");
     }

@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.AudienceEligibilityService;
 import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
@@ -190,6 +191,7 @@ public class CampaignDispatchService {
         try {
             channel = DeliveryChannel.fromToken(send.getChannel());
             target = automationExecutor.runAs(workspaceId, systemActor.user(), "system",
+                    AutomationScope.Origin.task(AutomationScope.Source.CAMPAIGN_DISPATCH, "system"),
                     () -> deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel));
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {

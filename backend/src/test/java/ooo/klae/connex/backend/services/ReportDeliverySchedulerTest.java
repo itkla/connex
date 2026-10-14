@@ -459,9 +459,10 @@ class ReportDeliverySchedulerTest {
         when(scheduleService.deliveryAccess(schedule))
                 .thenReturn(ScheduleService.DeliveryAccess.allowed(runAs, "owner"));
         doAnswer(invocation -> {
-            Supplier<?> work = invocation.getArgument(3);
+            Supplier<?> work = invocation.getArgument(4);
             return work.get();
-        }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"), any());
+        }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"),
+            eq(AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "user")), any());
         org.mockito.Mockito.lenient()
                 .when(scheduleService.claimDue(SCHEDULE_ID, USER_ID, now))
                 .thenReturn(schedule);

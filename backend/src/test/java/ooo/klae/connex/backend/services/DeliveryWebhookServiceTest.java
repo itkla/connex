@@ -108,8 +108,9 @@ class DeliveryWebhookServiceTest {
         User system = new User();
         system.setId(1);
         when(systemActor.user()).thenReturn(system);
-        when(automationExecutor.runAs(anyInt(), any(), eq("system"), any())).thenAnswer(
-                invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        when(automationExecutor.runAs(anyInt(), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system")), any())).thenAnswer(
+                invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         when(transactionTemplate.execute(any())).thenAnswer(invocation ->
                 ((TransactionCallback<?>) invocation.getArgument(0))
                         .doInTransaction(new SimpleTransactionStatus()));
@@ -125,7 +126,8 @@ class DeliveryWebhookServiceTest {
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
         InOrder ordered = inOrder(automationExecutor, transactionTemplate, campaignDeliveryMapper);
-        ordered.verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_A), any(), eq("system"), any());
+        ordered.verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_A), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system")), any());
         ordered.verify(transactionTemplate).execute(any());
         ordered.verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_A, PROVIDER, "m1");
     }
@@ -219,8 +221,9 @@ class DeliveryWebhookServiceTest {
 
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
-        verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_B), any(), eq("system"), any());
-        verify(automationExecutor, never()).runAs(eq(WORKSPACE_A), any(), any(), any());
+        verify(automationExecutor, times(2)).runAs(eq(WORKSPACE_B), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system")), any());
+        verify(automationExecutor, never()).runAs(eq(WORKSPACE_A), any(), any(), any(), any());
         verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_B, PROVIDER, "m1");
         verify(campaignDeliveryMapper, never()).findByProviderMessage(eq(WORKSPACE_A), any(), any());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
@@ -242,8 +245,9 @@ class DeliveryWebhookServiceTest {
         User system = new User();
         system.setId(1);
         when(systemActor.user()).thenReturn(system);
-        when(automationExecutor.runAs(eq(WORKSPACE_A), eq(system), eq("system"), any())).thenAnswer(
-                invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        when(automationExecutor.runAs(eq(WORKSPACE_A), eq(system), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_WEBHOOK, "system")), any())).thenAnswer(
+                invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
 
         assertThrows(DeliveryProviderException.class,
                 () -> service().ingest("other_esp", "tok", new byte[0], Map.of()));

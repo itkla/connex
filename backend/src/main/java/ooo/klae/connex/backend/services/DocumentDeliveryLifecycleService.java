@@ -253,6 +253,7 @@ public class DocumentDeliveryLifecycleService {
             workspaceId,
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_DELIVERY_LIFECYCLE, "system"),
             () -> {
                 createActivity(deal, document, delivery, transition);
                 return null;

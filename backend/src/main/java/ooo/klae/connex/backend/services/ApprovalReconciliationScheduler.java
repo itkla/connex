@@ -123,7 +123,9 @@ public class ApprovalReconciliationScheduler {
         JobRunDetail detail = JobRunDetail.startedUtc();
         try {
             BatchResult result = automationExecutor.runAs(
-                workspaceId, systemActor.user(), "system", () -> reconcileBatch(workspaceId));
+                workspaceId, systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.APPROVAL_RECONCILIATION, "system"),
+                () -> reconcileBatch(workspaceId));
             JobRunStatus status = result.failedCount() == 0
                 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED;
             record(workspaceId, status, new JobRunDetail(detail.startedAt(), Map.of(

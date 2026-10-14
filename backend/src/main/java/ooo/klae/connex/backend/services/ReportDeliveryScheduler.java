@@ -131,7 +131,8 @@ public class ReportDeliveryScheduler {
             skip(ref, schedule.getRunAsUserId(), now, access.denialReason(), runDetail);
             return;
         }
-        automationExecutor.runAs(ref.workspaceId(), access.user(), access.role(), () -> {
+        automationExecutor.runAs(ref.workspaceId(), access.user(), access.role(),
+            AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "user"), () -> {
             deliver(ref, schedule.getRunAsUserId(), now, runDetail);
             return null;
         });

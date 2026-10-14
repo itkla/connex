@@ -50,6 +50,7 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.AudienceEligibilityService;
 import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
@@ -852,8 +853,9 @@ class CampaignDispatchServiceTest {
 
     private static AutomationExecutor automationExecutor() {
         AutomationExecutor executor = mock(AutomationExecutor.class);
-        when(executor.runAs(anyInt(), any(), eq("system"), any())).thenAnswer(
-                invocation -> ((Supplier<?>) invocation.getArgument(3)).get());
+        when(executor.runAs(anyInt(), any(), eq("system"),
+                eq(AutomationScope.Origin.task(AutomationScope.Source.CAMPAIGN_DISPATCH, "system")), any())).thenAnswer(
+                invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         return executor;
     }
 

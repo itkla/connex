@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,7 +27,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @ExtendWith(MockitoExtension.class)
 class AutomationExecutorTest {
 
-    @Mock private AutomationScope automationScope;
+    private final AutomationScope automationScope = new AutomationScope();
     @Mock private TenantCatalogResolver tenantCatalogResolver;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private User principal;
@@ -57,6 +58,9 @@ class AutomationExecutorTest {
 
         String during = tenantWorkScope.inWorkspace(7,
             () -> executor.runAs(7, principal, "member", () -> {
+                assertTrue(automationScope.isActive());
+                assertEquals(AutomationScope.Origin.task(AutomationScope.Source.BACKGROUND_TASK, "user"),
+                    automationScope.origin());
                 assertEquals(7, tenantContext.getWorkspaceId());
                 assertEquals(42, tenantContext.getOrgId());
                 return tenantContext.getCatalog();
@@ -66,6 +70,7 @@ class AutomationExecutorTest {
         assertFalse(tenantContext.isResolved());
         assertNull(tenantContext.getCatalog());
         verify(tenantCatalogResolver, times(1)).resolveCatalog(42);
-        verify(automationScope).restore(false);
+        assertFalse(automationScope.isActive());
+        assertNull(automationScope.origin());
     }
 }

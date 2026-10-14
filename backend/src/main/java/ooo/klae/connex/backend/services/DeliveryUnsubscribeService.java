@@ -132,7 +132,8 @@ public class DeliveryUnsubscribeService {
 
     private <T> T inDeliveryWorkspace(CampaignDelivery delivery, Supplier<T> work) {
         return automationExecutor.runAs(
-                delivery.getWorkspaceId(), systemActor.user(), "system", work);
+                delivery.getWorkspaceId(), systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.DELIVERY_UNSUBSCRIBE, "system"), work);
     }
 
     private CampaignDelivery requireDelivery(String tokenHash) {
