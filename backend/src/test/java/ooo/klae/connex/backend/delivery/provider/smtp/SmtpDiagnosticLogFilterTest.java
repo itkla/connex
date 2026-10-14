@@ -15,6 +15,31 @@ import org.junit.jupiter.api.Test;
 /** Exercises library log records before JUL handlers and the SLF4J bridge see them. */
 class SmtpDiagnosticLogFilterTest {
     @Test
+    void dataSuppressionDropsEncodedRecordsAndResumesAtTheDotStuffedTerminator() {
+        SmtpDiagnosticLogFilter filter = new SmtpDiagnosticLogFilter(null);
+        SmtpDiagnosticLogFilter.beginDataBody();
+        try {
+            for (String body : new String[] {"YWJjZGVmZ2hpamtsbW5vcA==", "split=\r\nencoded body", ".."}) {
+                LogRecord record = new LogRecord(Level.FINEST, body);
+                record.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+                assertFalse(filter.isLoggable(record));
+            }
+            LogRecord diagnostic = new LogRecord(Level.FINE, "connection diagnostic retained");
+            diagnostic.setLoggerName("org.eclipse.angus.mail.smtp");
+            assertTrue(filter.isLoggable(diagnostic));
+            LogRecord terminator = new LogRecord(Level.FINEST, ".");
+            terminator.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+            assertTrue(filter.isLoggable(terminator));
+            LogRecord response = new LogRecord(Level.FINEST, "554 rejected " + "a".repeat(64));
+            response.setLoggerName("org.eclipse.angus.mail.smtp.protocol");
+            assertTrue(filter.isLoggable(response));
+            assertEquals("554 rejected [redacted]", response.getMessage());
+        } finally {
+            SmtpDiagnosticLogFilter.endDataBody();
+        }
+    }
+
+    @Test
     void scrubsMessageParametersAndThrowableGraphWithoutChangingTheSourceException() {
         String bearer = "AB".repeat(32);
         IllegalStateException cause = new IllegalStateException("cause " + bearer);

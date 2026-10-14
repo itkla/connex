@@ -8,8 +8,9 @@ import java.util.logging.Logger;
 
 import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 
-/** Scrubs Angus diagnostics that are logged before the SMTP adapter can handle a rejection. */
+/** Scrubs Angus diagnostics and suppresses MIME DATA before JUL handlers can publish them. */
 final class SmtpDiagnosticLogFilter implements Filter {
+    private static final ThreadLocal<Boolean> DATA_BODY = new ThreadLocal<>();
     private static final Logger[] LOGGERS = {
             Logger.getLogger("org.eclipse.angus.mail.smtp"),
             Logger.getLogger("org.eclipse.angus.mail.smtp.protocol")
@@ -29,8 +30,25 @@ final class SmtpDiagnosticLogFilter implements Filter {
         }
     }
 
+    /** Starts suppression after the DATA command and its successful server response. */
+    static void beginDataBody() {
+        DATA_BODY.set(true);
+    }
+
+    /** Clears the sending thread's state after completion or transport cleanup. */
+    static void endDataBody() {
+        DATA_BODY.remove();
+    }
+
     @Override
     public boolean isLoggable(LogRecord record) {
+        if (Boolean.TRUE.equals(DATA_BODY.get()) && record.getLoggerName() != null
+                && record.getLoggerName().endsWith(".protocol")) {
+            if (!".".equals(record.getMessage())) {
+                return false;
+            }
+            endDataBody();
+        }
         record.setMessage(CampaignDeliveryDiagnostics.scrub(record.getMessage(), null));
         Object[] parameters = record.getParameters();
         if (parameters != null) {

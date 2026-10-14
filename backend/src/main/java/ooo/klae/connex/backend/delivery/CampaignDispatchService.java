@@ -431,15 +431,16 @@ public class CampaignDispatchService {
                     "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
         String diagnostic = CampaignDeliveryDiagnostics.scrub(receipt.detail(), unsubscribeToken);
+        String providerMessageId = CampaignDeliveryDiagnostics.scrub(receipt.providerMessageId(), unsubscribeToken);
         if (receipt.status() == DispatchStatus.SENT) {
             int updated;
             try {
                 updated = leaseOwner == null
                     ? campaignDeliveryMapper.markDispatched(
-                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId())
+                        workspaceId, deliveryId, target.providerId(), providerMessageId)
                     : campaignDeliveryMapper.markTriggeredDispatched(
                         workspaceId, deliveryId, leaseOwner, target.providerId(),
-                        receipt.providerMessageId());
+                        providerMessageId);
             } catch (RuntimeException exception) {
                 throw new AmbiguousDispatchException(exception);
             }
@@ -447,10 +448,10 @@ public class CampaignDispatchService {
                 appendEvent(workspaceId, deliveryId, "dispatched", diagnostic);
             } else if (leaseOwner == null) {
                 attachLateAudienceProviderCorrelation(
-                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
+                        workspaceId, deliveryId, target.providerId(), providerMessageId);
             } else {
                 attachLateTriggeredProviderCorrelation(
-                        workspaceId, deliveryId, target, receipt.providerMessageId());
+                        workspaceId, deliveryId, target, providerMessageId);
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS

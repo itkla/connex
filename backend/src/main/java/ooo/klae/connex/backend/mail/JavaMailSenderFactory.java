@@ -20,6 +20,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Component;
 
+import ooo.klae.connex.backend.delivery.provider.smtp.BodySafeSmtpTransport;
+
 /**
  * Builds and caches a {@link JavaMailSender} per distinct resolved SMTP config,
  * so repeated sends to the same server reuse one sender rather than rebuilding
@@ -109,7 +111,7 @@ public class JavaMailSenderFactory {
             ResolvedMailConfig config,
             PinnedSocketFactory pinnedSocketFactory,
             Integer remainingMillis) {
-        JavaMailSenderImpl sender = new JavaMailSenderImpl();
+        JavaMailSenderImpl sender = new BodySafeJavaMailSender();
         configure(sender, config, pinnedSocketFactory, remainingMillis);
         return sender;
     }
@@ -131,6 +133,9 @@ public class JavaMailSenderFactory {
 
         Properties props = sender.getJavaMailProperties();
         props.put("mail.transport.protocol", "smtp");
+        props.put("mail.debug", "false");
+        props.put("mail.debug.quote", "false");
+        props.put("mail.smtp.chunksize", "0");
         props.put("mail.smtp.auth", String.valueOf(config.auth()));
         props.put("mail.smtp.starttls.enable", String.valueOf(config.starttls()));
         props.put("mail.smtp.starttls.required", String.valueOf(config.starttls()));
@@ -206,7 +211,15 @@ public class JavaMailSenderFactory {
         return false;
     }
 
-    private static final class DeadlineJavaMailSender extends JavaMailSenderImpl {
+    private static class BodySafeJavaMailSender extends JavaMailSenderImpl {
+
+        @Override
+        protected Transport getTransport(Session session) throws NoSuchProviderException {
+            return new BodySafeSmtpTransport(session, super.getTransport(session));
+        }
+    }
+
+    private static final class DeadlineJavaMailSender extends BodySafeJavaMailSender {
 
         private final AtomicBoolean aborted = new AtomicBoolean();
         private final AtomicReference<Transport> transport = new AtomicReference<>();

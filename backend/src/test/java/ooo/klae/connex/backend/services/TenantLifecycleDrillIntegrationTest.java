@@ -60,6 +60,11 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
+import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
+import ooo.klae.connex.backend.delivery.DispatchReceipt;
+import ooo.klae.connex.backend.delivery.DeliveryRequest;
+import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.MessageDispatcher;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
@@ -127,6 +132,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private TenantExportService exportService;
     @Autowired private CampaignDispatchService campaignDispatchService;
     @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
+    @MockitoSpyBean private DeliveryProviderRouter deliveryProviderRouter;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
     @Autowired private UploadContentInspector uploadContentInspector;
@@ -150,6 +156,53 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     private Workspace drillWorkspace;
     private Workspace otherWorkspace;
     private User concurrentLeaver;
+
+    @Test
+    void providerReturnedMessageIdCannotPersistOrExportTheAttemptBearer() throws Exception {
+        createDedicatedDrillRoots();
+        seedUnsubscribeDigest();
+        int workspaceId = drillWorkspace.getId();
+        int sendId = jdbcTemplate.queryForObject("SELECT id FROM campaign_send WHERE workspace_id = ?",
+                Integer.class, workspaceId);
+        int messageId = jdbcTemplate.queryForObject("SELECT message_id FROM campaign_send WHERE id = ?",
+                Integer.class, sendId);
+        int deliveryId = jdbcTemplate.queryForObject("SELECT id FROM campaign_delivery WHERE send_id = ?",
+                Integer.class, sendId);
+        jdbcTemplate.update("""
+                INSERT INTO campaign_message_revision
+                    (workspace_id, message_id, version, locale, subject, body_html)
+                VALUES (?, ?, 1, 'en', 'Provider receipt', '<a href="{{unsubscribe_url}}">Unsubscribe</a>')
+                """, workspaceId, messageId);
+        jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE id = ?", sendId);
+        jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending' WHERE id = ?", deliveryId);
+        AtomicReference<String> bearer = new AtomicReference<>();
+        MessageDispatcher dispatcher = org.mockito.Mockito.mock(MessageDispatcher.class);
+        org.mockito.Mockito.when(dispatcher.dispatch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    DeliveryRequest request = invocation.getArgument(1);
+                    java.util.regex.Matcher token = java.util.regex.Pattern.compile("/unsubscribe#token=([a-f0-9]{64})")
+                            .matcher(request.content().bodyHtml());
+                    assertTrue(token.find());
+                    bearer.set(token.group(1));
+                    return DispatchReceipt.sent("receipt " + bearer.get() + " other " + "C".repeat(64) + " retained", "accepted");
+                });
+        org.mockito.Mockito.doReturn(dispatcher).when(deliveryProviderRouter).dispatcherFor(HttpEspDeliveryProvider.PROVIDER_ID);
+        ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(HttpEspDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId, DeliveryCredentials.none());
+        org.mockito.Mockito.when(deliveryProviderConfigService.resolveForWorkspace(workspaceId, DeliveryChannel.EMAIL)).thenReturn(target);
+        org.mockito.Mockito.when(deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, null)).thenReturn(true);
+        assertTrue(campaignDispatchService.processSend(workspaceId, sendId));
+        assertNotNull(bearer.get());
+        assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
+                String.class, deliveryId));
+        assertEquals("receipt [redacted] other [redacted] retained",
+                jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
+                        String.class, deliveryId));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        exportService.prepare(drillOrganization.getId(), workspaceId, currentUser.getId()).writeTo(output);
+        Map<String, byte[]> entries = zipEntries(output.toByteArray());
+        assertTrue(text(entries, "data/campaign_delivery.jsonl").contains("receipt [redacted] other [redacted] retained"));
+        assertTrue(entries.values().stream().noneMatch(bytes -> new String(bytes, StandardCharsets.UTF_8).contains(bearer.get())));
+    }
 
     @Test
     void rejectingSmtpDiagnosticsCannotExportOrLogTheAttemptBearer() throws Exception {

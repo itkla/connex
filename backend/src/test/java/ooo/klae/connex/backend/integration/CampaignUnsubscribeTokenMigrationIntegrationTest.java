@@ -62,6 +62,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                             UNION ALL SELECT 7, 'bounced' UNION ALL SELECT 8, 'complained'
                         ) statuses
                         """);
+                seedLegacyDiagnostics(statement);
             }
             migrate(catalog, "226");
             try (Connection connection = connection(catalog);
@@ -89,6 +90,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                         WHERE token_hash = LOWER(SHA2(LPAD(HEX(delivery_id - 22600), 64, '0'), 256))
                         """));
                 assertContract(statement);
+                assertScrubbedDiagnostics(statement, 8);
                 assertThrows(SQLException.class, () -> statement.executeUpdate("""
                         INSERT INTO campaign_delivery_unsubscribe_token (token_hash, workspace_id, delivery_id)
                         VALUES (REPEAT('a', 64), 22602, 22601)
@@ -123,6 +125,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 statement.execute("""
                         CREATE TABLE campaign_delivery (
                             id INT PRIMARY KEY, workspace_id INT NOT NULL,
+                            last_error VARCHAR(512) NULL, provider_message_id VARCHAR(255) NULL,
                             unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                             unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
                                 GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
@@ -131,8 +134,10 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                             UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash)
                         )
                         """);
+                createLegacyEventTable(statement);
                 statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                         + " VALUES (1, 22601, REPEAT('a', 64)), (2, 22601, REPEAT('b', 64))");
+                seedLegacyDiagnostics(statement);
                 String expand = sql("V226__campaign_delivery_unsubscribe_hash_history.sql");
                 statement.execute(expand.substring(0, expand.indexOf(';')));
                 Flyway interruptedExpand = recoveryFlyway(catalog, "226");
@@ -162,6 +167,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 interruptedContract.repair();
                 interruptedContract.migrate();
                 assertContract(statement);
+                assertScrubbedDiagnostics(statement, 2);
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"
                         + " WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))"));
             }
@@ -176,6 +182,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
             statement.execute("""
                     CREATE TABLE campaign_delivery (
                         id INT PRIMARY KEY, workspace_id INT NOT NULL,
+                        last_error VARCHAR(512) NULL, provider_message_id VARCHAR(255) NULL,
                         unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
                         unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
                             GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
@@ -184,25 +191,66 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                         UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash)
                     )
                     """);
+            createLegacyEventTable(statement);
             statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                     + " VALUES (1, 22601, REPEAT('a', 64))");
             recoveryFlyway(catalog, "226").migrate();
             statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                     + " VALUES (2, 22601, REPEAT('b', 64))");
+            seedLegacyDiagnostics(statement);
             assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             statement.execute("ALTER TABLE campaign_delivery DROP INDEX uq_campaign_delivery_token");
             Flyway contract = recoveryFlyway(catalog, "227");
             assertThrows(FlywayException.class, contract::migrate);
             assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
+            assertScrubbedDiagnostics(statement, 2);
             statement.execute("ALTER TABLE campaign_delivery ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token)");
             contract.repair();
             contract.migrate();
             assertContract(statement);
+            assertScrubbedDiagnostics(statement, 2);
             assertEquals(2, scalar(statement, """
                     SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token
                     WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))
                     """));
         }
+    }
+
+    private static void createLegacyEventTable(Statement statement) throws SQLException {
+        statement.execute("""
+                CREATE TABLE campaign_delivery_event (
+                    workspace_id INT NOT NULL, delivery_id INT NOT NULL,
+                    event_type VARCHAR(16) NOT NULL, detail VARCHAR(512) NULL,
+                    FOREIGN KEY (workspace_id, delivery_id)
+                        REFERENCES campaign_delivery(workspace_id, id) ON DELETE CASCADE
+                )
+                """);
+    }
+
+    private static void seedLegacyDiagnostics(Statement statement) throws SQLException {
+        statement.executeUpdate("""
+                UPDATE campaign_delivery
+                SET last_error = CONCAT('554 rejected ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained'),
+                    provider_message_id = CONCAT('receipt ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained')
+                """);
+        statement.executeUpdate("""
+                INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail)
+                SELECT workspace_id, id, 'failed',
+                       CONCAT('event ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained')
+                FROM campaign_delivery
+                """);
+    }
+
+    private static void assertScrubbedDiagnostics(Statement statement, int deliveries) throws SQLException {
+        assertEquals(deliveries, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery
+                WHERE last_error = '554 rejected [redacted] repeated [redacted] retained'
+                  AND provider_message_id = 'receipt [redacted] repeated [redacted] retained'
+                """));
+        assertEquals(deliveries, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event
+                WHERE detail = 'event [redacted] repeated [redacted] retained'
+                """));
     }
 
     private static String sql(String filename) throws IOException {

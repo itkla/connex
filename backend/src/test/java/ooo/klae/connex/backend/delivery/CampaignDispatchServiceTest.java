@@ -853,6 +853,46 @@ class CampaignDispatchServiceTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void providerMessageIdsAreScrubbedBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDelivery attempt = delivery();
+        attempt.setPersonId(null);
+        CampaignDispatchService service = triggered
+                ? triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency())
+                : audienceDispatch(deliveryMapper, dispatcher, admittedFrequency(), attempt);
+        when(deliveryMapper.renewAudienceClaim(eq(7), eq(13), anyLong())).thenReturn(1);
+        CampaignMessageRevision revision = revision();
+        revision.setBodyHtml("<a href=\"{{unsubscribe_url}}\">Unsubscribe</a>");
+        CampaignMessageMapper messageMapper = (CampaignMessageMapper) ReflectionTestUtils.getField(service, "campaignMessageMapper");
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
+        when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
+            DeliveryRequest request = invocation.getArgument(1);
+            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(request.content().bodyHtml());
+            assertTrue(token.find());
+            return DispatchReceipt.sent("receipt " + token.group(1) + " diagnostic " + "AB".repeat(32) + " retained",
+                    "accepted");
+        });
+        when(deliveryMapper.markDispatched(eq(7), eq(13), eq("smtp"), any())).thenReturn(late ? 0 : 1);
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any()))
+                .thenReturn(late ? 0 : 1);
+        String expected = "receipt [redacted] diagnostic [redacted] retained";
+        assertTrue(service.processSend(7, 11));
+        if (triggered) {
+            verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), eq(expected));
+            if (late) {
+                verify(deliveryMapper).attachLateTriggeredProviderCorrelation(eq(7), eq(13), eq("smtp"), anyString(), eq(expected));
+            }
+        } else {
+            verify(deliveryMapper).markDispatched(7, 13, "smtp", expected);
+            if (late) {
+                verify(deliveryMapper).attachLateAudienceProviderCorrelation(eq(7), eq(13), eq("smtp"), eq(expected), any(), anyString());
+            }
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(DispatchStatus.class)
     void providerDiagnosticsAreScrubbedBeforeEveryOutcomeIsPersisted(DispatchStatus status) {
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);

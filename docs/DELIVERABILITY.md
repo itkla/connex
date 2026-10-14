@@ -372,10 +372,12 @@ prior attempts. Links have no expiry and work while their delivery exists. Newly
 have no digest until dispatch reaches registration. Workspace exports reveal digests, which
 cannot be exchanged as bearers.
 
-Provider diagnostics can echo the rendered message. Before truncation, storage in delivery errors or
-events, or logging, Connex replaces the attempt's bearer and any 64-hex run with `[redacted]`, keeping
+Provider diagnostics and returned message ids can echo the rendered message. Before truncation,
+storage in delivery errors, events or provider correlation ids, or logging, Connex replaces the
+attempt's bearer and any 64-hex run with `[redacted]`, keeping
 the remaining diagnostic text. Named Angus SMTP loggers receive the same scrubbing before their
-DEBUG diagnostics reach logging handlers.
+diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
+TRACE, regardless of body encoding; command and response diagnostics remain available.
 
 **An idempotent replay re-renders the unsubscribe link under the unchanged
 `send:{sendId}:{deliveryId}` key.** An endpoint that compares request bodies under a key (such as
