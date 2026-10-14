@@ -83,6 +83,22 @@ public final class MemberReferenceReadings {
                 "> [Alice `line\n> ]` Former](user:42)", "Alice `line\n> ]` Former"));
         readings.add(new Reading("final-3", "lazy quote continuation preserves code pairing",
                 "> [Alice `line\nlazy continuation\n> ]` Former](user:42)", "Alice `line\nlazy continuation\n> ]` Former"));
+        for (String line : List.of("-=", "=-", " --== \t", "    ---", "**_", "_**", "\u2003")) {
+            String label = "Alice `line\n" + line + "\n]` Former";
+            readings.add(new Reading("boundary-regression", "non-block line " + line,
+                    "[" + label + "](user:42)", label));
+        }
+        for (String line : List.of("---", "===", "   --- \t", "  === \t", "***", "___", "* * *", "- - -", "_ _ _",
+                "> * * *", "> - - -", "> _ _ _")) {
+            readings.add(new Reading("boundary-regression", "real block line " + line,
+                    "` stray\n" + line + "\n[Alice `]` Former](user:42)", "Alice `]` Former"));
+        }
+        for (String remainder : List.of("welcome back.", "user:7 \"title\" trailing", "user:7 'title' trailing",
+                "user:7 (title) trailing", "user:7 \"unterminated", "user:7 (unescaped (parenthesis))",
+                "<user:7", "user:7)", "user:(7", "<user:7>suffix", "<user:<7>>", " ")) {
+            readings.add(new Reading("definition-fallback", "invalid definition " + remainder,
+                    "[Alice Former]: " + remainder + "\n\n[Alice Former]: user:42", "Alice Former"));
+        }
         return List.copyOf(readings);
     }
 

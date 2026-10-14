@@ -58,6 +58,11 @@ The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, co
 email and phone identifiers. A member's nonblank display name is protected; username is protected
 only when it supplies the existing blank-display-name fallback. Exact raw values retain the shared
 cross-kind deduplication rule. No member resource handle or new model-visible read field is added.
+Short symbol-only member labels containing a non-ASCII symbol, including a single emoji, are
+registered for irreversible `[redacted]` replacement and matching outbound scanning, never reversible
+tokens. Short labels made only of ASCII punctuation or whitespace remain outside the dictionary:
+masking a member named `.` or `?` would otherwise destroy ordinary punctuation. This is a bounded
+residual; it does not exempt non-ASCII symbol labels.
 
 Before memory preparation or compaction, the loop registers every active member label from the
 exact current workspace through `WorkspaceService.getMembers`. Directory labels are match
@@ -75,7 +80,7 @@ labels, including both authored HTML-entity spellings and decoded labels. Recogn
 over-includes the covered [CommonMark member-link readings](https://spec.commonmark.org/0.31.2/#link-reference-definitions):
 an independent canonical-token pass runs everywhere, and the structural collector considers every
 bracket without code-span suppression and unions code/HTML-aware readings. Covered readings include
-inline, full, collapsed and shortcut links; failed-inline shortcut fallbacks; prose shortcuts followed
+inline, full, collapsed and shortcut links; failed-inline and failed-definition shortcut fallbacks; prose shortcuts followed
 by a colon; entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
 continuations; blockquote and list-item definitions, including continued keys with container markers;
 and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets

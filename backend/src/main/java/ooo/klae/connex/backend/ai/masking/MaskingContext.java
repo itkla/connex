@@ -78,7 +78,7 @@ public final class MaskingContext {
         }
         registerIdentifier(kind, rawValue, originalValueToToken.get(rawValue));
         IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
-        if (entry != null && entry.placeholderShaped()) {
+        if (entry != null && (entry.placeholderShaped() || entry.irreversibleMemberSymbol())) {
             return MaskingEngine.REDACTED;
         }
         String token = originalValueToToken.get(rawValue);
@@ -106,10 +106,13 @@ public final class MaskingContext {
     private void registerIdentifier(EntityKind kind, String rawValue, String token) {
         IdentifierEntry existing = rawIdentifierEntries.get(rawValue);
         if (existing != null) {
-            if (existing.token() == null && token != null) {
+            boolean memberSymbol = existing.irreversibleMemberSymbol()
+                    || kind == EntityKind.MEMBER && isShortNonAsciiSymbol(rawValue, existing.canonicalValue());
+            if (existing.token() == null && token != null || memberSymbol != existing.irreversibleMemberSymbol()) {
                 rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue,
-                        existing.canonicalValue(), existing.labelValue(), token,
-                        Objects.requireNonNull(tokenToKind.get(token)), existing.unsafe(), existing.placeholderShaped()));
+                        existing.canonicalValue(), existing.labelValue(), token == null ? existing.token() : token,
+                        token == null ? existing.kind() : Objects.requireNonNull(tokenToKind.get(token)),
+                        existing.unsafe() || memberSymbol, existing.placeholderShaped(), memberSymbol));
             }
             return;
         }
@@ -122,17 +125,26 @@ public final class MaskingContext {
             reservedTokens.add("{{" + placeholders.group(1) + "}}");
         }
         String canonicalValue = stored.literal();
+        boolean memberSymbol = kind == EntityKind.MEMBER && isShortNonAsciiSymbol(rawValue, canonicalValue);
         if (isCanonicalDictionaryEligible(canonicalValue)
-                || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+                || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH || memberSymbol) {
             identifierDictionary.add(rawValue);
             rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue, canonicalValue,
                     stored.label(), token, token == null ? kind : tokenToKind.get(token),
-                    !stored.converged() || placeholderShaped, placeholderShaped));
+                    !stored.converged() || placeholderShaped || memberSymbol, placeholderShaped, memberSymbol));
             if (!stored.converged()) {
                 unsafeIdentifierValues.add(canonicalValue);
                 log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
             }
         }
+    }
+
+    /** Short non-ASCII symbols carry member identity but cannot supply reversible placeholders. */
+    private static boolean isShortNonAsciiSymbol(String rawValue, String canonicalValue) {
+        return !canonicalValue.isEmpty() && canonicalValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                && canonicalValue.codePoints().noneMatch(Character::isLetterOrDigit)
+                && rawValue.codePoints().anyMatch(value -> value > 127
+                        && !Character.isWhitespace(value) && !Character.isSpaceChar(value));
     }
 
     /**
@@ -255,6 +267,8 @@ public final class MaskingContext {
      * <p>Eligibility uses the stored replacement canonicalization, so control-only names cannot
      * become empty matchers. Short symbol-only canonical values are also excluded; short names
      * containing a letter or digit, including single-character CJK surnames, remain protected.
+     * MEMBER candidates additionally retain short non-ASCII symbols for irreversible redaction;
+     * short ASCII punctuation-only labels retain the generic exclusion.
      * Raw values long enough for {@link OutboundLeakScan} remain in its dictionary independently
      * of replacement eligibility, preserving fail-closed scanning when separator folding removes
      * their entire value or reduces it below the scanner's floor.
@@ -454,7 +468,9 @@ public final class MaskingContext {
 
     /** Refuses literal identifier spellings even when their colliding binding predates registration. */
     String originalValueForToken(String token) {
-        return reservedTokens.contains(token) ? null : tokenToOriginalValue.get(token);
+        String original = tokenToOriginalValue.get(token);
+        IdentifierEntry entry = rawIdentifierEntries.get(original);
+        return reservedTokens.contains(token) || entry != null && entry.irreversibleMemberSymbol() ? null : original;
     }
 
     List<IdentifierEntry> identifierEntries() {
@@ -499,13 +515,13 @@ public final class MaskingContext {
 
     record IdentifierEntry(
             String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind,
-            boolean unsafe, boolean placeholderShaped) {
+            boolean unsafe, boolean placeholderShaped, boolean irreversibleMemberSymbol) {
         boolean replacementEligible() {
-            return isCanonicalDictionaryEligible(canonicalValue);
+            return isCanonicalDictionaryEligible(canonicalValue) || irreversibleMemberSymbol;
         }
 
         boolean labelEligible() {
-            return isCanonicalDictionaryEligible(labelValue);
+            return isCanonicalDictionaryEligible(labelValue) || irreversibleMemberSymbol && !labelValue.isEmpty();
         }
     }
 }

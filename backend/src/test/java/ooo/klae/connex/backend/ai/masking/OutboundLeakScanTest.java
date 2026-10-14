@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.masking;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -232,6 +233,26 @@ class OutboundLeakScanTest {
                 OutboundLeakScan.assertNoLeakStrict("Little", context, objectMapper));
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(
                 MaskingEngine.maskFreeText("Ask Li and 李", context), context, objectMapper));
+    }
+
+    @Test
+    void shortSymbolMemberRedactionAndScanningShareEveryMatch() throws Exception {
+        for (String member : java.util.List.of("😀", "♞", "🛰️")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(member);
+            String text = "Ask" + member + ".";
+            assertThrows(MaskingLeakException.class, () ->
+                    OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(java.util.Map.of("content", text)), context, objectMapper));
+            String masked = MaskingEngine.maskFreeText(text, context);
+            assertEquals("Ask" + MaskingEngine.REDACTED + ".", masked);
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+        var punctuation = new MaskingContext();
+        punctuation.registerMemberCandidate(".");
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict("Keep ordinary periods.", punctuation, objectMapper));
     }
 
     @Test

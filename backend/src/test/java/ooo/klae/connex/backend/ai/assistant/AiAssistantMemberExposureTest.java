@@ -604,6 +604,59 @@ class AiAssistantMemberExposureTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void emojiMembersAreRedactedInUserAndToolProseWhilePeriodsRemain(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("😀");
+        context.registerMemberCandidate(".");
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Ask 😀. Keep ordinary periods.");
+        var result = new AiAssistantToolResult(Map.of("description", "Follow up with 😀. Then finish."),
+                List.of(new Identifier("member", "😀"), new Identifier("member", ".")));
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("😀"));
+        assertTrue(payload.contains("Ask [redacted]. Keep ordinary periods."));
+        assertTrue(payload.contains("Follow up with [redacted]. Then finish."));
+        assertTrue(context.tokenBindings().isEmpty());
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void failedDefinitionsMaskTheirShortcutWhileValidKeysRemainOrdinary(boolean nativeProtocol) throws Exception {
+        String text = "[Alice Former]: welcome back.\n\n[Alice Former]: user:42\n\n"
+                + "[Pending Former]: <invalid\n\n[Pending Former]: user:43\n\n"
+                + "[Public Label][m]\n\n[m]: user:44 \"first\nsecond\"\n\nm remains ordinary";
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(text, context);
+        var identifiers = AiAssistantMemberIdentifiers.referenceIdentifiers(text);
+        assertEquals(List.of(new Identifier("member", "Alice Former"), new Identifier("member", "Pending Former"),
+                new Identifier("member", "Public Label")), identifiers);
+        var result = new AiAssistantToolResult(Map.of("description", text), identifiers);
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("Alice"));
+        assertFalse(payload.contains("Pending"));
+        assertFalse(payload.contains("Public Label"));
+        assertTrue(payload.contains("m remains ordinary"));
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
     @MethodSource("memberReferenceReadings")
     void everyConservativeMemberReadingIsMaskedInActualPayload(
             boolean nativeProtocol, ooo.klae.connex.backend.services.MemberReferenceReadings.Reading reading) throws Exception {

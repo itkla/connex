@@ -16,6 +16,40 @@ class MaskingContextTest {
     private static final String EXHAUSTED_NAME =
             "Johnathan " + "[".repeat(17) + "Sm" + "](person:1)".repeat(17) + "ith";
 
+    @Test
+    void shortNonAsciiMemberSymbolsAreIrreversibleWithoutRegisteringAsciiPunctuation() {
+        for (String member : List.of("😀", "♞", "🛰️")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(member);
+            assertTrue(context.identifierDictionary().contains(member));
+            assertEquals(List.of(member), context.memberCandidatesIn("Ask " + member + "."));
+            assertEquals("Ask " + MaskingEngine.REDACTED + ".", MaskingEngine.maskFreeText("Ask " + member + ".", context));
+            assertEquals(MaskingEngine.REDACTED, context.tokenFor(EntityKind.MEMBER, member));
+            assertTrue(context.tokenBindings().isEmpty());
+            context.exposeDispatchedPayload("{{M1}}");
+            assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+        }
+        var punctuation = new MaskingContext();
+        punctuation.registerMemberCandidate(".");
+        punctuation.registerMemberCandidate("-");
+        punctuation.registerMemberCandidate("?");
+        assertTrue(punctuation.identifierDictionary().isEmpty());
+        assertEquals("Ask. Then follow-up?", MaskingEngine.maskFreeText("Ask. Then follow-up?", punctuation));
+    }
+
+    @Test
+    void aSymbolMemberCannotReuseAnEarlierOtherKindBindingAndCheckpointRestoresTheOldKind() {
+        var context = new MaskingContext();
+        String token = context.tokenFor(EntityKind.PERSON, "😀");
+        var checkpoint = context.checkpoint();
+        context.registerMemberCandidate("😀");
+        context.exposeDispatchedPayload(token);
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        assertEquals(MaskingEngine.REDACTED, context.tokenFor(EntityKind.MEMBER, "😀"));
+        context.restore(checkpoint);
+        assertEquals("😀", Demasker.demask(token, context).text());
+    }
+
     /**
      * A restore withdraws exactly the bindings issued after its checkpoint, and a withdrawn
      * placeholder is never issued again for another value.

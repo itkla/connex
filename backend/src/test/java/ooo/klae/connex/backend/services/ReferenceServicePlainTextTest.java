@@ -161,4 +161,61 @@ class ReferenceServicePlainTextTest {
         }
     }
 
+    @Test
+    void validDefinitionsKeepTheirKeysOutOfMemberCandidates() {
+        for (String remainder : java.util.List.of("user:42", "<user:42>", "<>", "<url with spaces>",
+                "url(with(nested)parentheses)", "url\\(with\\)escapes", "url \"title\"", "url 'title'", "url (title)",
+                "url \"escaped \\\"quote\"", "url \"a&#10;b\"", "url \"first\nsecond\"", "url\n\"title\" trailing",
+                "\nuser:42", "\r<user:42>", "\r\n> user:42")) {
+            String content = "[Alice Former][m]\n\n[m]: " + remainder + "\n\n[m]: user:42";
+            assertEquals(java.util.List.of("Alice Former"), ReferenceService.memberLabelsFromReaderVisibleContent(content),
+                    remainder);
+        }
+    }
+
+    @Test
+    void memberRuleRunsFinishInLinearTimeWithOrWithoutATrailingLetter() {
+        for (String marker : java.util.List.of("-", "=", "*", "_")) {
+            for (String suffix : java.util.List.of("", "x")) {
+                String line = marker.repeat(100_000) + suffix;
+                String content = "` stray\n" + line + "\n[Alice `]` Former](user:42)";
+                assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                    assertEquals(suffix.isEmpty(), ReferenceService.memberRuleLine(line, 0, line.length()));
+                    assertEquals(suffix.isEmpty(),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(content).contains("Alice `]` Former"));
+                }, marker + suffix);
+            }
+        }
+    }
+
+    @Test
+    void memberRuleRunsReadEachSourceCharacterAtMostOnce() {
+        for (String marker : java.util.List.of("-", "=", "*", "_")) {
+            for (String suffix : java.util.List.of("", "x")) {
+                String line = marker.repeat(100_000) + suffix;
+                var reads = new java.util.concurrent.atomic.AtomicInteger();
+                CharSequence counted = new CharSequence() {
+                    @Override
+                    public int length() {
+                        return line.length();
+                    }
+
+                    @Override
+                    public char charAt(int index) {
+                        org.junit.jupiter.api.Assertions.assertTrue(reads.incrementAndGet() <= line.length() + 1,
+                                "Boundary detection rescanned the source");
+                        return line.charAt(index);
+                    }
+
+                    @Override
+                    public CharSequence subSequence(int start, int end) {
+                        throw new AssertionError("Boundary detection must scan the original source");
+                    }
+                };
+                assertEquals(suffix.isEmpty(), ReferenceService.memberRuleLine(counted, 0, counted.length()));
+                assertEquals(line.length() + 1, reads.get());
+            }
+        }
+    }
+
 }
