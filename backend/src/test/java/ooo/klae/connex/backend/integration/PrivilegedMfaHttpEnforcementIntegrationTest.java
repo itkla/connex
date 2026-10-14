@@ -2,7 +2,11 @@ package ooo.klae.connex.backend.integration;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,9 +21,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 
 import jakarta.servlet.Filter;
+import jakarta.servlet.http.HttpServletRequest;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -114,14 +120,9 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 .andExpect(jsonPath("$.approvalGaps").isArray());
 
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
-                "auth.mfa.policy.denied",
-                "user",
-                USER_ID,
-                null,
-                null,
-                "Unenrolled Privileged Integration",
-                "Privileged account confined pending MFA enrollment",
-                "enrollment_required");
+                eq("auth.mfa.policy.denied"), eq("user"), eq(USER_ID), isNull(), isNull(),
+                eq("Unenrolled Privileged Integration"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     /**
@@ -148,14 +149,32 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ATTESTATION_REQUIRED"));
 
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
-                "auth.mfa.policy.denied",
-                "user",
-                UNAPPROVED_USER_ID,
-                null,
-                null,
-                "Unapproved Privileged Integration",
-                "Privileged account confined pending passkey approval",
-                "attestation_required");
+                eq("auth.mfa.policy.denied"), eq("user"), eq(UNAPPROVED_USER_ID), isNull(), isNull(),
+                eq("Unapproved Privileged Integration"), eq("Privileged account confined pending passkey approval"),
+                eq("attestation_required"), any(HttpServletRequest.class));
+    }
+
+    @Test
+    void crossSiteFetchMetadataReachesDenialAuditingThroughTheSecurityChain() throws Exception {
+        mockMvc.perform(get("/api/companies").session(stampedSession()).with(authentication(authentication))
+                        .with(request -> {
+                            request.setRemoteAddr("203.0.113.36");
+                            return request;
+                        })
+                        .header("Sec-Fetch-Site", "cross-site")
+                        .header("Sec-Fetch-Mode", "no-cors")
+                        .header("Sec-Fetch-Dest", "image"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
+
+        ArgumentCaptor<HttpServletRequest> deniedRequest = ArgumentCaptor.forClass(HttpServletRequest.class);
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(USER_ID), isNull(), isNull(),
+                eq("Unenrolled Privileged Integration"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"), deniedRequest.capture());
+        assertEquals("cross-site", deniedRequest.getValue().getHeader("Sec-Fetch-Site"));
+        assertEquals("no-cors", deniedRequest.getValue().getHeader("Sec-Fetch-Mode"));
+        assertEquals("image", deniedRequest.getValue().getHeader("Sec-Fetch-Dest"));
     }
 
     /**

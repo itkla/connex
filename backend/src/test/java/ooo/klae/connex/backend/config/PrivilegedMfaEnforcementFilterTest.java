@@ -15,6 +15,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
@@ -37,6 +38,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -93,7 +95,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     /**
@@ -113,7 +115,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     @Test
@@ -126,7 +128,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     @Test
@@ -139,7 +141,71 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(filterChain, never()).doFilter(any(), any());
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq(AuditService.EXPORT_STEP_UP_ACTION), eq("user"), eq(7), isNull(), isNull(),
-                eq("Admin"), eq(AuditService.EXPORT_STEP_UP_SUMMARY), eq("step_up_required"));
+                eq("Admin"), eq(AuditService.EXPORT_STEP_UP_SUMMARY), eq("step_up_required"), any(HttpServletRequest.class));
+    }
+
+    @ParameterizedTest
+    @MethodSource("fetchMetadataDenials")
+    void fetchMetadataNeverSkipsADenialOrChangesItsAddressBound(PrivilegedMfaStanding standing,
+            String path, String action, String summary, String reason, String code) throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(standing);
+        MockHttpServletRequest first = request("GET", path);
+        first.setRemoteAddr("203.0.113.5");
+        first.addHeader("Sec-Fetch-Site", "cross-site");
+        first.addHeader("Sec-Fetch-Mode", "no-cors");
+        first.addHeader("Sec-Fetch-Dest", "image");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(first, response, filterChain);
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains(code));
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq(action), eq("user"), eq(7), isNull(), isNull(), eq("Admin"), eq(summary),
+                eq(reason), eq(first));
+
+        for (List<String> metadata : List.of(
+                List.of("same-site", "navigate", "document"),
+                List.of("same-origin", "cors", "empty"))) {
+            MockHttpServletRequest repeated = request("GET", path);
+            repeated.setRemoteAddr("203.0.113.5");
+            repeated.addHeader("Sec-Fetch-Site", metadata.get(0));
+            repeated.addHeader("Sec-Fetch-Mode", metadata.get(1));
+            repeated.addHeader("Sec-Fetch-Dest", metadata.get(2));
+            MockHttpServletResponse repeatedResponse = new MockHttpServletResponse();
+            filter.doFilter(repeated, repeatedResponse, filterChain);
+            assertEquals(403, repeatedResponse.getStatus());
+            assertTrue(repeatedResponse.getContentAsString().contains(code));
+        }
+        assertEquals(403, execute("GET", path, "203.0.113.5").getStatus());
+        verifyNoMoreInteractions(auditService);
+
+        MockHttpServletRequest otherAddress = request("GET", path);
+        otherAddress.setRemoteAddr("198.51.100.9");
+        otherAddress.addHeader("Sec-Fetch-Site", "same-site");
+        otherAddress.addHeader("Sec-Fetch-Mode", "no-cors");
+        otherAddress.addHeader("Sec-Fetch-Dest", "image");
+        MockHttpServletResponse otherResponse = new MockHttpServletResponse();
+        filter.doFilter(otherAddress, otherResponse, filterChain);
+        assertEquals(403, otherResponse.getStatus());
+        assertTrue(otherResponse.getContentAsString().contains(code));
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq(action), eq("user"), eq(7), isNull(), isNull(), eq("Admin"), eq(summary),
+                eq(reason), eq(otherAddress));
+        verifyNoMoreInteractions(auditService);
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    private static Stream<Arguments> fetchMetadataDenials() {
+        return Stream.of(
+                Arguments.of(PrivilegedMfaStanding.ENROLLMENT_REQUIRED, "/api/companies",
+                        "auth.mfa.policy.denied", "Privileged account confined pending MFA enrollment",
+                        "enrollment_required", PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE),
+                Arguments.of(PrivilegedMfaStanding.ATTESTATION_REQUIRED, "/api/companies",
+                        "auth.mfa.policy.denied", "Privileged account confined pending passkey approval",
+                        "attestation_required", PrivilegedMfaEnforcementFilter.ATTESTATION_REQUIRED_CODE),
+                Arguments.of(PrivilegedMfaStanding.SATISFIED, "/api/audit/export",
+                        AuditService.EXPORT_STEP_UP_ACTION, AuditService.EXPORT_STEP_UP_SUMMARY,
+                        "step_up_required", "RECENT_AUTHENTICATION_REQUIRED"));
     }
 
     /**
@@ -169,7 +235,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     /**
@@ -182,7 +248,7 @@ class PrivilegedMfaEnforcementFilterTest {
         doThrow(new IllegalStateException("audit unavailable"))
                 .doNothing()
                 .when(auditService).recordStrictFailureIndependentScoped(
-                        any(), any(), any(), any(), any(), any(), any(), any());
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(HttpServletRequest.class));
 
         assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
         assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
@@ -191,7 +257,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     @Test
@@ -207,7 +273,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending passkey approval"),
-                eq("attestation_required"));
+                eq("attestation_required"), any(HttpServletRequest.class));
     }
 
     /**
@@ -229,11 +295,11 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending passkey approval"),
-                eq("attestation_required"));
+                eq("attestation_required"), any(HttpServletRequest.class));
     }
 
     @Test
@@ -529,7 +595,7 @@ class PrivilegedMfaEnforcementFilterTest {
         doThrow(new LinkageError("audit write died"))
                 .doNothing()
                 .when(auditService).recordStrictFailureIndependentScoped(
-                        any(), any(), any(), any(), any(), any(), any(), any());
+                        any(), any(), any(), any(), any(), any(), any(), any(), any(HttpServletRequest.class));
 
         assertThrows(LinkageError.class, () -> execute("GET", "/api/companies", "203.0.113.5"));
         assertEquals(403, execute("GET", "/api/companies", "203.0.113.5").getStatus());
@@ -537,7 +603,7 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"));
+                eq("enrollment_required"), any(HttpServletRequest.class));
     }
 
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {
