@@ -143,6 +143,8 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
      * under the {@code SameSite=None} that SAML deployments use. Unbounded, every visit appended a row
      * attributed to the victim (#1850). The write is strict so that a failure hands the window
      * back instead of suppressing the next denial's evidence; the request is refused either way.
+     * Fetch metadata is recorded only as advisory context: non-browser clients can forge it, so
+     * it never affects admission or the rate-limit key (#1936).
      */
     private void recordDenial(HttpServletRequest request, User user, String action, String summary,
             String reason) {
@@ -154,7 +156,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
         boolean written = false;
         try {
             auditService.recordStrictFailureIndependentScoped(action, "user", user.getId(), null, null,
-                    user.getDisplayName(), summary, reason);
+                    user.getDisplayName(), summary, reason, request);
             written = true;
         } catch (RuntimeException e) {
             log.error("Failed to record access denial action={} userId={}", action, user.getId(), e);

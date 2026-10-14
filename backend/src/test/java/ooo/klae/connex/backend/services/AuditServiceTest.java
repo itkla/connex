@@ -19,6 +19,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +28,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -629,6 +633,111 @@ class AuditServiceTest {
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    @Test
+    void strictFailureAuditRecordsAdvisoryFetchMetadata() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "cross-site");
+        request.addHeader("Sec-Fetch-Mode", "no-cors");
+        request.addHeader("Sec-Fetch-Dest", "image");
+        request.addHeader("Authorization", "must-not-be-copied");
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog entry = appended.getValue();
+        assertEquals("auth.mfa.policy.denied", entry.getAction());
+        assertEquals("failure", entry.getOutcome());
+        assertEquals("user", entry.getEntityType());
+        assertEquals(7, entry.getEntityId());
+        assertNull(entry.getWorkspaceId());
+        assertNull(entry.getOrgId());
+        assertEquals(objectMapper.valueToTree(Map.of(
+                "error", "enrollment_required", "secFetchSite", "cross-site",
+                "secFetchMode", "no-cors", "secFetchDest", "image")),
+                objectMapper.readTree(entry.getContext()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"})
+    void strictFailureAuditCapsAndSanitizesEveryFetchMetadataValue(String header) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(header, "  cross\u0000-site\r\n\t\u007f\u0085" + "x".repeat(128));
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        String key = switch (header) {
+            case "Sec-Fetch-Site" -> "secFetchSite";
+            case "Sec-Fetch-Mode" -> "secFetchMode";
+            case "Sec-Fetch-Dest" -> "secFetchDest";
+            default -> throw new IllegalArgumentException(header);
+        };
+        assertEquals(objectMapper.valueToTree(Map.of(
+                "error", "enrollment_required", key, "cross -site" + " ".repeat(5) + "x".repeat(48))),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditSanitizesReferenceTokensInFetchMetadata() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "[Private](note:42)");
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "a note")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditOmitsAbsentFetchMetadata() {
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required",
+                new MockHttpServletRequest());
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditOmitsFetchMetadataTheFirewallRejects() {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.addHeader("Sec-Fetch-Site", "cross\u0085site");
+        raw.addHeader("Sec-Fetch-Mode", "no-cors");
+        raw.addHeader("Sec-Fetch-Dest", "image\u009f");
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Site"));
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Dest"));
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchMode", "no-cors")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditWithFetchMetadataPropagatesAppendFailures() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Sec-Fetch-Site", "cross-site");
+        IllegalStateException failure = new IllegalStateException("audit store unavailable");
+        doThrow(failure).when(auditIntegrityService).appendIndependent(any());
+
+        assertSame(failure, assertThrows(IllegalStateException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                        "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request)));
     }
 
     /** A deferred append that fails is logged, never thrown into the completed transaction's cleanup. */

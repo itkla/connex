@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -59,6 +60,7 @@ public class AuditService {
     private static final int IP_MAX = 45;
     private static final int HASH_LEN = 64;
     private static final int ERROR_MAX = 500;
+    private static final int FETCH_METADATA_MAX = 64;
     private static final int MAX_OFFSET = 100_000;
     private static final int EXPORT_MAX_LIMIT = 10_000;
 
@@ -324,6 +326,52 @@ public class AuditService {
         Object context = reason == null ? null : Map.of("error", truncate(reason, ERROR_MAX));
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
                 context, true, true, workspaceId, orgId, true);
+    }
+
+    /**
+     * Records a strict, independently scoped failure with advisory fetch metadata from the request.
+     *
+     * <p>Only the three fetch-metadata headers are copied. Each value is sanitized and capped at
+     * 64 characters. Absent headers, and values the request firewall rejects when read, are omitted
+     * so a malformed header can never suppress the row. Non-browser clients can forge these values,
+     * so they must never determine audit admission or authorization.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed sanitized failure classification
+     * @param request denied request whose fetch metadata is advisory
+     */
+    public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        if (reason != null) {
+            context.put("error", truncate(reason, ERROR_MAX));
+        }
+        copyFetchMetadata(request, context, "Sec-Fetch-Site", "secFetchSite");
+        copyFetchMetadata(request, context, "Sec-Fetch-Mode", "secFetchMode");
+        copyFetchMetadata(request, context, "Sec-Fetch-Dest", "secFetchDest");
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
+                context.isEmpty() ? null : context, true, true, workspaceId, orgId, true);
+    }
+
+    private static void copyFetchMetadata(HttpServletRequest request, Map<String, Object> context,
+            String header, String key) {
+        String value;
+        try {
+            value = request.getHeader(header);
+        } catch (RequestRejectedException rejected) {
+            return;
+        }
+        if (value != null) {
+            String cleaned = sanitizeAuditText(value).replaceAll("[\\p{Cc}]", " ").strip();
+            context.put(key, truncate(cleaned, FETCH_METADATA_MAX));
+        }
     }
 
     /**
