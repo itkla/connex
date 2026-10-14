@@ -62,7 +62,7 @@ class MigrationLineageArchTest {
             "(?:CREATE(?:\\s+UNIQUE|\\s+FULLTEXT|\\s+SPATIAL)?|DROP)\\s+INDEX\\s+[`\"]?\\w+[`\"]?\\s+ON\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE),
         Pattern.compile(
-            "(?:^|;)\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
+            "(?:^|;)\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE(?:\\s+IGNORE)?|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE),
         Pattern.compile(
             "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)",
@@ -166,6 +166,32 @@ class MigrationLineageArchTest {
             () -> assertLineagePurity(fixture, "tenant", TablePlaneRegistry.ORG_DATA_TABLES));
         assertThrows(AssertionError.class,
             () -> assertLineagePurity(fixture, "control", TablePlaneRegistry.CONTROL_PLANE_TABLES));
+    }
+
+    @Test
+    void updateIgnoreTenantTargetsRemainEnforced(@TempDir Path root) throws IOException {
+        Path tenant = root.resolve("tenant/R__update_ignore.sql");
+        Files.createDirectories(tenant.getParent());
+        Files.writeString(tenant, "UPDATE IGNORE campaign_delivery SET last_error = NULL;");
+        assertLineagePurity(MigrationInventory.read(root), "tenant", TablePlaneRegistry.ORG_DATA_TABLES);
+
+        Files.writeString(tenant, "UPDATE IGNORE app_user SET id = id;");
+        AssertionError violation = assertThrows(AssertionError.class,
+            () -> assertLineagePurity(MigrationInventory.read(root), "tenant", TablePlaneRegistry.ORG_DATA_TABLES));
+        assertTrue(violation.getMessage().contains("touches app_user"));
+    }
+
+    @Test
+    void updateIgnoreControlTargetsRemainEnforced(@TempDir Path root) throws IOException {
+        Path control = root.resolve("control/R__update_ignore.sql");
+        Files.createDirectories(control.getParent());
+        Files.writeString(control, "UPDATE IGNORE app_user SET id = id;");
+        assertLineagePurity(MigrationInventory.read(root), "control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
+
+        Files.writeString(control, "UPDATE IGNORE person SET id = id;");
+        AssertionError violation = assertThrows(AssertionError.class,
+            () -> assertLineagePurity(MigrationInventory.read(root), "control", TablePlaneRegistry.CONTROL_PLANE_TABLES));
+        assertTrue(violation.getMessage().contains("touches person"));
     }
 
     @Test

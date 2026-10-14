@@ -96,11 +96,20 @@ window approval. V227 creates the tenant-plane `campaign_delivery_unsubscribe_to
 and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V227
 and V228 together with all writers stopped; there is no manual checkpoint between them. V228 first
 reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
-then uses the still-present bearer to replace historical copies in delivery errors, provider message
-ids, and delivery event details with `[redacted]`, joining events on both workspace and delivery ids.
-Historical provider event ids replace the exact bearer with its digest instead, preserving distinct
-event keys and the provider-event unique constraint used for webhook deduplication.
-It then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
+then uses the still-present bearer to replace historical copies case-insensitively. Free-text delivery
+errors and event details use `[redacted]`; provider message and event ids use the lowercase digest,
+joining events on both workspace and delivery ids. V228 rekeys event ids with `UPDATE IGNORE`,
+which skips any row whose digest correlation form would violate the workspace/provider event key.
+This covers collisions with existing canonical keys and between multiple legacy rows being rekeyed,
+including rows belonging to different deliveries. A second update sets every event key still
+containing its delivery's bearer to NULL. One canonical key survives each collision; multiple NULL
+keys are permitted, and webhook redeliveries still deduplicate against the surviving canonical key.
+These updates can run again after a failed history row.
+After the upgrade, incoming raw provider ids use the same correlation form before lookup and dedupe,
+so historical message ids still correlate. Only 64-hex windows whose lowercased SHA-256 digest is
+recorded in the resolved workspace match; unrelated identifiers stay byte-identical. Digest probes
+are plain primary-key consistent reads and acquire no row locks.
+V228 then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
 Existing fragment links keep working for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
 and previously generated export ZIPs are outside this remediation.
 

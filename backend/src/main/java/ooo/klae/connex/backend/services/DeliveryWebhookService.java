@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignSend;
+import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 import ooo.klae.connex.backend.delivery.DeliveryEvent;
 import ooo.klae.connex.backend.delivery.DeliveryEventType;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -35,6 +36,12 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * signature-verified by the provider's own adapter, translated into normalized events, and each event
  * is recorded idempotently against the {@code campaign_delivery} it concerns. A hard bounce or a
  * complaint additionally records a suppression entry and revokes consent.
+ * Provider message and event identifiers use the same digest correlation form as dispatch before
+ * lookup or deduplication. Only recorded digests in the resolved workspace match; their primary-key
+ * probes are plain consistent reads without row locks. Unrelated opaque identifiers are preserved,
+ * and free-text details redact every 64-hex run before persistence.
+ * Message identifiers exceeding the 255-code-point column limit cannot correlate and are ignored
+ * without digest probes. Event identifier persistence retains the column limit's rejection behavior.
  *
  * <p>Provider callers carry no session, so {@code TenantResolutionInterceptor} leaves the request
  * thread unresolved and every workspace-scoped statement would otherwise be refused by the
@@ -111,11 +118,12 @@ public class DeliveryWebhookService {
 
     private boolean applyEvent(ResolvedDeliveryProvider target, DeliveryEvent event) {
         int workspaceId = target.workspaceId();
-        if (event.providerMessageId() == null || event.providerMessageId().isBlank()) {
+        if (event.providerMessageId() == null || event.providerMessageId().isBlank()
+                || !CampaignDeliveryDiagnostics.fitsIdentifierColumn(event.providerMessageId())) {
             return false;
         }
         CampaignDelivery delivery = campaignDeliveryMapper.findByProviderMessage(
-                workspaceId, target.providerId(), event.providerMessageId());
+                workspaceId, target.providerId(), correlationForm(workspaceId, event.providerMessageId()));
         if (delivery == null) {
             return false;
         }
@@ -130,7 +138,7 @@ public class DeliveryWebhookService {
     }
 
     private boolean recordEvent(int workspaceId, int deliveryId, String providerId, DeliveryEvent event) {
-        String providerEventId = event.providerEventId();
+        String providerEventId = correlationForm(workspaceId, event.providerEventId());
         if ((providerEventId == null || providerEventId.isBlank())
                 && campaignDeliveryMapper.hasEvent(workspaceId, deliveryId, event.type().token())) {
             return false;
@@ -139,7 +147,7 @@ public class DeliveryWebhookService {
         row.setWorkspaceId(workspaceId);
         row.setDeliveryId(deliveryId);
         row.setEventType(event.type().token());
-        row.setDetail(bounded(event.detail()));
+        row.setDetail(bounded(CampaignDeliveryDiagnostics.scrub(event.detail(), null)));
         row.setProviderId(providerId);
         row.setProviderEventId(providerEventId);
         try {
@@ -156,6 +164,11 @@ public class DeliveryWebhookService {
             case BOUNCED, COMPLAINED -> List.of("dispatched", "delivered", "failed");
         };
         campaignDeliveryMapper.applyProviderStatus(workspaceId, delivery.getId(), type.token(), fromStatuses);
+    }
+
+    private String correlationForm(int workspaceId, String identifier) {
+        return CampaignDeliveryDiagnostics.correlationForm(identifier,
+                hash -> campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash) != null);
     }
 
     private void suppress(int workspaceId, CampaignDelivery delivery, DeliveryEventType type) {

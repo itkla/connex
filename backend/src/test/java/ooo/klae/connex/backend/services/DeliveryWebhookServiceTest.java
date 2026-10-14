@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.ProviderEventSource;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 
@@ -227,6 +228,86 @@ class DeliveryWebhookServiceTest {
         verify(campaignDeliveryMapper).findByProviderMessage(WORKSPACE_B, PROVIDER, "m1");
         verify(campaignDeliveryMapper, never()).findByProviderMessage(eq(WORKSPACE_A), any(), any());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
+    }
+
+    @Test
+    void ingestCanonicalizesMessageAndEventIdsBeforeLookupAndDedupeAndScrubsDetail() {
+        String bearer = "ab09".repeat(16);
+        String digest = OneTimeTokenDigest.sha256(bearer);
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("message:0" + "Ab09".repeat(16) + "f",
+                "event:" + bearer.toUpperCase(java.util.Locale.ROOT), DeliveryEventType.DELIVERED,
+                null, "reason " + bearer + " retained")));
+        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> digest.equals(invocation.getArgument(1)) ? Integer.valueOf(500) : null);
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "message:0" + digest + "f"))
+                .thenReturn(delivery(WORKSPACE_A));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            CampaignDeliveryEvent row = invocation.getArgument(0);
+            assertEquals("event:" + digest, row.getProviderEventId());
+            assertEquals("reason [redacted] retained", row.getDetail());
+            return 1;
+        }).doThrow(new DuplicateKeyException("duplicate canonical key"))
+                .when(campaignDeliveryMapper).insertEvent(any(CampaignDeliveryEvent.class));
+        scopeInline();
+
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        verify(campaignDeliveryMapper, times(2)).findByProviderMessage(
+                WORKSPACE_A, PROVIDER, "message:0" + digest + "f");
+        verify(campaignDeliveryMapper).applyProviderStatus(WORKSPACE_A, 500, "delivered", List.of("dispatched", "failed"));
+    }
+
+    @Test
+    void ingestDoesNotMatchAnotherWorkspacesDigestOrAlterUnrelatedHexIds() {
+        String foreignBearer = "ab09".repeat(16);
+        String unrelated = "CD".repeat(32);
+        resolveTo(WORKSPACE_B, List.of(new DeliveryEvent("foreign:" + foreignBearer,
+                unrelated, DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_B), any())).thenReturn(null);
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_B, PROVIDER, "foreign:" + foreignBearer))
+                .thenReturn(delivery(WORKSPACE_B));
+        scopeInline();
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        verify(campaignDeliveryMapper).getUnsubscribeTokenDeliveryId(
+                WORKSPACE_B, OneTimeTokenDigest.sha256(foreignBearer));
+        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any());
+        org.mockito.ArgumentCaptor<CampaignDeliveryEvent> row = org.mockito.ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(campaignDeliveryMapper).insertEvent(row.capture());
+        assertEquals(unrelated, row.getValue().getProviderEventId());
+    }
+
+    @Test
+    void ingestShortIdentifiersDoNotProbeDigestHistory() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), any());
+    }
+
+    @Test
+    void ingestIgnoresOversizedMessageIdsBeforeProbesOrWrites() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("a".repeat(300), "event", DeliveryEventType.BOUNCED, null, null)));
+        scopeInline();
+        byte[] body = "signed webhook".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Map<String, String> headers = Map.of("signature", "verified-signature");
+        assertEquals(0, service().ingest(PROVIDER, "tok", body, headers));
+        verify(eventSource).verifySignature(target(WORKSPACE_A), body, headers);
+        verifyNoInteractions(campaignDeliveryMapper, campaignSendMapper, suppressionService, consentService);
+    }
+
+    @Test
+    void ingestRejectsOversizedEventIdsBeforeProbesOrWrites() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "a".repeat(300), DeliveryEventType.BOUNCED, null, null)));
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
+        assertThrows(IllegalArgumentException.class, () -> service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), any());
+        verify(campaignDeliveryMapper, never()).insertEvent(any());
+        verify(campaignDeliveryMapper, never()).applyProviderStatus(anyInt(), anyInt(), any(), any());
+        verifyNoInteractions(campaignSendMapper, suppressionService, consentService);
     }
 
     @Test

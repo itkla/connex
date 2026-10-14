@@ -9,21 +9,26 @@ WHERE d.unsubscribe_token_hash IS NOT NULL
   );
 
 UPDATE campaign_delivery
-SET last_error = REPLACE(last_error, unsubscribe_token, '[redacted]')
+SET last_error = REGEXP_REPLACE(last_error, unsubscribe_token, '[redacted]', 1, 0, 'i')
 WHERE last_error LIKE CONCAT('%', unsubscribe_token, '%');
 
 UPDATE campaign_delivery
-SET provider_message_id = REPLACE(provider_message_id, unsubscribe_token, '[redacted]')
+SET provider_message_id = REGEXP_REPLACE(provider_message_id, unsubscribe_token, unsubscribe_token_hash, 1, 0, 'i')
 WHERE provider_message_id LIKE CONCAT('%', unsubscribe_token, '%');
 
 UPDATE campaign_delivery_event e
 JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = d.id
-SET e.detail = REPLACE(e.detail, d.unsubscribe_token, '[redacted]')
+SET e.detail = REGEXP_REPLACE(e.detail, d.unsubscribe_token, '[redacted]', 1, 0, 'i')
 WHERE e.detail LIKE CONCAT('%', d.unsubscribe_token, '%');
+
+UPDATE IGNORE campaign_delivery_event e
+JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = d.id
+SET e.provider_event_id = REGEXP_REPLACE(e.provider_event_id, d.unsubscribe_token, d.unsubscribe_token_hash, 1, 0, 'i')
+WHERE e.provider_event_id LIKE CONCAT('%', d.unsubscribe_token, '%');
 
 UPDATE campaign_delivery_event e
 JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = d.id
-SET e.provider_event_id = REPLACE(e.provider_event_id, d.unsubscribe_token, d.unsubscribe_token_hash)
+SET e.provider_event_id = NULL
 WHERE e.provider_event_id LIKE CONCAT('%', d.unsubscribe_token, '%');
 
 ALTER TABLE campaign_delivery

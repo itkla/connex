@@ -340,6 +340,7 @@ public class CampaignDispatchService {
             return;
         }
         String unsubscribeToken = newUnsubscribeToken();
+        String unsubscribeTokenHash = OneTimeTokenDigest.sha256(unsubscribeToken);
         RenderedMessage content = render(channel, revision, unsubscribeToken);
         long providerDeadlineNanos = providerDeadlineNanos();
         claimBoundary.beforeProviderLeaseRenewal(workspaceId, deliveryId);
@@ -365,7 +366,7 @@ public class CampaignDispatchService {
         }
         try {
             if (!unsubscribeTokenRegistrationService.register(
-                    workspaceId, deliveryId, leaseOwner, OneTimeTokenDigest.sha256(unsubscribeToken))) {
+                    workspaceId, deliveryId, leaseOwner, unsubscribeTokenHash)) {
                 return;
             }
         } catch (RuntimeException exception) {
@@ -431,10 +432,13 @@ public class CampaignDispatchService {
                     "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
         String diagnostic = CampaignDeliveryDiagnostics.scrub(receipt.detail(), unsubscribeToken);
-        String providerMessageId = CampaignDeliveryDiagnostics.scrubIdentifier(receipt.providerMessageId(), unsubscribeToken);
         if (receipt.status() == DispatchStatus.SENT) {
+            String providerMessageId;
             int updated;
             try {
+                providerMessageId = CampaignDeliveryDiagnostics.correlationForm(receipt.providerMessageId(),
+                        hash -> unsubscribeTokenHash.equals(hash) || Integer.valueOf(deliveryId).equals(
+                                campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash)));
                 updated = leaseOwner == null
                     ? campaignDeliveryMapper.markDispatched(
                         workspaceId, deliveryId, target.providerId(), providerMessageId)

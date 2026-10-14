@@ -34,7 +34,6 @@ import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -204,7 +203,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertNotNull(bearer.get());
         assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
-        String expected = "receipt [redacted] other " + "C".repeat(64) + " retained";
+        String expected = "receipt " + OneTimeTokenDigest.sha256(bearer.get()) + " other " + "C".repeat(64) + " retained";
         assertEquals(expected,
                 jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
                         String.class, deliveryId));
@@ -216,10 +215,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = DeliveryEventType.class, names = {"BOUNCED", "COMPLAINED"})
-    void opaqueHexProviderIdSurvivesDispatchAndCorrelatesSuppressingWebhook(DeliveryEventType type) {
+    @org.junit.jupiter.params.provider.CsvSource({"BOUNCED, opaque", "COMPLAINED, opaque", "BOUNCED, current", "COMPLAINED, current", "BOUNCED, legacy", "COMPLAINED, legacy"})
+    void providerIdsCorrelateSuppressingWebhooksAndPreserveOpaqueHexIds(DeliveryEventType type, String idKind) {
         createDedicatedDrillRoots();
-        seedUnsubscribeDigest();
+        String legacyBearer = seedUnsubscribeDigest();
         int workspaceId = drillWorkspace.getId();
         Person recipient = newPerson(newCompany());
         consentService.setForPerson(recipient.getId(), new ContactChannelConsentRequest(
@@ -238,20 +237,38 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE id = ?", sendId);
         jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending', person_id = ?, address = ? WHERE id = ?",
                 recipient.getId(), recipient.getEmail(), deliveryId);
-        String providerMessageId = "AB".repeat(32);
+        AtomicReference<String> bearer = new AtomicReference<>();
+        AtomicReference<String> providerMessageId = new AtomicReference<>();
         MessageDispatcher dispatcher = org.mockito.Mockito.mock(MessageDispatcher.class);
         org.mockito.Mockito.when(dispatcher.dispatch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(DispatchReceipt.sent(providerMessageId, "accepted"));
+                .thenAnswer(invocation -> {
+                    DeliveryRequest request = invocation.getArgument(1);
+                    java.util.regex.Matcher token = java.util.regex.Pattern.compile("/unsubscribe#token=([a-f0-9]{64})")
+                            .matcher(request.content().bodyHtml());
+                    assertTrue(token.find());
+                    bearer.set(token.group(1));
+                    providerMessageId.set(!"opaque".equals(idKind) ? "receipt:0" + bearer.get().toUpperCase(java.util.Locale.ROOT) + "f"
+                            : "AB".repeat(32));
+                    return DispatchReceipt.sent(providerMessageId.get(), "accepted");
+                });
         org.mockito.Mockito.doReturn(dispatcher).when(deliveryProviderRouter).dispatcherFor(HttpEspDeliveryProvider.PROVIDER_ID);
         ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(
                 HttpEspDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId, DeliveryCredentials.none());
         org.mockito.Mockito.when(deliveryProviderConfigService.resolveForWorkspace(workspaceId, DeliveryChannel.EMAIL)).thenReturn(target);
         org.mockito.Mockito.when(deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, null)).thenReturn(true);
 
-        assertTrue(campaignDispatchService.processSend(workspaceId, sendId));
+        if ("legacy".equals(idKind)) {
+            bearer.set(legacyBearer);
+            providerMessageId.set("receipt:0" + legacyBearer.toUpperCase(java.util.Locale.ROOT) + "f");
+            jdbcTemplate.update("UPDATE campaign_delivery SET status = 'dispatched', provider_id = ?, provider_message_id = ? WHERE id = ?",
+                    HttpEspDeliveryProvider.PROVIDER_ID, "receipt:0" + OneTimeTokenDigest.sha256(legacyBearer) + "f", deliveryId);
+        } else {
+            assertTrue(campaignDispatchService.processSend(workspaceId, sendId));
+        }
         assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
-        assertEquals(providerMessageId, jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
+        String expectedMessageId = !"opaque".equals(idKind) ? "receipt:0" + OneTimeTokenDigest.sha256(bearer.get()) + "f" : "AB".repeat(32);
+        assertEquals(expectedMessageId, jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
         assertEquals("granted", consentService.getForPerson(recipient.getId()).getFirst().status());
         assertTrue(suppressionService.list().isEmpty());
@@ -263,11 +280,18 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 org.mockito.ArgumentMatchers.eq("webhook-token"), org.mockito.ArgumentMatchers.any())).thenReturn(target);
         org.mockito.Mockito.doReturn(source).when(deliveryProviderRouter).eventSourceFor(HttpEspDeliveryProvider.PROVIDER_ID);
         org.mockito.Mockito.when(source.translate(body)).thenReturn(List.of(
-                new DeliveryEvent(providerMessageId, "opaque-id-event", type, null, type.token())));
+                new DeliveryEvent(providerMessageId.get(), "event:" + bearer.get(), type, null,
+                        type.token() + " reason " + bearer.get().toUpperCase(java.util.Locale.ROOT))));
 
         assertEquals(1, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
         assertEquals(0, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
         org.mockito.Mockito.verify(source, org.mockito.Mockito.times(2)).verifySignature(target, body, headers);
+        assertEquals("event:" + OneTimeTokenDigest.sha256(bearer.get()), jdbcTemplate.queryForObject(
+                "SELECT provider_event_id FROM campaign_delivery_event WHERE delivery_id = ? AND event_type = ?",
+                String.class, deliveryId, type.token()));
+        assertEquals(type.token() + " reason [redacted]", jdbcTemplate.queryForObject(
+                "SELECT detail FROM campaign_delivery_event WHERE delivery_id = ? AND event_type = ?",
+                String.class, deliveryId, type.token()));
         assertEquals(type.token(), jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
         String reason = type == DeliveryEventType.BOUNCED ? "hard_bounce" : "complaint";

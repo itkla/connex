@@ -116,6 +116,11 @@
     WHERE t.token_hash = #{tokenHash}
   </select>
 
+  <select id="getUnsubscribeTokenDeliveryId" resultType="int">
+    SELECT delivery_id FROM campaign_delivery_unsubscribe_token
+    WHERE token_hash = #{tokenHash} AND workspace_id = #{workspaceId}
+  </select>
+
   <select id="findByProviderMessage" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
     WHERE workspace_id = #{workspaceId}

@@ -13,7 +13,8 @@ import org.eclipse.angus.mail.smtp.SMTPTransport;
 /**
  * Keeps SMTP commands and responses observable while suppressing all MIME DATA tracing.
  * Suppression begins when Angus returns the DATA stream after its successful 354 response, without
- * copying or pre-serializing the message. BDAT streams receive the same protection. Dot stuffing
+ * copying or pre-serializing the message. BDAT streams receive fail-safe protection until send
+ * cleanup, also hiding BDAT commands and replies; chunking remains disabled. DATA dot stuffing
  * distinguishes the standalone terminator from every body line, so logging resumes before the
  * final server response without inspecting MIME encodings.
  */

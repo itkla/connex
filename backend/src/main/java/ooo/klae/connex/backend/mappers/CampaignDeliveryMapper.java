@@ -102,6 +102,11 @@ public interface CampaignDeliveryMapper {
     /** Resolves one delivery by any of its issued unsubscribe digests, unrouted. */
     CampaignDelivery getByTokenHash(@Param("tokenHash") String tokenHash);
 
+    /** Resolves a digest by its primary key within the workspace, using a non-locking consistent read. */
+    Integer getUnsubscribeTokenDeliveryId(
+            @Param("workspaceId") int workspaceId,
+            @Param("tokenHash") String tokenHash);
+
     CampaignDelivery findByProviderMessage(
             @Param("workspaceId") int workspaceId,
             @Param("providerId") String providerId,

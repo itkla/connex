@@ -181,7 +181,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(comparesBody ? "failed" : "dispatched", stored.getStatus());
         assertEquals(comparesBody, stored.getReconciliationRequiredAt() != null);
         if (!comparesBody) {
-            assertEquals("original-receipt", stored.getProviderMessageId());
+            assertEquals("original:" + OneTimeTokenDigest.sha256(originalToken), stored.getProviderMessageId());
         }
     }
 
@@ -230,7 +230,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     private static final class OriginalReceiptDispatcher extends ReplayDispatcher {
         @Override
         DispatchReceipt replay(DeliveryRequest request) {
-            return DispatchReceipt.sent("original-receipt", "Original submission receipt");
+            return DispatchReceipt.sent("original:" + token(requests.getFirst()).toUpperCase(java.util.Locale.ROOT),
+                    "Original submission receipt");
         }
     }
 

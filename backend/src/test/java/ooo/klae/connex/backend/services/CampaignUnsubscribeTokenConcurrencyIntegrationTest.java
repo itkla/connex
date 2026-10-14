@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 
@@ -156,6 +157,39 @@ class CampaignUnsubscribeTokenConcurrencyIntegrationTest extends CampaignRealDbT
         assertFalse(registration.register(workspace.getId(), deliveryId, "expired", "e".repeat(64)));
         assertFalse(registration.register(workspace.getId(), Integer.MAX_VALUE, "expired", "e".repeat(64)));
         assertEquals(0, digestCount(deliveryId));
+    }
+
+    @Test
+    void digestPrimaryKeyProbesDoNotWaitForAnExclusiveRowLockAndRemainWorkspaceScoped() throws Exception {
+        List<Integer> deliveries = deliveries();
+        int originalId = deliveries.getFirst();
+        int replacementId = deliveries.getLast();
+        String digest = "a".repeat(64);
+        deliveryMapper.insertUnsubscribeTokenHash(workspace.getId(), originalId, digest);
+        assertEquals("PRIMARY", jdbc.queryForMap("EXPLAIN SELECT delivery_id FROM campaign_delivery_unsubscribe_token"
+                + " WHERE token_hash = ? AND workspace_id = ?", digest, workspace.getId()).get("key"));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> holder = executor.submit(() -> transaction().executeWithoutResult(status -> {
+                jdbc.update("UPDATE campaign_delivery_unsubscribe_token SET delivery_id = ? WHERE token_hash = ?",
+                        replacementId, digest);
+                locked.countDown();
+                await(release);
+            }));
+            await(locked);
+            Future<Integer> reader = executor.submit(() -> deliveryMapper.getUnsubscribeTokenDeliveryId(workspace.getId(), digest));
+            assertEquals(originalId, reader.get(10, TimeUnit.SECONDS));
+            assertNull(deliveryMapper.getUnsubscribeTokenDeliveryId(Integer.MAX_VALUE, digest));
+            release.countDown();
+            holder.get(20, TimeUnit.SECONDS);
+            assertEquals(replacementId, deliveryMapper.getUnsubscribeTokenDeliveryId(workspace.getId(), digest));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(20, TimeUnit.SECONDS));
+        }
     }
 
     private TransactionTemplate transaction() {

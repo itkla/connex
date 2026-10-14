@@ -236,24 +236,53 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
     private static void seedLegacyDiagnostics(Statement statement) throws SQLException {
         statement.executeUpdate("""
                 UPDATE campaign_delivery
-                SET last_error = CONCAT('554 rejected ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained'),
-                    provider_message_id = CONCAT('receipt ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained')
+                SET last_error = CONCAT('554 rejected ', UPPER(unsubscribe_token), ' repeated ',
+                        UPPER(LEFT(unsubscribe_token, 32)), LOWER(RIGHT(unsubscribe_token, 32)), ' retained'),
+                    provider_message_id = CONCAT('receipt ', UPPER(unsubscribe_token), ' repeated ',
+                        UPPER(LEFT(unsubscribe_token, 32)), LOWER(RIGHT(unsubscribe_token, 32)), ' retained')
                 """);
         statement.executeUpdate("""
                 INSERT INTO campaign_delivery_event
                     (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)
                 SELECT workspace_id, id, 'failed',
-                       CONCAT('event ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained'),
-                       'http_esp', CONCAT('legacy:', unsubscribe_token, ':event')
-                FROM campaign_delivery
+                       IF(copies.n = 1, CONCAT('event ', UPPER(unsubscribe_token), ' repeated ',
+                           UPPER(LEFT(unsubscribe_token, 32)), LOWER(RIGHT(unsubscribe_token, 32)), ' retained'), NULL),
+                       'http_esp', CONCAT('legacy:', IF(copies.n = 1,
+                           CONCAT(UPPER(LEFT(unsubscribe_token, 32)), LOWER(RIGHT(unsubscribe_token, 32))),
+                           unsubscribe_token_hash), ':event')
+                FROM campaign_delivery CROSS JOIN (SELECT 1 n UNION ALL SELECT 2) copies
+                WHERE copies.n = 1 OR id = (SELECT MIN(id) FROM campaign_delivery)
+                """);
+        statement.executeUpdate("""
+                INSERT INTO campaign_delivery_event
+                    (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)
+                SELECT workspace_id, id, 'failed', 'same-collision', 'http_esp',
+                       CONCAT('same:', IF(copies.n = 1, unsubscribe_token, unsubscribe_token_hash), ':',
+                           IF(copies.n = 1, unsubscribe_token_hash, unsubscribe_token))
+                FROM campaign_delivery CROSS JOIN (SELECT 1 n UNION ALL SELECT 2) copies
+                WHERE id = (SELECT MIN(id) FROM campaign_delivery)
+                """);
+        statement.executeUpdate("""
+                INSERT INTO campaign_delivery_event
+                    (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)
+                SELECT first.workspace_id, IF(copies.n = 1, first.id, last.id), 'failed',
+                       'cross-collision', 'http_esp', CONCAT('cross:',
+                           IF(copies.n = 1, first.unsubscribe_token, first.unsubscribe_token_hash), ':',
+                           IF(copies.n = 1, last.unsubscribe_token_hash, last.unsubscribe_token))
+                FROM campaign_delivery first CROSS JOIN campaign_delivery last
+                CROSS JOIN (SELECT 1 n UNION ALL SELECT 2) copies
+                WHERE first.id = (SELECT MIN(id) FROM campaign_delivery)
+                  AND last.id = (SELECT MAX(id) FROM campaign_delivery)
                 """);
     }
 
     private static void assertScrubbedDiagnostics(Statement statement, int deliveries) throws SQLException {
         assertEquals(deliveries, scalar(statement, """
-                SELECT COUNT(*) FROM campaign_delivery
-                WHERE last_error = '554 rejected [redacted] repeated [redacted] retained'
-                  AND provider_message_id = 'receipt [redacted] repeated [redacted] retained'
+                SELECT COUNT(*) FROM campaign_delivery d
+                JOIN campaign_delivery_unsubscribe_token t
+                  ON t.workspace_id = d.workspace_id AND t.delivery_id = d.id
+                WHERE d.last_error = '554 rejected [redacted] repeated [redacted] retained'
+                  AND d.provider_message_id = CONCAT('receipt ', t.token_hash, ' repeated ', t.token_hash, ' retained')
                 """));
         assertEquals(deliveries, scalar(statement, """
                 SELECT COUNT(*) FROM campaign_delivery_event
@@ -269,15 +298,53 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 WHERE e.provider_id = 'http_esp'
                   AND e.provider_event_id = CONCAT('legacy:', t.token_hash, ':event')
                 """));
-        assertEquals(deliveries, scalar(statement, """
+        assertEquals(deliveries + 5, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event WHERE provider_id = 'http_esp'
+                """));
+        assertEquals(deliveries + 2, scalar(statement, """
                 SELECT COUNT(DISTINCT provider_event_id) FROM campaign_delivery_event
                 WHERE provider_id = 'http_esp'
+                """));
+        assertEquals(3, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event
+                WHERE provider_id = 'http_esp' AND provider_event_id IS NULL
+                """));
+        assertEquals(1, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event e
+                JOIN campaign_delivery_unsubscribe_token t
+                  ON t.workspace_id = e.workspace_id AND t.delivery_id = e.delivery_id
+                WHERE e.detail = 'same-collision'
+                  AND e.provider_event_id = CONCAT('same:', t.token_hash, ':', t.token_hash)
+                """));
+        assertEquals(1, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event e
+                JOIN campaign_delivery_unsubscribe_token first ON first.workspace_id = e.workspace_id
+                JOIN campaign_delivery_unsubscribe_token last ON last.workspace_id = e.workspace_id
+                WHERE first.delivery_id = (SELECT MIN(id) FROM campaign_delivery)
+                  AND last.delivery_id = (SELECT MAX(id) FROM campaign_delivery)
+                  AND e.detail = 'cross-collision'
+                  AND e.provider_event_id = CONCAT('cross:', first.token_hash, ':', last.token_hash)
+                """));
+        assertEquals(1, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event
+                WHERE detail = 'same-collision' AND provider_event_id IS NULL
+                """));
+        assertEquals(1, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event
+                WHERE detail = 'cross-collision' AND provider_event_id IS NULL
+                """));
+        assertEquals(0, scalar(statement, """
+                SELECT COUNT(*) FROM (
+                    SELECT workspace_id, provider_id, provider_event_id
+                    FROM campaign_delivery_event WHERE provider_event_id IS NOT NULL
+                    GROUP BY workspace_id, provider_id, provider_event_id HAVING COUNT(*) > 1
+                ) duplicate_keys
                 """));
         SQLException duplicate = assertThrows(SQLException.class, () -> statement.executeUpdate("""
                 INSERT INTO campaign_delivery_event
                     (workspace_id, delivery_id, event_type, provider_id, provider_event_id)
                 SELECT workspace_id, delivery_id, event_type, provider_id, provider_event_id
-                FROM campaign_delivery_event WHERE provider_id = 'http_esp' LIMIT 1
+                FROM campaign_delivery_event WHERE provider_id = 'http_esp' AND provider_event_id IS NOT NULL LIMIT 1
                 """));
         assertEquals(1062, duplicate.getErrorCode());
     }
