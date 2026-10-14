@@ -248,6 +248,10 @@ public final class MaskingEngine {
      * @return safely masked text with issued placeholders preserved in canonical form
      */
     public static String maskFreeTextPreservingIssuedPlaceholders(String text, MaskingContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        if (text != null && ctx.containsUnexposedMemberToken(text)) {
+            throw new MaskingLeakException(java.util.Set.of(EntityKind.MEMBER), 1);
+        }
         return maskFreeTextPreservingIssuedPlaceholders(text, ctx, false);
     }
 
@@ -907,7 +911,7 @@ public final class MaskingEngine {
      * the evidence needed to remove another identifier before truncation or provider egress.
      */
     /** Shares short-member primary matching with the final outbound leak scan. */
-    static boolean containsShortMemberMatch(String text, MaskingContext.IdentifierEntry entry) {
+    static boolean containsShortMemberMatch(ScreenText input, MaskingContext.IdentifierEntry entry) {
         boolean literal = entry.replacementEligible()
                 && entry.canonicalValue().length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH;
         boolean label = entry.labelEligible()
@@ -915,9 +919,21 @@ public final class MaskingEngine {
         if (!literal && !label) {
             return false;
         }
-        ScreenText input = screenText(text);
+        String text = input.original();
         return literal && !identifierSpans(text, input.literal(), entry.canonicalValue()).isEmpty()
                 || label && !identifierSpans(text, input.labels(), entry.labelValue()).isEmpty();
+    }
+
+    /** Uses the outbound scanner's literal, alias and short-label coverage for replay provenance. */
+    static boolean containsIdentifierCoverage(ScreenText input, MaskingContext.IdentifierEntry entry) {
+        if (entry == null) {
+            return false;
+        }
+        return entry.canonicalValue().length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                    && input.literal().value().contains(entry.canonicalValue())
+                || entry.labelEligible() && entry.labelValue().length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                    && input.labels().value().contains(entry.labelValue())
+                || containsShortMemberMatch(input, entry);
     }
 
     private static List<ReplacementSpan> sensitiveSpans(

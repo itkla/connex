@@ -14,6 +14,8 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
     String REASON_TRUNCATED = "truncated";
     /** Provider output did not contain a usable JSON object for the requested shape. */
     String REASON_MALFORMED = "malformed_output";
+    /** Provider output guessed a MEMBER placeholder never exposed by Connex. */
+    String REASON_INVENTED_PLACEHOLDER = "invented_placeholder";
 
     /**
      * Successful structured completion.
@@ -43,7 +45,7 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
 
     /**
      * Structured completion that could not be parsed into the requested shape.
-     * @param reason stable failure reason drawn from {@link #REASON_TRUNCATED} or {@link #REASON_MALFORMED}
+     * @param reason stable malformed, truncated, or invented-placeholder refusal reason
      * @param inputTokens provider-reported input token count
      * @param outputTokens provider-reported output token count
      * @param stopReason provider stop reason

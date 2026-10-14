@@ -390,11 +390,15 @@ public class AiChatMemoryService {
             String maskedSummary = MaskingEngine.maskFreeText(generatedSummary, context);
             List<java.util.Map<String, String>> storedIdentifiers = context.tokenBindings().stream()
                     .filter(binding -> maskedSummary.contains(binding.getKey()))
+                    .filter(binding -> !"member".equals(identifierKind(binding.getKey())))
                     .map(binding -> java.util.Map.of(
                             "kind", identifierKind(binding.getKey()),
                             "value", binding.getValue()))
                     .toList();
-            if (storedIdentifiers.size() > 200
+            var memberIdentifiers = context.referencedMemberValues(generatedSummary).stream()
+                    .map(value -> java.util.Map.of("kind", "member", "value", value)).toList();
+            if (storedIdentifiers.size() + memberIdentifiers.size() > 200
+                    || memberIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)
                     || storedIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)) {
                 throw new IllegalStateException("Assistant summary identifier metadata is invalid");
             }
@@ -404,6 +408,7 @@ public class AiChatMemoryService {
             metadata.put("throughSeq", throughSeq);
             metadata.put("resources", storedResources);
             metadata.put("identifiers", storedIdentifiers);
+            metadata.put("memberIdentifiers", memberIdentifiers);
             return objectMapper.writeValueAsString(metadata);
         } catch (JacksonException exception) {
             throw new IllegalStateException(

@@ -95,6 +95,12 @@ the outbound scan, including short Unicode names, with the replacer's matching r
 apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
 separate pre-existing issue.
 
+Provider-authored output is checked for unexposed MEMBER tokens before schema validation or
+repair retention. Such output cannot earn a repair payload or exposure through replay. Static server
+text is excluded only in its own fields; a collision never exempts a member label in tenant text.
+Field projections are built once and reused across the complete candidate dictionary. Final replay
+provenance uses replacer/scanner coverage, including joined occurrences such as `Alice_team`.
+
 Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
 Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary
 masking, screening and leak detection. The P1.1 hold on member-name string classes is lifted only
@@ -108,9 +114,12 @@ pending members. MEMBER identifiers carried by tool results register as candidat
 allocation; actual dispatch exposure remains required for demasking. This adds no directory lookup,
 mutation, outcome field or token kind.
 
-Deploy MEMBER-compatible answer, user-message and summary metadata readers before enabling
-MEMBER metadata writers. Once member provenance exists, rollback past that compatibility release
-is prohibited. No migration or historical metadata rewrite accompanies this contract.
+Answer, user-message and summary writers put raw MEMBER provenance only in the separate
+`memberIdentifiers` field, with the same `{kind:"member",value:...}` entry shape in all three forms.
+The existing `identifiers` array never gains a `member` entry. New readers read both fields and
+retain old-shape conversation compatibility. Older releases ignore the additional field and replay
+without member masking, exactly their pre-#1822 behavior; automatic or manual rollback remains
+compatible. No writer flag, reader-first rollout, rollback floor, migration or historical rewrite is required.
 
 ## Image/media exception
 

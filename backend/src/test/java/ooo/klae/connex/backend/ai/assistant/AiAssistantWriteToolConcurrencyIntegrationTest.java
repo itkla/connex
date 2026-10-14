@@ -1220,7 +1220,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                             new ooo.klae.connex.backend.ai.provider.AiToolCall("stored-owner", "assign_owner", "{}")), context, budget, null).exchanges()
                             : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
                     var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, exchanges,
-                            "{\"text\":\"Ready\"}", false, null);
+                            AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
                     String payload = objectMapper.writeValueAsString(capture.request().messages()) + objectMapper.writeValueAsString(capture.request().nativeTools());
                     assertFalse(payload.contains(originalLabel));
                     assertFalse(payload.contains("Renamed Assignment Member"));

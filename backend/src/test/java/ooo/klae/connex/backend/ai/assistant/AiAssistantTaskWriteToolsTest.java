@@ -219,7 +219,7 @@ class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
                                 List.of(), budget, AiAssistantToolCatalog.ALL)
                         : assembler.assemble(List.of(), result, List.of(), context, resources,
                                 AiAssistantToolCatalog.ALL);
-                String answer = "{\"text\":\"{{M1}} and {{M2}}\"}";
+                String answer = "{\"text\":\"{{M1}} and {{M2}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
                 String output = nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}";
                 var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol,
                         List.of(), output, false, null);
@@ -232,7 +232,7 @@ class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
                 assertEquals(0, capture.warnings());
                 assertEquals("Former Member and Pending Member",
                         ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}} and {{M2}}", context).text());
-                String guessed = "{\"text\":\"{{M3}}\"}";
+                String guessed = "{\"text\":\"{{M3}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
                 var refused = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, List.of(),
                         nativeProtocol ? guessed : "{\"tool\":null,\"final\":" + guessed + "}", false, null);
                 assertEquals(1, refused.warnings());

@@ -69,18 +69,25 @@ class AiConversationPreprocessingArchTest {
                 "message.getStructuredJson", "metadata.get", "objectMapper.readTree", "orElse",
                 "resources.handleFor", "stored.id", "stored.kind", "storedCitations.isArray", "storedResource",
                 "storedResources.isArray", "identifiers.isArray", "identifiers.size", "storedSummaryIdentifier",
-                "stored.value", "MaskingEngine.maskField"));
+                "stored.value", "MaskingEngine.maskField", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeSummary", Set.of(
                 "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
                 "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
-                "storedIdentifiers.size", "storedResource", "storedResources.isArray", "storedSummaryIdentifier"));
+                "storedIdentifiers.size", "storedResource", "storedResources.isArray", "storedSummaryIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeUser", Set.of(
                 "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
                 "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
                 "storedIdentifiers.size", "storedResourceIdentity", "storedResources.isArray",
-                "storedResources.isEmpty", "storedSummaryIdentifier"));
+                "storedResources.isEmpty", "storedSummaryIdentifier", "seedMemberIdentifiers"));
+        assertCalls(assembler, "seedMemberIdentifiers", Set.of(
+                "metadata.get", "members.isArray", "members.size", "identifiers.isArray", "identifiers.size",
+                "storedSummaryIdentifier", "stored.kind", "stored.value", "IllegalStateException", "MaskingEngine.maskField"));
+        String members = compact(methodBody(assembler, "seedMemberIdentifiers"));
+        assertTrue(members.contains("metadata.get( )"));
+        assertTrue(members.contains("members.size() > limit - otherCount"));
+        assertTrue(members.contains("if (stored.kind() != EntityKind.MEMBER)"));
         assertCalls(assembler, "crmDataMasked", Set.of("Map.of", "serialize"));
         assertCalls(assembler, "serialize", Set.of("IllegalStateException", "objectMapper.writeValueAsString"));
         assertTrue(compact(methodBody(assembler, "reauthorizeAnswer"))

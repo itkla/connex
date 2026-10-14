@@ -619,6 +619,7 @@ public class AiChatTurnPersistenceService {
                             "id", entry.getValue().id()))
                     .toList();
             List<java.util.Map<String, String>> storedIdentifiers = identifiers.stream()
+                    .filter(identifier -> identifier.kind() != ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER)
                     .map(identifier -> java.util.Map.of(
                             "kind", identifier.kind().name().toLowerCase(java.util.Locale.ROOT),
                             "value", identifier.value()))
@@ -626,7 +627,10 @@ public class AiChatTurnPersistenceService {
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "kind", "user_message",
                     "resources", storedResources,
-                    "identifiers", storedIdentifiers));
+                    "identifiers", storedIdentifiers,
+                    "memberIdentifiers", identifiers.stream()
+                            .filter(identifier -> identifier.kind() == ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER)
+                            .map(identifier -> java.util.Map.of("kind", "member", "value", identifier.value())).toList()));
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Assistant user message metadata could not be serialized", exception);

@@ -141,7 +141,7 @@ class AiAssistantMemberExposureTest {
                 ? assembler.assembleNative(List.of(request), empty, List.of(), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
                 : assembler.assemble(List.of(request), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
         var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
-                "{\"text\":\"Ready\"}", false, null);
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
         assertTrue(mapper.writeValueAsString(capture.request().messages()).contains(MEMBER));
         assertEquals(0, context.tokenBindings().size());
         assertEquals(0, capture.warnings());
@@ -163,7 +163,7 @@ class AiAssistantMemberExposureTest {
                 (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
         var observer = streamed ? new AiChatStreamingProgress(new AiChatQueuedTurn(7, 11, 13, 17, 19, 1, 23L, true,
                 List.of(), List.of()), persistence, context).observer(nativeProtocol) : null;
-        String answer = "{\"text\":\"{{M1}}\"}";
+        String answer = "{\"text\":\"{{M1}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
         String output = nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}";
         var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(), output, false, observer);
         if (observer != null) {
@@ -176,6 +176,99 @@ class AiAssistantMemberExposureTest {
         assertFalse(mapper.writeValueAsString(capture.request().messages()).contains(MEMBER));
         assertEquals(0, capture.warnings());
         assertEquals(MEMBER, Demasker.demask("{{M1}}", context).text());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void unexposedMemberGuessesCannotEarnASchemaRepairOrRepairExposure(boolean nativeProtocol) throws Exception {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, MEMBER, context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        for (String token : List.of("{{M1}}", "{{[M1](person:1)}}", "\\u007b\\u007bM1\\u007d\\u007d")) {
+            String invalidAnswer = "{\"text\":\"" + token + "\"}";
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                    nativeProtocol ? invalidAnswer : "{\"tool\":null,\"final\":" + invalidAnswer + "}", false, null);
+            assertEquals("invented_placeholder", capture.refusalReason());
+            assertFalse(capture.repairPresent());
+            assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+            assertFalse(mapper.writeValueAsString(capture.request().messages()).contains("{{M1}}"));
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> MaskingEngine.maskFreeTextPreservingIssuedPlaceholders("{\"text\":\"{{M1}}\"}", context));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void memberCollisionWithRealStaticDirectiveMasksTheTenantMentionOnly(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("May");
+        AiChatMessage user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Ask May to follow up");
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        assertTrue(prompt.getSystemPrompt().contains("may"));
+        assertFalse(prompt.getSystemPrompt().contains("{{M1}}"));
+        assertFalse(mapper.writeValueAsString(prompt.getMessages()).contains("May"));
+        assertTrue(mapper.writeValueAsString(prompt.getMessages()).contains("{{M1}}"));
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        assertEquals(prompt.getSystemPrompt(), capture.request().systemPrompt());
+        assertEquals(0, capture.warnings());
+        org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> ooo.klae.connex.backend.ai.masking.OutboundLeakScan.assertNoLeakInServerEnvelope(
+                        mapper.writeValueAsString(Map.of("messages", List.of(Map.of("role", "user", "content", "Ask May")))),
+                        context, mapper));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void joinedMemberOutputRetainsProvenanceAfterRenameAndFreshReplay(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        var result = new AiAssistantToolResult(Map.of("owner", "Alice"), List.of(new Identifier("member", "Alice")));
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "{{M1}}_team"), false, null);
+        assertEquals(0, capture.warnings());
+        String answer = Demasker.demask("{{M1}}_team", context).text();
+        assertEquals("Alice_team", answer);
+        var labels = context.referencedMemberValues(answer);
+        assertEquals(List.of("Alice"), labels);
+        var history = new AiChatMessage();
+        history.setAuthorKind("assistant");
+        history.setContent(answer);
+        history.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), resources.snapshot(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), labels));
+        var fresh = new MaskingContext();
+        fresh.registerMemberCandidate("Renamed Alice");
+        var freshResources = new AiChatResourceRegistry(fresh);
+        freshResources.register("person", 31);
+        var plainHistory = new AiChatMessage();
+        plainHistory.setAuthorKind("assistant");
+        plainHistory.setContent("Alice followed up");
+        plainHistory.setStructuredJson(history.getStructuredJson());
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var replay = nativeProtocol
+                ? assembler.assembleNative(List.of(history, plainHistory), empty, List.of(), fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(history, plainHistory), empty, List.of(), fresh, freshResources, AiAssistantToolCatalog.ALL);
+        var replayCapture = support.captureAssistantPayload(replay, fresh, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        assertFalse(mapper.writeValueAsString(replayCapture.request().messages()).contains("Alice"));
+        assertEquals(0, replayCapture.warnings());
     }
 
 }

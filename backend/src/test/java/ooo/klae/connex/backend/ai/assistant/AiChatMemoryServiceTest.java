@@ -869,6 +869,9 @@ class AiChatMemoryServiceTest {
         AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
         AiChatMessage summary = memory.history().getFirst();
         assertTrue(summary.getStructuredJson().contains("\"kind\":\"member\""));
+        var metadata = tools.jackson.databind.json.JsonMapper.builder().build().readTree(summary.getStructuredJson());
+        assertEquals(0, metadata.path("identifiers").size());
+        assertEquals("Member Continuity", metadata.path("memberIdentifiers").get(0).path("value").asString());
         assertTrue(summary.getStructuredJson().contains("Member Continuity"));
         assertFalse(summary.getStructuredJson().contains("{{M1}}"));
         MaskingContext fresh = new MaskingContext();

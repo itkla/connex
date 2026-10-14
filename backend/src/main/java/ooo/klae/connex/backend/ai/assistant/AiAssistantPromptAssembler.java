@@ -1410,7 +1410,7 @@ public class AiAssistantPromptAssembler {
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
             if (!memberIdentifiers.isEmpty()) {
-                metadata.put("identifiers", memberIdentifiers.stream()
+                metadata.put("memberIdentifiers", memberIdentifiers.stream()
                         .map(value -> Map.of("kind", "member", "value", value)).toList());
             }
             if (toolBudgetAudit.degraded()) {
@@ -1814,6 +1814,7 @@ public class AiAssistantPromptAssembler {
                 MaskingEngine.maskField(stored.kind(), stored.value(), context);
             }
         }
+        seedMemberIdentifiers(metadata, context, MAX_SUMMARY_IDENTIFIERS);
         return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));
     }
 
@@ -1842,6 +1843,7 @@ public class AiAssistantPromptAssembler {
                 return null;
             }
         }
+        seedMemberIdentifiers(metadata, context, MAX_SUMMARY_IDENTIFIERS);
         JsonNode storedIdentifiers = metadata.get("identifiers");
         if (storedIdentifiers == null || !storedIdentifiers.isArray()
                 || storedIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS) {
@@ -1879,6 +1881,7 @@ public class AiAssistantPromptAssembler {
                 return null;
             }
         }
+        seedMemberIdentifiers(metadata, context, MAX_USER_IDENTIFIERS);
         JsonNode storedIdentifiers = metadata.get("identifiers");
         if (storedIdentifiers == null || !storedIdentifiers.isArray()) {
             return storedResources.isEmpty() ? message.getContent() : null;
@@ -1894,6 +1897,25 @@ public class AiAssistantPromptAssembler {
             MaskingEngine.maskField(stored.kind(), stored.value(), context);
         }
         return message.getContent();
+    }
+
+    private void seedMemberIdentifiers(JsonNode metadata, MaskingContext context, int limit) {
+        JsonNode members = metadata.get("memberIdentifiers");
+        if (members == null) {
+            return;
+        }
+        JsonNode identifiers = metadata.get("identifiers");
+        int otherCount = identifiers != null && identifiers.isArray() ? identifiers.size() : 0;
+        if (!members.isArray() || members.size() > limit - otherCount) {
+            throw new IllegalStateException("Assistant member identifier metadata is invalid");
+        }
+        for (JsonNode identifier : members) {
+            StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+            if (stored.kind() != EntityKind.MEMBER) {
+                throw new IllegalStateException("Assistant member identifier metadata is invalid");
+            }
+            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+        }
     }
 
     private static StoredResource storedResource(JsonNode resource) {

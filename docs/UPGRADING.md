@@ -516,15 +516,13 @@ Restart only a release at or above the rollback floor. Have affected accounts re
 vouching grantor, or use operator break-glass recovery where that route is unavailable, before
 reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
 
-### Ask Connex member masking (#1822): rollback floor
+### Ask Connex member masking (#1822): rollback compatibility
 
-The release that masks workspace member names in Ask Connex (issue #1822) has **no schema change**. It does persist member provenance (raw labels, never token bindings) in assistant answer, user-message and summary metadata. Earlier releases do not recognise that provenance: they throw while reading it, so any conversation carrying it fails closed on an older binary.
-
-- **Rolling forward** needs no operator action.
-- **Rollback floor:** once this release has served assistant traffic, do not roll back to a release that predates it.
-  - Automatic deploy rollback returns to the last release that passed its smoke checks, which is this release or a later one once it has served, so it stays above the floor.
-  - A manual rollback must stay above it too.
-- **If a rollback past the floor is unavoidable,** affected conversations work again after rolling forward. Nothing is lost: the stored metadata is unchanged.
+This release has no schema change and is rollback-safe. Raw member provenance is stored in the
+separate `memberIdentifiers` metadata field on answers, user messages and summaries. Older
+releases ignore that field and continue replaying without member-name masking, exactly as they
+behaved before #1822. Existing `identifiers` arrays retain only their previously supported kinds.
+No writer flag, reader-first rollout or MEMBER-specific rollback floor is required.
 
 ## Triggered-send rollback quiescence
 

@@ -570,6 +570,11 @@ public class AiChatAgentLoopService {
                         outcome = null;
                     }
                 }
+                if (outcome instanceof AiStructuredOutcome.Malformed<?> malformed
+                        && AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER.equals(malformed.reason())) {
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    return AiGenerationTaskResult.failed("malformed_output");
+                }
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     if (repair != null || attempt.repair().isEmpty()) {

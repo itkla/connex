@@ -509,6 +509,11 @@ public class AiInvocationService {
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         ObjectNode object = AiJson.extractObject(stripped, objectMapper);
+        if (invocation.context().containsUnexposedMemberToken(stripped)
+                || object != null && invocation.context().containsUnexposedMemberToken(object.toString())) {
+            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
+                    "invented_placeholder", "", object != null, false);
+        }
         if (object == null) {
             return malformed(
                     raw, invocation, result, truncationReason(result.stopReason()),

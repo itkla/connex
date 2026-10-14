@@ -169,6 +169,12 @@ final class AiAssistantMaskingTestSupport {
                 AiCredentials.of(Map.of())));
     }
 
+    static String finalOutput(boolean nativeProtocol, String text) {
+        String answer = "{\"text\":" + tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(text)
+                + ",\"citations\":[],\"suggestions\":[],\"title\":null}";
+        return nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}";
+    }
+
     AssistantCapture captureAssistantPayload(
             ooo.klae.connex.backend.ai.masking.MaskedPrompt prompt, MaskingContext context,
             ObjectMapper mapper, boolean nativeProtocol,
@@ -205,25 +211,40 @@ final class AiAssistantMaskingTestSupport {
         var schema = new AiAssistantStepSchema(mapper, catalog);
         var admission = fixtureMock(AiInvocationAdmissionService.DirectAdmission.class);
         int warnings;
+        String refusalReason = null;
+        boolean repairPresent = false;
+        var stepGuard = new AiAssistantStepGuard(catalog);
+        var issued = context.tokenBindings().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet());
         if (nativeProtocol) {
             var outcome = harness.service().completeNativeToolsRepairable(invocation,
                     tools.jackson.databind.JsonNode.class,
-                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
-                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
+                    stepGuard.forStep(AiAssistantToolCatalog.ALL, issued),
+                    stepGuard.finalAnswerForIssuedPlaceholders(issued),
                     schema.finalResponseSchema(),
                     new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
                             assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), exchanges),
                     admission, () -> { });
+            if (outcome instanceof ooo.klae.connex.backend.ai.AiNativeToolCompletion.Content<?> content) {
+                repairPresent = content.attempt().repair().isPresent();
+                if (content.attempt().outcome() instanceof ooo.klae.connex.backend.ai.AiStructuredOutcome.Malformed<?> malformed) {
+                    refusalReason = malformed.reason();
+                }
+            }
             warnings = switch (outcome) {
                 case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool<?> tool -> tool.demaskWarnings();
                 case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Content<?> content -> parsedWarnings(content.attempt().outcome());
                 case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Malformed<?> malformed -> malformed.demaskWarnings();
             };
         } else {
-            warnings = parsedWarnings(harness.service().completeStructuredRepairable(invocation,
+            var attempt = harness.service().completeStructuredRepairable(invocation,
                     tools.jackson.databind.JsonNode.class,
-                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
-                    schema.responseSchema(AiAssistantToolCatalog.ALL), admission, () -> { }).outcome());
+                    stepGuard.forStep(AiAssistantToolCatalog.ALL, issued),
+                    schema.responseSchema(AiAssistantToolCatalog.ALL), admission, () -> { });
+            warnings = parsedWarnings(attempt.outcome());
+            repairPresent = attempt.repair().isPresent();
+            if (attempt.outcome() instanceof ooo.klae.connex.backend.ai.AiStructuredOutcome.Malformed<?> malformed) {
+                refusalReason = malformed.reason();
+            }
         }
         ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
         if (observer == null) {
@@ -232,15 +253,19 @@ final class AiAssistantMaskingTestSupport {
             verify(provider).completeStreaming(request.capture(), any());
         }
         clearInvocations(harness.mocks().toArray());
-        return new AssistantCapture(request.getValue(), warnings);
+        return new AssistantCapture(request.getValue(), warnings, refusalReason, repairPresent);
     }
 
     private static int parsedWarnings(ooo.klae.connex.backend.ai.AiStructuredOutcome<?> outcome) {
+        if (outcome instanceof ooo.klae.connex.backend.ai.AiStructuredOutcome.Malformed<?> malformed
+                && ooo.klae.connex.backend.ai.AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER.equals(malformed.reason())) {
+            return 1;
+        }
         return org.junit.jupiter.api.Assertions.assertInstanceOf(
                 ooo.klae.connex.backend.ai.AiStructuredOutcome.Parsed.class, outcome).demaskWarnings();
     }
 
-    record AssistantCapture(AiCompletionRequest request, int warnings) {
+    record AssistantCapture(AiCompletionRequest request, int warnings, String refusalReason, boolean repairPresent) {
     }
 
     private ProviderHarness newProviderHarness(ObjectMapper mapper) {

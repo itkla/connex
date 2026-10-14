@@ -21,7 +21,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>An identifier whose raw value the request's registered server-authored text provably contains
  * is skipped: the server emits that word in every prompt regardless of tenant data, so its presence
  * carries no tenant signal, and refusing it would make a record named a common envelope word poison
- * every request that seeds it. Tenant occurrences of the value are still tokenized by the replacer.
+ * every request that seeds it. MEMBER labels never receive this label-wide exemption: only complete
+ * static fields and server-authored system/tool/schema positions are excluded for members.
  *
  * <p>The same reasoning applies positionally, and more sharply. A server-authored envelope holds
  * tenant text only in its values; its property names and its message-role discriminator are emitted
@@ -93,26 +94,28 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(objectMapper, "objectMapper");
         boolean honorTrustedText = !providerAuthored;
         List<ScannedField> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
-        List<String> unprotectedFields = fields.stream()
+        List<PreparedField> preparedFields = fields.stream()
                 .filter(field -> providerAuthored || field.tenantBearing())
-                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream())
+                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream()
+                        .map(text -> new PreparedField(MaskingEngine.screenText(text),
+                                providerAuthored || !field.staticPosition() && !ctx.isTrustedStaticField(field.text()))))
                 .toList();
-        List<String> canonicalFields = unprotectedFields.stream().map(OutboundLeakScan::normalizeForScan).toList();
-        List<String> labelFields = unprotectedFields.stream()
-                .map(field -> CanonicalText.projectLabels(field).value()).toList();
+        List<PreparedField> memberFields = preparedFields.stream().filter(PreparedField::memberBearing).toList();
         Set<String> leakedIdentifiers = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
+            boolean member = ctx.isMemberIdentifier(entry.rawValue());
+            List<PreparedField> matchingFields = member
+                    ? memberFields : preparedFields;
             String identifier = entry.canonicalValue();
             boolean canonicalLeak = identifier.length() >= MIN_IDENTIFIER_LENGTH
-                    && canonicalFields.stream().anyMatch(field -> field.contains(identifier));
+                    && matchingFields.stream().anyMatch(field -> field.input().literal().value().contains(identifier));
             boolean labelLeak = entry.labelEligible() && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && labelFields.stream().anyMatch(field -> field.contains(entry.labelValue()));
+                    && matchingFields.stream().anyMatch(field -> field.input().labels().value().contains(entry.labelValue()));
             boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && unprotectedFields.stream().anyMatch(field -> field.contains(entry.rawValue()));
-            boolean shortMemberLeak = ctx.isMemberIdentifier(entry.rawValue())
-                    && unprotectedFields.stream().anyMatch(field ->
-                            MaskingEngine.containsShortMemberMatch(field, entry));
+                    && matchingFields.stream().anyMatch(field -> field.input().original().contains(entry.rawValue()));
+            boolean shortMemberLeak = member && matchingFields.stream().anyMatch(field ->
+                    MaskingEngine.containsShortMemberMatch(field.input(), entry));
             if ((canonicalLeak || labelLeak || exactRawLeak || shortMemberLeak)
                     && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedIdentifiers.add(entry.rawValue());
@@ -128,16 +131,26 @@ public final class OutboundLeakScan {
     private static List<ScannedField> decodedJsonFields(String payload, ObjectMapper objectMapper) {
         List<ScannedField> fields = new ArrayList<>();
         try (JsonParser parser = objectMapper.createParser(payload)) {
+            int depth = 0;
+            String rootField = null;
             for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
-                if (token == JsonToken.PROPERTY_NAME) {
-                    fields.add(new ScannedField(parser.getString(), false));
+                if (token == JsonToken.START_OBJECT || token == JsonToken.START_ARRAY) {
+                    depth++;
+                } else if (token == JsonToken.END_OBJECT || token == JsonToken.END_ARRAY) {
+                    depth--;
+                } else if (token == JsonToken.PROPERTY_NAME) {
+                    if (depth == 1) {
+                        rootField = parser.getString();
+                    }
+                    fields.add(new ScannedField(parser.getString(), false, false));
                 } else if (token.isScalarValue() && token != JsonToken.VALUE_NULL) {
                     String value = parser.getString();
-                    fields.add(new ScannedField(value, !isRoleDiscriminator(parser.currentName(), value)));
+                    fields.add(new ScannedField(value, !isRoleDiscriminator(parser.currentName(), value),
+                            "system".equals(rootField) || "tools".equals(rootField) || "responseSchema".equals(rootField)));
                 }
             }
         } catch (JacksonException exception) {
-            fields.add(new ScannedField(payload, true));
+            fields.add(new ScannedField(payload, true, false));
         }
         return fields;
     }
@@ -146,7 +159,10 @@ public final class OutboundLeakScan {
         return ROLE_PROPERTY.equals(propertyName) && MaskedMessage.ROLES.contains(value);
     }
 
-    private record ScannedField(String text, boolean tenantBearing) {
+    private record ScannedField(String text, boolean tenantBearing, boolean staticPosition) {
+    }
+
+    private record PreparedField(MaskingEngine.ScreenText input, boolean memberBearing) {
     }
 
     /** Uses the same canonical form as registration, lookup admission and replacement. */

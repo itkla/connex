@@ -1051,4 +1051,24 @@ class AiChatTurnPersistenceServiceTest {
         attachment.setId(id);
         return attachment;
     }
+    @Test
+    void queuedUserMemberProvenanceUsesTheRollbackCompatibleField() {
+        when(identifierResolver.resolve("Ask Former Member about Old Company")).thenReturn(
+                new AiAssistantIdentifierResolver.Resolution(List.of(), List.of(
+                        new AiAssistantIdentifierResolver.Identifier(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Former Member"),
+                        new AiAssistantIdentifierResolver.Identifier(ooo.klae.connex.backend.ai.masking.EntityKind.COMPANY, "Old Company"))));
+        when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+        service.queue(TURN.sessionId(), new AiChatTurnCreateRequest("Ask Former Member about Old Company", List.of()),
+                TURN.restrictionEpoch());
+        var message = ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.AiChatMessage.class);
+        verify(chatMapper).insertMessage(message.capture());
+        var metadata = JsonMapper.builder().build().readTree(message.getValue().getStructuredJson());
+        assertEquals(1, metadata.path("identifiers").size());
+        assertEquals("company", metadata.path("identifiers").get(0).path("kind").asString());
+        assertEquals(1, metadata.path("memberIdentifiers").size());
+        assertEquals("member", metadata.path("memberIdentifiers").get(0).path("kind").asString());
+        assertEquals("Former Member", metadata.path("memberIdentifiers").get(0).path("value").asString());
+        assertFalse(metadata.toString().contains("{{M"));
+    }
+
 }

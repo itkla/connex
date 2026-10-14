@@ -32,6 +32,7 @@ public final class MaskingContext {
     private final Set<String> unsafeIdentifierValues = new LinkedHashSet<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
+    private final Set<String> trustedStaticFields = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
     private final Set<String> exposedTokens = new LinkedHashSet<>();
     private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
@@ -133,9 +134,21 @@ public final class MaskingContext {
         return memberIdentifierValues.contains(rawValue);
     }
 
-    /** Detects invented or undispatched member placeholders before publishing a streamed fragment. */
+    /**
+     * Detects unexposed member placeholders, including tokens reconstructed by link cleanup.
+     * The identity source map preserves doubled braces that ordinary prose canonicalization cancels.
+     */
     public boolean containsUnexposedMemberToken(String text) {
-        var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(text, "text"));
+        String normalized = java.text.Normalizer.normalize(Objects.requireNonNull(text, "text"),
+                java.text.Normalizer.Form.NFKC);
+        int[] starts = new int[normalized.length()];
+        int[] ends = new int[normalized.length()];
+        for (int index = 0; index < normalized.length(); index++) {
+            starts[index] = index;
+            ends[index] = index + 1;
+        }
+        String labels = ConversationText.projectLabels(new CanonicalText.Projection(normalized, starts, ends)).value();
+        var matcher = DISPATCHED_TOKEN.matcher(labels.toUpperCase(java.util.Locale.ROOT));
         while (matcher.find()) {
             if (matcher.group(1).startsWith("M")
                     && demaskableValueForToken("{{" + matcher.group(1) + "}}") == null) {
@@ -152,10 +165,11 @@ public final class MaskingContext {
 
     /** Returns exposed member provenance whose raw label occurs in the final replay text. */
     public List<String> referencedMemberValues(String replayText) {
+        MaskingEngine.ScreenText input = MaskingEngine.screenText(replayText);
         return tokenToOriginalValue.entrySet().stream()
                 .filter(entry -> exposedTokens.contains(entry.getKey())
                         && memberIdentifierValues.contains(entry.getValue()))
-                .filter(entry -> MaskingEngine.containsIdentifierMention(replayText, entry.getValue()))
+                .filter(entry -> MaskingEngine.containsIdentifierCoverage(input, rawIdentifierEntries.get(entry.getValue())))
                 .map(Map.Entry::getValue)
                 .toList();
     }
@@ -212,6 +226,7 @@ public final class MaskingContext {
     public void addTrustedStaticText(String text) {
         if (text != null && !text.isBlank()) {
             trustedStaticTexts.add(OutboundLeakScan.normalizeForScan(text));
+            trustedStaticFields.add(text);
         }
     }
 
@@ -220,16 +235,14 @@ public final class MaskingContext {
      * own normalization.
      *
      * @param rawValue seeded identifier raw value
-     * @return true when the server's own prompt text contains the value
+     * @return true for a non-member identifier when the server text contains the value
      */
     public boolean isTrustedTextCollision(String rawValue) {
         if (trustedStaticTexts.isEmpty()) {
             return false;
         }
-        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
-        if (entry != null && isMemberIdentifier(rawValue)
-                && trustedStaticTexts.stream().anyMatch(text -> MaskingEngine.containsShortMemberMatch(text, entry))) {
-            return true;
+        if (isMemberIdentifier(rawValue)) {
+            return false;
         }
         String candidate = OutboundLeakScan.normalizeForScan(rawValue);
         String labelCandidate = CanonicalText.storedIdentifier(rawValue).label();
@@ -240,6 +253,11 @@ public final class MaskingContext {
             }
         }
         return false;
+    }
+
+    /** Recognizes one complete registered server-authored field, never a label-wide exemption. */
+    boolean isTrustedStaticField(String value) {
+        return trustedStaticFields.contains(value);
     }
 
     /**

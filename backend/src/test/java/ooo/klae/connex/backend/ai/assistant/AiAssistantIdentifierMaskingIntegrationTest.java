@@ -1045,7 +1045,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                             taskTurn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-task", "list_tasks", "{\"handle\":\"r1\",\"limit\":10}")),
                     context, budget, null).exchanges() : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
             var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
-                    "{\"text\":\"Ready\"}", false, null);
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
             String payload = mapper.writeValueAsString(capture.request().messages()) + mapper.writeValueAsString(capture.request().nativeTools());
             for (String label : List.of("Prior Member", "Other Prior", "Pending Member", "Pending Alias", "Renamed Member", "Foreign Member")) {
                 assertFalse(payload.contains(label), label);
@@ -1065,7 +1065,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             var replayPrompt = nativeProtocol
                     ? assembler.assembleNative(List.of(priorAnswer), page, List.of(), fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
                     : assembler.assemble(List.of(priorAnswer), page, List.of(), fresh, freshResources, AiAssistantToolCatalog.ALL);
-            var replayCapture = support.captureAssistantPayload(replayPrompt, fresh, mapper, nativeProtocol, List.of(), "{\"text\":\"Ready\"}", false, null);
+            var replayCapture = support.captureAssistantPayload(replayPrompt, fresh, mapper, nativeProtocol, List.of(), AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
             String replayPayload = mapper.writeValueAsString(replayCapture.request().messages());
             for (String label : provenance) {
                 assertFalse(replayPayload.contains(label), label);
@@ -1131,7 +1131,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                     Map.of(turn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("task-outcome", tool,
                             mapper.writeValueAsString(request))), context, budget, null).exchanges()
                     : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
-            String answer = "{\"text\":\"{{M1}} and {{M3}}\"}";
+            String answer = "{\"text\":\"{{M1}} and {{M3}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
             var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
                     nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}", false, null);
             String payload = mapper.writeValueAsString(capture.request().messages())
@@ -1144,7 +1144,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             assertEquals(0, capture.warnings());
             assertEquals("Prior Member Label and Pending Member Label", Demasker.demask("{{M1}} and {{M3}}", context).text());
             assertEquals(4, context.tokenBindings().size());
-            String guessed = "{\"text\":\"{{M5}}\"}";
+            String guessed = "{\"text\":\"{{M5}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
             var refused = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
                     nativeProtocol ? guessed : "{\"tool\":null,\"final\":" + guessed + "}", false, null);
             assertEquals(1, refused.warnings());

@@ -1739,6 +1739,8 @@ class AiAssistantPromptAssemblerTest {
         String metadata = assembler.finalMetadata(41, List.of(), List.of(), Map.of(), Map.of(),
                 AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member"));
         assertFalse(metadata.contains("{{M"));
+        assertFalse(objectMapper.readTree(metadata).path("identifiers").toString().contains("member"));
+        assertEquals("member", objectMapper.readTree(metadata).path("memberIdentifiers").get(0).path("kind").asString());
         assertTrue(metadata.contains("\"kind\":\"member\""));
         AiChatMessage answer = new AiChatMessage();
         answer.setAuthorKind("assistant");
@@ -1786,6 +1788,50 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL).getMessages());
         assertFalse(screened.contains("Assigned Member"));
         assertTrue(screened.contains("{{M1}}"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void rollbackCompatibleMemberMetadataReplaysMixedOldAndNewConversations(boolean nativeProtocol) throws Exception {
+        AiChatMessage oldUser = new AiChatMessage();
+        oldUser.setAuthorKind("user");
+        oldUser.setContent("Old Company was contacted.");
+        oldUser.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[],\"identifiers\":[{\"kind\":\"company\",\"value\":\"Old Company\"}]}");
+        AiChatMessage oldAnswer = new AiChatMessage();
+        oldAnswer.setAuthorKind("assistant");
+        oldAnswer.setContent("Old Company has a followup.");
+        oldAnswer.setStructuredJson("{\"resources\":[],\"citations\":[]}");
+        AiChatMessage newUser = new AiChatMessage();
+        newUser.setAuthorKind("user");
+        newUser.setContent("Former Member contacted Old Company.");
+        newUser.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        AiChatMessage answer = new AiChatMessage();
+        answer.setAuthorKind("assistant");
+        answer.setContent("Former Member has a followup.");
+        answer.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member")));
+        AiChatMessage oldSummary = new AiChatMessage();
+        oldSummary.setAuthorKind("system");
+        oldSummary.setContent("Old Company discussed next steps.");
+        oldSummary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[{\"kind\":\"company\",\"value\":\"Old Company\"}]}");
+        AiChatMessage newSummary = new AiChatMessage();
+        newSummary.setAuthorKind("system");
+        newSummary.setContent("Former Member discussed next steps.");
+        newSummary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        var context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        var history = List.of(oldUser, oldAnswer, newUser, answer, oldSummary, newSummary);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(history, empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(history, empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains("Former Member"));
+        assertFalse(payload.contains("Old Company"));
+        assertTrue(payload.contains("{{M1}}"));
+        assertTrue(payload.contains("{{C1}}"));
+        assertEquals(6, prompt.getMessages().size());
     }
 
 }

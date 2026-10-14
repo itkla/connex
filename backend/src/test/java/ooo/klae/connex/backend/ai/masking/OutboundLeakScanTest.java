@@ -208,4 +208,36 @@ class OutboundLeakScanTest {
                 MaskingEngine.maskFreeText("Ask Li and 李", context), context, objectMapper));
     }
 
+    @Test
+    void largeMemberDirectoryBuildsEachFieldProjectionOnceWithoutSkippingCandidates() {
+        MaskingContext context = new MaskingContext();
+        for (int index = 0; index < 1_000; index++) {
+            context.registerMemberCandidate("一" + (char) (0x5000 + index));
+        }
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("May");
+        context.registerMemberCandidate("李");
+        assertEquals(1_003, context.identifierDictionary().size());
+        String field = "zebra ".repeat(8_000);
+        var constructions = new java.util.concurrent.atomic.AtomicInteger();
+        try (var engine = org.mockito.Mockito.mockStatic(MaskingEngine.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            engine.when(() -> MaskingEngine.screenText(field)).thenAnswer(invocation -> {
+                assertEquals(1, constructions.incrementAndGet(), "Field projections rebuilt per member label");
+                return invocation.callRealMethod();
+            });
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(field, context, objectMapper));
+            assertEquals(1, constructions.get());
+            constructions.set(0);
+            assertEquals(field, MaskingEngine.maskFreeText(field, context));
+            assertEquals(1, constructions.get());
+        }
+        String last = "一" + (char) (0x5000 + 999);
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict(field + last, context, objectMapper));
+        String masked = MaskingEngine.maskFreeText(field + last, context);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        assertEquals(1_003, context.identifierDictionary().size());
+        assertEquals(1, context.tokenBindings().size());
+    }
+
 }
