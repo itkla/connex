@@ -1154,7 +1154,7 @@ link. A body-comparing provider refuses the changed body and the earlier accepta
 ambiguous for reconciliation; a body-insensitive provider returns its original receipt. Neither
 provider submits a second email, and both registered links resolve. This also applies to migrated
 in-flight claims whose legacy bearer is no longer reconstructable. See `DELIVERABILITY.md` §3 and
-`UPGRADING.md`'s V226/V227 cutover. Backfill uses `INSERT ... SELECT` across every status; outside
+`UPGRADING.md`'s V227/V228 cutover. Backfill uses `INSERT ... SELECT` across every status; outside
 `READ_COMMITTED` MySQL may take shared source next-key locks, so all writers must be stopped.
 
 Triggered delivery dispatch uses a separate, short owner-fenced claim update. The claim stores a UUID

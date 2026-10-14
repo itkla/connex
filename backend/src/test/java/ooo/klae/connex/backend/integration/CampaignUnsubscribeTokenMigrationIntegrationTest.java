@@ -27,7 +27,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
     @Test
     void populatedUpgradePreservesEveryStatusAcrossAnInterruptedCutover() throws SQLException {
         try (MySqlScratchCatalog catalog = catalog()) {
-            migrate(catalog, "225");
+            migrate(catalog, "226");
             try (Connection connection = connection(catalog);
                     Statement statement = connection.createStatement()) {
                 statement.executeUpdate("""
@@ -64,7 +64,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                         """);
                 seedLegacyDiagnostics(statement);
             }
-            migrate(catalog, "226");
+            migrate(catalog, "227");
             try (Connection connection = connection(catalog);
                     Statement statement = connection.createStatement()) {
                 assertEquals(8, scalar(statement, """
@@ -81,8 +81,8 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 statement.executeUpdate("DELETE FROM campaign_delivery_unsubscribe_token WHERE delivery_id = 22605");
                 assertEquals(7, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             }
-            assertEquals(MigrationVersion.fromVersion("227"),
-                    migrate(catalog, "227").info().current().getVersion());
+            assertEquals(MigrationVersion.fromVersion("228"),
+                    migrate(catalog, "228").info().current().getVersion());
             try (Connection connection = connection(catalog);
                     Statement statement = connection.createStatement()) {
                 assertEquals(8, scalar(statement, """
@@ -110,7 +110,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
     @Test
     void freshUpgradeHasOnlyDigestStorage() throws SQLException {
         try (MySqlScratchCatalog catalog = catalog()) {
-            migrate(catalog, "227");
+            migrate(catalog, "228");
             try (Connection connection = connection(catalog);
                     Statement statement = connection.createStatement()) {
                 assertContract(statement);
@@ -139,21 +139,21 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                         + " VALUES (1, 22601, REPEAT('a', 64)), (2, 22601, REPEAT('b', 64))");
                 seedLegacyDiagnostics(statement);
-                String expand = sql("V226__campaign_delivery_unsubscribe_hash_history.sql");
+                String expand = sql("V227__campaign_delivery_unsubscribe_hash_history.sql");
                 statement.execute(expand.substring(0, expand.indexOf(';')));
-                Flyway interruptedExpand = recoveryFlyway(catalog, "226");
+                Flyway interruptedExpand = recoveryFlyway(catalog, "227");
                 assertThrows(FlywayException.class, interruptedExpand::migrate);
                 assertEquals(0, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
                 statement.execute("DROP TABLE campaign_delivery_unsubscribe_token");
                 interruptedExpand.repair();
                 interruptedExpand.migrate();
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
-                for (String command : sql("V227__drop_campaign_delivery_unsubscribe_tokens.sql").split(";")) {
+                for (String command : sql("V228__drop_campaign_delivery_unsubscribe_tokens.sql").split(";")) {
                     if (!command.isBlank()) {
                         statement.execute(command);
                     }
                 }
-                Flyway interruptedContract = recoveryFlyway(catalog, "227");
+                Flyway interruptedContract = recoveryFlyway(catalog, "228");
                 assertThrows(FlywayException.class, interruptedContract::migrate);
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
                 statement.execute("""
@@ -196,13 +196,13 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
             createLegacyEventTable(statement);
             statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                     + " VALUES (1, 22601, REPEAT('a', 64))");
-            recoveryFlyway(catalog, "226").migrate();
+            recoveryFlyway(catalog, "227").migrate();
             statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
                     + " VALUES (2, 22601, REPEAT('b', 64))");
             seedLegacyDiagnostics(statement);
             assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             statement.execute("ALTER TABLE campaign_delivery DROP INDEX uq_campaign_delivery_token");
-            Flyway contract = recoveryFlyway(catalog, "227");
+            Flyway contract = recoveryFlyway(catalog, "228");
             assertThrows(FlywayException.class, contract::migrate);
             assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             assertScrubbedDiagnostics(statement, 2);
@@ -291,7 +291,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
         return Flyway.configure()
                 .dataSource(catalog.url(), System.getenv("CONNEX_DB_USERNAME"), System.getenv("CONNEX_DB_PASSWORD"))
                 .locations("classpath:db/migration/tenant")
-                .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("225"))
+                .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("226"))
                 .target(MigrationVersion.fromVersion(target)).load();
     }
 

@@ -387,7 +387,7 @@ Resend's 409 response) refuses the changed replay. The earlier acceptance remain
 enters the reconciliation path and manual suppression check above. An endpoint that deduplicates
 solely by key returns the original receipt, allowing recovery. With either contract the provider
 accepts at most one message, and every emailed link remains valid. This applies to claims in flight
-at the V226/V227 cutover too; their old bearer cannot be reconstructed. Connector administrators
+at the V227/V228 cutover too; their old bearer cannot be reconstructed. Connector administrators
 must account for this difference when opting into replay; Connex introduces no new provider retry
 policy or required secret.
 

@@ -88,13 +88,13 @@ not run old and new backend versions concurrently across this migration. The sta
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
 
-### V226/V227 campaign unsubscribe cutover
+### V227/V228 campaign unsubscribe cutover
 
 The 2026-10-12 owner decision authorizes build and merge when green; staging's next deployment is
 the coordinated restart. This supersedes the earlier merge hold and needs no additional restart
-window approval. V226 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
-and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V226
-and V227 together with all writers stopped; there is no manual checkpoint between them. V227 first
+window approval. V227 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
+and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V227
+and V228 together with all writers stopped; there is no manual checkpoint between them. V228 first
 reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
 then uses the still-present bearer to replace historical copies in delivery errors, provider message
 ids, and delivery event details with `[redacted]`, joining events on both workspace and delivery ids.
@@ -112,10 +112,10 @@ and previously generated export ZIPs are outside this remediation.
    With writers stopped, record each catalog's delivery count, maximum delivery id, and a protected
    inventory of `(workspace_id, id, unsubscribe_token_hash)` for post-cutover comparison. Preserve
    that inventory with the backup; it contains digests, never raw bearers.
-3. With writers stopped, run the tenant lineage through V227 for every inventoried catalog other
-   than the configured default, using the normal catalog migration tooling. Each run applies V226
-   and V227 together. Activate only the new release: its automatic startup applies both migrations
-   together in the configured default catalog; it does not enumerate dedicated catalogs. V227
+3. With writers stopped, run the tenant lineage through V228 for every inventoried catalog other
+   than the configured default, using the normal catalog migration tooling. Each run applies V227
+   and V228 together. Activate only the new release: its automatic startup applies both migrations
+   together in the configured default catalog; it does not enumerate dedicated catalogs. V228
    enforces the backfill before removing its source. Keep ingress closed until verification finishes,
    and keep every old writer stopped. In **each catalog**, verify both token
    columns and indexes are absent and the composite cascading FK is present. Substitute the recorded
@@ -141,12 +141,12 @@ and previously generated export ZIPs are outside this remediation.
    Verify unsubscribe exchange/preview/confirmation, then reopen writers and ingress. Do not touch
    suppression, consent, or recovery evidence during migration.
 
-**No previous-binary rollback is supported after V227.** Recovery must move forward with the new
+**No previous-binary rollback is supported after V228.** Recovery must move forward with the new
 binary. **Staging's automatic deploy currently rolls back to the previous release if a failure
 occurs after activation during this cutover deploy.** That previous backend cannot run against
-V227's schema: campaign materialization, dispatch, and unsubscribe lookups fail until the next
-deploy re-activates the new release. Operators must not keep a rolled-back pre-V227 backend serving;
-close ingress and stop it, then restore service with a release containing V227 using forward
+V228's schema: campaign materialization, dispatch, and unsubscribe lookups fail until the next
+deploy re-activates the new release. Operators must not keep a rolled-back pre-V228 backend serving;
+close ingress and stop it, then restore service with a release containing V228 using forward
 recovery. An enforced deployment rollback floor is tracked in
 [#2065](https://github.com/itkla/connex/issues/2065).
 
@@ -158,18 +158,18 @@ or connectors without the explicit deduplication guarantee. Previously emailed l
 
 **Partially committed DDL:** keep all writers and ingress stopped, inspect physical schema and Flyway
 history independently, and preserve the digest table. MySQL DDL commits independently of Flyway's
-history bookkeeping; `repair` alone never undoes it. If V226 created the child but backfill/history
+history bookkeeping; `repair` alone never undoes it. If V227 created the child but backfill/history
 failed while both legacy columns remain, the raw-derived source still exists: drop only that new
-child table, repair the failed V226 entry using the normal migration tooling, then rerun the
-automatic migration boot. V227 reasserts the backfill and repeats the idempotent diagnostic and event-key cleanup
+child table, repair the failed V227 entry using the normal migration tooling, then rerun the
+automatic migration boot. V228 reasserts the backfill and repeats the idempotent diagnostic and event-key cleanup
 before its ALTER; require the post-cutover
 catalog-wide checks above before reopening service. Do not drop the child once legacy columns
 are gone.
 
-If V227's ALTER committed but history recording failed, first verify the preserved child against the
-recorded inventory and verify that V226 is recorded successful. Recreate **empty removable columns
-and indexes only**, while every writer remains stopped, then repair the failed V227 entry and rerun
-V227 with the new binary:
+If V228's ALTER committed but history recording failed, first verify the preserved child against the
+recorded inventory and verify that V227 is recorded successful. Recreate **empty removable columns
+and indexes only**, while every writer remains stopped, then repair the failed V228 entry and rerun
+V228 with the new binary:
 
 ```sql
 ALTER TABLE campaign_delivery
@@ -181,10 +181,10 @@ ALTER TABLE campaign_delivery
 ```
 
 These temporary NULL columns reconstruct no bearer and cannot serve an old binary; all lookup
-continues from the preserved child. V227 ignores these NULL source hashes while preserving all
+continues from the preserved child. V228 ignores these NULL source hashes while preserving all
 existing child rows. Its `NOT EXISTS` backfill also makes a retry safe if the INSERT committed but
 the ALTER or history recording failed. If the ALTER did not commit, leave its original columns alone
-and repair/rerun the failed V227 entry. If schema/history or the recorded digest inventory do not
+and repair/rerun the failed V228 entry. If schema/history or the recorded digest inventory do not
 match either state, keep the deployment closed and recover from the pre-cutover backup in an isolated
 catalog through the new lineage; never guess at missing digests or start the previous binary.
 
@@ -778,7 +778,7 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    prefix in the no-logging rules until that resend is complete — see the V203/V204 cutover section
    above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
-   containers. **Exception: after the V226/V227 campaign unsubscribe cutover, use its forward-recovery
+   containers. **Exception: after the V227/V228 campaign unsubscribe cutover, use its forward-recovery
    procedure above; do not start the previous binary.** For other upgrades, Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
