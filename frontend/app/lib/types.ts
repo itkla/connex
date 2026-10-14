@@ -4480,10 +4480,10 @@ export type OwnershipOffer = {
     closedAt: string | null;
     closedByUserId: number | null;
     closureReason: string | null;
-    scopeName?: string | null;
-    offerorDisplayName?: string | null;
-    offereeDisplayName?: string | null;
-    offereeEmail?: string | null;
+    scopeName: string | null;
+    offerorDisplayName: string | null;
+    offereeDisplayName: string | null;
+    offereeEmail: string | null;
 };
 
 /** The 202 body returned when an owner promotion becomes an offer instead of a role change. */

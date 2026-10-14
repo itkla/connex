@@ -30,6 +30,10 @@ const OFFER = {
     closedAt: null,
     closedByUserId: null,
     closureReason: null,
+    scopeName: "Acme",
+    offerorDisplayName: "Riley",
+    offereeDisplayName: "Dana",
+    offereeEmail: "dana@example.com",
 };
 
 const MEMBER = {
