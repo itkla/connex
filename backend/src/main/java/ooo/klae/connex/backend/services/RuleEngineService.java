@@ -367,7 +367,8 @@ public class RuleEngineService {
             lockedPrincipal == null ? Set.of() : lockedPrincipal.lockedPermissions());
         List<String> failures = new ArrayList<>();
         try {
-            automationExecutor.runAs(workspaceId, principal.user(), principal.role(), () -> {
+            automationExecutor.runAs(workspaceId, principal.user(), principal.role(),
+                AutomationScope.Origin.rule(rule.getId(), execution.getId(), rule.getExecutionMode()), () -> {
                 for (RuleAction action : actions) {
                     try {
                         actionIsolation.run(() -> actionExecutor.execute(action, ctx));

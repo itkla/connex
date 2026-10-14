@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.secrets;
 
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,9 +19,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
+import org.mockito.Spy;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
@@ -37,6 +41,7 @@ import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AutomationScope;
 
 @ExtendWith(MockitoExtension.class)
 class SecretStoreLockOrderTest {
@@ -47,6 +52,7 @@ class SecretStoreLockOrderTest {
     @Mock private SecretStoreCrypto crypto;
     @Mock private SecretStoreProperties properties;
     @Mock private AuditService auditService;
+    @Spy private AutomationScope automationScope = new AutomationScope();
 
     @InjectMocks private SecretStore secretStore;
 
@@ -342,6 +348,58 @@ class SecretStoreLockOrderTest {
             principal.set(current == null ? null : current.getPrincipal());
             return null;
         };
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void deferredSecretAuditKeepsUseTimeOriginAndRestoresLaterAutomation(boolean failedUse, boolean automatedUse) {
+        StoredSecret secret = secret(1, "organization", 7);
+        secret.setPurpose(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL.value());
+        when(organizationMapper.lockByIdForShare(7)).thenReturn(7);
+        when(secretValueMapper.findById(1)).thenReturn(secret);
+        AtomicReference<AutomationScope.Origin> auditedOrigin = new AtomicReference<>();
+        Answer<Void> captureOrigin = invocation -> {
+            auditedOrigin.set(automationScope.origin());
+            return null;
+        };
+        if (failedUse) {
+            when(crypto.decrypt(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("Secret unavailable"));
+            doAnswer(captureOrigin).when(auditService).recordFailureScoped(
+                anyString(), anyString(), any(), any(), any(), anyString(), anyString(), anyString());
+        } else {
+            when(crypto.decrypt(anyString(), anyString(), anyString(), anyString())).thenReturn("plaintext");
+            doAnswer(captureOrigin).when(auditService).recordIndependentScoped(
+                anyString(), anyString(), any(), any(), any(), anyString(), anyString(), any());
+        }
+        AutomationScope.Origin origin = automatedUse
+            ? AutomationScope.Origin.workflow(23, 931L, "user") : null;
+        AutomationScope.State beforeUse = origin == null
+            ? automationScope.snapshot() : automationScope.enter(origin);
+        List<TransactionSynchronization> synchronizations;
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            if (failedUse) {
+                assertThrows(IllegalStateException.class,
+                    () -> secretStore.get(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1"));
+            } else {
+                secretStore.get(SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL, 7, "secret:v1:1");
+            }
+            synchronizations = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            automationScope.restore(beforeUse);
+        }
+        AutomationScope.Origin later = AutomationScope.Origin.task(
+            AutomationScope.Source.DELIVERY_WEBHOOK, "system");
+        AutomationScope.State beforeCompletion = automationScope.enter(later);
+        try {
+            synchronizations.getFirst().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+            assertEquals(origin, auditedOrigin.get());
+            assertEquals(later, automationScope.origin());
+        } finally {
+            automationScope.restore(beforeCompletion);
+        }
     }
 
     private static SecurityContext signIn(User user) {

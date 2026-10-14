@@ -42,6 +42,12 @@ A rule/workflow runs as either:
 
 Off-request execution installs explicit SecurityContext and TenantContext through the automation executor. Actor permission failure is an execution failure; do not bypass existing tenant/RBAC-enforcing services in an action implementation.
 
+Rule actions pass the persisted rule and execution IDs to `AutomationExecutor.runAs`; canonical nodes
+pass the workflow and run IDs. `AuditService` records those IDs and the execution mode under
+`context.executionOrigin`, including deferred secret-use audits. Other background callers name their
+own source, and pure observers remain untagged. Mutating observers such as the SLA sweep supply their
+source without suppressing rule triggers. The context-key and export contract is in [AUDIT.md](AUDIT.md).
+
 ## Adding trigger sources
 
 A mutation publishes a validated trigger token from the same transaction after its write through the existing trigger publisher. `WorkflowTriggerIntake` records bounded matching targets before commit; the runtime drains them after commit.

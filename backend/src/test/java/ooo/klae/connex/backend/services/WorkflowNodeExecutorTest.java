@@ -53,6 +53,8 @@ class WorkflowNodeExecutorTest {
         run = new WorkflowRun();
         run.setWorkspaceId(7);
         run.setId(31L);
+        run.setWorkflowId(23);
+        run.setExecutionMode("user");
         run.setTriggerType("entity_change");
         run.setRecordType("deal");
         run.setRecordId(41);
@@ -103,8 +105,9 @@ class WorkflowNodeExecutorTest {
 
         RuleAction action = new RuleAction();
         action.setType("notify");
-        when(automationExecutor.runAs(eq(7), any(User.class), eq("member"), any()))
-            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
+        when(automationExecutor.runAs(eq(7), any(User.class), eq("member"),
+                eq(AutomationScope.Origin.workflow(23, 31L, "user")), any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(4).get());
         WorkflowStepTransition actionResult = executor.execute(
             context, new WorkflowNode.Action("action", action));
         assertEquals(WorkflowEdge.Outcome.NEXT, actionResult.outcome());

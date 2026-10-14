@@ -65,6 +65,9 @@ Audit/support events contain only their approved metadata envelope. Never add ra
 
 Audit records prove that an operation occurred; they do not become a shadow copy of customer data.
 
+[AUDIT.md](AUDIT.md) defines the execution-origin context keys, deferred capture, and disclosure
+contract. Automation provenance is separate from the member or system principal acting on its behalf.
+
 ## Review checklist
 
 - Server-resolved identity/tenant/organization is authoritative.

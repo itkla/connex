@@ -62,6 +62,7 @@ public class DocumentSignatureWebhookService {
             event.workspaceId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_SIGNATURE_WEBHOOK, "system"),
             () -> transactionTemplate.execute(status -> apply(provider, event)));
         return Boolean.TRUE.equals(applied);
     }

@@ -235,7 +235,8 @@ class SecuritySignalMetricsTest {
                     org.mockito.Mockito.mock(ooo.klae.connex.backend.services.SessionSecurityService.class),
                     mapper, integrity,
                     new ObjectMapper(), tenant, new ooo.klae.connex.backend.util.ClientIpResolver(""),
-                    new ClientAssertedCorrelationPseudonymizer(properties));
+                    new ClientAssertedCorrelationPseudonymizer(properties),
+                    new ooo.klae.connex.backend.services.AutomationScope());
             AuditLog invalid = entry("workspace.role.create", "success", 7);
             invalid.setSummary("retained [Private](note:42)");
             invalid.setIntegrityReferenceState("captured");

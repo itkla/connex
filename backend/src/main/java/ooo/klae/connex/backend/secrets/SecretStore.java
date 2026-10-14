@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AutomationScope;
 
 /**
  * Central API for storing and reading never-searched integration secrets. Feature
@@ -38,6 +39,7 @@ public class SecretStore {
     private final SecretStoreCrypto crypto;
     private final SecretStoreProperties properties;
     private final AuditService auditService;
+    private final AutomationScope automationScope;
 
     public boolean isAvailable() {
         return crypto.isAvailable();
@@ -279,7 +281,8 @@ public class SecretStore {
      * so the append never contends with the scope locks this transaction holds.
      *
      * <p>The audit's content stays lazy, because whether a lazy rewrap counts depends on the outcome, but
-     * its actor is fixed at the call. A secret read inside {@code AutomationExecutor.runAs} joins the
+     * its actor and execution origin are fixed at the call. A secret read inside
+     * {@code AutomationExecutor.runAs} joins the
      * transaction enclosing that call, and {@code runAs} restores its caller's security context before
      * the transaction completes, so an actor resolved at completion would be the scheduler thread's
      * empty one (#1931). The append runs under the authentication the secret was used with, and the
@@ -292,14 +295,18 @@ public class SecretStore {
         }
         SecurityContext useContext = SecurityContextHolder.createEmptyContext();
         useContext.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
+        AutomationScope.State useScope = automationScope.snapshot();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
                 SecurityContext completionContext = SecurityContextHolder.getContext();
+                AutomationScope.State completionScope = automationScope.snapshot();
                 SecurityContextHolder.setContext(useContext);
+                automationScope.restore(useScope);
                 try {
                     recordAudit.accept(status);
                 } finally {
+                    automationScope.restore(completionScope);
                     SecurityContextHolder.setContext(completionContext);
                 }
             }

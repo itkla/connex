@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -375,6 +376,21 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         List<Task> created = taskMapper.getTasksByDealId(workspace.getId(), deal.getId());
         assertTrue(created.stream()
             .anyMatch(task -> createTask.getTitle().equals(task.getDescription())));
+        Task automatedTask = created.stream()
+            .filter(task -> createTask.getTitle().equals(task.getDescription())).findFirst().orElseThrow();
+        Map<String, Object> origin = jdbcTemplate.queryForMap("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.source')) AS source,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.executionMode')) AS execution_mode,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.ruleId')) AS rule_id,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.ruleExecutionId')) AS execution_id
+                FROM audit_log
+                WHERE workspace_id = ? AND action = 'task.create' AND entity_id = ?
+                """, workspace.getId(), automatedTask.getId());
+        assertEquals("rule", origin.get("source"));
+        assertEquals("user", origin.get("execution_mode"));
+        assertEquals(String.valueOf(rule.getId()), origin.get("rule_id"));
+        assertEquals(String.valueOf(ruleMapper.getExecutionsByRule(
+            workspace.getId(), rule.getId(), 50).getFirst().getId()), origin.get("execution_id"));
     }
 
     @Test

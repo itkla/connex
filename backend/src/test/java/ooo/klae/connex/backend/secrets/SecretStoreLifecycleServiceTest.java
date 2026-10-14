@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AutomationScope;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -176,7 +177,7 @@ class SecretStoreLifecycleServiceTest {
     private SecretStore store(String keyId, String masterKey, Map<String, String> keys, Set<String> disabledKeyIds) {
         SecretStoreProperties properties = properties(keyId, masterKey, keys, disabledKeyIds);
         return new SecretStore(secretValueMapper, userMapper, workspaceMapper, organizationMapper,
-                new SecretStoreCrypto(properties), properties, mock(AuditService.class));
+                new SecretStoreCrypto(properties), properties, mock(AuditService.class), new AutomationScope());
     }
 
     private SecretStoreLifecycleService lifecycle(String keyId, String masterKey,

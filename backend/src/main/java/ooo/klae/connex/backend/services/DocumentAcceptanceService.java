@@ -98,6 +98,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> {
                 Aggregate aggregate = lockAggregate(admitted, false);
                 requireActionable(aggregate.delivery(), aggregate.recipient(), now());
@@ -138,6 +139,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(
                 status -> previewInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document preview result");
@@ -153,6 +155,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(
                 status -> markViewedInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document view result");
@@ -201,6 +204,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> acceptInTransaction(
                 admitted, request.typedName().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document acceptance result");
@@ -220,6 +224,7 @@ public class DocumentAcceptanceService {
             admitted.workspace().getId(),
             systemActor.user(),
             "system",
+            AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_ACCEPTANCE, "system"),
             () -> transactionTemplate.execute(status -> declineInTransaction(
                 admitted, request.reason().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document decline result");

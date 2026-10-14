@@ -123,7 +123,9 @@ public class LeadResponseSlaScheduler {
         JobRunDetail detail = JobRunDetail.startedUtc();
         try {
             BatchResult result = automationExecutor.runAsObserver(
-                workspaceId, systemActor.user(), "system", () -> sweepBatches(workspaceId));
+                workspaceId, systemActor.user(), "system",
+                AutomationScope.Origin.task(AutomationScope.Source.LEAD_RESPONSE_SLA, "system"),
+                () -> sweepBatches(workspaceId));
             record(
                 workspaceId,
                 result.failedCount() == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,

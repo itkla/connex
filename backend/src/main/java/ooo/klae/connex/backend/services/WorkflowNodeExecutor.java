@@ -48,6 +48,8 @@ public class WorkflowNodeExecutor {
                 context.run().getWorkspaceId(),
                 context.principal().principal(),
                 context.principal().role(),
+                AutomationScope.Origin.workflow(context.run().getWorkflowId(),
+                    context.run().getId(), context.run().getExecutionMode()),
                 () -> actionExecutor.execute(action.config(), actionContext));
             return transition.withActionResult(actionResult);
         }

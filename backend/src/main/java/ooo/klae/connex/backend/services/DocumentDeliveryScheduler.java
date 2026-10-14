@@ -74,6 +74,7 @@ public class DocumentDeliveryScheduler {
                         workspaceId,
                         systemActor.user(),
                         "system",
+                        AutomationScope.Origin.task(AutomationScope.Source.DOCUMENT_DELIVERY_EXPIRY, "system"),
                         () -> transactionTemplate.execute(status -> expireWorkspace(workspaceId)));
                     record(
                         workspaceId,

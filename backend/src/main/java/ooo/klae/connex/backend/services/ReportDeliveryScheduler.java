@@ -58,11 +58,15 @@ public class ReportDeliveryScheduler {
             "レポート",
             "準備完了");
 
+    private static final AutomationScope.Origin SCHEDULER_ORIGIN =
+            AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "system");
+
     private final ScheduleMapper scheduleMapper;
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final ScheduleService scheduleService;
     private final AutomationExecutor automationExecutor;
+    private final AutomationScope automationScope;
     private final ReportService reportService;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -131,7 +135,8 @@ public class ReportDeliveryScheduler {
             skip(ref, schedule.getRunAsUserId(), now, access.denialReason(), runDetail);
             return;
         }
-        automationExecutor.runAs(ref.workspaceId(), access.user(), access.role(), () -> {
+        automationExecutor.runAs(ref.workspaceId(), access.user(), access.role(),
+            AutomationScope.Origin.task(AutomationScope.Source.REPORT_DELIVERY, "user"), () -> {
             deliver(ref, schedule.getRunAsUserId(), now, runDetail);
             return null;
         });
@@ -296,13 +301,13 @@ public class ReportDeliveryScheduler {
     }
 
     private void auditSkip(ReportScheduleRef ref, String reason, JobRunDetail runDetail) {
-        tenantWorkScope.unrouted(() -> {
+        attributed(() -> tenantWorkScope.unrouted(() -> {
             auditService.recordFailureScoped(
                     "report.schedule.skip", "report_schedule", ref.scheduleId(),
                     ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
                     "Skipped scheduled report delivery", reason);
             return null;
-        });
+        }));
         record(ref, JobRunStatus.SKIPPED, runDetail, Map.of(
                 "phase", "delivery_skipped",
                 "scheduleId", ref.scheduleId()));
@@ -366,13 +371,33 @@ public class ReportDeliveryScheduler {
     }
 
     private void auditUnrouted(ReportScheduleRef ref, String reason) {
-        tenantWorkScope.unrouted(() -> {
+        attributed(() -> tenantWorkScope.unrouted(() -> {
             auditService.recordFailureScoped(
                     "report.schedule.delivery", "report_schedule", ref.scheduleId(),
                     ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
                     "Scheduled report delivery failed", reason);
             return null;
-        });
+        }));
+    }
+
+    /**
+     * Writes a scheduler audit under the report-delivery origin. Audits written inside
+     * {@code runAs} already carry the run-as origin; skips are written before it and failure
+     * recovery after it has restored the scope, so those are attributed here as system work.
+     *
+     * @param audit audit write to attribute
+     */
+    private void attributed(Runnable audit) {
+        if (automationScope.origin() != null) {
+            audit.run();
+            return;
+        }
+        AutomationScope.State previous = automationScope.attribute(SCHEDULER_ORIGIN);
+        try {
+            audit.run();
+        } finally {
+            automationScope.restore(previous);
+        }
     }
 
     private void recordSkipped(ReportScheduleRef ref, String phase, JobRunDetail runDetail) {

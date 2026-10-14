@@ -151,6 +151,7 @@ public class AuditService {
     private final TenantContext tenantContext;
     private final ClientIpResolver clientIpResolver;
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
+    private final AutomationScope automationScope;
 
     /**
      * Collapses an attacker-influenced scanner signature to a fixed safe token.
@@ -577,7 +578,7 @@ public class AuditService {
         entry.setOutcome(outcome);
         entry.setSummary(truncate(sanitizeAuditText(summary), SUMMARY_MAX));
         entry.setChanges(toSanitizedJson(changes));
-        entry.setContext(toSanitizedJson(context));
+        entry.setContext(contextWithExecutionOrigin(context));
 
         if (explicitScope) {
             entry.setWorkspaceId(workspaceId);
@@ -592,6 +593,23 @@ public class AuditService {
             resolveRequest(entry);
         }
         return entry;
+    }
+
+    private String contextWithExecutionOrigin(Object context) {
+        String json = toSanitizedJson(context);
+        AutomationScope.Origin origin = automationScope.origin();
+        if (origin == null) {
+            return json;
+        }
+        Map<String, Object> merged = new LinkedHashMap<>();
+        Object existing = readAuditJson(json);
+        if (existing instanceof Map<?, ?> fields) {
+            fields.forEach((key, value) -> merged.put(String.valueOf(key), value));
+        } else if (existing != null) {
+            merged.put("detail", existing);
+        }
+        merged.put("executionOrigin", origin.context());
+        return toSanitizedJson(merged);
     }
 
     private void appendAndObserve(AuditLog entry, boolean independent) {
@@ -1090,11 +1108,45 @@ public class AuditService {
         if (!(parsed instanceof Map<?, ?> context)) {
             return null;
         }
+        Map<String, Object> projected = new LinkedHashMap<>();
         Object error = metadataValue(context.get("error"));
-        if (!(error instanceof String string) || !SAFE_ERROR_TOKEN.matcher(string).matches()) {
-            return null;
+        if (error instanceof String string && SAFE_ERROR_TOKEN.matcher(string).matches()) {
+            projected.put("error", string);
         }
-        return toProjectedJson(Map.of("error", string));
+        Map<String, Object> origin = projectExecutionOrigin(context.get("executionOrigin"));
+        if (!origin.isEmpty()) {
+            projected.put("executionOrigin", origin);
+        }
+        return toProjectedJson(projected);
+    }
+
+    private static Map<String, Object> projectExecutionOrigin(Object value) {
+        if (!(value instanceof Map<?, ?> metadata)
+                || !(metadata.get("source") instanceof String source)
+                || !(metadata.get("executionMode") instanceof String mode)) {
+            return Map.of();
+        }
+        try {
+            AutomationScope.Source kind = AutomationScope.Source.valueOf(source.toUpperCase(Locale.ROOT));
+            Long definitionId = null;
+            Long runId = null;
+            if (kind == AutomationScope.Source.RULE || kind == AutomationScope.Source.WORKFLOW) {
+                String definitionKey = kind == AutomationScope.Source.RULE ? "ruleId" : "workflowId";
+                String runKey = kind == AutomationScope.Source.RULE ? "ruleExecutionId" : "workflowRunId";
+                if (!isExecutionId(metadata.get(definitionKey)) || !isExecutionId(metadata.get(runKey))) {
+                    return Map.of();
+                }
+                definitionId = ((Number) metadata.get(definitionKey)).longValue();
+                runId = ((Number) metadata.get(runKey)).longValue();
+            }
+            return new AutomationScope.Origin(kind, mode, definitionId, runId).context();
+        } catch (IllegalArgumentException exception) {
+            return Map.of();
+        }
+    }
+
+    private static boolean isExecutionId(Object value) {
+        return (value instanceof Integer || value instanceof Long) && ((Number) value).longValue() > 0;
     }
 
     private static SensitiveAuditFamily sensitiveAuditFamily(AuditLog entry) {

@@ -216,6 +216,17 @@ class CampaignSecretUseAuditIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(systemUser.getId(), row.get("actor_id"));
         assertEquals(systemUser.getDisplayName(), row.get("actor_label"));
         assertEquals(purpose, row.get("target_label"));
+        Map<String, Object> origin = jdbcTemplate.queryForMap("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.source')) AS source,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.automation')) AS automation,
+                       JSON_UNQUOTE(JSON_EXTRACT(context, '$.executionOrigin.executionMode')) AS execution_mode
+                FROM audit_log
+                WHERE workspace_id = ? AND action = 'secret_store.secret.use'
+                """, workspace.getId());
+        assertEquals(purpose.equals("workspace.delivery.webhook_secret")
+            ? "delivery_webhook" : "campaign_dispatch", origin.get("source"));
+        assertEquals("false", origin.get("automation"));
+        assertEquals("system", origin.get("execution_mode"));
     }
 
     private CampaignTriggeredSendService.EnrollmentResult enroll() {
