@@ -43,13 +43,16 @@ GH_STUB = textwrap.dedent(
         exit 0 ;;
       "api repos/"*"/issues/"*)
         if [ "${GH_ISSUE_READ_FAILS:-0}" = "1" ]; then exit 1; fi
-        number="${2##*/}"; state=closed
+        number="${2##*/}"; state=closed; labels='[{"name":"ci-main-red"}]'
         for open in $(cat "$GH_CREATED") ${GH_OPEN_ISSUES:-}; do
           [ "$open" = "$number" ] && state=open
         done
+        for unlabeled in ${GH_UNLABELED_ISSUES:-}; do
+          [ "$unlabeled" = "$number" ] && labels='[]'
+        done
         jqexpr=""; prev=""
         for a in "$@"; do [ "$prev" = "--jq" ] && jqexpr="$a"; prev="$a"; done
-        printf '{"state":"%s"}' "$state" | jq -r "$jqexpr"; exit 0 ;;
+        printf '{"state":"%s","labels":%s}' "$state" "$labels" | jq -r "$jqexpr"; exit 0 ;;
       "api repos/"*"/actions/runs/"*)
         jqexpr=""; prev=""
         for a in "$@"; do [ "$prev" = "--jq" ] && jqexpr="$a"; prev="$a"; done
@@ -108,6 +111,8 @@ def run_step(env_overrides, gh_env):
             "GH_LIST_CALLS": str(tmp / "list.calls"),
             "GH_CREATED": str(tmp / "created"),
             "GH_OPEN_ISSUES": "",
+            "GH_UNLABELED_ISSUES": "",
+            "SWEEP_RELIST_DELAY_SECONDS": "0",
             "GH_ISSUE_READ_FAILS": "0",
             "GH_RUN_STATUS": "completed",
             "GH_RUN_CONCLUSION": '"failure"',
@@ -248,6 +253,26 @@ class RedMainAlertBehavior(unittest.TestCase):
         # Like a failed list, a failed direct read is no evidence of a close.
         result, actions = run_step({}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_READ_FAILS": "1"})
         self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"), actions)
+
+    def test_a_lagging_sweep_list_gets_another_pass_to_deduplicate(self):
+        # #9 was already open but the first lookup lagged it, so this run created #31. The sweep's
+        # first list lags too; the next pass must still see both and close the newer one.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": "[]",
+                 "GH_ISSUE_LIST_3": '[{"number": 9}, {"number": 31}]'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"), actions)
+        self.assertIn("close 31", actions)
+
+    def test_an_open_issue_that_lost_its_label_is_recreated(self):
+        # A maintainer stripped ci-main-red from #9; it is open but no longer a visible alert.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_ISSUE_LIST_2": "[]",
+                 "GH_ISSUE_LIST_3": '[{"number": 31}]', "GH_OPEN_ISSUES": "9",
+                 "GH_UNLABELED_ISSUES": "9"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("comment 9", actions)
         self.assertEqual(1, actions.count("create"), actions)
 
     def test_a_sweep_list_failure_does_not_mint_a_duplicate(self):

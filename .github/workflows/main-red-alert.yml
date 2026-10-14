@@ -79,6 +79,7 @@ jobs:
           WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SWEEP_RELIST_DELAY_SECONDS: "10"
         run: |
           set -euo pipefail
 
@@ -156,20 +157,23 @@ jobs:
 
           # Converge on exactly one OPEN rolling issue, without serialisation.
           #
-          # If the sweep finds none open, either the issue this run touched was closed underneath it
-          # -- a maintainer closing on an observed recovery just as a new failure arrives -- or the
-          # list has not yet caught up with a create made seconds earlier. The list lags fresh
-          # creates: one run that read an empty list as a close opened #2047, #2048 and #2049 for a
-          # single failure. So the touched issue is read directly first, and only a confirmed close
-          # recreates; an unreadable state is left to the next event, as a failed list is. gh issue
-          # comment does not reopen, so a confirmed close recreates to keep main-red visible, then
-          # LISTS AGAIN so a concurrent recreate is deduplicated in this run rather than left as a
-          # second open alert. If it finds several, keep the lowest-numbered and close the rest.
+          # If the sweep finds none open, either the issue this run touched stopped being a visible
+          # alert -- closed, or stripped of its label, by a maintainer just as a new failure arrives
+          # -- or the list has not yet caught up with a create made seconds earlier. The list lags
+          # fresh creates: one run that read an empty list as a close opened #2047, #2048 and #2049
+          # for a single failure. So the touched issue is read directly first:
+          #   - open and still labeled: the list is lagging. Wait and LIST AGAIN without creating,
+          #     so the next pass can still see and deduplicate an alert the first lookup missed.
+          #   - closed, or open without the label: recreate (gh issue comment does not reopen) so
+          #     main-red stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in
+          #     this run rather than left as a second open alert.
+          #   - unreadable: left to the next event, as a failed list is.
+          # If the list finds several, keep the lowest-numbered and close the rest.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
           # failure the sweep is skipped -- the report itself already landed above.
-          for attempt in 1 2; do
+          for attempt in 1 2 3; do
             if ! issues_json="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
               --limit 100 --json number 2>/dev/null)"; then
               echo "Sweep list failed; leaving convergence to the next event."
@@ -178,10 +182,19 @@ jobs:
             mapfile -t open_issues < <(printf '%s' "$issues_json" \
               | jq -r 'sort_by(.number) | .[].number')
             if [ "${#open_issues[@]}" -eq 0 ]; then
-              state="$(gh api "repos/$REPO/issues/$target" --jq '.state' 2>/dev/null || true)"
-              if [ "$state" != "closed" ]; then
-                echo "Issue #$target reads as ${state:-unreadable}; the list has not caught up."
+              state="$(gh api "repos/$REPO/issues/$target" --jq \
+                'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                 then "visible" else .state end' 2>/dev/null || true)"
+              if [ -z "$state" ]; then
+                echo "Could not read issue #$target; leaving convergence to the next event."
                 break
+              fi
+              if [ "$state" = "visible" ]; then
+                echo "Issue #$target is open and labeled; the list has not caught up."
+                if [ "$attempt" -lt 3 ]; then
+                  sleep "$SWEEP_RELIST_DELAY_SECONDS"
+                fi
+                continue
               fi
               created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
               echo "$created"
