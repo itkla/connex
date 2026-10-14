@@ -92,6 +92,11 @@ public class ReferenceService {
         "(?im)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
             + ":(\\d+)>?(?:[ \\t].*)?$");
+    private static final Pattern MEMBER_REFERENCE_DEFINITION = Pattern.compile(
+        "(?m)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
+            + "(?:\\r?\\n[ \\t]++)?([^\\r\\n]++)$");
+    private static final Pattern MEMBER_REFERENCE_DESTINATION = Pattern.compile(
+        "(?i)<?user:(\\d+)>?(?:[ \\t].*)?");
 
     /**
      * Reader-scoped prose and structured references after invisible targets are removed.
@@ -630,21 +635,20 @@ public class ReferenceService {
     /**
      * Extracts every authored member-reference label from prose already scoped by
      * {@link #redactInvisibleTargets}, including repeated targets and reference-style Markdown.
+     * Original delimiters establish label spans before either labels or destinations are decoded.
      * This pure parser grants no visibility and must receive only reader-authorized content.
      */
     public static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
         if (readerVisibleContent == null || readerVisibleContent.isBlank()) {
             return List.of();
         }
-        String content = normalizeReferenceSyntax(readerVisibleContent);
-        List<String> labels = new ArrayList<>();
-        collectInlineTargets(content, new ArrayList<>(), new HashSet<>(), labels);
+        String content = readerVisibleContent;
+        List<MemberLabelSpan> labels = new ArrayList<>();
         Set<String> memberDefinitions = new HashSet<>();
-        Matcher definitions = REFERENCE_DEFINITION.matcher(content);
+        Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
-            if (TYPE_USER.equals(canonicalReferenceType(definitions.group(2)))
-                    && parseReferenceTarget(definitions.group(2), definitions.group(3)).isPresent()) {
-                memberDefinitions.add(referenceLabelKey(definitions.group(1)));
+            if (isMemberReferenceDestination(definitions.group(2), true)) {
+                memberDefinitions.add(referenceLabelKey(normalizeReferenceSyntax(definitions.group(1))));
             }
         }
         int[] labelEnds = matchingLabelEnds(content);
@@ -655,7 +659,21 @@ public class ReferenceService {
             }
             String label = content.substring(index + 1, end);
             int next = skipWhitespace(content, end + 1);
-            if (next < content.length() && (content.charAt(next) == ':' || content.charAt(next) == '(')) {
+            if (next < content.length() && content.charAt(next) == '(') {
+                int destinationStart = skipWhitespace(content, next + 1);
+                int destinationEnd = destinationStart;
+                while (destinationEnd < content.length()
+                        && !Character.isWhitespace(content.charAt(destinationEnd))
+                        && "()[]".indexOf(content.charAt(destinationEnd)) < 0) {
+                    destinationEnd++;
+                }
+                if (isMemberReferenceDestination(content.substring(destinationStart, destinationEnd), false)) {
+                    labels.add(new MemberLabelSpan(index + 1, end));
+                }
+                index = end;
+                continue;
+            }
+            if (next < content.length() && content.charAt(next) == ':') {
                 index = end;
                 continue;
             }
@@ -667,24 +685,24 @@ public class ReferenceService {
                 }
                 next = labelEnds[next];
             }
-            if (memberDefinitions.contains(referenceLabelKey(key))) {
-                labels.add(label);
+            if (memberDefinitions.contains(referenceLabelKey(normalizeReferenceSyntax(key)))) {
+                labels.add(new MemberLabelSpan(index + 1, end));
             }
             index = Math.max(end, next - 1);
         }
-        Set<String> normalizedLabels = Set.copyOf(labels);
-        int[] sourceEnds = matchingLabelEnds(readerVisibleContent);
-        for (int index = 0; index < readerVisibleContent.length(); index++) {
-            int end = sourceEnds[index];
-            if (end >= 0 && !isEscaped(readerVisibleContent, index)) {
-                String sourceLabel = readerVisibleContent.substring(index + 1, end);
-                if (normalizedLabels.contains(normalizeReferenceSyntax(sourceLabel))) {
-                    labels.add(sourceLabel);
-                }
-                index = end;
-            }
-        }
-        return List.copyOf(new java.util.LinkedHashSet<>(labels));
+        var candidates = new java.util.LinkedHashSet<String>();
+        labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
+        labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
+        return List.copyOf(candidates);
+    }
+
+    private static boolean isMemberReferenceDestination(String source, boolean complete) {
+        Matcher destination = MEMBER_REFERENCE_DESTINATION.matcher(normalizeReferenceSyntax(source).stripLeading());
+        return (complete ? destination.matches() : destination.lookingAt())
+                && parseReferenceTarget(TYPE_USER, destination.group(1)).isPresent();
+    }
+
+    private record MemberLabelSpan(int start, int end) {
     }
 
     private static String referenceLabelKey(String label) {

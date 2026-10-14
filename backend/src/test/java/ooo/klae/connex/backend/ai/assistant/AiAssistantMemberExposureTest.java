@@ -497,6 +497,46 @@ class AiAssistantMemberExposureTest {
         assertEquals(0, capture.warnings());
     }
 
+    static Stream<Arguments> encodedReferenceDelimiters() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                Map.entry("Al&#93;ice", "Al]ice"),
+                Map.entry("Al&#91;ice", "Al[ice"),
+                Map.entry("Alice &amp; Bob", "Alice & Bob"))
+                .flatMap(label -> Stream.of(false, true).map(referenceStyle ->
+                        Arguments.of(nativeProtocol, referenceStyle, label.getKey(), label.getValue()))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("encodedReferenceDelimiters")
+    void encodedLabelDelimitersAreMaskedInActualPayload(
+            boolean nativeProtocol, boolean referenceStyle, String sourceLabel, String decodedLabel) throws Exception {
+        String text = referenceStyle
+                ? "[" + sourceLabel + "][member&#93;key]\n[member&#93;key]: user&#58;42"
+                : "[" + sourceLabel + "](user&#58;42)";
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(text, context);
+        assertTrue(context.tokenBindings().isEmpty());
+        var result = new AiAssistantToolResult(Map.of("description", text),
+                AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        assertEquals(List.of(new Identifier("member", decodedLabel), new Identifier("member", sourceLabel)),
+                result.identifiers());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains(sourceLabel));
+        assertFalse(payload.contains(decodedLabel));
+        String token = context.tokenBindings().stream().filter(binding -> sourceLabel.equals(binding.getValue()))
+                .map(Map.Entry::getKey).findFirst().orElseThrow();
+        assertTrue(payload.contains(token));
+        assertEquals(sourceLabel, Demasker.demask(token, context).text());
+        assertEquals(0, capture.warnings());
+    }
+
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void recordedContainmentPreservesFixedToolResultVocabularyByPosition(boolean nativeProtocol) throws Exception {

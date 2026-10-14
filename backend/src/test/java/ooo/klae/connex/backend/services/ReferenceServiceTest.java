@@ -312,4 +312,19 @@ class ReferenceServiceTest extends AbstractServiceTest {
                         "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43"));
     }
 
+    @Test
+    void readerAuthorizedMemberCandidatesParseOriginalEncodedDelimiters() {
+        for (var label : List.of(
+                java.util.Map.entry("Al&#93;ice", "Al]ice"),
+                java.util.Map.entry("Al&#91;ice", "Al[ice"),
+                java.util.Map.entry("Alice &amp; Bob", "Alice & Bob"))) {
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "](user&#58;42)"));
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "][member&#93;key]\n[member&#93;key]: user&#58;42"));
+        }
+    }
+
 }
