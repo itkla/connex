@@ -572,7 +572,22 @@
     "leaveConfirmBody": "You'll lose access to this workspace. Your assigned tasks become unassigned and deals you own lose their owner.",
     "cancel": "Cancel",
     "left": "You left the workspace",
-    "leaveFailed": "Couldn't leave the workspace"
+    "leaveFailed": "Couldn't leave the workspace",
+    "offersLoadFailed": "Couldn't load ownership offers",
+    "ownershipTitle": "Ownership offers",
+    "ownershipSubtitle": "Someone offered to make you an owner. Nothing changes until you accept.",
+    "ownershipOfferTitle": "Owner of {scope}",
+    "ownershipOfferMeta": "Offered by {name} · Expires {date}",
+    "ownershipOfferExpires": "Expires {date}",
+    "ownershipScopeWorkspace": "a workspace",
+    "ownershipScopeOrganization": "an organization",
+    "ownershipAccepted": "You're now an owner of {scope}",
+    "ownershipAcceptFailed": "Couldn't accept the ownership offer",
+    "ownershipDeclined": "Ownership offer declined",
+    "ownershipDeclineFailed": "Couldn't decline the ownership offer",
+    "ownershipConfinementTitle": "Become an owner of {scope}?",
+    "ownershipConfinementBody": "Owners sign in with a passkey that another owner has approved. Until one approves yours, you can only set up a passkey, enter a passkey approval code, or leave.",
+    "ownershipConfinementAccept": "Accept and continue"
   },
   "AccountConnectionConsent": {
     "title": "Connect {provider}",

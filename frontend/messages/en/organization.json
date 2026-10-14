@@ -197,7 +197,13 @@
     "roleUpdatedToast": "Role updated",
     "removedToast": "Administrator removed",
     "approvalCode": "Passkey approval code",
-    "memberActions": "Administrator actions"
+    "memberActions": "Administrator actions",
+    "ownershipOffered": "Ownership offered to {name}. They become an owner when they accept.",
+    "ownershipPending": "Ownership offered",
+    "withdrawOwnershipOffer": "Withdraw ownership offer",
+    "ownershipOfferWithdrawn": "Ownership offer withdrawn",
+    "pendingOffersTitle": "Pending ownership offers",
+    "offereeUnknown": "Invited account"
   },
   "OrgDomains": {
     "title": "Allowed domains",

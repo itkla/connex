@@ -269,7 +269,12 @@
         "domainRemoved": "ドメインを削除しました",
         "domainRemoveFailed": "ドメインを削除できませんでした",
         "domainsEmpty": "ドメインの制限はありません。招待リンクを知っている人は、メールアドレスに関係なく参加できます。",
-        "approvalCode": "パスキー承認コード"
+        "approvalCode": "パスキー承認コード",
+        "ownershipOffered": "{name} にオーナー権限を提案しました。承認されるとオーナーになります。",
+        "ownershipPending": "オーナー提案中",
+        "withdrawOwnershipOffer": "オーナー提案を取り消す",
+        "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
+        "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした"
     },
     "WorkspaceRoles": {
         "title": "ロール",

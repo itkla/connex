@@ -269,7 +269,12 @@
         "domainRemoved": "Domain removed",
         "domainRemoveFailed": "Couldn't remove the domain",
         "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email.",
-        "approvalCode": "Passkey approval code"
+        "approvalCode": "Passkey approval code",
+        "ownershipOffered": "Ownership offered to {name}. They become an owner when they accept.",
+        "ownershipPending": "Ownership offered",
+        "withdrawOwnershipOffer": "Withdraw ownership offer",
+        "ownershipOfferWithdrawn": "Ownership offer withdrawn",
+        "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer"
     },
     "WorkspaceRoles": {
         "title": "Roles",

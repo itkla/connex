@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { EllipsisHorizontalIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowUturnLeftIcon, EllipsisHorizontalIcon, KeyIcon, TrashIcon } from "@heroicons/react/24/outline";
 
-import type { OrgMember, OrgRole } from "@/app/lib/types";
+import type { OrgMember, OrgRole, OwnershipOffer } from "@/app/lib/types";
 import {
     addOrgMemberByEmail,
     ApiError,
     getOrgMembers,
+    getOrgOwnershipOffers,
+    isOwnershipOfferCreated,
     issueOrgMfaAttestation,
     removeOrgMember,
     revokeOrgMfaAttestation,
+    revokeOrgOwnershipOffer,
     setOrgMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -59,6 +62,11 @@ function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
 }
 
+/** Pending ownership offers loaded for one organization, so switching never shows stale ones. */
+type OrgOwnershipOffers = { orgId: number | null; offers: OwnershipOffer[] };
+
+const NO_OWNERSHIP_OFFERS: OwnershipOffer[] = [];
+
 /**
  * The organization's administrators, and — for an owner — the controls that change them.
  *
@@ -88,6 +96,7 @@ export default function OrgMembersPanel({
     const { fieldErrors, setFieldErrors, clearError } = useFieldErrors();
 
     const [members, setMembers] = useState<OrgMember[]>([]);
+    const [offerState, setOfferState] = useState<OrgOwnershipOffers>({ orgId: null, offers: NO_OWNERSHIP_OFFERS });
     const [loading, setLoading] = useState(true);
     const [accessDenied, setAccessDenied] = useState(false);
     const [busy, setBusy] = useState<number | null>(null);
@@ -127,11 +136,72 @@ export default function OrgMembersPanel({
         };
     }, [orgId, showApiError]);
 
+    useEffect(() => {
+        if (!orgId || !isOwner) return;
+        let cancelled = false;
+        void getOrgOwnershipOffers(orgId).then((offers) => {
+            if (!cancelled) setOfferState({ orgId, offers });
+        }).catch(() => {
+            if (!cancelled) setOfferState({ orgId, offers: NO_OWNERSHIP_OFFERS });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [orgId, isOwner]);
+
+    const openOffers = useMemo(
+        () => (isOwner && offerState.orgId === orgId ? offerState.offers : NO_OWNERSHIP_OFFERS)
+            .filter((offer) => offer.state === "OPEN"),
+        [isOwner, offerState, orgId],
+    );
+    const openOfferByOfferee = useMemo(
+        () => new Map(openOffers.map((offer) => [offer.offereeUserId, offer] as const)),
+        [openOffers],
+    );
+    const offersForNonMembers = openOffers.filter(
+        (offer) => !members.some((member) => member.id === offer.offereeUserId),
+    );
+
+    function rememberOffer(id: number, offer: OwnershipOffer) {
+        setOfferState((current) => ({
+            orgId: id,
+            offers: [
+                ...(current.orgId === id ? current.offers : NO_OWNERSHIP_OFFERS)
+                    .filter((existing) => existing.offereeUserId !== offer.offereeUserId),
+                offer,
+            ],
+        }));
+    }
+
+    async function withdrawOffer(offer: OwnershipOffer) {
+        if (!orgId) return;
+        setBusy(offer.offereeUserId);
+        try {
+            await revokeOrgOwnershipOffer(orgId, offer.id);
+            setOfferState((current) => current.orgId === orgId
+                ? { orgId, offers: current.offers.filter((existing) => existing.id !== offer.id) }
+                : current);
+            toastSuccess(t("ownershipOfferWithdrawn"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                showApiError(err);
+            }
+        } finally {
+            setBusy(null);
+        }
+    }
+
     async function changeRole(userId: number, next: OrgRole) {
         if (!orgId) return;
         setBusy(userId);
         try {
-            await setOrgMemberRole(orgId, userId, next);
+            const result = await setOrgMemberRole(orgId, userId, next);
+            if (isOwnershipOfferCreated<OrgMember>(result)) {
+                rememberOffer(orgId, result.offer);
+                const name = members.find((member) => member.id === userId)?.displayName ?? "";
+                toastSuccess(t("ownershipOffered", { name }));
+                return;
+            }
             await reload(orgId);
             toastSuccess(t("roleUpdatedToast"));
         } catch (err) {
@@ -164,10 +234,15 @@ export default function OrgMembersPanel({
         if (!orgId || email.trim().length === 0) return;
         setAdding(true);
         try {
-            await addOrgMemberByEmail(orgId, email.trim(), addRole);
+            const result = await addOrgMemberByEmail(orgId, email.trim(), addRole);
+            if (isOwnershipOfferCreated<OrgMember>(result)) {
+                rememberOffer(orgId, result.offer);
+                toastSuccess(t("ownershipOffered", { name: email.trim() }));
+            } else {
+                toastSuccess(t("addedToast"));
+            }
             await reload(orgId);
             setEmail("");
-            toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
             else if (!handlePasskeyStepUpError(err)) showApiError(err);
@@ -206,6 +281,8 @@ export default function OrgMembersPanel({
                             const editable = isOwner && !lockedSoleOwner;
                             const removable = isOwner && !lockedSoleOwner;
                             const attestable = isOwner && !isSelf;
+                            const openOffer = openOfferByOfferee.get(member.id);
+                            const withdrawable = isOwner && openOffer !== undefined;
                             return (
                                 <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                     <Avatar>
@@ -222,6 +299,11 @@ export default function OrgMembersPanel({
                                             {isSelf && (
                                                 <Badge variant="outline" className="text-muted-foreground">
                                                     {t("you")}
+                                                </Badge>
+                                            )}
+                                            {openOffer && (
+                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                    {t("ownershipPending")}
                                                 </Badge>
                                             )}
                                         </div>
@@ -271,6 +353,15 @@ export default function OrgMembersPanel({
                                                         {t("approvalCode")}
                                                     </DropdownMenuItem>
                                                 )}
+                                                {withdrawable && openOffer && (
+                                                    <DropdownMenuItem
+                                                        disabled={busy === member.id}
+                                                        onSelect={() => withdrawOffer(openOffer)}
+                                                    >
+                                                        <ArrowUturnLeftIcon className="size-4" />
+                                                        {t("withdrawOwnershipOffer")}
+                                                    </DropdownMenuItem>
+                                                )}
                                                 {removable && (
                                                     <DropdownMenuItem variant="destructive" onSelect={() => setRemoveTarget(member)}>
                                                         <TrashIcon className="size-4" />
@@ -284,6 +375,45 @@ export default function OrgMembersPanel({
                             );
                         })}
                     </ListCard>
+                )}
+
+                {offersForNonMembers.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                        <p className="px-1 text-xs font-medium text-muted-foreground">{t("pendingOffersTitle")}</p>
+                        <ListCard>
+                            {offersForNonMembers.map((offer) => {
+                                const label = offer.offereeDisplayName?.trim() || offer.offereeEmail?.trim() || t("offereeUnknown");
+                                return (
+                                    <li key={offer.id} className="flex items-center gap-3 px-4 py-3">
+                                        <Avatar>
+                                            <AvatarFallback>{initial(label)}</AvatarFallback>
+                                        </Avatar>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="truncate text-sm font-medium text-foreground">{label}</span>
+                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                    {t("ownershipPending")}
+                                                </Badge>
+                                            </div>
+                                            {offer.offereeDisplayName && offer.offereeEmail ? (
+                                                <p className="truncate text-xs text-muted-foreground">{offer.offereeEmail}</p>
+                                            ) : null}
+                                        </div>
+                                        <Button
+                                            size="toolbar"
+                                            variant="outline"
+                                            disabled={busy === offer.offereeUserId}
+                                            onClick={() => withdrawOffer(offer)}
+                                        >
+                                            {busy === offer.offereeUserId
+                                                ? <Loader2Icon className="size-4 animate-spin" />
+                                                : t("withdrawOwnershipOffer")}
+                                        </Button>
+                                    </li>
+                                );
+                            })}
+                        </ListCard>
+                    </div>
                 )}
             </Rise>
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
+    ArrowUturnLeftIcon,
     CheckIcon,
     EllipsisHorizontalIcon,
     EnvelopeIcon,
@@ -17,6 +18,7 @@ import {
 
 import type {
     CustomRole,
+    OwnershipOffer,
     WorkspaceInvite,
     WorkspaceInviteLink,
     WorkspaceMember,
@@ -30,12 +32,15 @@ import {
     getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
+    getWorkspaceOwnershipOffers,
     getWorkspaceRoles,
+    isOwnershipOfferCreated,
     issueWorkspaceMfaAttestation,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
     revokeWorkspaceMfaAttestation,
+    revokeWorkspaceOwnershipOffer,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -91,6 +96,11 @@ type RoleOptionsLoadState = {
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
 }
+
+/** Pending ownership offers loaded for one workspace, so a workspace switch never shows stale badges. */
+type WorkspaceOwnershipOffers = { workspaceId: number | null; offers: OwnershipOffer[] };
+
+const NO_OWNERSHIP_OFFERS: OwnershipOffer[] = [];
 
 function isWorkspaceRole(role: string): role is WorkspaceRole {
     return role === "member" || role === "admin" || role === "owner";
@@ -198,6 +208,10 @@ function MembersWorkspacePanel({
     const isOwner = role === "owner";
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const [ownershipOfferState, setOwnershipOfferState] = useState<WorkspaceOwnershipOffers>({
+        workspaceId: null,
+        offers: NO_OWNERSHIP_OFFERS,
+    });
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
     const [roleOptionsLoadState, setRoleOptionsLoadState] = useState<RoleOptionsLoadState>({
@@ -298,17 +312,78 @@ function MembersWorkspacePanel({
         return request;
     }, [workspaceId]);
 
+    useEffect(() => {
+        if (!workspaceId || !isOwner) return;
+        let cancelled = false;
+        void getWorkspaceOwnershipOffers(workspaceId).then((offers) => {
+            if (!cancelled) setOwnershipOfferState({ workspaceId, offers });
+        }).catch(() => {
+            if (!cancelled) setOwnershipOfferState({ workspaceId, offers: NO_OWNERSHIP_OFFERS });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [workspaceId, isOwner]);
+
+    const ownershipOffers = isOwner && ownershipOfferState.workspaceId === workspaceId
+        ? ownershipOfferState.offers
+        : NO_OWNERSHIP_OFFERS;
+
+    const openOfferByOfferee = useMemo(
+        () => new Map(
+            ownershipOffers
+                .filter((offer) => offer.state === "OPEN")
+                .map((offer) => [offer.offereeUserId, offer] as const),
+        ),
+        [ownershipOffers],
+    );
+
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
             const updated = await updateMemberRole(workspaceId, userId, next);
+            if (isOwnershipOfferCreated<WorkspaceMember>(updated)) {
+                const { offer, currentMember } = updated;
+                if (currentMember) {
+                    setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
+                }
+                setOwnershipOfferState((current) => ({
+                    workspaceId,
+                    offers: [
+                        ...(current.workspaceId === workspaceId ? current.offers : NO_OWNERSHIP_OFFERS)
+                            .filter((existing) => existing.offereeUserId !== offer.offereeUserId),
+                        offer,
+                    ],
+                }));
+                const name = members.find((m) => m.id === userId)?.displayName ?? "";
+                toastSuccess(t("ownershipOffered", { name }));
+                return;
+            }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err, "roleChangeFailed");
+            }
+        } finally {
+            setBusyMemberId(null);
+        }
+    };
+
+    const withdrawOwnershipOffer = async (offer: OwnershipOffer) => {
+        if (!workspaceId) return;
+        setBusyMemberId(offer.offereeUserId);
+        try {
+            await revokeWorkspaceOwnershipOffer(workspaceId, offer.id);
+            setOwnershipOfferState((current) => current.workspaceId === workspaceId
+                ? { workspaceId, offers: current.offers.filter((existing) => existing.id !== offer.id) }
+                : current);
+            toastSuccess(t("ownershipOfferWithdrawn"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                showApiError(err, "ownershipOfferWithdrawFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -558,6 +633,8 @@ function MembersWorkspacePanel({
                                         || (canManageRoles && grantableCustomRoles.length > 0)
                                     );
                                 const removable = canManageMembers && !isSelf && !protectedOwner;
+                                const openOffer = openOfferByOfferee.get(member.id);
+                                const withdrawable = isOwner && openOffer !== undefined;
                                 const currentCustomRoleIsGrantable = member.roleId != null
                                     && grantableCustomRoles.some((candidate) => candidate.id === member.roleId);
                                 const currentBuiltInRole = member.roleId == null && isWorkspaceRole(member.role)
@@ -591,6 +668,11 @@ function MembersWorkspacePanel({
                                                 {pending && (
                                                     <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                         {t("pending")}
+                                                    </Badge>
+                                                )}
+                                                {openOffer && (
+                                                    <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                        {t("ownershipPending")}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -656,7 +738,7 @@ function MembersWorkspacePanel({
                                             ) : null}
                                         </div>
 
-                                        {(removable || attestable) && (
+                                        {(removable || attestable || withdrawable) && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -672,6 +754,15 @@ function MembersWorkspacePanel({
                                                         <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
                                                             <KeyIcon className="size-4" />
                                                             {t("approvalCode")}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {withdrawable && openOffer && (
+                                                        <DropdownMenuItem
+                                                            disabled={busy}
+                                                            onSelect={() => withdrawOwnershipOffer(openOffer)}
+                                                        >
+                                                            <ArrowUturnLeftIcon className="size-4" />
+                                                            {t("withdrawOwnershipOffer")}
                                                         </DropdownMenuItem>
                                                     )}
                                                     {removable && (
