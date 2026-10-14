@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.CustomFieldValue;
 import ooo.klae.connex.backend.beans.Deal;
@@ -213,6 +214,12 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         Map<String, byte[]> entries = zipEntries(output.toByteArray());
 
         assertTrue(entries.containsKey("manifest.json"));
+        assertTrue(entries.containsKey("data/campaign_delivery_unsubscribe_token.jsonl"));
+        assertTrue(text(entries, "data/campaign_delivery_unsubscribe_token.jsonl").contains(
+            OneTimeTokenDigest.sha256(fixture.unsubscribeBearer())));
+        assertFalse(text(entries, "data/campaign_delivery.jsonl").contains("unsubscribe_token"));
+        assertTrue(entries.values().stream().noneMatch(bytes ->
+            new String(bytes, StandardCharsets.UTF_8).contains(fixture.unsubscribeBearer())));
         assertTrue(entries.containsKey("data/person.jsonl"));
         assertTrue(entries.containsKey("data/person_identity.jsonl"));
         assertTrue(entries.containsKey("data/company.jsonl"));
@@ -289,6 +296,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertEquals(lifecycleTables, residual.tableRows().keySet());
         assertEquals(0, residual.totalRows());
         assertTrue(residual.tableRows().values().stream().allMatch(count -> count == 0));
+        assertEquals(0, rowCount("campaign_delivery_unsubscribe_token"));
         assertEquals(0, rowCount("ai_chat_session"));
         assertEquals(0, rowCount("ai_chat_session_participant"));
         assertEquals(0, rowCount("ai_chat_message"));
@@ -811,7 +819,37 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             terminalReason,
             templateRootId,
             templateName,
-            teamName);
+            teamName,
+            seedUnsubscribeDigest());
+    }
+
+    private String seedUnsubscribeDigest() {
+        int workspaceId = drillWorkspace.getId();
+        jdbcTemplate.update("INSERT INTO campaign (workspace_id, name, type, status) VALUES (?, 'Unsubscribe export', 'email', 'draft')", workspaceId);
+        int campaignId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign WHERE workspace_id = ?", Integer.class, workspaceId);
+        jdbcTemplate.update("INSERT INTO campaign_message (workspace_id, campaign_id, channel, name, status) VALUES (?, ?, 'email', 'Export', 'final')", workspaceId, campaignId);
+        int messageId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign_message WHERE workspace_id = ?", Integer.class, workspaceId);
+        jdbcTemplate.update("""
+            INSERT INTO campaign_audience_snapshot
+                (workspace_id, campaign_id, version, record_type, definition_json,
+                 estimated_included, excluded_total, excluded_consent, excluded_suppressed, excluded_restricted)
+            VALUES (?, ?, 1, 'person', '{}', 0, 0, 0, 0, 0)
+            """, workspaceId, campaignId);
+        int snapshotId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign_audience_snapshot WHERE workspace_id = ?", Integer.class, workspaceId);
+        jdbcTemplate.update("""
+            INSERT INTO campaign_send (workspace_id, campaign_id, snapshot_id, message_id, message_version)
+            VALUES (?, ?, ?, ?, 1)
+            """, workspaceId, campaignId, snapshotId, messageId);
+        int sendId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign_send WHERE workspace_id = ?", Integer.class, workspaceId);
+        jdbcTemplate.update("INSERT INTO campaign_delivery (workspace_id, send_id, address, status) VALUES (?, ?, 'export@example.test', 'dispatched')", workspaceId, sendId);
+        int deliveryId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign_delivery WHERE workspace_id = ?", Integer.class, workspaceId);
+        String bearer = UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", "");
+        jdbcTemplate.update("""
+            INSERT INTO campaign_delivery_unsubscribe_token (workspace_id, delivery_id, token_hash)
+            VALUES (?, ?, ?), (?, ?, ?)
+            """, workspaceId, deliveryId, OneTimeTokenDigest.sha256(bearer),
+            workspaceId, deliveryId, OneTimeTokenDigest.sha256(bearer + "replay"));
+        return bearer;
     }
 
     private int rowCount(String table) {
@@ -879,7 +917,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             String terminalReason,
             int templateRootId,
             String templateName,
-            String teamName) {
+            String teamName,
+            String unsubscribeBearer) {
     }
 
     @FunctionalInterface

@@ -93,7 +93,13 @@ public interface CampaignDeliveryMapper {
             @Param("sendId") int sendId,
             @Param("personId") int personId);
 
-    /** Resolves one delivery by the SHA-256 digest of its unsubscribe token, unrouted. */
+    /** Appends one issued unsubscribe digest to its delivery's lifetime history. */
+    int insertUnsubscribeTokenHash(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("tokenHash") String tokenHash);
+
+    /** Resolves one delivery by any of its issued unsubscribe digests, unrouted. */
     CampaignDelivery getByTokenHash(@Param("tokenHash") String tokenHash);
 
     CampaignDelivery findByProviderMessage(

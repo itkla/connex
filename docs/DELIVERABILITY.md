@@ -365,6 +365,23 @@ Those items' webhooks match no delivery and record no suppression and no consent
 records for that recipient and add any suppression by hand** (`POST /api/suppressions`). Where the
 message ID was attached after all, the webhook has already recorded the suppression and the manual
 check simply finds nothing left to add.
+Each campaign dispatch attempt re-renders its unsubscribe link with a fresh random 64-character
+lowercase hexadecimal bearer. Registration commits only its SHA-256 digest before submission;
+`campaign_delivery_unsubscribe_token` retains all issued digests, including migrated deliveries and
+prior attempts. Links have no expiry and work while their delivery exists. Newly materialized recipients
+have no digest until dispatch reaches registration. Workspace exports reveal digests, which
+cannot be exchanged as bearers.
+
+**An idempotent replay re-renders the unsubscribe link under the unchanged
+`send:{sendId}:{deliveryId}` key.** An endpoint that compares request bodies under a key (such as
+Resend's 409 response) refuses the changed replay. The earlier acceptance remains **ambiguous** and
+enters the reconciliation path and manual suppression check above. An endpoint that deduplicates
+solely by key returns the original receipt, allowing recovery. With either contract the provider
+accepts at most one message, and every emailed link remains valid. This applies to claims in flight
+at the V226/V227 cutover too; their old bearer cannot be reconstructed. Connector administrators
+must account for this difference when opting into replay; Connex introduces no new provider retry
+policy or required secret.
+
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no

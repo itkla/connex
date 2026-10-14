@@ -1032,6 +1032,33 @@ serializes cooperating writers. The unique triggered-send key and catch-and-re-r
 race defense across mixed-version writers. Missing child-row locking reads never substitute for the
 campaign mutex. No provider dispatch occurs in this transaction.
 
+Campaign dispatch mints a fresh random 64-character lowercase hexadecimal unsubscribe bearer for
+one rendered attempt; materialization and triggered enrollment mint none. Only its SHA-256 digest
+enters `campaign_delivery_unsubscribe_token`. Every attempt's digest, including migrated legacy
+digests and unused attempts, remains valid until its delivery is deleted. The bearer lives only in
+the rendered message and provider request; export contains digests alone.
+
+After lease renewal and before frequency admission, the proxied
+`CampaignUnsubscribeTokenRegistrationService.register` opens a short `READ_COMMITTED` transaction:
+`campaign_delivery FOR UPDATE` → current claim/status/database-clock triggered lease validation →
+child digest INSERT. The insert takes exclusive index locks and a shared composite-FK parent check.
+It takes no workspace, campaign, send, authorization, or audit lock. Commit completes before dispatch
+returns to the workspace → delivery frequency transaction, and provider I/O holds neither
+transaction's locks. Recovery and deletion wait on the delivery; a waiting stale registrar rechecks
+the owner after acquiring it. Cascade deletion follows parent → child. Duplicate-key contention can
+still deadlock: rollback and fail closed without provider egress, with sanitized persistence errors.
+No database retry encloses provider submission. Death after registration leaves an unused digest;
+death after submission leaves a working emailed link even without terminal evidence. Earlier
+submission uncertainty survives registration failure.
+
+An opted-in idempotent replay keeps `send:{sendId}:{deliveryId}` but re-renders a fresh unsubscribe
+link. A body-comparing provider refuses the changed body and the earlier acceptance remains
+ambiguous for reconciliation; a body-insensitive provider returns its original receipt. Neither
+provider submits a second email, and both registered links resolve. This also applies to migrated
+in-flight claims whose legacy bearer is no longer reconstructable. See `DELIVERABILITY.md` §3 and
+`UPGRADING.md`'s V226/V227 cutover. Backfill uses `INSERT ... SELECT` across every status; outside
+`READ_COMMITTED` MySQL may take shared source next-key locks, so all writers must be stopped.
+
 Triggered delivery dispatch uses a separate, short owner-fenced claim update. The claim stores a UUID
 owner and a database-clock expiry whose duration is the bounded provider deadline plus its safety
 margin. Provider I/O runs outside database locks. Immediately before provider egress the

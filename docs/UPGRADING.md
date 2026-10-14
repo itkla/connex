@@ -88,6 +88,73 @@ not run old and new backend versions concurrently across this migration. The sta
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
 
+### V226/V227 campaign unsubscribe cutover
+
+The 2026-10-12 owner decision authorizes build and merge when green; staging's next deployment is
+the coordinated restart. This supersedes the earlier merge hold and needs no additional restart
+window approval. V226 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
+and backfills **every delivery, irrespective of status**. V227 drops both token indexes, the
+generated hash column, and the raw bearer column in one ALTER. Existing fragment links keep working
+for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
+and previously generated export ZIPs are outside this remediation.
+
+1. Close ingress and stop **every old backend replica and writer**, including scheduler workers.
+   Drain bounded provider calls where possible. Do not run old and new replicas concurrently; the
+   previous binary reads and writes the removed columns. The coordinated Compose restart boundary
+   used for V170 applies here too.
+2. Inventory every tenant catalog (pooled and dedicated), take the normal pre-cutover backup, and
+   record each catalog's delivery count. Apply the tenant lineage through V226 with writers stopped.
+   In **each catalog**, require this missing/mismatched backfill count to be zero and the child count
+   to equal the recorded delivery count before allowing V227:
+
+   ```sql
+   SELECT COUNT(*) AS missing_hashes
+   FROM campaign_delivery d
+   LEFT JOIN campaign_delivery_unsubscribe_token t
+     ON t.workspace_id = d.workspace_id AND t.delivery_id = d.id
+    AND t.token_hash = d.unsubscribe_token_hash
+   WHERE t.token_hash IS NULL;
+   SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token;
+   ```
+
+3. Apply V227 across the same catalog inventory. Verify both delivery token columns and indexes are
+   absent, the child count still matches the pre-cutover count, and the composite cascading FK is
+   present. Start only the new binary, verify unsubscribe exchange/preview/confirmation, then reopen
+   ingress. Do not touch suppression, consent, or recovery evidence during migration.
+
+**No previous-binary rollback is supported after V227.** Recovery must move forward with the new
+binary. A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
+replay keeps its submission key but renders a fresh link. A body-comparing provider rejects it and
+the delivery becomes ambiguous, requiring the existing provider/suppression reconciliation check;
+a body-insensitive provider returns the original receipt. No automatic replay is enabled for SMTP
+or connectors without the explicit deduplication guarantee. Previously emailed links still resolve.
+
+**Partially committed DDL:** keep all writers and ingress stopped, inspect physical schema and Flyway
+history independently, and preserve the digest table. MySQL DDL commits independently of Flyway's
+history bookkeeping; `repair` alone never undoes it. If V226 created the child but backfill/history
+failed while both legacy columns remain, the raw-derived source still exists: drop only that new
+child table, repair the failed V226 entry using the normal migration tooling, then rerun V226 and
+require the catalog-wide checks above before V227. Do not drop the child once legacy columns are gone.
+If V227's ALTER committed but history recording failed, first verify the preserved child against the
+recorded inventory and verify that V226 is recorded successful. Recreate **empty removable columns
+and indexes only**, while every writer remains stopped, then repair the failed V227 entry and rerun
+V227 with the new binary:
+
+```sql
+ALTER TABLE campaign_delivery
+  ADD COLUMN unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  ADD COLUMN unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+    GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
+  ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token),
+  ADD UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash);
+```
+
+These temporary NULL columns reconstruct no bearer and cannot serve an old binary; all lookup
+continues from the preserved child. If the ALTER did not commit, leave its original columns alone
+and repair/rerun the failed V227 entry. If schema/history or the recorded digest inventory do not
+match either state, keep the deployment closed and recover from the pre-cutover backup in an isolated
+catalog through the new lineage; never guess at missing digests or start the previous binary.
+
 ### V185 workspace-invite authorization cutover
 
 `V185__workspace_invite_grant_authorization.sql` adds the protocol marker that lets the new backend
@@ -678,7 +745,8 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    prefix in the no-logging rules until that resend is complete — see the V203/V204 cutover section
    above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
-   containers. Remove the target deployment directory, re-verify and extract the exact prior signed
+   containers. **Exception: after the V226/V227 campaign unsubscribe cutover, use its forward-recovery
+   procedure above; do not start the previous binary.** For other upgrades, Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
    backup** and start the previous version. Changing only image digest variables is not a rollback

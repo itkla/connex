@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,8 +45,6 @@ public class CampaignTriggeredSendService {
 
     private static final String PURPOSE = "marketing";
     private static final String ROLLBACK_SNAPSHOT_LABEL = "Triggered (system)";
-    private static final int TOKEN_BYTES = 32;
-    private static final SecureRandom RANDOM = new SecureRandom();
     private static final List<Permission> REQUIRED_PERMISSIONS = List.of(
             Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND,
@@ -264,7 +261,6 @@ public class CampaignTriggeredSendService {
         delivery.setPersonId(request.personId());
         delivery.setAddress(address);
         delivery.setStatus("pending");
-        delivery.setUnsubscribeToken(newToken());
         try {
             campaignDeliveryMapper.insertDeliveries(workspaceId, List.of(delivery));
         } catch (DuplicateKeyException exception) {
@@ -478,17 +474,6 @@ public class CampaignTriggeredSendService {
             throw new ForbiddenException("A resolved workspace membership is required");
         }
         return workspaceId;
-    }
-
-    private static String newToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        StringBuilder builder = new StringBuilder(TOKEN_BYTES * 2);
-        for (byte value : bytes) {
-            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
-            builder.append(Character.forDigit(value & 0xF, 16));
-        }
-        return builder.toString();
     }
 
     private record Request(int personId, int messageId, int messageVersion) { }

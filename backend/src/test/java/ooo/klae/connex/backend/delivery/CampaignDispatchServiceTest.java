@@ -130,7 +130,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admission, automationExecutor(), systemActor());
+                admission, registration(), automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -228,7 +228,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
         ReflectionTestUtils.setField(service, "nanoTimeSource", (java.util.function.LongSupplier) now::get);
 
         assertTrue(service.processSend(7, 11));
@@ -284,7 +284,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admittedFrequency(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -818,7 +818,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
     }
 
     private static CampaignDispatchService audienceDispatch(
@@ -848,7 +848,59 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
                 providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void registrationFailureStopsEgressAndPreservesEarlierUncertainty(boolean earlierUncertainty) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(eq(7), eq(13), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("private SQL detail"));
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+        CampaignDelivery attempt = delivery();
+        if (earlierUncertainty) {
+            attempt.setLastErrorCode("deadline_ambiguous");
+        }
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+
+        assertTrue(service.processSend(7, 11));
+
+        verifyNoInteractions(dispatcher);
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        if (earlierUncertainty) {
+            verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(), anyString(), eq("deadline_ambiguous"));
+        } else {
+            verify(deliveryMapper).markTriggeredFailed(eq(7), eq(13), anyString(),
+                    eq("Unsubscribe token registration failed"), eq("relay_error"));
+        }
+    }
+
+    @Test
+    void lostClaimAtRegistrationStopsEgress() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(registration).register(eq(7), eq(13), anyString(), anyString());
+        verifyNoInteractions(dispatcher);
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        verify(deliveryMapper, never()).markTriggeredFailed(anyInt(), anyInt(), anyString(), anyString(), anyString());
+    }
+
+    private static CampaignUnsubscribeTokenRegistrationService registration() {
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(anyInt(), anyInt(), any(), anyString())).thenReturn(true);
+        return registration;
     }
 
     private static AutomationExecutor automationExecutor() {
@@ -909,7 +961,6 @@ class CampaignDispatchServiceTest {
         delivery.setId(13);
         delivery.setPersonId(17);
         delivery.setAddress("recipient@dest.test");
-        delivery.setUnsubscribeToken("token");
         return delivery;
     }
 
@@ -967,6 +1018,6 @@ class CampaignDispatchServiceTest {
                 gate,
                 mock(WorkflowRunMapper.class),
                 mock(CampaignDispatchClaimBoundary.class),
-                admittedFrequency(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor());
     }
 }

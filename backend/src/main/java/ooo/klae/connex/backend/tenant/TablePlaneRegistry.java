@@ -142,6 +142,7 @@ public final class TablePlaneRegistry {
         "campaign_audience_snapshot",
         "campaign_delivery",
         "campaign_delivery_event",
+        "campaign_delivery_unsubscribe_token",
         "campaign_message",
         "campaign_message_revision",
         "campaign_send",

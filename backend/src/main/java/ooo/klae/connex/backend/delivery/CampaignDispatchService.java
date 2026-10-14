@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.delivery;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.services.AutomationExecutor;
 import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Processes queued campaign deliveries for a send, claim-first and never throwing to the caller
@@ -57,6 +60,7 @@ public class CampaignDispatchService {
     private static final int QUIET_START_HOUR = -1;
     private static final int QUIET_END_HOUR = -1;
     private static final int ERROR_LIMIT = 512;
+    private static final SecureRandom RANDOM = new SecureRandom();
     private static final String EXPIRED_NON_IDEMPOTENT_CLAIM =
             "AMBIGUOUS: Worker claim expired on a transport without idempotent submission";
     private static final String EXPIRED_CHANGED_TARGET_CLAIM =
@@ -83,6 +87,7 @@ public class CampaignDispatchService {
     private final WorkflowRunMapper workflowRunMapper;
     private final CampaignDispatchClaimBoundary claimBoundary;
     private final CampaignFrequencyAdmissionService frequencyAdmissionService;
+    private final CampaignUnsubscribeTokenRegistrationService unsubscribeTokenRegistrationService;
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
     private LongSupplier nanoTimeSource = System::nanoTime;
@@ -334,7 +339,8 @@ public class CampaignDispatchService {
             }
             return;
         }
-        RenderedMessage content = render(channel, revision, delivery);
+        String unsubscribeToken = newUnsubscribeToken();
+        RenderedMessage content = render(channel, revision, unsubscribeToken);
         long providerDeadlineNanos = providerDeadlineNanos();
         claimBoundary.beforeProviderLeaseRenewal(workspaceId, deliveryId);
         if (leaseOwner != null) {
@@ -356,6 +362,14 @@ public class CampaignDispatchService {
                     "Provider deadline expired before egress",
                     CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
             return;
+        }
+        try {
+            if (!unsubscribeTokenRegistrationService.register(
+                    workspaceId, deliveryId, leaseOwner, OneTimeTokenDigest.sha256(unsubscribeToken))) {
+                return;
+            }
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Unsubscribe token registration failed", exception);
         }
         if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
             CampaignFrequencyAdmissionService.Admission admission = frequencyAdmissionService.reserve(
@@ -881,8 +895,8 @@ public class CampaignDispatchService {
      * carry no subject or HTML body — so only the text body is rendered and handed to the adapter.
      */
     private RenderedMessage render(
-            DeliveryChannel channel, CampaignMessageRevision revision, CampaignDelivery delivery) {
-        Map<String, String> tokens = Map.of("unsubscribe_url", unsubscribeUrl(delivery.getUnsubscribeToken()));
+            DeliveryChannel channel, CampaignMessageRevision revision, String unsubscribeToken) {
+        Map<String, String> tokens = Map.of("unsubscribe_url", unsubscribeUrl(unsubscribeToken));
         String text = revision.getBodyText() == null ? null : substitutePlain(revision.getBodyText(), tokens);
         if (channel == DeliveryChannel.SMS) {
             return new RenderedMessage(null, null, text);
@@ -890,6 +904,12 @@ public class CampaignDispatchService {
         String subject = revision.getSubject() == null ? null : substitutePlain(revision.getSubject(), tokens);
         String html = revision.getBodyHtml() == null ? null : substituteHtml(revision.getBodyHtml(), tokens);
         return new RenderedMessage(subject, html, text);
+    }
+
+    private static String newUnsubscribeToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
     private String unsubscribeUrl(String token) {

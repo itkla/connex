@@ -6,17 +6,17 @@
   <sql id="deliveryColumns">
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
     provider_id, attempt_target_fingerprint, attempt_count, last_error, last_error_code,
-    reconciliation_required_at, reconciliation_outcome, unsubscribe_token, unsubscribe_token_hash,
+    reconciliation_required_at, reconciliation_outcome,
     created_at, submitted_at, frequency_reserved_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
     INSERT INTO campaign_delivery
-      (workspace_id, send_id, person_id, address, status, unsubscribe_token)
+      (workspace_id, send_id, person_id, address, status)
     VALUES
     <foreach item="delivery" collection="deliveries" separator=",">
       (#{workspaceId}, #{delivery.sendId}, #{delivery.personId}, #{delivery.address},
-       #{delivery.status}, #{delivery.unsubscribeToken})
+       #{delivery.status})
     </foreach>
   </insert>
 
@@ -105,9 +105,15 @@
       AND person_id = #{personId} AND dedupe_active = 1
   </select>
 
+  <insert id="insertUnsubscribeTokenHash">
+    INSERT INTO campaign_delivery_unsubscribe_token (token_hash, workspace_id, delivery_id)
+    VALUES (#{tokenHash}, #{workspaceId}, #{deliveryId})
+  </insert>
+
   <select id="getByTokenHash" resultType="CampaignDelivery">
-    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
-    WHERE unsubscribe_token_hash = #{tokenHash}
+    SELECT d.* FROM campaign_delivery_unsubscribe_token t
+    JOIN campaign_delivery d ON d.workspace_id = t.workspace_id AND d.id = t.delivery_id
+    WHERE t.token_hash = #{tokenHash}
   </select>
 
   <select id="findByProviderMessage" resultType="CampaignDelivery">

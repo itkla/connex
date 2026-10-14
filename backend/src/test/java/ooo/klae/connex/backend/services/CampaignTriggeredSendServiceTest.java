@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -9,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,11 +18,17 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
@@ -42,6 +50,7 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.CampaignDispatchClaimBoundary;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
+import ooo.klae.connex.backend.delivery.CampaignUnsubscribeTokenRegistrationService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryClaimTarget;
@@ -50,6 +59,11 @@ import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
+import ooo.klae.connex.backend.delivery.DeliveryRequest;
+import ooo.klae.connex.backend.delivery.DispatchReceipt;
+import ooo.klae.connex.backend.delivery.MessageDispatcher;
+import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationDto;
 import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignDto;
@@ -79,6 +93,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
 
     @Autowired private CampaignService campaignService;
+    @Autowired private DeliveryUnsubscribeService deliveryUnsubscribeService;
     @Autowired private CampaignSendService campaignSendService;
     @Autowired private RuleActionExecutor ruleActionExecutor;
     @Autowired private CampaignTriggeredSendService triggeredSendService;
@@ -86,6 +101,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private AutomationExecutor automationExecutor;
     @Autowired private SystemActor systemActor;
     @Autowired private CampaignFrequencyAdmissionService frequencyAdmissionService;
+    @Autowired private CampaignUnsubscribeTokenRegistrationService unsubscribeTokenRegistrationService;
     @Autowired private CampaignSendWorker campaignSendWorker;
     @Autowired private SuppressionService suppressionService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
@@ -121,6 +137,104 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         lenient().when(triggeredSendGate.dispatchPageSize()).thenReturn(200);
         lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
     }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void acceptedAttemptWorkerLossRemintsAndRetainsBothLinks(boolean comparesBody) {
+        String prefix = "token-replay-" + unique();
+        Person recipient = person(prefix, prefix + "@example.com");
+        CampaignMessageDto message = message(prefix);
+        CampaignTriggeredSendService.EnrollmentResult enrollment = triggeredSendService.enroll(
+                recipient.getId(), message.id(), 1);
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token WHERE delivery_id = ?",
+                Integer.class, enrollment.deliveryId()));
+        ReplayDispatcher dispatcher = comparesBody ? new BodyComparingDispatcher() : new OriginalReceiptDispatcher();
+        DeliveryProviderRouter router = mock(DeliveryProviderRouter.class);
+        when(router.dispatcherFor(CampaignSendServiceTest.FakeDispatcher.ID)).thenReturn(dispatcher);
+        when(router.adapterFor(CampaignSendServiceTest.FakeDispatcher.ID)).thenReturn(dispatcher);
+        CampaignDispatchService service = dispatchService(true);
+        ReflectionTestUtils.setField(service, "deliveryProviderRouter", router);
+
+        assertThrows(WorkerLost.class, () -> service.processSend(workspace.getId(), enrollment.sendId()));
+        assertEquals("dispatching", campaignDeliveryMapper.getDelivery(
+                workspace.getId(), enrollment.deliveryId()).getStatus());
+        expireClaim(enrollment.deliveryId());
+        assertTrue(service.processSend(workspace.getId(), enrollment.sendId()));
+        assertTrue(service.processSend(workspace.getId(), enrollment.sendId()));
+
+        assertEquals(1, dispatcher.accepted);
+        assertEquals(2, dispatcher.requests.size());
+        DeliveryRequest original = dispatcher.requests.getFirst();
+        DeliveryRequest replay = dispatcher.requests.getLast();
+        assertEquals("send:" + enrollment.sendId() + ":" + enrollment.deliveryId(), original.dedupeKey());
+        assertEquals(original.dedupeKey(), replay.dedupeKey());
+        String originalToken = token(original);
+        String replayToken = token(replay);
+        assertNotEquals(originalToken, replayToken);
+        assertEquals(OneTimeTokenDigest.sha256(originalToken), deliveryUnsubscribeService.exchange(originalToken));
+        assertEquals(OneTimeTokenDigest.sha256(replayToken), deliveryUnsubscribeService.exchange(replayToken));
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token WHERE delivery_id = ?",
+                Integer.class, enrollment.deliveryId()));
+        CampaignDelivery stored = campaignDeliveryMapper.getDelivery(workspace.getId(), enrollment.deliveryId());
+        assertEquals(comparesBody ? "failed" : "dispatched", stored.getStatus());
+        assertEquals(comparesBody, stored.getReconciliationRequiredAt() != null);
+        if (!comparesBody) {
+            assertEquals("original-receipt", stored.getProviderMessageId());
+        }
+    }
+
+    private static String token(DeliveryRequest request) {
+        Matcher matcher = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})")
+                .matcher(request.content().bodyHtml());
+        assertTrue(matcher.find());
+        return matcher.group(1);
+    }
+
+    private abstract static class ReplayDispatcher implements MessageDispatcher {
+        final List<DeliveryRequest> requests = new ArrayList<>();
+        int accepted;
+
+        @Override
+        public String providerId() { return CampaignSendServiceTest.FakeDispatcher.ID; }
+
+        @Override
+        public Set<DeliveryChannel> channels() { return Set.of(DeliveryChannel.EMAIL); }
+
+        @Override
+        public DeliveryCapabilities capabilities() { return new DeliveryCapabilities(true, false, false, true, 1); }
+
+        @Override
+        public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
+            requests.add(request);
+            if (requests.size() == 1) {
+                accepted++;
+                throw new WorkerLost();
+            }
+            assertEquals(requests.getFirst().dedupeKey(), request.dedupeKey());
+            return replay(request);
+        }
+
+        abstract DispatchReceipt replay(DeliveryRequest request);
+    }
+
+    private static final class BodyComparingDispatcher extends ReplayDispatcher {
+        @Override
+        DispatchReceipt replay(DeliveryRequest request) {
+            assertFalse(requests.getFirst().content().equals(request.content()));
+            return DispatchReceipt.rejected("Provider returned status 409 for changed idempotent body");
+        }
+    }
+
+    private static final class OriginalReceiptDispatcher extends ReplayDispatcher {
+        @Override
+        DispatchReceipt replay(DeliveryRequest request) {
+            return DispatchReceipt.sent("original-receipt", "Original submission receipt");
+        }
+    }
+
+    private static final class WorkerLost extends Error { }
 
     @Test
     void enrollCreatesOneTriggeredSendAndOneIdempotentDelivery() {
@@ -903,6 +1017,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 workflowRunMapper,
                 new CampaignDispatchClaimBoundary(),
                 frequencyAdmissionService,
+                unsubscribeTokenRegistrationService,
                 automationExecutor,
                 systemActor);
     }
