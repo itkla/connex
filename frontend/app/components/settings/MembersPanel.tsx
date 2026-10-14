@@ -304,7 +304,12 @@ function MembersWorkspacePanel({
         return request;
     }, [workspaceId]);
 
-    const ownershipOffers = useScopeOwnershipOffers(workspaceId, isOwner, getWorkspaceOwnershipOffers);
+    const ownershipOffers = useScopeOwnershipOffers(
+        workspaceId,
+        isOwner,
+        getWorkspaceOwnershipOffers,
+        (err) => showApiError(err, "ownershipOffersLoadFailed"),
+    );
     const { openOfferByOfferee } = ownershipOffers;
 
     const changeRole = async (userId: number, next: WorkspaceRole) => {

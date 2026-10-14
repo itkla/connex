@@ -202,6 +202,7 @@
     "ownershipPending": "Ownership offered",
     "withdrawOwnershipOffer": "Withdraw ownership offer",
     "ownershipOfferWithdrawn": "Ownership offer withdrawn",
+    "ownershipOffersLoadFailed": "Couldn't load pending ownership offers",
     "pendingOffersTitle": "Pending ownership offers",
     "offereeUnknown": "Invited account"
   },

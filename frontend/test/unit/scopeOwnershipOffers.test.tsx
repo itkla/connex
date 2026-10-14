@@ -6,11 +6,12 @@ import type { OwnershipOffer } from '@/app/lib/types';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 
 const load = vi.fn<(scopeId: number) => Promise<OwnershipOffer[]>>();
+const onError = vi.fn<(error: unknown) => void>();
 
 const scope = { id: 5, enabled: true };
 
 function OffersProbe({ onValue }: { onValue: (value: ScopeOwnershipOffers) => void }) {
-    const value = useScopeOwnershipOffers(scope.id, scope.enabled, load);
+    const value = useScopeOwnershipOffers(scope.id, scope.enabled, load, onError);
     useEffect(() => {
         onValue(value);
     });
@@ -87,6 +88,7 @@ beforeEach(() => {
     scope.id = 5;
     scope.enabled = true;
     load.mockReset();
+    onError.mockReset();
 });
 
 afterEach(async () => {
@@ -142,15 +144,40 @@ describe('scope ownership offers', () => {
         expect(openIds(mounted.current())).toEqual([]);
     });
 
-    it('keeps the last list when a re-read fails', async () => {
+    it('keeps the last list when a re-read fails and reports the failure once', async () => {
         load.mockResolvedValueOnce([offer('41', 11)]);
         const mounted = await mountOffers();
         const failedRead = deferred<OwnershipOffer[]>();
         load.mockReturnValueOnce(failedRead.promise);
+        const failure = new Error('backend unavailable');
 
         await act(async () => mounted.current().refresh());
-        await act(async () => failedRead.reject(new Error('backend unavailable')));
+        await act(async () => failedRead.reject(failure));
         expect(openIds(mounted.current())).toEqual(['41']);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith(failure);
+    });
+
+    it('stays silent when a superseded or previous-scope read fails', async () => {
+        const supersededRead = deferred<OwnershipOffer[]>();
+        const previousScopeRead = deferred<OwnershipOffer[]>();
+        const currentScopeRead = deferred<OwnershipOffer[]>();
+        load.mockReturnValueOnce(supersededRead.promise).mockReturnValueOnce(previousScopeRead.promise)
+            .mockReturnValueOnce(currentScopeRead.promise);
+        const mounted = await mountOffers();
+
+        await act(async () => mounted.current().refresh());
+        await act(async () => supersededRead.reject(new Error('superseded')));
+        expect(onError, 'a superseded read must not report').not.toHaveBeenCalled();
+
+        scope.id = 6;
+        await mounted.rerender();
+        await act(async () => previousScopeRead.reject(new Error('previous scope')));
+        expect(onError, 'a previous scope read must not report').not.toHaveBeenCalled();
+
+        await act(async () => currentScopeRead.resolve([offer('51', 13)]));
+        expect(openIds(mounted.current())).toEqual(['51']);
+        expect(onError).not.toHaveBeenCalled();
     });
 
     it('ignores the previous scope answering after a switch', async () => {

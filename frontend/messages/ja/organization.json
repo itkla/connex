@@ -202,6 +202,7 @@
     "ownershipPending": "オーナー提案中",
     "withdrawOwnershipOffer": "オーナー提案を取り消す",
     "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
+    "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
     "pendingOffersTitle": "保留中のオーナー提案",
     "offereeUnknown": "招待したアカウント"
   },

@@ -131,7 +131,12 @@ export default function OrgMembersPanel({
         };
     }, [orgId, showApiError]);
 
-    const ownershipOffers = useScopeOwnershipOffers(orgId, isOwner, getOrgOwnershipOffers);
+    const ownershipOffers = useScopeOwnershipOffers(
+        orgId,
+        isOwner,
+        getOrgOwnershipOffers,
+        (err) => showApiError(err, "ownershipOffersLoadFailed"),
+    );
     const { openOffers, openOfferByOfferee } = ownershipOffers;
     const offersForNonMembers = openOffers.filter(
         (offer) => !members.some((member) => member.id === offer.offereeUserId),

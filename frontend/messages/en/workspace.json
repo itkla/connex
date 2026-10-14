@@ -274,6 +274,7 @@
         "ownershipPending": "Ownership offered",
         "withdrawOwnershipOffer": "Withdraw ownership offer",
         "ownershipOfferWithdrawn": "Ownership offer withdrawn",
+        "ownershipOffersLoadFailed": "Couldn't load pending ownership offers",
         "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer"
     },
     "WorkspaceRoles": {
