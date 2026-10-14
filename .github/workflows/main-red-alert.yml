@@ -168,8 +168,10 @@ jobs:
           #     when nothing else is open, recreate (gh issue comment does not reopen) so main-red
           #     stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in this run.
           #   - unreadable: when nothing else is open, left to the next event, as a failed list is.
-          # Of the open alerts, keep the lowest-numbered and close the rest. When that closes the
-          # issue this run reported on, the report is re-posted on the kept issue.
+          # Of the open alerts, keep the lowest-numbered and close the rest. The issue this run
+          # reported on is closed in favour of a lower one only after that keeper reads open and
+          # labeled directly AND the report has been re-posted on it; otherwise the touched issue,
+          # known to be live, stays the keeper, so a stale list can never close the last alert.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
@@ -211,15 +213,23 @@ jobs:
               esac
             fi
             keep="${open_issues[0]}"
+            if [ "$target" != "$keep" ] && printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
+              keep_state="$(gh api "repos/$REPO/issues/$keep" --jq \
+                'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                 then "visible" else .state end' 2>/dev/null || true)"
+              if [ "$keep_state" = "visible" ] && gh issue comment "$keep" --repo "$REPO" --body "$body"; then
+                gh issue close "$target" --repo "$REPO" --comment "Duplicate of #$keep." || true
+                target="$keep"
+              else
+                echo "Could not confirm #$keep as the keeper; keeping #$target, which this run reported on."
+                keep="$target"
+              fi
+            fi
             for number in "${open_issues[@]}"; do
-              if [ "$number" != "$keep" ]; then
+              if [ "$number" != "$keep" ] && [ "$number" != "$target" ]; then
                 gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
               fi
             done
-            if [ "$target" != "$keep" ] && printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
-              gh issue comment "$keep" --repo "$REPO" --body "$body" || true
-              target="$keep"
-            fi
             if [ "$lagging" = true ] && [ "$attempt" -lt 3 ]; then
               sleep "$SWEEP_RELIST_DELAY_SECONDS"
               continue

@@ -69,7 +69,11 @@ GH_STUB = textwrap.dedent(
         if [ -n "$jqexpr" ]; then printf '%s' "$val" | jq -r "$jqexpr"
         else printf '%s' "$val"; fi
         exit 0 ;;
-      "issue comment"*) log "comment ${3}"; exit 0 ;;
+      "issue comment"*)
+        for failing in ${GH_COMMENT_FAILS_ON:-}; do
+          [ "$failing" = "$3" ] && exit 1
+        done
+        log "comment ${3}"; exit 0 ;;
       "issue create"*)
         log "create"
         number=$(( $(wc -l < "$GH_CREATED") + 31 )); echo "$number" >> "$GH_CREATED"
@@ -112,6 +116,7 @@ def run_step(env_overrides, gh_env):
             "GH_CREATED": str(tmp / "created"),
             "GH_OPEN_ISSUES": "",
             "GH_UNLABELED_ISSUES": "",
+            "GH_COMMENT_FAILS_ON": "",
             "SWEEP_RELIST_DELAY_SECONDS": "0",
             "GH_ISSUE_READ_FAILS": "0",
             "GH_RUN_STATUS": "completed",
@@ -260,7 +265,7 @@ class RedMainAlertBehavior(unittest.TestCase):
         # first list lags too; the next pass must still see both and close the newer one.
         result, actions = run_step(
             {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": "[]",
-                 "GH_ISSUE_LIST_3": '[{"number": 9}, {"number": 31}]'})
+                 "GH_ISSUE_LIST_3": '[{"number": 9}, {"number": 31}]', "GH_OPEN_ISSUES": "9"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"), actions)
         self.assertIn("close 31", actions)
@@ -269,11 +274,30 @@ class RedMainAlertBehavior(unittest.TestCase):
         # #9 was already open but the first lookup lagged it, so this run created #31; the sweep's
         # list then shows #9 while still missing #31. #31 must be closed and the report moved to #9.
         result, actions = run_step(
-            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]'})
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]', "GH_OPEN_ISSUES": "9"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"), actions)
         self.assertIn("close 31", actions)
         self.assertIn("comment 9", actions)
+        self.assertLess(actions.index("comment 9"), actions.index("close 31"), actions)
+
+    def test_a_stale_keeper_never_closes_the_live_alert(self):
+        # The list still shows #9, which was closed moments ago, and misses #31, which this run
+        # created. #31 is the only live alert; it must stay open.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"), actions)
+        self.assertNotIn("close 31", actions)
+
+    def test_a_failed_report_repost_keeps_the_touched_alert_open(self):
+        # #9 is a valid keeper, but re-posting this run's report there fails; closing #31 would
+        # leave the only copy of the report on a closed duplicate.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]', "GH_OPEN_ISSUES": "9",
+                 "GH_COMMENT_FAILS_ON": "9"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("close 31", actions)
 
     def test_an_open_issue_that_lost_its_label_is_recreated(self):
         # A maintainer stripped ci-main-red from #9; it is open but no longer a visible alert.
