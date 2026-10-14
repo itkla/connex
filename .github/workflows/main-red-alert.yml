@@ -157,18 +157,19 @@ jobs:
 
           # Converge on exactly one OPEN rolling issue, without serialisation.
           #
-          # If the sweep finds none open, either the issue this run touched stopped being a visible
-          # alert -- closed, or stripped of its label, by a maintainer just as a new failure arrives
-          # -- or the list has not yet caught up with a create made seconds earlier. The list lags
-          # fresh creates: one run that read an empty list as a close opened #2047, #2048 and #2049
-          # for a single failure. So the touched issue is read directly first:
-          #   - open and still labeled: the list is lagging. Wait and LIST AGAIN without creating,
-          #     so the next pass can still see and deduplicate an alert the first lookup missed.
-          #   - closed, or open without the label: recreate (gh issue comment does not reopen) so
-          #     main-red stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in
-          #     this run rather than left as a second open alert.
-          #   - unreadable: left to the next event, as a failed list is.
-          # If the list finds several, keep the lowest-numbered and close the rest.
+          # The list lags fresh creates: one run that read an empty list as a close opened #2047,
+          # #2048 and #2049 for a single failure, and a partly caught-up list can show an older
+          # alert while still missing the one this run just created. So whenever the issue this
+          # run touched is missing from the list, it is read directly:
+          #   - open and still labeled: the list is lagging. It joins the set being deduplicated,
+          #     and the sweep waits and LISTS AGAIN without creating, so a later pass can still see
+          #     an alert the first lookup missed.
+          #   - closed, or stripped of its label, by a maintainer just as a new failure arrives:
+          #     when nothing else is open, recreate (gh issue comment does not reopen) so main-red
+          #     stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in this run.
+          #   - unreadable: when nothing else is open, left to the next event, as a failed list is.
+          # Of the open alerts, keep the lowest-numbered and close the rest. When that closes the
+          # issue this run reported on, the report is re-posted on the kept issue.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
@@ -181,25 +182,33 @@ jobs:
             fi
             mapfile -t open_issues < <(printf '%s' "$issues_json" \
               | jq -r 'sort_by(.number) | .[].number')
-            if [ "${#open_issues[@]}" -eq 0 ]; then
+            lagging=false
+            if ! printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
               state="$(gh api "repos/$REPO/issues/$target" --jq \
                 'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
                  then "visible" else .state end' 2>/dev/null || true)"
-              if [ -z "$state" ]; then
-                echo "Could not read issue #$target; leaving convergence to the next event."
-                break
-              fi
-              if [ "$state" = "visible" ]; then
-                echo "Issue #$target is open and labeled; the list has not caught up."
-                if [ "$attempt" -lt 3 ]; then
-                  sleep "$SWEEP_RELIST_DELAY_SECONDS"
-                fi
-                continue
-              fi
-              created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
-              echo "$created"
-              target="${created##*/}"
-              continue
+              case "$state" in
+                visible)
+                  echo "Issue #$target is open and labeled; the list has not caught up."
+                  lagging=true
+                  mapfile -t open_issues < <(printf '%s\n' "${open_issues[@]}" "$target" \
+                    | grep -v '^$' | sort -n -u)
+                  ;;
+                "")
+                  if [ "${#open_issues[@]}" -eq 0 ]; then
+                    echo "Could not read issue #$target; leaving convergence to the next event."
+                    break
+                  fi
+                  ;;
+                *)
+                  if [ "${#open_issues[@]}" -eq 0 ]; then
+                    created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
+                    echo "$created"
+                    target="${created##*/}"
+                    continue
+                  fi
+                  ;;
+              esac
             fi
             keep="${open_issues[0]}"
             for number in "${open_issues[@]}"; do
@@ -207,5 +216,13 @@ jobs:
                 gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
               fi
             done
+            if [ "$target" != "$keep" ] && printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
+              gh issue comment "$keep" --repo "$REPO" --body "$body" || true
+              target="$keep"
+            fi
+            if [ "$lagging" = true ] && [ "$attempt" -lt 3 ]; then
+              sleep "$SWEEP_RELIST_DELAY_SECONDS"
+              continue
+            fi
             break
           done

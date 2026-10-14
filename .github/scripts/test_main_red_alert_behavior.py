@@ -265,6 +265,16 @@ class RedMainAlertBehavior(unittest.TestCase):
         self.assertEqual(1, actions.count("create"), actions)
         self.assertIn("close 31", actions)
 
+    def test_a_partial_list_that_lags_the_create_still_deduplicates(self):
+        # #9 was already open but the first lookup lagged it, so this run created #31; the sweep's
+        # list then shows #9 while still missing #31. #31 must be closed and the report moved to #9.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"), actions)
+        self.assertIn("close 31", actions)
+        self.assertIn("comment 9", actions)
+
     def test_an_open_issue_that_lost_its_label_is_recreated(self):
         # A maintainer stripped ci-main-red from #9; it is open but no longer a visible alert.
         result, actions = run_step(
