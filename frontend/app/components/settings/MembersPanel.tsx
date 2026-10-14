@@ -48,6 +48,7 @@ import { useGrantedPermissions, usePermission } from "@/app/hooks/usePermissions
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -96,11 +97,6 @@ type RoleOptionsLoadState = {
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
 }
-
-/** Pending ownership offers loaded for one workspace, so a workspace switch never shows stale badges. */
-type WorkspaceOwnershipOffers = { workspaceId: number | null; offers: OwnershipOffer[] };
-
-const NO_OWNERSHIP_OFFERS: OwnershipOffer[] = [];
 
 function isWorkspaceRole(role: string): role is WorkspaceRole {
     return role === "member" || role === "admin" || role === "owner";
@@ -208,10 +204,6 @@ function MembersWorkspacePanel({
     const isOwner = role === "owner";
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    const [ownershipOfferState, setOwnershipOfferState] = useState<WorkspaceOwnershipOffers>({
-        workspaceId: null,
-        offers: NO_OWNERSHIP_OFFERS,
-    });
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
     const [roleOptionsLoadState, setRoleOptionsLoadState] = useState<RoleOptionsLoadState>({
@@ -312,31 +304,8 @@ function MembersWorkspacePanel({
         return request;
     }, [workspaceId]);
 
-    useEffect(() => {
-        if (!workspaceId || !isOwner) return;
-        let cancelled = false;
-        void getWorkspaceOwnershipOffers(workspaceId).then((offers) => {
-            if (!cancelled) setOwnershipOfferState({ workspaceId, offers });
-        }).catch(() => {
-            if (!cancelled) setOwnershipOfferState({ workspaceId, offers: NO_OWNERSHIP_OFFERS });
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [workspaceId, isOwner]);
-
-    const ownershipOffers = isOwner && ownershipOfferState.workspaceId === workspaceId
-        ? ownershipOfferState.offers
-        : NO_OWNERSHIP_OFFERS;
-
-    const openOfferByOfferee = useMemo(
-        () => new Map(
-            ownershipOffers
-                .filter((offer) => offer.state === "OPEN")
-                .map((offer) => [offer.offereeUserId, offer] as const),
-        ),
-        [ownershipOffers],
-    );
+    const ownershipOffers = useScopeOwnershipOffers(workspaceId, isOwner, getWorkspaceOwnershipOffers);
+    const { openOfferByOfferee } = ownershipOffers;
 
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
@@ -348,19 +317,13 @@ function MembersWorkspacePanel({
                 if (currentMember) {
                     setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
                 }
-                setOwnershipOfferState((current) => ({
-                    workspaceId,
-                    offers: [
-                        ...(current.workspaceId === workspaceId ? current.offers : NO_OWNERSHIP_OFFERS)
-                            .filter((existing) => existing.offereeUserId !== offer.offereeUserId),
-                        offer,
-                    ],
-                }));
+                ownershipOffers.remember(offer);
                 const name = members.find((m) => m.id === userId)?.displayName ?? "";
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -377,9 +340,7 @@ function MembersWorkspacePanel({
         setBusyMemberId(offer.offereeUserId);
         try {
             await revokeWorkspaceOwnershipOffer(workspaceId, offer.id);
-            setOwnershipOfferState((current) => current.workspaceId === workspaceId
-                ? { workspaceId, offers: current.offers.filter((existing) => existing.id !== offer.id) }
-                : current);
+            ownershipOffers.forget(offer.id);
             toastSuccess(t("ownershipOfferWithdrawn"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -396,6 +357,7 @@ function MembersWorkspacePanel({
         try {
             const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -413,6 +375,7 @@ function MembersWorkspacePanel({
         try {
             await removeWorkspaceMember(workspaceId, removeTarget.id);
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
+            ownershipOffers.refresh();
             toastSuccess(t("removed"));
             setRemoveTarget(null);
         } catch (err) {
