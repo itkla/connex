@@ -79,11 +79,12 @@ public interface DocumentApprovalMapper {
         @Param("userId") int userId, @Param("asOf") String asOf,
         @Param("after") ApprovalInboxCursor after, @Param("limit") int limit);
 
-    /** Fresh, non-locking routing facts for departure checks, including future open steps. */
-    List<DocumentApprovalStep> findOpenStepsForDeparture(@Param("workspaceId") int workspaceId);
+    /** Fresh, non-locking complete routing facts only for steps mentioning the departing user. */
+    List<DocumentApprovalStep> findOpenStepsForDeparture(@Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
 
-    /** Fresh, non-locking routing facts throughout the current tenant catalog. */
-    List<DocumentApprovalStep> findOpenStepsForDepartureAnywhere();
+    /** Fresh, non-locking complete routing facts for this user throughout the current tenant catalog. */
+    List<DocumentApprovalStep> findOpenStepsForDepartureAnywhere(@Param("userId") int userId);
 
     /** Discovers every frozen or template approver reference, including terminal and inactive ones. */
     List<ApprovalStepApprover> findDepartureReferences(@Param("workspaceId") int workspaceId,

@@ -32,7 +32,7 @@ class DepartureApprovalGuardTest {
     void soleDistinctPolicyApproverBlocksEvenWithDuplicateDeclarations() {
         ApprovalPolicyStep step = new ApprovalPolicyStep();
         step.setApprovers(List.of(named(9), named(9)));
-        when(policyMapper.findActiveStepsForDeparture(7)).thenReturn(List.of(step));
+        when(policyMapper.findActiveStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertThrows(ConflictException.class, () -> guard.assertCanDepart(7, 9));
     }
@@ -43,7 +43,7 @@ class DepartureApprovalGuardTest {
         multiple.setApprovers(List.of(named(9), named(11)));
         ApprovalPolicyStep any = new ApprovalPolicyStep();
         any.setApprovers(List.of(named(9), anyApprover()));
-        when(policyMapper.findActiveStepsForDeparture(7)).thenReturn(List.of(multiple, any));
+        when(policyMapper.findActiveStepsForDeparture(7, 9)).thenReturn(List.of(multiple, any));
 
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
     }
@@ -51,7 +51,7 @@ class DepartureApprovalGuardTest {
     @Test
     void futureSequentialStepBlocksAndCatalogErasureUsesTheSameGuard() {
         DocumentApprovalStep future = step("pending", named(9));
-        when(approvalMapper.findOpenStepsForDepartureAnywhere()).thenReturn(List.of(future));
+        when(approvalMapper.findOpenStepsForDepartureAnywhere(9)).thenReturn(List.of(future));
 
         assertThrows(ConflictException.class, () -> guard.assertCanErase(9));
     }
@@ -60,7 +60,7 @@ class DepartureApprovalGuardTest {
     void multipleNamedFrozenApproversAllowDepartureRegardlessOfRequiredCount() {
         DocumentApprovalStep step = step("active", named(9), named(11));
         step.setRequiredCount(2);
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
     }
@@ -70,7 +70,7 @@ class DepartureApprovalGuardTest {
         DocumentApprovalStep step = step("active", named(9));
         step.setAssignments(List.of(assignment(1, "reassignment", 1, 9, null),
             assignment(2, "reassignment", 2, 11, null)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
     }
@@ -79,7 +79,7 @@ class DepartureApprovalGuardTest {
     void reassignmentCanNameTheDepartingUserWithoutAFrozenReference() {
         DocumentApprovalStep step = step("active", named(11));
         step.setAssignments(List.of(assignment(1, "reassignment", 1, 9, null)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertThrows(ConflictException.class, () -> guard.assertCanDepart(7, 9));
     }
@@ -89,7 +89,7 @@ class DepartureApprovalGuardTest {
         DocumentApprovalStep step = step("active", named(11));
         step.setAssignments(List.of(assignment(1, "escalation", 0, null, null),
             assignment(2, "reassignment", 1, 9, null)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertThrows(ConflictException.class, () -> guard.assertCanDepart(7, 9));
     }
@@ -99,7 +99,7 @@ class DepartureApprovalGuardTest {
         DocumentApprovalStep step = step("active", named(9));
         step.setAssignments(List.of(assignment(1, "reassignment", 1, 9, null),
             assignment(2, "escalation", 1, null, null)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
     }
@@ -108,7 +108,7 @@ class DepartureApprovalGuardTest {
     void delegationAwayUnblocksAndDelegationToDepartingUserBlocks() {
         DocumentApprovalStep step = step("active", named(9));
         step.setAssignments(List.of(assignment(1, "delegation", 0, 11, 9)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
 
         step.setApprovers(List.of(named(11)));
@@ -120,14 +120,14 @@ class DepartureApprovalGuardTest {
     void anInertDelegationCannotAddTheDepartingUser() {
         DocumentApprovalStep step = step("active", named(11));
         step.setAssignments(List.of(assignment(1, "delegation", 0, 9, 12)));
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(step));
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
         assertDoesNotThrow(() -> guard.assertCanDepart(7, 9));
     }
 
     @Test
     void terminalAndAnyApproverStepsNeverBlock() {
-        when(approvalMapper.findOpenStepsForDeparture(7)).thenReturn(List.of(
+        when(approvalMapper.findOpenStepsForDeparture(7, 9)).thenReturn(List.of(
             step("approved", named(9)), step("rejected", named(9)), step("cancelled", named(9)),
             step("unsatisfiable", named(9)), step("expired", named(9)),
             step("active", named(9), anyApprover())));

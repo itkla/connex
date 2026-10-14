@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -39,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
+import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentApproval;
@@ -291,31 +293,125 @@ class DepartureReferencesIntegrationTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"workspace", "catalog"})
+    void unrelatedOpenStepsAreNotLoadedAndCompleteCandidateRoutesKeepTheSameVerdicts(String scope) {
+        DocumentApproval request = request("active", null);
+        unrelatedRoutes(request);
+        assertEquals(257, jdbc.queryForObject("SELECT COUNT(*) FROM document_approval_step "
+            + "WHERE workspace_id = ? AND status IN ('pending', 'active')", Integer.class, workspace.getId()));
+        assertEquals(257, jdbc.queryForObject("SELECT COUNT(*) FROM approval_policy_step "
+            + "WHERE workspace_id = ?", Integer.class, workspace.getId()));
+        assertEquals(1, departurePolicies(scope).size());
+        assertEquals(1, departureRequests(scope).size());
+        assertThrows(ConflictException.class, () -> departureVerdict(scope));
+
+        jdbc.update("INSERT INTO approval_policy_step_approver (workspace_id, step_id, approver_kind, user_id) "
+            + "SELECT workspace_id, step_id, 'user', ? FROM approval_policy_step_approver "
+            + "WHERE workspace_id = ? AND user_id = ?", survivor.getId(), workspace.getId(), target.getId());
+        assertEquals(2, departurePolicies(scope).getFirst().getApprovers().size());
+        assertThrows(ConflictException.class, () -> departureVerdict(scope));
+        jdbc.update("INSERT INTO document_approval_step_approver (workspace_id, step_id, approver_kind, user_id) "
+            + "SELECT workspace_id, step_id, 'user', ? FROM document_approval_step_approver "
+            + "WHERE workspace_id = ? AND user_id = ?", survivor.getId(), workspace.getId(), target.getId());
+        assertEquals(2, departureRequests(scope).getFirst().getApprovers().size());
+        assertDoesNotThrow(() -> departureVerdict(scope));
+
+        jdbc.update("INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+            + "assignment_kind, assignment_round, approver_kind, user_id) "
+            + "SELECT workspace_id, approval_id, id, 'reassignment', 1, 'user', ? "
+            + "FROM document_approval_step WHERE approval_id = ? AND step_order = 1", target.getId(), request.getId());
+        assertThrows(ConflictException.class, () -> departureVerdict(scope));
+        jdbc.update("INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+            + "assignment_kind, assignment_round, approver_kind, user_id) "
+            + "SELECT workspace_id, approval_id, id, 'reassignment', 2, 'user', ? "
+            + "FROM document_approval_step WHERE approval_id = ? AND step_order = 1", survivor.getId(), request.getId());
+        assertEquals(2, departureRequests(scope).getFirst().getAssignments().size());
+        assertDoesNotThrow(() -> departureVerdict(scope));
+
+        jdbc.update("DELETE FROM approval_policy_step_approver WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), target.getId());
+        jdbc.update("DELETE FROM document_approval_step_approver WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), target.getId());
+        assertEquals(0, departurePolicies(scope).size());
+        assertEquals(1, departureRequests(scope).size());
+        jdbc.update("DELETE FROM document_approval_step_assignment WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), target.getId());
+        assertEquals(0, departureRequests(scope).size());
+        assertDoesNotThrow(() -> departureVerdict(scope));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"reassignment", "escalation", "delegationTo", "delegationFrom"})
+    void assignmentMentionsDiscoverCandidatesWithoutAFrozenUserReference(String kind) {
+        reassignPolicy();
+        DocumentApproval request = request("active", null);
+        unrelatedRoutes(request);
+        jdbc.update("UPDATE document_approval_step_approver SET user_id = ? "
+            + "WHERE workspace_id = ? AND user_id = ?", survivor.getId(), workspace.getId(), target.getId());
+        assertEquals(0, departureRequests("catalog").size());
+        if ("escalation".equals(kind)) {
+            jdbc.update("DELETE FROM document_approval_step_approver WHERE workspace_id = ? AND step_id = "
+                + "(SELECT id FROM document_approval_step WHERE approval_id = ? AND step_order = 1)",
+                workspace.getId(), request.getId());
+        }
+        String assignmentKind = kind.startsWith("delegation") ? "delegation" : kind;
+        Integer delegator = switch (kind) {
+            case "delegationTo" -> survivor.getId();
+            case "delegationFrom" -> target.getId();
+            default -> null;
+        };
+        int assignee = "delegationFrom".equals(kind) ? owner.getId() : target.getId();
+        jdbc.update("INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+            + "assignment_kind, assignment_round, approver_kind, user_id, delegated_by_user_id) "
+            + "SELECT workspace_id, approval_id, id, ?, ?, 'user', ?, ? "
+            + "FROM document_approval_step WHERE approval_id = ? AND step_order = 1", assignmentKind,
+            "reassignment".equals(kind) ? 1 : 0, assignee, delegator, request.getId());
+
+        assertEquals(1, departureRequests("workspace").size());
+        assertEquals(1, departureRequests("catalog").size());
+        assertEquals(1, departureRequests("catalog").getFirst().getAssignments().size());
+        if ("delegationFrom".equals(kind)) {
+            assertDoesNotThrow(() -> departureVerdict("workspace"));
+            assertDoesNotThrow(() -> departureVerdict("catalog"));
+        } else {
+            assertThrows(ConflictException.class, () -> departureVerdict("workspace"));
+            assertThrows(ConflictException.class, () -> departureVerdict("catalog"));
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"policy", "policyAnywhere", "request", "requestAnywhere"})
     void guardReadsFlushAPrimedRealSession(String query) {
         assertEquals(org.apache.ibatis.session.LocalCacheScope.SESSION,
             sqlSession.getConfiguration().getLocalCacheScope());
         DocumentApproval request = request("active", null);
         Supplier<List<Integer>> route = switch (query) {
-            case "policy" -> () -> policyMapper.findActiveStepsForDeparture(workspace.getId()).getFirst()
-                .getApprovers().stream().map(approver -> approver.getUserId()).toList();
-            case "policyAnywhere" -> () -> policyMapper.findActiveStepsForDepartureAnywhere().stream()
-                .filter(step -> step.getPolicyId() == policy.getId()).findFirst().orElseThrow()
-                .getApprovers().stream().map(approver -> approver.getUserId()).toList();
-            case "request" -> () -> approvalMapper.findOpenStepsForDeparture(workspace.getId()).getFirst()
-                .getApprovers().stream().map(approver -> approver.getUserId()).toList();
-            case "requestAnywhere" -> () -> approvalMapper.findOpenStepsForDepartureAnywhere().stream()
-                .filter(step -> step.getApprovalId() == request.getId()).findFirst().orElseThrow()
-                .getApprovers().stream().map(approver -> approver.getUserId()).toList();
+            case "policy" -> () -> policyMapper.findActiveStepsForDeparture(workspace.getId(), target.getId()).stream()
+                .flatMap(step -> step.getApprovers().stream()).map(approver -> approver.getUserId()).toList();
+            case "policyAnywhere" -> () -> policyMapper.findActiveStepsForDepartureAnywhere(target.getId()).stream()
+                .filter(step -> step.getPolicyId() == policy.getId())
+                .flatMap(step -> step.getApprovers().stream()).map(approver -> approver.getUserId()).toList();
+            case "request" -> () -> approvalMapper.findOpenStepsForDeparture(workspace.getId(), target.getId()).stream()
+                .flatMap(step -> step.getApprovers().stream()).map(approver -> approver.getUserId()).toList();
+            case "requestAnywhere" -> () -> approvalMapper.findOpenStepsForDepartureAnywhere(target.getId()).stream()
+                .filter(step -> step.getApprovalId() == request.getId())
+                .flatMap(step -> step.getApprovers().stream()).map(approver -> approver.getUserId()).toList();
             default -> throw new IllegalArgumentException(query);
         };
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             assertEquals(List.of(target.getId()), route.get());
-            jdbc.update("UPDATE approval_policy_step_approver SET user_id = ? WHERE workspace_id = ?",
-                survivor.getId(), workspace.getId());
-            jdbc.update("UPDATE document_approval_step_approver SET user_id = ? WHERE workspace_id = ?",
-                survivor.getId(), workspace.getId());
-            assertEquals(List.of(survivor.getId()), route.get());
+            jdbc.update("INSERT INTO approval_policy_step_approver (workspace_id, step_id, approver_kind, user_id) "
+                + "SELECT workspace_id, step_id, 'user', ? FROM approval_policy_step_approver "
+                + "WHERE workspace_id = ? AND user_id = ?", survivor.getId(), workspace.getId(), target.getId());
+            jdbc.update("INSERT INTO document_approval_step_approver (workspace_id, step_id, approver_kind, user_id) "
+                + "SELECT workspace_id, step_id, 'user', ? FROM document_approval_step_approver "
+                + "WHERE workspace_id = ? AND user_id = ?", survivor.getId(), workspace.getId(), target.getId());
+            assertEquals(List.of(target.getId(), survivor.getId()), route.get());
+            jdbc.update("UPDATE approval_policy_step_approver SET user_id = ? WHERE workspace_id = ? AND user_id = ?",
+                owner.getId(), workspace.getId(), target.getId());
+            jdbc.update("UPDATE document_approval_step_approver SET user_id = ? WHERE workspace_id = ? AND user_id = ?",
+                owner.getId(), workspace.getId(), target.getId());
+            assertEquals(List.of(), route.get());
             status.setRollbackOnly();
         });
     }
@@ -501,6 +597,53 @@ class DepartureReferencesIntegrationTest {
             + "AND decided_by = ?", Integer.class, workspace.getId(), target.getId()));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM document_approval_step_assignment WHERE workspace_id = ?",
             Integer.class, workspace.getId()));
+    }
+
+    private List<ApprovalPolicyStep> departurePolicies(String scope) {
+        return "workspace".equals(scope)
+            ? policyMapper.findActiveStepsForDeparture(workspace.getId(), target.getId())
+            : policyMapper.findActiveStepsForDepartureAnywhere(target.getId());
+    }
+
+    private List<DocumentApprovalStep> departureRequests(String scope) {
+        return "workspace".equals(scope)
+            ? approvalMapper.findOpenStepsForDeparture(workspace.getId(), target.getId())
+            : approvalMapper.findOpenStepsForDepartureAnywhere(target.getId());
+    }
+
+    private void departureVerdict(String scope) {
+        if ("workspace".equals(scope)) {
+            guard.assertCanDepart(workspace.getId(), target.getId());
+        } else {
+            guard.assertCanErase(target.getId());
+        }
+    }
+
+    /** Committed, set-based fixtures give unrelated steps several approvers and assignment facts. */
+    private void unrelatedRoutes(DocumentApproval request) {
+        jdbc.update("INSERT INTO approval_policy (workspace_id, name, active) VALUES (?, 'unrelated', TRUE)",
+            workspace.getId());
+        jdbc.update("INSERT INTO approval_policy_step (workspace_id, policy_id, step_order, required_count) "
+            + "WITH RECURSIVE numbers AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM numbers WHERE n < 256) "
+            + "SELECT p.workspace_id, p.id, n, 1 FROM approval_policy p CROSS JOIN numbers "
+            + "WHERE p.workspace_id = ? AND p.name = 'unrelated'", workspace.getId());
+        jdbc.update("INSERT INTO approval_policy_step_approver (workspace_id, step_id, approver_kind, user_id) "
+            + "SELECT s.workspace_id, s.id, 'user', u.user_id FROM approval_policy_step s "
+            + "JOIN approval_policy p ON p.id = s.policy_id CROSS JOIN (SELECT ? AS user_id UNION ALL SELECT ?) u "
+            + "WHERE s.workspace_id = ? AND p.name = 'unrelated'", owner.getId(), survivor.getId(), workspace.getId());
+        jdbc.update("INSERT INTO document_approval_step (workspace_id, approval_id, step_order, required_count, status) "
+            + "WITH RECURSIVE numbers AS (SELECT 2 AS n UNION ALL SELECT n + 1 FROM numbers WHERE n < 257) "
+            + "SELECT ?, ?, n, 1, 'pending' FROM numbers", workspace.getId(), request.getId());
+        jdbc.update("INSERT INTO document_approval_step_approver (workspace_id, step_id, approver_kind, user_id) "
+            + "SELECT s.workspace_id, s.id, 'user', u.user_id FROM document_approval_step s "
+            + "CROSS JOIN (SELECT ? AS user_id UNION ALL SELECT ?) u "
+            + "WHERE s.approval_id = ? AND s.step_order > 1", owner.getId(), survivor.getId(), request.getId());
+        jdbc.update("INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+            + "assignment_kind, assignment_round, approver_kind, user_id, delegated_by_user_id) "
+            + "SELECT s.workspace_id, s.approval_id, s.id, h.kind, 0, 'user', ?, h.delegator "
+            + "FROM document_approval_step s CROSS JOIN (SELECT 'reassignment' AS kind, NULL AS delegator "
+            + "UNION ALL SELECT 'escalation', NULL UNION ALL SELECT 'delegation', ?) h "
+            + "WHERE s.approval_id = ? AND s.step_order > 1", survivor.getId(), owner.getId(), request.getId());
     }
 
     private DocumentApproval request(String stepStatus, String expiry) {

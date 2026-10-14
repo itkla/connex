@@ -21,7 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  * writes platform-wide during every account deletion. Most of these indexes
  * exist only implicitly today (created by the cross-plane foreign keys), so
  * the FK-drop migration must replace them explicitly — this test fails the
- * build if it forgets.
+ * build if it forgets. Non-locking departure approval discovery also needs user-leading indexes
+ * so unrelated catalog traffic is never scanned for candidate step ids.
  */
 @SpringBootTest
 class OffboardingIndexArchTest {
@@ -82,7 +83,11 @@ class OffboardingIndexArchTest {
         new String[] {"sequence", "updated_by_id"},
         new String[] {"sequence_version_publisher", "published_by_id"},
         new String[] {"team", "manager_user_id"},
-        new String[] {"team_member", "user_id"});
+        new String[] {"team_member", "user_id"},
+        new String[] {"approval_policy_step_approver", "user_id"},
+        new String[] {"document_approval_step_approver", "user_id"},
+        new String[] {"document_approval_step_assignment", "user_id"},
+        new String[] {"document_approval_step_assignment", "delegated_by_user_id"});
 
     @Autowired private DataSource dataSource;
 

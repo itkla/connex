@@ -206,7 +206,12 @@
     SELECT s.id, s.workspace_id, s.policy_id, s.step_order, s.name, s.required_count,
            a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
            a.approver_kind, a.user_id AS approver_user_id
-    FROM approval_policy_step s
+    FROM (
+      SELECT DISTINCT workspace_id, step_id
+      FROM approval_policy_step_approver
+      WHERE user_id = #{userId} ${departureWorkspacePredicate}
+    ) candidate
+    JOIN approval_policy_step s ON s.workspace_id = candidate.workspace_id AND s.id = candidate.step_id
     JOIN approval_policy p ON p.workspace_id = s.workspace_id AND p.id = s.policy_id
     LEFT JOIN approval_policy_step_approver a
       ON a.workspace_id = s.workspace_id AND a.step_id = s.id
@@ -214,13 +219,17 @@
   </sql>
 
   <select id="findActiveStepsForDeparture" resultMap="ApprovalPolicyStepResult" flushCache="true">
-    <include refid="departureSteps"/>
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value="AND workspace_id = #{workspaceId}"/>
+    </include>
       AND s.workspace_id = #{workspaceId}
     ORDER BY s.id, a.id
   </select>
 
   <select id="findActiveStepsForDepartureAnywhere" resultMap="ApprovalPolicyStepResult" flushCache="true">
-    <include refid="departureSteps"/>
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value=""/>
+    </include>
     ORDER BY s.workspace_id, s.id, a.id
   </select>
 

@@ -21,14 +21,14 @@ public class DepartureApprovalGuard {
 
     /** Checks fresh non-locking routes in the workspace being left. */
     public void assertCanDepart(int workspaceId, int userId) {
-        assertCanDepart(userId, policyMapper.findActiveStepsForDeparture(workspaceId),
-            approvalMapper.findOpenStepsForDeparture(workspaceId));
+        assertCanDepart(userId, policyMapper.findActiveStepsForDeparture(workspaceId, userId),
+            approvalMapper.findOpenStepsForDeparture(workspaceId, userId));
     }
 
     /** Checks fresh non-locking routes throughout the currently routed tenant catalog. */
     public void assertCanErase(int userId) {
-        assertCanDepart(userId, policyMapper.findActiveStepsForDepartureAnywhere(),
-            approvalMapper.findOpenStepsForDepartureAnywhere());
+        assertCanDepart(userId, policyMapper.findActiveStepsForDepartureAnywhere(userId),
+            approvalMapper.findOpenStepsForDepartureAnywhere(userId));
     }
 
     private void assertCanDepart(int userId, List<ApprovalPolicyStep> policies,

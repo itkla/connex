@@ -32,11 +32,12 @@ public interface ApprovalPolicyMapper {
     int insertStepApprover(ApprovalStepApprover approver);
     int deleteStepsByPolicyId(@Param("workspaceId") int workspaceId, @Param("policyId") int policyId);
 
-    /** Fresh, non-locking routing facts for departure checks, including future open steps. */
-    List<ApprovalPolicyStep> findActiveStepsForDeparture(@Param("workspaceId") int workspaceId);
+    /** Fresh, non-locking complete routing facts only for steps mentioning the departing user. */
+    List<ApprovalPolicyStep> findActiveStepsForDeparture(@Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
 
-    /** Fresh, non-locking routing facts throughout the current tenant catalog. */
-    List<ApprovalPolicyStep> findActiveStepsForDepartureAnywhere();
+    /** Fresh, non-locking complete routing facts for this user throughout the current tenant catalog. */
+    List<ApprovalPolicyStep> findActiveStepsForDepartureAnywhere(@Param("userId") int userId);
 
     /** Discovers every frozen or template approver reference, including terminal and inactive ones. */
     List<ApprovalStepApprover> findDepartureReferences(@Param("workspaceId") int workspaceId,

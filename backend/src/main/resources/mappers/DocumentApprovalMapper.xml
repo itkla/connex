@@ -491,7 +491,20 @@
            h.id AS assignment_id, h.assignment_kind, h.assignment_round,
            h.approver_kind AS assignment_approver_kind, h.user_id AS assignment_user_id,
            h.delegated_by_user_id
-    FROM document_approval_step s
+    FROM (
+      SELECT workspace_id, step_id
+      FROM document_approval_step_approver
+      WHERE user_id = #{userId} ${departureWorkspacePredicate}
+      UNION
+      SELECT workspace_id, step_id
+      FROM document_approval_step_assignment
+      WHERE user_id = #{userId} ${departureWorkspacePredicate}
+      UNION
+      SELECT workspace_id, step_id
+      FROM document_approval_step_assignment
+      WHERE delegated_by_user_id = #{userId} ${departureWorkspacePredicate}
+    ) candidate
+    JOIN document_approval_step s ON s.workspace_id = candidate.workspace_id AND s.id = candidate.step_id
     JOIN document_approval r ON r.workspace_id = s.workspace_id AND r.id = s.approval_id
     LEFT JOIN document_approval_step_approver a
       ON a.workspace_id = s.workspace_id AND a.step_id = s.id
@@ -501,13 +514,17 @@
   </sql>
 
   <select id="findOpenStepsForDeparture" resultMap="DepartureStepResult" flushCache="true">
-    <include refid="departureSteps"/>
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value="AND workspace_id = #{workspaceId}"/>
+    </include>
       AND s.workspace_id = #{workspaceId}
     ORDER BY s.id, a.id, h.id
   </select>
 
   <select id="findOpenStepsForDepartureAnywhere" resultMap="DepartureStepResult" flushCache="true">
-    <include refid="departureSteps"/>
+    <include refid="departureSteps">
+      <property name="departureWorkspacePredicate" value=""/>
+    </include>
     ORDER BY s.workspace_id, s.id, a.id, h.id
   </select>
 

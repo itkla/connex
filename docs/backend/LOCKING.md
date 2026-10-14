@@ -275,7 +275,11 @@ cleanup cannot inherit the active-header workspace.
 The sole named approver guard uses fresh non-locking MyBatis reads (`flushCache="true"`) inside each
 existing departure transaction, after its existing lock prefix and before destructive work. Routing
 replay is pure Java; named routes are distinct from permission-filtered decision eligibility. It
-adds no policy, document, deal, or goal aggregate lock and no writer fence.
+adds no policy, document, deal, or goal aggregate lock and no writer fence. Each read first discovers
+candidate step ids through user-leading indexes on frozen/policy approvers and assignment users or
+delegators, then loads every routing fact only for those steps in the same statement snapshot.
+Steps whose routing facts never mention the departing user cannot make that user their sole named
+approver and are omitted; unrelated catalog approval traffic is not materialized.
 
 Goal and policy/frozen approver cleanup uses conditional single-table statements keyed exactly by
 workspace, row id, and departing user. It runs last, after the workspace-cleanup and catalog-erasure
