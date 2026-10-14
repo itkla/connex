@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.delivery;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +37,7 @@ import ooo.klae.connex.backend.services.AutomationExecutor;
 import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Processes queued campaign deliveries for a send, claim-first and never throwing to the caller
@@ -57,6 +61,7 @@ public class CampaignDispatchService {
     private static final int QUIET_START_HOUR = -1;
     private static final int QUIET_END_HOUR = -1;
     private static final int ERROR_LIMIT = 512;
+    private static final SecureRandom RANDOM = new SecureRandom();
     private static final String EXPIRED_NON_IDEMPOTENT_CLAIM =
             "AMBIGUOUS: Worker claim expired on a transport without idempotent submission";
     private static final String EXPIRED_CHANGED_TARGET_CLAIM =
@@ -83,6 +88,7 @@ public class CampaignDispatchService {
     private final WorkflowRunMapper workflowRunMapper;
     private final CampaignDispatchClaimBoundary claimBoundary;
     private final CampaignFrequencyAdmissionService frequencyAdmissionService;
+    private final CampaignUnsubscribeTokenRegistrationService unsubscribeTokenRegistrationService;
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
     private LongSupplier nanoTimeSource = System::nanoTime;
@@ -109,7 +115,7 @@ public class CampaignDispatchService {
             } catch (Exception exception) {
                 failed++;
                 log.warn("Campaign send {} dispatch failed in workspace {}: {}",
-                        sendId, workspaceId, exception.getMessage());
+                        sendId, workspaceId, bounded(exception.getMessage()));
             }
         }
         return failed;
@@ -195,7 +201,7 @@ public class CampaignDispatchService {
                     () -> deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel));
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
-            log.warn("Campaign send {} has no usable provider: {}", sendId, exception.getMessage());
+            log.warn("Campaign send {} has no usable provider: {}", sendId, bounded(exception.getMessage()));
             return false;
         }
         CampaignMessageRevision revision =
@@ -299,7 +305,7 @@ public class CampaignDispatchService {
                     leaseOwner,
                     lastError,
                     CampaignDeliveryFailureReason.classify(lastError, false).token());
-            log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, exception.getMessage());
+            log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, lastError);
         }
     }
 
@@ -334,7 +340,9 @@ public class CampaignDispatchService {
             }
             return;
         }
-        RenderedMessage content = render(channel, revision, delivery);
+        String unsubscribeToken = newUnsubscribeToken();
+        String unsubscribeTokenHash = OneTimeTokenDigest.sha256(unsubscribeToken);
+        RenderedMessage content = render(channel, revision, unsubscribeToken);
         long providerDeadlineNanos = providerDeadlineNanos();
         claimBoundary.beforeProviderLeaseRenewal(workspaceId, deliveryId);
         if (leaseOwner != null) {
@@ -356,6 +364,14 @@ public class CampaignDispatchService {
                     "Provider deadline expired before egress",
                     CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
             return;
+        }
+        try {
+            if (!unsubscribeTokenRegistrationService.register(
+                    workspaceId, deliveryId, leaseOwner, unsubscribeTokenHash)) {
+                return;
+            }
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Unsubscribe token registration failed", exception);
         }
         if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
             CampaignFrequencyAdmissionService.Admission admission = frequencyAdmissionService.reserve(
@@ -416,31 +432,47 @@ public class CampaignDispatchService {
             receipt = DispatchReceipt.ambiguous(
                     "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
+        String diagnostic = CampaignDeliveryDiagnostics.scrub(receipt.detail(), unsubscribeToken);
         if (receipt.status() == DispatchStatus.SENT) {
+            String providerMessageId;
             int updated;
             try {
+                providerMessageId = CampaignDeliveryDiagnostics.correlationForm(receipt.providerMessageId(),
+                        hashes -> {
+                            Set<String> unresolved = new HashSet<>(hashes);
+                            boolean includesCurrent = unresolved.remove(unsubscribeTokenHash);
+                            Set<String> recorded = unresolved.isEmpty() ? new HashSet<>() : new HashSet<>(
+                                    campaignDeliveryMapper.findUnsubscribeTokenHashes(workspaceId, List.copyOf(unresolved)));
+                            if (includesCurrent) {
+                                recorded.add(unsubscribeTokenHash);
+                            }
+                            return recorded;
+                        });
+                if (receipt.providerMessageId() != null && providerMessageId == null) {
+                    log.warn("Campaign delivery {} accepted with an unusable provider identifier", deliveryId);
+                }
                 updated = leaseOwner == null
                     ? campaignDeliveryMapper.markDispatched(
-                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId())
+                        workspaceId, deliveryId, target.providerId(), providerMessageId)
                     : campaignDeliveryMapper.markTriggeredDispatched(
                         workspaceId, deliveryId, leaseOwner, target.providerId(),
-                        receipt.providerMessageId());
+                        providerMessageId);
             } catch (RuntimeException exception) {
                 throw new AmbiguousDispatchException(exception);
             }
             if (updated == 1) {
-                appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+                appendEvent(workspaceId, deliveryId, "dispatched", diagnostic);
             } else if (leaseOwner == null) {
                 attachLateAudienceProviderCorrelation(
-                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
+                        workspaceId, deliveryId, target.providerId(), providerMessageId);
             } else {
                 attachLateTriggeredProviderCorrelation(
-                        workspaceId, deliveryId, target, receipt.providerMessageId());
+                        workspaceId, deliveryId, target, providerMessageId);
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
-                    ? "AMBIGUOUS: " + receipt.detail()
-                    : receipt.detail();
+                    ? "AMBIGUOUS: " + diagnostic
+                    : diagnostic;
             String failureCode = CampaignDeliveryFailureReason.classify(
                     failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
             if (receipt.provenBeforeEgress()) {
@@ -504,9 +536,9 @@ public class CampaignDispatchService {
         }
         return leaseOwner == null
             ? campaignDeliveryMapper.markFailed(
-                    workspaceId, deliveryId, lastError, lastErrorCode)
+                    workspaceId, deliveryId, bounded(lastError), lastErrorCode)
             : campaignDeliveryMapper.markTriggeredFailed(
-                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+                    workspaceId, deliveryId, leaseOwner, bounded(lastError), lastErrorCode);
     }
 
     private boolean hasEarlierSubmissionUncertainty(CampaignDelivery history) {
@@ -538,9 +570,9 @@ public class CampaignDispatchService {
             String lastErrorCode) {
         return leaseOwner == null
             ? campaignDeliveryMapper.markAmbiguous(
-                    workspaceId, deliveryId, lastError, lastErrorCode)
+                    workspaceId, deliveryId, bounded(lastError), lastErrorCode)
             : campaignDeliveryMapper.markTriggeredAmbiguous(
-                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+                    workspaceId, deliveryId, leaseOwner, bounded(lastError), lastErrorCode);
     }
 
     private int markAmbiguousOrThrow(
@@ -881,8 +913,8 @@ public class CampaignDispatchService {
      * carry no subject or HTML body — so only the text body is rendered and handed to the adapter.
      */
     private RenderedMessage render(
-            DeliveryChannel channel, CampaignMessageRevision revision, CampaignDelivery delivery) {
-        Map<String, String> tokens = Map.of("unsubscribe_url", unsubscribeUrl(delivery.getUnsubscribeToken()));
+            DeliveryChannel channel, CampaignMessageRevision revision, String unsubscribeToken) {
+        Map<String, String> tokens = Map.of("unsubscribe_url", unsubscribeUrl(unsubscribeToken));
         String text = revision.getBodyText() == null ? null : substitutePlain(revision.getBodyText(), tokens);
         if (channel == DeliveryChannel.SMS) {
             return new RenderedMessage(null, null, text);
@@ -890,6 +922,12 @@ public class CampaignDispatchService {
         String subject = revision.getSubject() == null ? null : substitutePlain(revision.getSubject(), tokens);
         String html = revision.getBodyHtml() == null ? null : substituteHtml(revision.getBodyHtml(), tokens);
         return new RenderedMessage(subject, html, text);
+    }
+
+    private static String newUnsubscribeToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
     private String unsubscribeUrl(String token) {
@@ -954,7 +992,7 @@ public class CampaignDispatchService {
         if (message == null || message.isBlank()) {
             return null;
         }
-        String trimmed = message.trim();
+        String trimmed = CampaignDeliveryDiagnostics.scrub(message, null).trim();
         return trimmed.length() > ERROR_LIMIT ? trimmed.substring(0, ERROR_LIMIT) : trimmed;
     }
 

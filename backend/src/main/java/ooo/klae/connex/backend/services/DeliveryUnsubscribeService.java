@@ -25,10 +25,10 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Handles the public unsubscribe endpoints. The raw emailed token is seen once, by
- * {@link #exchange}, which turns it into the SHA-256 digest the generated
- * {@code campaign_delivery.unsubscribe_token_hash} column is keyed on; that digest alone identifies
- * a single {@code campaign_delivery} row, the workspace is resolved from that row and never trusted
- * from the request, so no caller-supplied id is honored. The whole operation is idempotent.
+ * {@link #exchange}, which turns it into a SHA-256 digest retained in
+ * {@code campaign_delivery_unsubscribe_token}. Every attempt's digest identifies
+ * the same {@code campaign_delivery} row for that delivery's lifetime. The workspace is resolved
+ * from that row and never trusted from the request, so no caller-supplied id is honored. The whole operation is idempotent.
  *
  * <p>The only caller these endpoints have is an email recipient with no session, so
  * {@code TenantResolutionInterceptor} leaves the request thread unresolved and every

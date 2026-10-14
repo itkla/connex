@@ -48,6 +48,13 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void unsubscribeDigestBatchRequiresTheSameScopeAsTheSingleLookup() {
+        assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.getUnsubscribeTokenDeliveryId"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.findUnsubscribeTokenHashes"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.getByTokenHash"));
+    }
+
+    @Test
     void assignmentMaintenanceHasExactExemptionsAndAControlOnlyIdentityLookup() {
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(NS + "AssignmentSweepMapper"));
         for (String method : Set.of("findWatermark", "findReferencesAnywhere", "lockParent", "clearOwner",

@@ -347,6 +347,9 @@ public final class TenantLifecycleRegistry {
         raw.add(storage("managed_object_usage", 600));
         raw.add(storage("object_deletion_queue", 610));
         raw.add(storage("object_storage_quota", 620));
+        raw.add(cascade("campaign_delivery_unsubscribe_token", "campaign_delivery",
+            "fk_campaign_unsubscribe_delivery",
+            link("workspace_id", "workspace_id"), link("delivery_id", "id")));
         raw.add(cascade("attachment_tag", "attachment",
             "fk_attachment_tag_attachment", link("attachment_id", "id")));
         raw.add(cascade("company_tag", "company",

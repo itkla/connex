@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -61,8 +60,6 @@ public class CampaignSendService {
     private static final String DEFAULT_PURPOSE = "marketing";
     private static final Set<String> LOCALES = Set.of("en", "ja");
     private static final int SQL_BATCH_SIZE = 500;
-    private static final int TOKEN_BYTES = 32;
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final CampaignMapper campaignMapper;
     private final CampaignMessageMapper campaignMessageMapper;
@@ -354,7 +351,6 @@ public class CampaignSendService {
             delivery.setPersonId(personId);
             delivery.setAddress(address);
             delivery.setStatus("pending");
-            delivery.setUnsubscribeToken(newToken());
             deliveries.add(delivery);
         }
         return deliveries;
@@ -479,17 +475,6 @@ public class CampaignSendService {
             throw new BadRequestException("Campaign send purpose is invalid");
         }
         return normalized;
-    }
-
-    private static String newToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        StringBuilder builder = new StringBuilder(TOKEN_BYTES * 2);
-        for (byte value : bytes) {
-            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
-            builder.append(Character.forDigit(value & 0xF, 16));
-        }
-        return builder.toString();
     }
 
     private static String trimToNull(String value) {
