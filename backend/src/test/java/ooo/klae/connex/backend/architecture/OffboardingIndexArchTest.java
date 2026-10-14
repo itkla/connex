@@ -84,6 +84,8 @@ class OffboardingIndexArchTest {
         new String[] {"sequence_version_publisher", "published_by_id"},
         new String[] {"team", "manager_user_id"},
         new String[] {"team_member", "user_id"},
+        new String[] {"report_goal", "owner_id"},
+        new String[] {"report_goal", "created_by"},
         new String[] {"approval_policy_step_approver", "user_id"},
         new String[] {"document_approval_step_approver", "user_id"},
         new String[] {"document_approval_step_assignment", "user_id"},

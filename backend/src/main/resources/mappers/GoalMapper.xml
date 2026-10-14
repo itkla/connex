@@ -56,8 +56,11 @@
   </select>
 
   <select id="findDepartureReferencesAnywhere" resultType="ReportGoal" flushCache="true">
-    SELECT <include refid="columns"/> FROM report_goal
-    WHERE owner_id = #{userId} OR created_by = #{userId}
+    SELECT id, workspace_id FROM report_goal
+    WHERE owner_id = #{userId}
+    UNION
+    SELECT id, workspace_id FROM report_goal
+    WHERE created_by = #{userId}
     ORDER BY workspace_id, id
   </select>
 

@@ -33,7 +33,7 @@ public interface GoalMapper {
     List<ReportGoal> findDepartureReferences(@Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
 
-    /** Fresh, non-locking discovery of owner and creator references in this catalog. */
+    /** Fresh, non-locking discovery of distinct row and workspace ids for owner/creator references. */
     List<ReportGoal> findDepartureReferencesAnywhere(@Param("userId") int userId);
 
     /** Deletes only the discovered personal goal if its owner still matches. */
