@@ -365,6 +365,67 @@ Those items' webhooks match no delivery and record no suppression and no consent
 records for that recipient and add any suppression by hand** (`POST /api/suppressions`). Where the
 message ID was attached after all, the webhook has already recorded the suppression and the manual
 check simply finds nothing left to add.
+Each campaign dispatch attempt re-renders its unsubscribe link with a fresh random 64-character
+lowercase hexadecimal bearer. Registration commits only its SHA-256 digest before submission;
+`campaign_delivery_unsubscribe_token` retains all issued digests, including migrated deliveries and
+prior attempts. Links have no expiry and work while their delivery exists. Newly materialized recipients
+have no digest until dispatch reaches registration. Workspace exports reveal digests, which
+cannot be exchanged as bearers.
+
+Provider diagnostics and returned message ids can echo the rendered message. Before truncation,
+storage in delivery errors or event details, or logging, Connex replaces the attempt's bearer and
+any 64-hex run with `[redacted]`, keeping the remaining diagnostic text. Returned provider message
+ids use one correlation form: inspect every case-insensitive 64-hex window, including windows inside
+longer runs, and replace a matching bearer window with the SHA-256 digest of its lowercase text.
+Each pass uses the leftmost non-overlapping replacements and rescans its output, since a replacement
+can recreate an overlapping bearer. After at most four replacement passes, a final scan must find
+no recorded bearer. An identifier still containing one is unusable: dispatch stores a NULL message
+id and logs a WARN without the identifier; webhook message lookup returns no match; event persistence
+stores NULL and gives up provider-key deduplication for that event. Ordinary missing event ids retain
+the existing event-type fallback. Dispatch and webhooks match the same workspace's recorded digests;
+dispatch also recognizes the current attempt's digest explicitly,
+so a replay returning the original receipt is safe. Webhooks normalize both incoming message ids
+before lookup and event ids before deduplication against recorded digests in the resolved workspace.
+Unrelated ids, including opaque 64-hex ids, stay byte-identical, so bounce and complaint webhooks still
+correlate, suppress, and revoke consent. Webhook free-text reasons use the generic `[redacted]` rule.
+Each pass computes every candidate digest before one workspace-scoped `token_hash IN (...)` query
+resolves uncached membership. Positive and negative results are cached for that identifier only.
+There are at most five queries per identifier, including the final residual check; short ids do not
+query. These are plain non-locking consistent reads, and dispatch's current digest needs no lookup.
+Identifiers exceeding the 255-code-point storage limit are rejected before persistence or digest
+probes; accepted receipts then require reconciliation. Oversized incoming webhook message ids
+cannot match stored ids and are ignored without probes; oversized event ids still reject persistence.
+V228 rewrites each delivery's own historical bearer case-insensitively and clears any message id
+still containing it after replacement. Foreign historical bearers are outside that bounded guarantee
+(see `UPGRADING.md`). Event rekeying skips
+unique-key conflicts, then clears every remaining bearer-bearing key to NULL, covering collisions
+with existing canonical keys and between legacy rows being rekeyed.
+Both the native Angus SMTP loggers and Connex's transport package loggers receive the free-text
+scrubbing before their diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
+TRACE, regardless of body encoding; command and response diagnostics remain available. The native
+Angus transport starts suppression when `data()` returns its stream after the 354 response, and
+serializes the original message directly to that stream once. It performs no message copy or
+pre-egress serialization. `mail.smtp.chunksize=0` keeps BDAT disabled; the `bdat()` stream hook also
+starts fail-safe suppression if chunking is ever enabled: without a DATA dot terminator, suppression
+lasts until send cleanup and hides BDAT commands and replies too. Under DATA, the dot terminator
+resumes response tracing, and send/close cleanup clears suppression even on failure. Socket abort still precedes synchronized
+transport close at the deadline, releasing a blocked send before cross-thread close acquires its
+monitor.
+Angus names its loggers after the transport class's package, so SMTP diagnostics and protocol
+traces now log under `ooo.klae.connex.backend.delivery.provider.smtp` and
+`ooo.klae.connex.backend.delivery.provider.smtp.protocol`; enable those, not the
+`org.eclipse.angus.mail.smtp` names, when tracing SMTP commands.
+
+**An idempotent replay re-renders the unsubscribe link under the unchanged
+`send:{sendId}:{deliveryId}` key.** An endpoint that compares request bodies under a key (such as
+Resend's 409 response) refuses the changed replay. The earlier acceptance remains **ambiguous** and
+enters the reconciliation path and manual suppression check above. An endpoint that deduplicates
+solely by key returns the original receipt, allowing recovery. With either contract the provider
+accepts at most one message, and every emailed link remains valid. This applies to claims in flight
+at the V227/V228 cutover too; their old bearer cannot be reconstructed. Connector administrators
+must account for this difference when opting into replay; Connex introduces no new provider retry
+policy or required secret.
+
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -35,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
@@ -130,7 +132,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admission, automationExecutor(), systemActor());
+                admission, registration(), automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -228,7 +230,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
         ReflectionTestUtils.setField(service, "nanoTimeSource", (java.util.function.LongSupplier) now::get);
 
         assertTrue(service.processSend(7, 11));
@@ -284,7 +286,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admittedFrequency(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor());
 
         assertTrue(service.processSend(7, 11));
 
@@ -818,7 +820,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
     }
 
     private static CampaignDispatchService audienceDispatch(
@@ -848,7 +850,248 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
                 providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, false, upper", "false, true, upper", "true, false, upper", "true, true, upper",
+            "false, false, mixed", "false, true, mixed", "true, false, mixed", "true, true, mixed",
+            "false, false, long", "false, true, long", "true, false, long", "true, true, long"})
+    void providerMessageIdsUseWorkspaceHistoryBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late, String variant) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDelivery attempt = delivery();
+        attempt.setPersonId(null);
+        CampaignDispatchService service = triggered
+                ? triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency())
+                : audienceDispatch(deliveryMapper, dispatcher, admittedFrequency(), attempt);
+        when(deliveryMapper.renewAudienceClaim(eq(7), eq(13), anyLong())).thenReturn(1);
+        CampaignMessageRevision revision = revision();
+        revision.setBodyHtml("<a href=\"{{unsubscribe_url}}\">Unsubscribe</a>");
+        CampaignMessageMapper messageMapper = (CampaignMessageMapper) ReflectionTestUtils.getField(service, "campaignMessageMapper");
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
+        String earlierBearer = "ab09".repeat(16);
+        String earlierDigest = ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(earlierBearer);
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            return hashes.contains(earlierDigest) ? List.of(earlierDigest) : List.of();
+        });
+        java.util.concurrent.atomic.AtomicReference<String> currentDigest = new java.util.concurrent.atomic.AtomicReference<>();
+        when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
+            DeliveryRequest request = invocation.getArgument(1);
+            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(request.content().bodyHtml());
+            assertTrue(token.find());
+            currentDigest.set(ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(token.group(1)));
+            String originalId = switch (variant) {
+                case "upper" -> earlierBearer.toUpperCase(java.util.Locale.ROOT);
+                case "mixed" -> "Ab09".repeat(16);
+                default -> "0" + earlierBearer + "f";
+            };
+            return DispatchReceipt.sent("receipt " + originalId + " current " + token.group(1)
+                    + " diagnostic " + "AB".repeat(32) + " retained",
+                    "accepted");
+        });
+        when(deliveryMapper.markDispatched(eq(7), eq(13), eq("smtp"), any())).thenReturn(late ? 0 : 1);
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any()))
+                .thenReturn(late ? 0 : 1);
+        assertTrue(service.processSend(7, 11));
+        String expected = "receipt " + ("long".equals(variant) ? "0" + earlierDigest + "f" : earlierDigest)
+                + " current " + currentDigest.get() + " diagnostic " + "AB".repeat(32) + " retained";
+        if (triggered) {
+            verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), eq(expected));
+            if (late) {
+                verify(deliveryMapper).attachLateTriggeredProviderCorrelation(eq(7), eq(13), eq("smtp"), anyString(), eq(expected));
+            }
+        } else {
+            verify(deliveryMapper).markDispatched(7, 13, "smtp", expected);
+            if (late) {
+                verify(deliveryMapper).attachLateAudienceProviderCorrelation(eq(7), eq(13), eq("smtp"), eq(expected), any(), anyString());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void overlappingReceiptBearersAreRemovedAndUnusableIdsAreNotStored(boolean unusable) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        var fixture = ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.create();
+        java.util.Set<String> digests = java.util.Set.of(
+                ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.first()),
+                ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.second()));
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            return hashes.stream().filter(hash -> unusable || digests.contains(hash)).toList();
+        });
+        String identifier = fixture.identifier().toUpperCase(java.util.Locale.ROOT);
+        when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent(identifier, "accepted"));
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(CampaignDispatchService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+                new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            assertTrue(service.processSend(7, 11));
+            ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
+            verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), stored.capture());
+            if (unusable) {
+                assertNull(stored.getValue());
+                assertTrue(logs.list.stream().anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && event.getFormattedMessage().contains("unusable provider identifier")));
+            } else {
+                assertEquals(ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.first()).substring(0, 63)
+                        + ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.second()), stored.getValue());
+                assertFalse(stored.getValue().toLowerCase(java.util.Locale.ROOT).contains(fixture.first()));
+                assertFalse(stored.getValue().toLowerCase(java.util.Locale.ROOT).contains(fixture.second()));
+            }
+            assertTrue(logs.list.stream().noneMatch(event -> event.getFormattedMessage().contains(identifier)
+                    || event.getFormattedMessage().toLowerCase(java.util.Locale.ROOT).contains(fixture.first())
+                    || event.getFormattedMessage().toLowerCase(java.util.Locale.ROOT).contains(fixture.second())));
+        } finally {
+            logger.detachAppender(logs);
+            logs.stop();
+        }
+    }
+
+    @Test
+    void maximumHexReceiptUsesAtMostFiveMembershipQueries() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        List<List<String>> queries = new java.util.ArrayList<>();
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            queries.add(List.copyOf(hashes));
+            return hashes;
+        });
+        when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent(
+                ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.longHexIdentifier(), "accepted"));
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        assertTrue(service.processSend(7, 11));
+        assertEquals(5, queries.size());
+        assertEquals(192, queries.getFirst().size());
+        verify(deliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), anyString());
+        verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void oversizedAcceptedReceiptBecomesAmbiguousBeforeProbingOrPersistingItsId() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent("a".repeat(256), "accepted"));
+        assertTrue(service.processSend(7, 11));
+        verify(deliveryMapper, never()).findUnsubscribeTokenHashes(anyInt(), any());
+        verify(deliveryMapper, never()).markTriggeredDispatched(anyInt(), anyInt(), anyString(), anyString(), any());
+        verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(),
+                eq("AMBIGUOUS: Provider outcome could not be persisted definitively"), eq("relay_error"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(DispatchStatus.class)
+    void providerDiagnosticsAreScrubbedBeforeEveryOutcomeIsPersisted(DispatchStatus status) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        CampaignMessageRevision revision = revision();
+        revision.setBodyHtml("<a href=\"{{unsubscribe_url}}\">Unsubscribe</a>");
+        CampaignMessageMapper messageMapper = (CampaignMessageMapper) ReflectionTestUtils.getField(service, "campaignMessageMapper");
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
+        when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
+            DeliveryRequest request = invocation.getArgument(1);
+            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(request.content().bodyHtml());
+            assertTrue(token.find());
+            return new DispatchReceipt(status, null,
+                    "554 rejected " + token.group(1) + " diagnostic " + "AB".repeat(32) + " retained", false);
+        });
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        when(deliveryMapper.markTriggeredFailed(eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        when(deliveryMapper.markTriggeredAmbiguous(eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        assertTrue(service.processSend(7, 11));
+        String expected = (status == DispatchStatus.AMBIGUOUS ? "AMBIGUOUS: " : "")
+                + "554 rejected [redacted] diagnostic [redacted] retained";
+        ArgumentCaptor<CampaignDeliveryEvent> event = ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(deliveryMapper).insertEvent(event.capture());
+        assertEquals(expected, event.getValue().getDetail());
+        if (status == DispatchStatus.REJECTED) {
+            verify(deliveryMapper).markTriggeredFailed(eq(7), eq(13), anyString(), eq(expected), anyString());
+        } else if (status == DispatchStatus.AMBIGUOUS) {
+            verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(), eq(expected), anyString());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void registrationFailureStopsEgressAndPreservesEarlierUncertainty(boolean earlierUncertainty) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(eq(7), eq(13), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("private SQL detail"));
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+        CampaignDelivery attempt = delivery();
+        if (earlierUncertainty) {
+            attempt.setLastErrorCode("deadline_ambiguous");
+        }
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+
+        assertTrue(service.processSend(7, 11));
+
+        verifyNoInteractions(dispatcher);
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        if (earlierUncertainty) {
+            verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(), anyString(), eq("deadline_ambiguous"));
+        } else {
+            verify(deliveryMapper).markTriggeredFailed(eq(7), eq(13), anyString(),
+                    eq("Unsubscribe token registration failed"), eq("relay_error"));
+        }
+    }
+
+    @Test
+    void lostClaimAtRegistrationStopsEgress() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignFrequencyAdmissionService admission = admittedFrequency();
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admission);
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(registration).register(eq(7), eq(13), anyString(), anyString());
+        verifyNoInteractions(dispatcher);
+        verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
+        verify(deliveryMapper, never()).markTriggeredFailed(anyInt(), anyInt(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void registrationFailureScrubsEarlierDiagnosticsWhilePreservingSubmissionUncertainty() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(eq(7), eq(13), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("private SQL detail"));
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+        CampaignDelivery attempt = delivery();
+        attempt.setLastError("AMBIGUOUS: 554 rejected " + "a".repeat(64) + " retained");
+        attempt.setLastErrorCode("deadline_ambiguous");
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+        assertTrue(service.processSend(7, 11));
+        verifyNoInteractions(dispatcher);
+        verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(),
+                eq("AMBIGUOUS: 554 rejected [redacted] retained"), eq("deadline_ambiguous"));
+    }
+
+    private static CampaignUnsubscribeTokenRegistrationService registration() {
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(anyInt(), anyInt(), any(), anyString())).thenReturn(true);
+        return registration;
     }
 
     private static AutomationExecutor automationExecutor() {
@@ -909,7 +1152,6 @@ class CampaignDispatchServiceTest {
         delivery.setId(13);
         delivery.setPersonId(17);
         delivery.setAddress("recipient@dest.test");
-        delivery.setUnsubscribeToken("token");
         return delivery;
     }
 
@@ -967,6 +1209,6 @@ class CampaignDispatchServiceTest {
                 gate,
                 mock(WorkflowRunMapper.class),
                 mock(CampaignDispatchClaimBoundary.class),
-                admittedFrequency(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor());
     }
 }

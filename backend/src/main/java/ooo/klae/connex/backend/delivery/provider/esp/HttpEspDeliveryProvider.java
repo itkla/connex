@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.delivery.CampaignDeliveryDiagnostics;
 import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
@@ -430,7 +431,7 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
         if (message == null || message.isBlank()) {
             return null;
         }
-        String trimmed = message.trim();
+        String trimmed = CampaignDeliveryDiagnostics.scrub(message, null).trim();
         return trimmed.length() > DETAIL_LIMIT ? trimmed.substring(0, DETAIL_LIMIT) : trimmed;
     }
 

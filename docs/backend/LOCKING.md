@@ -1143,6 +1143,67 @@ serializes cooperating writers. The unique triggered-send key and catch-and-re-r
 race defense across mixed-version writers. Missing child-row locking reads never substitute for the
 campaign mutex. No provider dispatch occurs in this transaction.
 
+Campaign dispatch mints a fresh random 64-character lowercase hexadecimal unsubscribe bearer for
+one rendered attempt; materialization and triggered enrollment mint none. Only its SHA-256 digest
+enters `campaign_delivery_unsubscribe_token`. Every attempt's digest, including migrated legacy
+digests and unused attempts, remains valid until its delivery is deleted. The bearer lives only in
+the rendered message and provider request; export contains digests alone. Provider diagnostics are
+scrubbed of the exact attempt bearer and all 64-hex runs before truncation, error/event persistence,
+or logging. Native Angus and Connex transport package loggers scrub SMTP diagnostics before
+forwarding to handlers.
+The native Angus transport suppresses MIME DATA tracing when its `data()` stream returns after
+354, then serializes the original message once without a copy or pre-egress serialization. The
+`bdat()` stream is protected too, while `mail.smtp.chunksize=0` disables chunking. DATA's dot
+terminator resumes final-response diagnostics; under BDAT, fail-safe suppression lasts until send
+cleanup and also hides BDAT commands and replies. Send/close finally blocks clear suppression.
+Provider identifiers share a digest correlation form: every case-insensitive 64-hex window is
+hashed after lowercasing, including windows inside longer runs. Matching recorded digests replace
+the bearer window; unrelated identifier bytes, including opaque 64-hex ids, survive. Dispatch uses
+the resolved workspace's digest history plus the current attempt's digest, including when a replay
+returns the original receipt. Webhook message lookup and event dedupe use the same workspace scope.
+Correlation rescans replacement output for at most four replacement passes, then checks for residual
+bearers. An unusable id becomes NULL at dispatch (with an identifier-free WARN) or event persistence,
+or no match at webhook message lookup. Unusable event ids give up provider-key deduplication;
+ordinary missing event ids keep the existing fallback. Free-text webhook reasons redact all 64-hex
+runs. Each pass collects all candidate digests before `findUnsubscribeTokenHashes` resolves uncached
+membership with one workspace-scoped `token_hash IN (...)` query. Positive and negative membership
+is cached per identifier call only, so an identifier needs at most five queries, including the final
+residual scan. Dispatch's current digest is recognized explicitly without a lookup. These are plain
+consistent reads without `FOR UPDATE` or shared locks, and they acquire no row locks even while
+another transaction holds an exclusive child-row lock. Empty batches return no rows; short ids
+perform no queries. They add no lock-order
+edge to dispatch or the existing webhook transaction. Identifiers exceeding the 255-code-point
+storage limit are rejected before persistence or probes; accepted receipts then require reconciliation.
+Oversized webhook message ids instead return no match without probes; event id persistence still
+rejects oversized ids. V228 rekeys historical identifiers case-insensitively to digests with
+`UPDATE IGNORE`, skipping unique-key conflicts, then sets every event key still containing its
+delivery's bearer to NULL. This covers collisions with existing canonical keys and between legacy
+rows being rekeyed under the same workspace/provider, including rows from different deliveries. V228
+also clears message ids still containing their own
+bearer after replacement; foreign historical bearers remain outside its bounded guarantee, as
+explained in `UPGRADING.md`. Runtime matching uses the workspace scope without locking reads.
+
+After lease renewal and before frequency admission, the proxied
+`CampaignUnsubscribeTokenRegistrationService.register` opens a short `READ_COMMITTED` transaction:
+`campaign_delivery FOR UPDATE` → current claim/status/database-clock triggered lease validation →
+child digest INSERT. The insert takes exclusive index locks and a shared composite-FK parent check.
+It takes no workspace, campaign, send, authorization, or audit lock. Commit completes before dispatch
+returns to the workspace → delivery frequency transaction, and provider I/O holds neither
+transaction's locks. Recovery and deletion wait on the delivery; a waiting stale registrar rechecks
+the owner after acquiring it. Cascade deletion follows parent → child. Duplicate-key contention can
+still deadlock: rollback and fail closed without provider egress, with sanitized persistence errors.
+No database retry encloses provider submission. Death after registration leaves an unused digest;
+death after submission leaves a working emailed link even without terminal evidence. Earlier
+submission uncertainty survives registration failure.
+
+An opted-in idempotent replay keeps `send:{sendId}:{deliveryId}` but re-renders a fresh unsubscribe
+link. A body-comparing provider refuses the changed body and the earlier acceptance remains
+ambiguous for reconciliation; a body-insensitive provider returns its original receipt. Neither
+provider submits a second email, and both registered links resolve. This also applies to migrated
+in-flight claims whose legacy bearer is no longer reconstructable. See `DELIVERABILITY.md` §3 and
+`UPGRADING.md`'s V227/V228 cutover. Backfill uses `INSERT ... SELECT` across every status; outside
+`READ_COMMITTED` MySQL may take shared source next-key locks, so all writers must be stopped.
+
 Triggered delivery dispatch uses a separate, short owner-fenced claim update. The claim stores a UUID
 owner and a database-clock expiry whose duration is the bounded provider deadline plus its safety
 margin. Provider I/O runs outside database locks. Immediately before provider egress the
