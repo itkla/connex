@@ -97,6 +97,7 @@ public class ReferenceService {
             + "(?:\\r?\\n[ \\t]++)?([^\\r\\n]++)$");
     private static final Pattern MEMBER_REFERENCE_DESTINATION = Pattern.compile(
         "(?i)<?user:(\\d+)>?(?:[ \\t].*)?");
+    private static final Pattern MEMBER_DEFINITION_DESTINATION = Pattern.compile("(?i)<?user:(\\d+)>?");
 
     /**
      * Reader-scoped prose and structured references after invisible targets are removed.
@@ -697,9 +698,32 @@ public class ReferenceService {
     }
 
     private static boolean isMemberReferenceDestination(String source, boolean complete) {
-        Matcher destination = MEMBER_REFERENCE_DESTINATION.matcher(normalizeReferenceSyntax(source).stripLeading());
+        String value = complete ? normalizeReferenceSyntax(memberDefinitionDestination(source)).strip()
+                : normalizeReferenceSyntax(source).stripLeading();
+        Matcher destination = (complete ? MEMBER_DEFINITION_DESTINATION : MEMBER_REFERENCE_DESTINATION).matcher(value);
         return (complete ? destination.matches() : destination.lookingAt())
                 && parseReferenceTarget(TYPE_USER, destination.group(1)).isPresent();
+    }
+
+    /** Extracts the original destination so authored title content cannot suppress member detection. */
+    private static String memberDefinitionDestination(String source) {
+        int start = skipWhitespace(source, 0);
+        if (start == source.length()) {
+            return "";
+        }
+        int end = start;
+        if (source.charAt(start) == '<') {
+            int closing = source.indexOf('>', start + 1);
+            if (closing < 0) {
+                return "";
+            }
+            end = closing + 1;
+        } else {
+            while (end < source.length() && !Character.isWhitespace(source.charAt(end))) {
+                end++;
+            }
+        }
+        return source.substring(start, end);
     }
 
     private record MemberLabelSpan(int start, int end) {

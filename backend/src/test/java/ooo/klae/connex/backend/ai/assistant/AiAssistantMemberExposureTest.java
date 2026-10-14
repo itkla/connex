@@ -539,6 +539,38 @@ class AiAssistantMemberExposureTest {
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void encodedDefinitionTitleLineBreaksCannotExposeMemberLabels(boolean nativeProtocol) throws Exception {
+        String text = "[Alice &amp; Bob][m]\n[m]: user:42 \"a&#10;b\"\n"
+                + "[Pending &amp; Member][pending]\n[pending]: <user:43> (a&#13;b)";
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(text, context);
+        assertTrue(context.tokenBindings().isEmpty());
+        var result = new AiAssistantToolResult(Map.of("description", text),
+                AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        assertEquals(List.of(new Identifier("member", "Alice & Bob"), new Identifier("member", "Pending & Member"),
+                new Identifier("member", "Alice &amp; Bob"), new Identifier("member", "Pending &amp; Member")),
+                result.identifiers());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("Alice"));
+        assertFalse(payload.contains("Pending"));
+        for (String sourceLabel : List.of("Alice &amp; Bob", "Pending &amp; Member")) {
+            String token = context.tokenBindings().stream().filter(binding -> sourceLabel.equals(binding.getValue()))
+                    .map(Map.Entry::getKey).findFirst().orElseThrow();
+            assertTrue(payload.contains(token));
+            assertEquals(sourceLabel, Demasker.demask(token, context).text());
+        }
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void recordedContainmentPreservesFixedToolResultVocabularyByPosition(boolean nativeProtocol) throws Exception {
         var context = new MaskingContext();
         var result = new AiAssistantToolResult(Map.of("tool", "create_task", "tier", "auto", "status", "executed",

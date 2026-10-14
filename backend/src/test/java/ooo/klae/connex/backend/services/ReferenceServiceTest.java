@@ -327,4 +327,22 @@ class ReferenceServiceTest extends AbstractServiceTest {
         }
     }
 
+    @Test
+    void memberDefinitionTitlesNeverSuppressEncodedLabelCandidates() {
+        for (String lineBreak : List.of("&#10;", "&#x0A;", "&NewLine;", "&#13;")) {
+            for (String title : List.of("\"a" + lineBreak + "b\"", "'a" + lineBreak + "b'", "(a" + lineBreak + "b)")) {
+                for (String destination : List.of("user&#58;42", "<user&#58;42>", "&#32;user&#58;42&#32;")) {
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob][m]\n[m]: " + destination + " " + title),
+                            destination + " " + title);
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob](" + destination + " " + title + ")"),
+                            destination + " " + title);
+                }
+            }
+        }
+    }
+
 }
