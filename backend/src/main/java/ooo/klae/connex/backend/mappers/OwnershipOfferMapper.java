@@ -28,8 +28,11 @@ public interface OwnershipOfferMapper {
     /** Discovers a bounded organization-fence page for individual scope transactions. */
     List<OwnershipOffer> fencedOrganizationOffers(@Param("orgId") int orgId, @Param("limit") int limit);
 
-    /** Discovers a bounded expiry and lifecycle reconciliation sweep. */
-    List<OwnershipOffer> expiredCandidates(@Param("limit") int limit);
+    /** Captures the fixed maximum id for a disposable reconciliation traversal. */
+    Long findExpiryWatermark();
+    /** Discovers expiry and lifecycle candidates after the cursor through the fixed watermark. */
+    List<OwnershipOffer> expiredCandidates(@Param("cursor") long cursor, @Param("watermark") long watermark,
+        @Param("limit") int limit);
     /** Discovers a bounded delivery reconciliation pass. */
     List<OwnershipOffer> deliveryCandidates(@Param("limit") int limit);
     /** Claims OPEN consent with the database-clock expiry predicate. */

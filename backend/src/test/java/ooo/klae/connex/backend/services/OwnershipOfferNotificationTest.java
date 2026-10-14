@@ -49,7 +49,10 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
     private final List<Integer> accounts = new ArrayList<>();
 
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
-    @BeforeEach void freshOwner() { OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); clearInvocations(realtime); }
+    @BeforeEach void freshOwner() {
+        OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
+        OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); clearInvocations(realtime);
+    }
     @AfterEach void clean() { reset(inboxMapper); accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear(); }
 
     private long create(User target) { return Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id()); }

@@ -56,6 +56,7 @@ class OwnershipOfferConcurrencyIntegrationTest extends AbstractServiceTest {
 
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void fixtureAndProbes() {
+        OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
         target = newUser(); coOwner = newUser(); workspaceMapper.updateMemberRole(workspace.getId(), coOwner.getId(), "owner");
         for (User user : List.of(currentUser, target, coOwner)) { credentials.put(user.getId(), OwnershipOfferTestFixtures.passkey(jdbc, user)); }
         as(currentUser);

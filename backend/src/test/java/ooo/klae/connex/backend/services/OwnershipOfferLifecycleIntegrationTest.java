@@ -39,6 +39,7 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
     private String bulkAccountPrefix;
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void isolatedScope() {
+        OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
         org = new Organization(); org.setName("Ownership lifecycle"); org.setSlug("ownership-lifecycle-" + unique()); organizations.insert(org);
         Workspace created = new Workspace(); created.setOrgId(org.getId()); created.setName("Ownership lifecycle"); created.setSlug("ownership-lifecycle-" + unique()); workspaceMapper.insert(created);
         workspace = created; workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
@@ -89,7 +90,8 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.invalidated'", Integer.class, org.getId()));
         List<OwnershipOffer> pending = ledger.fencedOrganizationOffers(org.getId(), 50);
         assertEquals(7, pending.size());
-        assertEquals(7, ledger.expiredCandidates(100).stream().filter(offer -> offer.getOrgId() == org.getId()).count());
+        assertEquals(7, ledger.expiredCandidates(0, ledger.findExpiryWatermark(), 100).stream()
+            .filter(offer -> offer.getOrgId() == org.getId()).count());
         OwnershipOffer remaining = pending.getFirst();
         User offeree = userMapper.getUserById(remaining.getOffereeUserId());
         authenticateAs(offeree, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, offeree);

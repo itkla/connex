@@ -6,14 +6,21 @@ import java.util.Objects;
 import java.util.UUID;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.services.OwnershipOfferService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 
 /** Direct credential fixtures; ceremonies and enrollment authorization are covered by their owning tests. */
 public final class OwnershipOfferTestFixtures {
     private OwnershipOfferTestFixtures() {}
+
+    /** Starts an isolated scheduled-worker fixture with the same disposable state as a restart. */
+    public static void restartExpiryTraversal(OwnershipOfferService offers) {
+        ReflectionTestUtils.setField(offers, "expiryTraversal", null);
+    }
 
     /** Inserts one credential belonging to the given account. */
     public static int passkey(JdbcTemplate jdbc, User user) {

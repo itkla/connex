@@ -50,6 +50,7 @@ public class OwnershipOfferService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
+    private ExpiryTraversal expiryTraversal;
     private static final int FENCED_ORGANIZATION_PAGE_SIZE = 50;
     private static final Logger log = LoggerFactory.getLogger(OwnershipOfferService.class);
 
@@ -131,16 +132,38 @@ public class OwnershipOfferService {
         }
     }
 
-    /** Runs a bounded sweep with one complete transaction per discovered offer. */
-    public void expire() {
-        for (OwnershipOffer offer : tenantWorkScope.unroutedRead(() -> mapper.expiredCandidates(100))) {
+    /**
+     * Visits at most 100 candidates per call, retaining a fixed maximum id for each traversal.
+     * Advances past failures and wraps after an empty page so failed placements cannot starve
+     * later offers or their own retries. The in-memory cursor is disposable on restart; each
+     * candidate retains its existing routing and independent transaction.
+     */
+    public synchronized void expire() {
+        if (expiryTraversal == null) {
+            Long watermark = tenantWorkScope.unroutedRead(mapper::findExpiryWatermark);
+            if (watermark == null) {
+                return;
+            }
+            expiryTraversal = new ExpiryTraversal(0, watermark);
+        }
+        ExpiryTraversal traversal = expiryTraversal;
+        List<OwnershipOffer> page = tenantWorkScope.unroutedRead(() ->
+            mapper.expiredCandidates(traversal.cursor(), traversal.watermark(), 100));
+        if (page.isEmpty()) {
+            expiryTraversal = null;
+            return;
+        }
+        for (OwnershipOffer offer : page) {
             try {
                 routed(offer, offer.getOffereeUserId(), () -> { transaction.reconcile(offer.getId()); return true; });
             } catch (RuntimeException failure) {
                 log.warn("Ownership expiry failed offerId={} exceptionClass={}", offer.getId(), failure.getClass().getSimpleName());
             }
         }
+        expiryTraversal = new ExpiryTraversal(page.getLast().getId(), traversal.watermark());
     }
+
+    private record ExpiryTraversal(long cursor, long watermark) {}
 
     /**
      * Reconciles at most 50 open offers after an organization fence commits, in individual routed

@@ -60,6 +60,29 @@ class OwnershipOfferMapperTest extends AbstractServiceTest {
         assertTrue(offers.listForOfferee(offer.getOffereeUserId()).isEmpty());
     }
 
+    @Test void expiryPagesUseAscendingIdsAndBothTraversalBoundsRatherThanExpiryOrder() {
+        OwnershipOffer first = insert(newUser());
+        OwnershipOffer second = insert(newUser());
+        OwnershipOffer third = insert(newUser());
+        long watermark = offers.findExpiryWatermark();
+        assertEquals(third.getId(), watermark);
+        OwnershipOffer appended = insert(newUser());
+        jdbc.update("""
+            UPDATE ownership_offer SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 8 DAY),
+                expires_at = CASE id
+                    WHEN ? THEN DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY)
+                    WHEN ? THEN DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY)
+                    ELSE DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 3 DAY) END
+            WHERE id IN (?, ?, ?, ?)
+            """, first.getId(), second.getId(), first.getId(), second.getId(), third.getId(), appended.getId());
+        assertEquals(java.util.List.of(first.getId(), second.getId()),
+            offers.expiredCandidates(first.getId() - 1, watermark, 2).stream().map(OwnershipOffer::getId).toList());
+        assertEquals(java.util.List.of(third.getId()),
+            offers.expiredCandidates(second.getId(), watermark, 2).stream().map(OwnershipOffer::getId).toList());
+        assertTrue(offers.expiredCandidates(third.getId(), watermark, 2).isEmpty());
+        assertEquals(appended.getId(), offers.findExpiryWatermark());
+    }
+
     @Test void scopeAndDistinctPartyConstraintsRejectMalformedOffers() {
         OwnershipOffer offer = insert(newUser());
         DataAccessException scope = assertThrows(DataAccessException.class, () -> jdbc.update(

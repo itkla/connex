@@ -48,12 +48,15 @@
   <select id="fencedOrganizationOffers" resultType="OwnershipOffer" flushCache="true">
     SELECT <include refid="columns"/> FROM ownership_offer WHERE org_id = #{orgId} AND state = 'OPEN' ORDER BY id LIMIT #{limit}
   </select>
+  <select id="findExpiryWatermark" resultType="java.lang.Long" flushCache="true">
+    SELECT MAX(id) FROM ownership_offer
+  </select>
   <select id="expiredCandidates" resultType="OwnershipOffer" flushCache="true">
     SELECT <include refid="columns"/> FROM ownership_offer
-    WHERE state = 'OPEN' AND (expires_at &lt;= UTC_TIMESTAMP(6)
+    WHERE id &gt; #{cursor} AND id &lt;= #{watermark} AND state = 'OPEN' AND (expires_at &lt;= UTC_TIMESTAMP(6)
       OR EXISTS (SELECT 1 FROM organization o WHERE o.id = ownership_offer.org_id AND o.lifecycle_state &lt;&gt; 'active')
       OR EXISTS (SELECT 1 FROM workspace w WHERE w.id = ownership_offer.workspace_id AND w.lifecycle_state &lt;&gt; 'active'))
-    ORDER BY expires_at, id LIMIT #{limit}
+    ORDER BY id LIMIT #{limit}
   </select>
   <select id="deliveryCandidates" resultType="OwnershipOffer" flushCache="true">
     SELECT <include refid="columns"/> FROM ownership_offer
