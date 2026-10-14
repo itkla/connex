@@ -79,6 +79,7 @@ jobs:
           WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SWEEP_RELIST_DELAY_SECONDS: "10"
         run: |
           set -euo pipefail
 
@@ -147,22 +148,35 @@ jobs:
             --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
+            target="$existing"
           else
-            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+            created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
+            echo "$created"
+            target="${created##*/}"
           fi
 
           # Converge on exactly one OPEN rolling issue, without serialisation.
           #
-          # If the sweep finds none open, the issue this run touched was closed underneath it -- a
-          # maintainer closing on an observed recovery just as a new failure arrives -- and gh issue
-          # comment does not reopen; recreate so main-red stays visible, then LIST AGAIN so a
-          # concurrent recreate is deduplicated in this run rather than left as a second open alert.
-          # If it finds several, keep the lowest-numbered and close the rest.
+          # The list lags fresh creates: one run that read an empty list as a close opened #2047,
+          # #2048 and #2049 for a single failure, and a partly caught-up list can show an older
+          # alert while still missing the one this run just created. So whenever the issue this
+          # run touched is missing from the list, it is read directly:
+          #   - open and still labeled: the list is lagging. It joins the set being deduplicated,
+          #     and the sweep waits and LISTS AGAIN without creating, so a later pass can still see
+          #     an alert the first lookup missed.
+          #   - closed, or stripped of its label, by a maintainer just as a new failure arrives:
+          #     when nothing else is open, recreate (gh issue comment does not reopen) so main-red
+          #     stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in this run.
+          #   - unreadable: when nothing else is open, left to the next event, as a failed list is.
+          # Of the open alerts, keep the lowest-numbered and close the rest. The issue this run
+          # reported on is closed in favour of a lower one only after that keeper reads open and
+          # labeled directly AND the report has been re-posted on it; otherwise the touched issue,
+          # known to be live, stays the keeper, so a stale list can never close the last alert.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
           # failure the sweep is skipped -- the report itself already landed above.
-          for attempt in 1 2; do
+          for attempt in 1 2 3; do
             if ! issues_json="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
               --limit 100 --json number 2>/dev/null)"; then
               echo "Sweep list failed; leaving convergence to the next event."
@@ -170,15 +184,55 @@ jobs:
             fi
             mapfile -t open_issues < <(printf '%s' "$issues_json" \
               | jq -r 'sort_by(.number) | .[].number')
-            if [ "${#open_issues[@]}" -eq 0 ]; then
-              gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
-              continue
+            lagging=false
+            if ! printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
+              state="$(gh api "repos/$REPO/issues/$target" --jq \
+                'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                 then "visible" else .state end' 2>/dev/null || true)"
+              case "$state" in
+                visible)
+                  echo "Issue #$target is open and labeled; the list has not caught up."
+                  lagging=true
+                  mapfile -t open_issues < <(printf '%s\n' "${open_issues[@]}" "$target" \
+                    | grep -v '^$' | sort -n -u)
+                  ;;
+                "")
+                  if [ "${#open_issues[@]}" -eq 0 ]; then
+                    echo "Could not read issue #$target; leaving convergence to the next event."
+                    break
+                  fi
+                  ;;
+                *)
+                  if [ "${#open_issues[@]}" -eq 0 ]; then
+                    created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
+                    echo "$created"
+                    target="${created##*/}"
+                    continue
+                  fi
+                  ;;
+              esac
             fi
             keep="${open_issues[0]}"
+            if [ "$target" != "$keep" ] && printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
+              keep_state="$(gh api "repos/$REPO/issues/$keep" --jq \
+                'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                 then "visible" else .state end' 2>/dev/null || true)"
+              if [ "$keep_state" = "visible" ] && gh issue comment "$keep" --repo "$REPO" --body "$body"; then
+                gh issue close "$target" --repo "$REPO" --comment "Duplicate of #$keep." || true
+                target="$keep"
+              else
+                echo "Could not confirm #$keep as the keeper; keeping #$target, which this run reported on."
+                keep="$target"
+              fi
+            fi
             for number in "${open_issues[@]}"; do
-              if [ "$number" != "$keep" ]; then
+              if [ "$number" != "$keep" ] && [ "$number" != "$target" ]; then
                 gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
               fi
             done
+            if [ "$lagging" = true ] && [ "$attempt" -lt 3 ]; then
+              sleep "$SWEEP_RELIST_DELAY_SECONDS"
+              continue
+            fi
             break
           done
