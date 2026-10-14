@@ -72,12 +72,18 @@ task descriptions, skill activity reads and personal work-brief commitments ther
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
 labels, including both authored HTML-entity spellings and decoded labels. Recognition deliberately
-forms a superset of [CommonMark member-link readings](https://spec.commonmark.org/0.31.2/#link-reference-definitions):
+over-includes the covered [CommonMark member-link readings](https://spec.commonmark.org/0.31.2/#link-reference-definitions):
 an independent canonical-token pass runs everywhere, and the structural collector considers every
-bracket without code-span suppression and unions code/HTML-aware readings, accepts container and
-continuation definitions, retains
-shortcut fallbacks and folds reference keys with Unicode case and whitespace normalization.
+bracket without code-span suppression and unions code/HTML-aware readings. Covered readings include
+inline, full, collapsed and shortcut links; failed-inline shortcut fallbacks; prose shortcuts followed
+by a colon; entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
+continuations; blockquote and list-item definitions, including continued keys with container markers;
+and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets
+inside paired code spans opaque and stop backtick pairing at paragraph and block boundaries.
 Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
+Rarer CommonMark constructs outside these covered readings are a bounded residual tracked in
+[#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser for both
+reference readers; the owner decision is pending.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

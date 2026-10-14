@@ -97,6 +97,17 @@ public class ReferenceService {
     private static final Pattern MEMBER_REFERENCE_DESTINATION = Pattern.compile(
         "(?i)<?user:(\\d+)>?(?:[ \\t].*)?");
     private static final Pattern MEMBER_DEFINITION_DESTINATION = Pattern.compile("(?i)<?user:(\\d+)>?");
+    private static final String MEMBER_LINE_PREFIX = "[ ]{0,3}+(?:(?:>[ \t]?|[-+*][ \t]++|[0-9]{1,9}[.)][ \t]++)[ ]{0,3}+)*+";
+    private static final Pattern MEMBER_LINE_CONTENT = Pattern.compile(MEMBER_LINE_PREFIX);
+    private static final Pattern MEMBER_CONTINUATION_PREFIX = Pattern.compile("(?m)^(?!\\A)" + MEMBER_LINE_PREFIX);
+    private static final Pattern MEMBER_CODE_BLOCK_START = Pattern.compile(
+        "(?:#{1,6}(?:[ \t]|$)|`{3,}[^`]*$|~{3,}|(?:\\*[ \t]*+){3,}+$|(?:_[ \t]*+){3,}+$|[-=]+[ \t]*$"
+            + "|<!--|<\\?|<![A-Za-z]|<!\\[CDATA\\["
+            + "|<(?i:pre|script|style|textarea)(?:[ \t>]|$)"
+            + "|</?(?i:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
+            + "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html"
+            + "|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section"
+            + "|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|/>|$))");
     private static final String MEMBER_INLINE_SPACE = "[ \\t]*(?:(?:\\r\\n|[\\r\\n])[ \\t]*)?";
     private static final String MEMBER_ATTRIBUTE_SPACE = "(?:[ \\t]++|[ \\t]*(?:\\r\\n|[\\r\\n])[ \\t]*)";
     private static final String MEMBER_ATTRIBUTE_VALUE = "(?:[^ \\t\\r\\n\\\"'=<>`]++|'[^']*+'|\\\"[^\\\"]*+\\\")";
@@ -667,13 +678,13 @@ public class ReferenceService {
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
             if (isMemberReferenceDestination(memberDefinitionDestination(content, definitions.end()), true)) {
-                memberDefinitions.add(referenceLabelKey(definitions.group(1)));
-                memberDefinitions.add(referenceLabelKey(normalizeReferenceSyntax(definitions.group(1))));
+                memberDefinitions.addAll(memberReferenceKeys(definitions.group(1)));
             }
         }
-        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, false));
-        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, true));
-        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, true, true));
+        Set<Integer> definitionLineStarts = memberDefinitionLineStarts(content);
+        collectMemberLabels(content, memberDefinitions, definitionLineStarts, labels, matchingLabelEnds(content, false));
+        collectMemberLabels(content, memberDefinitions, definitionLineStarts, labels, matchingLabelEnds(content, true, false, true));
+        collectMemberLabels(content, memberDefinitions, definitionLineStarts, labels, matchingLabelEnds(content, true, true, true));
         labels.sort(java.util.Comparator.comparingInt(MemberLabelSpan::start).thenComparingInt(MemberLabelSpan::end));
         var candidates = new java.util.LinkedHashSet<String>();
         labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
@@ -686,7 +697,8 @@ public class ReferenceService {
      * its following bracket an unambiguous key role; nested, opaque and block readings keep shortcuts.
      */
     private static void collectMemberLabels(
-            String content, Set<String> memberDefinitions, List<MemberLabelSpan> labels, int[] labelEnds) {
+            String content, Set<String> memberDefinitions, Set<Integer> definitionLineStarts,
+            List<MemberLabelSpan> labels, int[] labelEnds) {
         Set<Integer> referenceKeys = new HashSet<>();
         for (int index = 0; index < content.length(); index++) {
             int end = labelEnds[index];
@@ -707,7 +719,8 @@ public class ReferenceService {
                     labels.add(new MemberLabelSpan(index + 1, end));
                 }
             }
-            if (next < content.length() && content.charAt(next) == ':') {
+            if (next == end + 1 && next < content.length() && content.charAt(next) == ':'
+                    && definitionLineStarts.contains(index)) {
                 continue;
             }
             if (!referenceKeys.contains(index) && memberDefinitionMatches(memberDefinitions, label)) {
@@ -785,8 +798,17 @@ public class ReferenceService {
     }
 
     private static boolean memberDefinitionMatches(Set<String> definitions, String label) {
-        return definitions.contains(referenceLabelKey(label))
-                || definitions.contains(referenceLabelKey(normalizeReferenceSyntax(label)));
+        return memberReferenceKeys(label).stream().anyMatch(definitions::contains);
+    }
+
+    /** Container-stripped keys supplement literal readings rather than discarding authored text. */
+    private static Set<String> memberReferenceKeys(String label) {
+        Set<String> keys = new HashSet<>();
+        for (String reading : List.of(label, normalizeReferenceSyntax(label))) {
+            keys.add(referenceLabelKey(reading));
+            keys.add(referenceLabelKey(MEMBER_CONTINUATION_PREFIX.matcher(reading).replaceAll("")));
+        }
+        return keys;
     }
 
     private record MemberLabelSpan(int start, int end) {
@@ -795,6 +817,22 @@ public class ReferenceService {
     private static String referenceLabelKey(String label) {
         return label.replaceAll("(?U)\\s+", " ").strip()
                 .toLowerCase(java.util.Locale.ROOT).toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /** Only a logical line opening makes a colon a definition delimiter rather than prose. */
+    private static Set<Integer> memberDefinitionLineStarts(String content) {
+        Set<Integer> starts = new HashSet<>();
+        for (int index = 0; index < content.length(); index++) {
+            if (index == 0 || content.charAt(index - 1) == '\n' || content.charAt(index - 1) == '\r') {
+                starts.add(memberLineContentStart(content, index));
+            }
+        }
+        return starts;
+    }
+
+    private static int memberLineContentStart(String content, int lineStart) {
+        Matcher prefix = MEMBER_LINE_CONTENT.matcher(content).region(lineStart, content.length());
+        return prefix.lookingAt() ? prefix.end() : lineStart;
     }
 
     private static int[] matchingLabelEnds(String content) {
@@ -806,9 +844,14 @@ public class ReferenceService {
     }
 
     private static int[] matchingLabelEnds(String content, boolean skipCodeSpans, boolean skipOpaqueInlines) {
+        return matchingLabelEnds(content, skipCodeSpans, skipOpaqueInlines, false);
+    }
+
+    private static int[] matchingLabelEnds(
+            String content, boolean skipCodeSpans, boolean skipOpaqueInlines, boolean boundCodeSpans) {
         int[] labelEnds = new int[content.length()];
         Arrays.fill(labelEnds, -1);
-        int[] closingBacktickRuns = closingBacktickRuns(content);
+        int[] closingBacktickRuns = closingBacktickRuns(content, boundCodeSpans);
         Matcher opaque = MEMBER_OPAQUE_INLINE.matcher(content);
         Map<String, Integer> terminators = new HashMap<>();
         Deque<Integer> labelStarts = new ArrayDeque<>();
@@ -894,11 +937,15 @@ public class ReferenceService {
         return end - start;
     }
 
-    private static int[] closingBacktickRuns(String content) {
+    private static int[] closingBacktickRuns(String content, boolean boundCodeSpans) {
         int[] closingRuns = new int[content.length()];
         Arrays.fill(closingRuns, -1);
         Map<Integer, Integer> nextRunByLength = new HashMap<>();
+        boolean[] blockStarts = boundCodeSpans ? codeSpanBlockStarts(content) : new boolean[content.length()];
         for (int end = content.length() - 1; end >= 0;) {
+            if (end + 1 < content.length() && blockStarts[end + 1]) {
+                nextRunByLength.clear();
+            }
             if (content.charAt(end) != '`') {
                 end--;
                 continue;
@@ -913,6 +960,36 @@ public class ReferenceService {
             end = start - 1;
         }
         return closingRuns;
+    }
+
+    /** Backticks cannot pair across blank lines or the start of another block. */
+    private static boolean[] codeSpanBlockStarts(String content) {
+        boolean[] starts = new boolean[content.length()];
+        long activeQuoteDepth = 0;
+        for (int lineStart = 0; lineStart < content.length();) {
+            int lineEnd = lineStart;
+            while (lineEnd < content.length() && "\r\n".indexOf(content.charAt(lineEnd)) < 0) {
+                lineEnd++;
+            }
+            int bodyStart = memberLineContentStart(content, lineStart);
+            String prefix = content.substring(lineStart, bodyStart);
+            long quoteDepth = prefix.chars().filter(value -> value == '>').count();
+            String itemMarker = prefix.replace(">", "").strip();
+            boolean itemStart = itemMarker.length() == 1 && "-+*".indexOf(itemMarker.charAt(0)) >= 0
+                    || "1.".equals(itemMarker) || "1)".equals(itemMarker);
+            boolean blank = content.substring(bodyStart, lineEnd).isBlank();
+            boolean interrupt = itemStart || MEMBER_CODE_BLOCK_START.matcher(content).region(bodyStart, lineEnd).lookingAt();
+            starts[lineStart] = blank || quoteDepth > activeQuoteDepth || interrupt;
+            activeQuoteDepth = blank || interrupt ? quoteDepth : Math.max(activeQuoteDepth, quoteDepth);
+            lineStart = lineEnd;
+            if (lineStart < content.length() && content.charAt(lineStart) == '\r') {
+                lineStart++;
+            }
+            if (lineStart < content.length() && content.charAt(lineStart) == '\n') {
+                lineStart++;
+            }
+        }
+        return starts;
     }
 
     private static boolean isEscaped(String content, int index) {

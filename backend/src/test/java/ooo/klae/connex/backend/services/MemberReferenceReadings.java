@@ -59,6 +59,30 @@ public final class MemberReferenceReadings {
                 "[Alice Former][SS]\n\n[ß]: user:42", "Alice Former"));
         readings.add(new Reading("e", "Unicode whitespace collapse",
                 "[Alice Former][ ONE\t TWO ]\n\n[one\u00a0two]: user:42", "Alice Former"));
+        readings.add(new Reading("final-1", "colon after prose shortcut",
+                "Hello [Alice Former]: welcome.\n\n[Alice Former]: user:42", "Alice Former"));
+        readings.add(new Reading("final-1", "space before colon is not a definition",
+                "[Alice Former] : welcome.\n\n[Alice Former]: user:42", "Alice Former"));
+        for (String marker : List.of("-", ">")) {
+            readings.add(new Reading("final-2", "literal continuation marker " + marker,
+                    "[Alice Former][m " + marker + " n]\n\n[m\n" + marker + " n]: user:42", "Alice Former"));
+        }
+        for (String prefix : List.of("> ", "> > ", "> - ", "- ", "1. ")) {
+            readings.add(new Reading("final-2", "continued container definition key " + prefix,
+                    "[Alice Former][m n]\n\n" + prefix + "[m\n" + prefix + "n]: user:42", "Alice Former"));
+        }
+        for (String boundary : List.of("\n\n", "\r\r", "\r\n\r\n", "\n# Heading\n", "\n> ", "\n- ")) {
+            readings.add(new Reading("final-3", "code pairing stops at block " + boundary,
+                    "` stray" + boundary + "[Alice `]` Former](user:42)", "Alice `]` Former"));
+        }
+        readings.add(new Reading("final-3", "soft line break inside code remains opaque",
+                "[Alice `line\n]` Former](user:42)", "Alice `line\n]` Former"));
+        readings.add(new Reading("final-3", "inline HTML does not interrupt code paragraph",
+                "[Alice `line\n<em>]` Former](user:42)", "Alice `line\n<em>]` Former"));
+        readings.add(new Reading("final-3", "quote continuation does not interrupt code paragraph",
+                "> [Alice `line\n> ]` Former](user:42)", "Alice `line\n> ]` Former"));
+        readings.add(new Reading("final-3", "lazy quote continuation preserves code pairing",
+                "> [Alice `line\nlazy continuation\n> ]` Former](user:42)", "Alice `line\nlazy continuation\n> ]` Former"));
         return List.copyOf(readings);
     }
 
