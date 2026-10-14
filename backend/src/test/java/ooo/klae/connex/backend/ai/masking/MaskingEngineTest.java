@@ -1805,6 +1805,25 @@ class MaskingEngineTest {
         assertTrue(context.tokenBindings().isEmpty());
     }
 
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void replayLeakChecksApplyOnlyToMaskedDisclosure(boolean unmasked, boolean conversational) {
+        var context = new MaskingContext(unmasked ? AiPrivacyMode.UNMASKED : AiPrivacyMode.MASKED);
+        context.tokenFor(EntityKind.MEMBER, "Former Member");
+        String text = "Ask Former Member. Email former@example.test";
+        String masked = conversational
+                ? MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Former Member"))
+                : MaskingEngine.maskFreeText(text, context, Map.of(), List.of("Former Member"));
+        assertEquals(unmasked ? "Ask Former Member. Email [redacted]" : "Ask {{M1}}. Email [redacted]", masked);
+        if (!unmasked) {
+            context.withReplayMemberValues(List.of("Former Member"), () -> {
+                assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+                assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+                return null;
+            });
+        }
+    }
+
     private static boolean containsIgnoreCase(String value, String needle) {
         return value.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
     }

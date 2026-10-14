@@ -2769,4 +2769,66 @@ class AiInvocationServiceTest {
         verify(aiProvider, times(1)).complete(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "id,false,{{M1}}", "signature,false,{{M1}}",
+            "id,false,{{M99}}", "signature,false,{{m1}}",
+            "id,false,｛｛Ｍ１｝｝", "signature,false,｛｛Ｍ１｝｝",
+            "id,true,{{M1}}", "signature,true,{{M1}}"})
+    void nativeOpaqueFieldsRequirePriorMemberExposure(String field, boolean exposed, String token) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn(exposed ? "Discuss {{M1}}" : "Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "call-" + token : "call-1", "search_records",
+                "{\"query\":\"relationship\"}", field.equals("signature") ? "sig-" + token : null);
+        var completion = completeMemberNative(invocation, List.of(), call);
+        if (exposed) {
+            var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+            assertEquals(call, accepted.providerCall());
+            assertEquals(0, accepted.demaskWarnings());
+            assertEquals("Hidden Member", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+        } else {
+            var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+            assertEquals("invented_placeholder", refused.repairRule());
+            assertEquals(1, refused.demaskWarnings());
+            assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        }
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "signature"})
+    void guessedOpaqueMembersCannotHideBehindAnInvalidNativeCall(String field) {
+        var call = new AiToolCall(field.equals("id") ? "{{M1}}" : "call-1", "unknown",
+                "not-json", field.equals("signature") ? "{{M1}}" : null);
+        var completion = completeNativeTools(1, List.of(call));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    /** Runs the actual dispatch callback with caller-owned member bindings and native replay. */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completeMemberNative(
+            AiInvocation invocation, List<AiToolExchange> exchanges, AiToolCall call) {
+        when(aiProvider.toolCallingCapability(resolved.target())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        providerReturns(new AiCompletionResult("", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "", AiReasoningMode.NONE, List.of(call)));
+        var mapper = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var guard = new AiAssistantStepGuard(catalog);
+        var schema = new AiAssistantStepSchema(mapper, catalog);
+        var issued = invocation.context().tokenBindings().stream().map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toSet());
+        return service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, issued), guard.finalAnswerForIssuedPlaceholders(issued),
+                schema.finalResponseSchema(), new AiNativeToolRequest(
+                        catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), exchanges),
+                directAdmission, providerAttemptGuard);
+    }
+
 }

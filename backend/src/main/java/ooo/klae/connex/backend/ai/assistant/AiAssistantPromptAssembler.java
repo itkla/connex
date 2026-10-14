@@ -1840,7 +1840,7 @@ public class AiAssistantPromptAssembler {
                 if (stored.kind() != EntityKind.MEMBER) {
                     throw new IllegalStateException("Assistant answer identifier metadata is invalid");
                 }
-                MaskingEngine.maskField(stored.kind(), stored.value(), context);
+                seedStoredIdentifier(stored, context);
             }
         }
         seedMemberIdentifiers(metadata, context, MAX_SUMMARY_IDENTIFIERS);
@@ -1880,7 +1880,7 @@ public class AiAssistantPromptAssembler {
         }
         for (JsonNode identifier : storedIdentifiers) {
             StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
-            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+            seedStoredIdentifier(stored, context);
         }
         return message.getContent();
     }
@@ -1923,7 +1923,7 @@ public class AiAssistantPromptAssembler {
             if (stored.kind() == EntityKind.EMAIL || stored.kind() == EntityKind.PHONE) {
                 return null;
             }
-            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+            seedStoredIdentifier(stored, context);
         }
         return message.getContent();
     }
@@ -1968,6 +1968,14 @@ public class AiAssistantPromptAssembler {
             if (stored.kind() != EntityKind.MEMBER) {
                 throw new IllegalStateException("Assistant member identifier metadata is invalid");
             }
+            seedStoredIdentifier(stored, context);
+        }
+    }
+
+    private void seedStoredIdentifier(StoredSummaryIdentifier stored, MaskingContext context) {
+        if (stored.kind() == EntityKind.MEMBER) {
+            context.registerMemberCandidate(stored.value());
+        } else {
             MaskingEngine.maskField(stored.kind(), stored.value(), context);
         }
     }

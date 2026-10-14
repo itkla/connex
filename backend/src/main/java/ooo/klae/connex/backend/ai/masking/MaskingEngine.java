@@ -93,7 +93,9 @@ public final class MaskingEngine {
             String text, MaskingContext ctx, Map<String, String> replayHandles, List<String> memberValues) {
         return ctx.withReplayMemberValues(memberValues, () -> {
             String masked = maskFreeText(text, ctx, replayHandles);
-            OutboundLeakScan.assertNoLeakInReplay(masked, ctx);
+            if (ctx.privacyMode() != ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+                OutboundLeakScan.assertNoLeakInReplay(masked, ctx);
+            }
             return masked;
         });
     }
@@ -166,7 +168,9 @@ public final class MaskingEngine {
             String text, MaskingContext ctx, Map<String, String> replayHandles, List<String> memberValues) {
         return ctx.withReplayMemberValues(memberValues, () -> {
             String masked = maskConversationalFreeText(text, ctx, replayHandles);
-            OutboundLeakScan.assertNoLeakInReplay(masked, ctx);
+            if (ctx.privacyMode() != ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+                OutboundLeakScan.assertNoLeakInReplay(masked, ctx);
+            }
             return masked;
         });
     }

@@ -69,21 +69,26 @@ class AiConversationPreprocessingArchTest {
                 "message.getStructuredJson", "metadata.get", "objectMapper.readTree", "orElse",
                 "resources.handleFor", "stored.id", "stored.kind", "storedCitations.isArray", "storedResource",
                 "storedResources.isArray", "identifiers.isArray", "identifiers.size", "storedSummaryIdentifier",
-                "stored.value", "MaskingEngine.maskField", "seedMemberIdentifiers"));
+                "seedStoredIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeSummary", Set.of(
-                "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
+                "seedStoredIdentifier", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
-                "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
+                "resources.handleFor", "stored.id", "stored.kind", "storedIdentifiers.isArray",
                 "storedIdentifiers.size", "storedResource", "storedResources.isArray", "storedSummaryIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeUser", Set.of(
-                "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
+                "seedStoredIdentifier", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
-                "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
+                "resources.handleFor", "stored.id", "stored.kind", "storedIdentifiers.isArray",
                 "storedIdentifiers.size", "storedResourceIdentity", "storedResources.isArray",
                 "storedResources.isEmpty", "storedSummaryIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "seedMemberIdentifiers", Set.of(
                 "metadata.get", "members.isArray", "members.size", "identifiers.isArray", "identifiers.size",
-                "storedSummaryIdentifier", "stored.kind", "stored.value", "IllegalStateException", "MaskingEngine.maskField"));
+                "storedSummaryIdentifier", "stored.kind", "IllegalStateException", "seedStoredIdentifier"));
+        assertCalls(assembler, "seedStoredIdentifier", Set.of(
+                "stored.kind", "context.registerMemberCandidate", "stored.value", "MaskingEngine.maskField"));
+        assertEquals("if (stored.kind() == EntityKind.MEMBER) { context.registerMemberCandidate(stored.value()); } "
+                        + "else { MaskingEngine.maskField(stored.kind(), stored.value(), context); }",
+                compact(methodBody(assembler, "seedStoredIdentifier")).strip());
         String members = compact(methodBody(assembler, "seedMemberIdentifiers"));
         assertTrue(members.contains("metadata.get( )"));
         assertTrue(members.contains("members.size() > limit - otherCount"));
@@ -112,8 +117,8 @@ class AiConversationPreprocessingArchTest {
         String answer = compact(methodBody(assembler, "reauthorizeAnswer"));
         assertTrue(answer.contains("identifiers.size() > MAX_SUMMARY_IDENTIFIERS"));
         assertTrue(answer.contains("if (stored.kind() != EntityKind.MEMBER)"));
-        assertTrue(answer.contains("MaskingEngine.maskField(stored.kind(), stored.value(), context);"));
-        assertEquals(1, Pattern.compile(Pattern.quote("MaskingEngine.maskField"))
+        assertTrue(answer.contains("seedStoredIdentifier(stored, context);"));
+        assertEquals(1, Pattern.compile(Pattern.quote("seedStoredIdentifier"))
                 .matcher(answer).results().count());
         assertReturns(assembler, "reauthorizeAnswer", List.of(
                 "new ReplayAnswer(message.getContent(), List.of(), Map.of())", "null", "null",

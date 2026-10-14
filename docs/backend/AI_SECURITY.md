@@ -71,6 +71,10 @@ member provenance records every contained known label within the combined 20-ide
 without adding resources; record mentions retain their existing canonical mention gate. Directory read failures abort before provider dispatch; the
 candidate dictionary is never truncated and a failed masked request is never retried unmasked.
 Approved `UNMASKED` disclosure retains its existing posture.
+History and compaction register MEMBER provenance through the same privacy-aware candidate path,
+including legacy metadata. They do not issue tokens merely to read provenance. The per-message
+masked replay leak check runs only in masked disclosure; universal contact and special-care screens
+still apply to unmasked text.
 
 Stored prose can name a member who has renamed themselves or is still pending. Notes, activities,
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
@@ -141,6 +145,12 @@ on such a refusal and defer the malformed-output exception until completion, pre
 reset through the transport. Context-free bare-placeholder checks require braces for MEMBER, so
 ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
+Native call ids, names and thought signatures receive the same unexposed-token check as arguments
+before validation, persistence or replay. Replaying any provider-authored native call field cannot
+grant exposure, even when it contains a bound placeholder. The dispatch exposure projection excludes
+the entire call by position and retains the server-authored tool result; the complete replay payload
+still passes the ordinary byte budget and outbound leak scan. Previously exposed tokens remain valid
+inside opaque fields without altering those fields.
 Final server-authored masking markers `[redacted]` and `[omitted by policy]` are excluded by
 position from MEMBER leak matching. Genuine source occurrences are replaced before these markers
 are inserted; a member named “Redacted” receives no label-wide exemption. Strict provider-authored

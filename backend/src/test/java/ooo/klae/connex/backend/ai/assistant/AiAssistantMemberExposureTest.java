@@ -42,6 +42,69 @@ class AiAssistantMemberExposureTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"id,false", "signature,false", "arguments,false", "id,true", "signature,true", "arguments,true"})
+    void providerCallReplayNeverGrantsMemberExposureButServerResultsDo(String field, boolean inResult) throws Exception {
+        var context = new MaskingContext();
+        context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, MEMBER);
+        var prompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build();
+        var call = new AiToolCall(field.equals("id") ? "call-{{M1}}" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"{{M1}}\"}" : "{\"query\":\"relationship\"}",
+                field.equals("signature") ? "sig-{{M1}}" : null);
+        var exchange = new AiToolExchange(call, inResult ? "{\"note\":\"Discuss {{M1}}\"}" : "{\"records\":[]}", 1, 0);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, true, List.of(exchange),
+                AiAssistantMaskingTestSupport.finalOutput(true, "Ask {{M1}}"), false, null);
+        assertEquals(call, capture.request().nativeTools().exchanges().get(0).call());
+        assertFalse(mapper.writeValueAsString(capture.request().nativeTools().exchanges()).contains(MEMBER));
+        assertEquals(inResult ? 0 : 1, capture.warnings());
+        assertEquals(!inResult, "invented_placeholder".equals(capture.refusalReason()));
+        assertFalse(capture.repairPresent());
+        var demasked = Demasker.demask("{{M1}}", context);
+        assertEquals(inResult ? 0 : 1, demasked.warnings());
+        assertEquals(inResult ? MEMBER : "[unknown reference]", demasked.text());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void unmaskedMemberMetadataReplaysAndCompactsThroughActualDispatch(boolean nativeProtocol) throws Exception {
+        support.allowUnmaskedDisclosure(mapper);
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Discuss Former Member");
+        user.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        var answer = new AiChatMessage();
+        answer.setAuthorKind("assistant");
+        answer.setContent("Former Member handled it.");
+        answer.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member")));
+        var summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("Former Member discussed next steps.");
+        summary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        var context = new MaskingContext(ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED);
+        var resources = new AiChatResourceRegistry(context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var history = List.of(summary, user, answer);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(history, empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(history, empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        assertTrue(mapper.writeValueAsString(capture.request().messages()).contains("Former Member"));
+        assertEquals(0, capture.warnings());
+        assertTrue(context.tokenBindings().isEmpty());
+        assertTrue(context.identifierDictionary().isEmpty());
+        var compacted = assembler.assembleSummary(summary, List.of(user, answer), context, resources);
+        var compactCapture = support.captureAssistantPayload(compacted, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        assertTrue(mapper.writeValueAsString(compactCapture.request().messages()).contains("Former Member"));
+        assertEquals(0, compactCapture.warnings());
+        assertTrue(context.tokenBindings().isEmpty());
+        assertTrue(context.identifierDictionary().isEmpty());
+    }
+
+    @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"false,Redacted", "true,Redacted", "false,[redacted]", "true,[redacted]",
             "false,Omitted by policy", "true,Omitted by policy"})
     void maskingSentinelsCannotPoisonDispatchOrExemptSourceMemberMentions(boolean nativeProtocol, String label) throws Exception {
@@ -151,6 +214,7 @@ class AiAssistantMemberExposureTest {
             assertEquals(MaskingEngine.REDACTED, redacted);
             attachments.add(Map.of("content", redacted));
         } else if ("omitted_replay".equals(source)) {
+            context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, MEMBER);
             AiChatMessage omitted = new AiChatMessage();
             omitted.setAuthorKind("assistant");
             omitted.setContent("t1 remembers " + MEMBER);

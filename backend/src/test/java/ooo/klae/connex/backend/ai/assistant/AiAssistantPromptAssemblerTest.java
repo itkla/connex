@@ -1834,4 +1834,51 @@ class AiAssistantPromptAssemblerTest {
         assertEquals(6, prompt.getMessages().size());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void memberMetadataSeedingHonorsDisclosureWithoutIssuingUnusedBindings(boolean unmasked, boolean nativeProtocol) throws Exception {
+        for (String author : List.of("user", "assistant", "system")) {
+            for (String field : List.of("identifiers", "memberIdentifiers")) {
+                for (boolean compaction : List.of(false, true)) {
+                    var context = new MaskingContext(unmasked ? ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED
+                            : ooo.klae.connex.backend.ai.AiPrivacyMode.MASKED);
+                    var resources = new AiChatResourceRegistry(context);
+                    var message = new AiChatMessage();
+                    message.setAuthorKind(author);
+                    message.setContent("Former Member handled it.");
+                    String kind = author.equals("system") ? "history_summary" : "user_message";
+                    var metadata = objectMapper.createObjectNode();
+                    if (!author.equals("assistant")) {
+                        metadata.put("kind", kind);
+                    }
+                    metadata.putArray("resources");
+                    metadata.putArray("identifiers");
+                    var identifiers = metadata.putArray(field);
+                    identifiers.addObject().put("kind", "member").put("value", "Former Member");
+                    identifiers.addObject().put("kind", "member").put("value", "Unused Member");
+                    message.setStructuredJson(metadata.toString());
+                    var empty = new AiAssistantToolResult(Map.of(), List.of());
+                    var prompt = compaction
+                            ? assembler.assembleSummary(author.equals("system") ? message : null,
+                                    author.equals("system") ? List.of() : List.of(message), context, resources)
+                            : nativeProtocol
+                                    ? assembler.assembleNative(List.of(message), empty, List.of(), context, resources, List.of(),
+                                            new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                                    : assembler.assemble(List.of(message), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+                    String payload = objectMapper.writeValueAsString(prompt.getMessages());
+                    assertEquals(unmasked, payload.contains("Former Member"));
+                    assertEquals(!unmasked, payload.contains("{{M1}}"));
+                    assertFalse(payload.contains("Unused Member"));
+                    assertEquals(unmasked ? 0 : 1, context.tokenBindings().size());
+                    assertEquals(unmasked ? 0 : 2, context.identifierDictionary().size());
+                    assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(payload, context, objectMapper));
+                    if (!unmasked) {
+                        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                                "{\"content\":\"Former Member handled it.\"}", context, objectMapper));
+                    }
+                }
+            }
+        }
+    }
+
 }

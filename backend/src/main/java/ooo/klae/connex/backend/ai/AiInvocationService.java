@@ -575,7 +575,11 @@ public class AiInvocationService {
             } catch (JacksonException | IllegalArgumentException exception) {
                 decoded = null;
             }
-            if (invocation.context().containsUnexposedMemberToken(call.arguments())
+            if (invocation.context().containsUnexposedMemberToken(call.id())
+                    || invocation.context().containsUnexposedMemberToken(call.name())
+                    || call.thoughtSignature() != null
+                            && invocation.context().containsUnexposedMemberToken(call.thoughtSignature())
+                    || invocation.context().containsUnexposedMemberToken(call.arguments())
                     || decoded != null && invocation.context().containsUnexposedMemberToken(decoded.toString())) {
                 return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", 1);
             }
@@ -899,9 +903,12 @@ public class AiInvocationService {
         registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
+        String memberExposurePayload;
         try {
             serializedPrompt = serializeProviderInput(
                     effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
+            memberExposurePayload = nativeTools == null ? serializedPrompt : serializeProviderInput(
+                    effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools, false);
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
@@ -949,7 +956,7 @@ public class AiInvocationService {
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, budgetLease, outputTokensClamped,
+                serializedPrompt, memberExposurePayload, budgetLease, outputTokensClamped,
                 nativeTools == null ? 1 : nativeTools.maxParallelCalls());
         try {
             if (!effectiveInvocation.images().isEmpty()) {
@@ -1177,6 +1184,16 @@ public class AiInvocationService {
             AiResponseSchema responseSchema,
             AiReasoningMode reasoningMode,
             AiNativeToolRequest nativeTools) {
+        return serializeProviderInput(prompt, responseSchema, reasoningMode, nativeTools, true);
+    }
+
+    /** Provider-authored call fields are replayed verbatim but cannot authorize member demasking. */
+    private String serializeProviderInput(
+            MaskedPrompt prompt,
+            AiResponseSchema responseSchema,
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools,
+            boolean includeProviderCalls) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", systemPrompt(prompt, reasoningMode));
         payload.put("messages", prompt.getMessages().stream()
@@ -1190,7 +1207,8 @@ public class AiInvocationService {
                     .map(AiInvocationService::toolDefinitionPayload)
                     .toList());
             payload.put("toolExchanges", nativeTools.exchanges().stream()
-                    .map(AiInvocationService::toolExchangePayload)
+                    .map(exchange -> includeProviderCalls ? toolExchangePayload(exchange)
+                            : Map.of("result", exchange.maskedResult()))
                     .toList());
             if (nativeTools.repairMessage() != null) {
                 payload.put("repairMessage", nativeTools.repairMessage());
@@ -1431,6 +1449,7 @@ public class AiInvocationService {
         private final Runnable initialCommitment;
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
+        private final String memberExposurePayload;
         private final boolean outputTokensClamped;
         private final int maxParallelCalls;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
@@ -1449,6 +1468,7 @@ public class AiInvocationService {
                 Runnable initialCommitment,
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
+                String memberExposurePayload,
                 AiOrganizationBudgetCoordinator.Lease budgetLease,
                 boolean outputTokensClamped,
                 int maxParallelCalls) {
@@ -1463,6 +1483,7 @@ public class AiInvocationService {
             this.providerAttemptGuard = providerAttemptGuard;
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
+            this.memberExposurePayload = Objects.requireNonNull(memberExposurePayload, "memberExposurePayload");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
             this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
@@ -1555,7 +1576,7 @@ public class AiInvocationService {
         public synchronized void beforeSend() {
             checkpoint();
             Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
-            invocation.context().exposeDispatchedPayload(serializedPrompt);
+            invocation.context().exposeDispatchedPayload(memberExposurePayload);
         }
 
         @Override
