@@ -4897,12 +4897,15 @@ export function updateDataSubjectRequest(orgId: number, requestId: number, body:
 }
 
 /**
- * Assembles the subject-scoped disclosure for a verified disclosure request. The payload is the
- * operator-facing raw material (Art. 33 assembly); callers save it as a file rather than render it.
+ * Assembles the subject-scoped disclosure for a verified disclosure request. Every assembly is
+ * recorded as an access audit, so it is a CSRF-protected POST rather than a GET a cross-site page
+ * could trigger (#2004). The payload is the operator-facing raw material (Art. 33 assembly);
+ * callers save it as a file rather than render it.
  */
-export function getDataSubjectDisclosure(orgId: number, requestId: number) {
-    return getJson<Record<string, unknown>>(
+export function assembleDataSubjectDisclosure(orgId: number, requestId: number) {
+    return postJson<Record<string, unknown>>(
         `/api/orgs/${orgId}/data-subject-requests/${requestId}/disclosure`,
+        {},
         { cache: "no-store" },
     );
 }
