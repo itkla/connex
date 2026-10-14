@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.OrgMemberService;
 import ooo.klae.connex.backend.services.OwnershipOfferService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Organization membership administration (#316). Listing an org's members
@@ -43,6 +44,7 @@ public class OrgMemberController {
     private final OwnershipOfferService ownershipOfferService;
     private final PrivilegedMfaAttestationService attestationService;
     private final AuthService authService;
+    private final TenantWorkScope tenantWorkScope;
 
     @GetMapping
     public List<OrgMembershipDto> myOrganizations() {
@@ -56,7 +58,7 @@ public class OrgMemberController {
 
     @PostMapping("/{orgId}/members")
     public ResponseEntity<?> addMember(@PathVariable int orgId, @Valid @RequestBody AddOrgMemberRequest request) {
-        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, authService.getCurrentUser().getId(), null,
+        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, currentUserId(), null,
                 request.getEmail(), request.getOrgRole(),
                 Boolean.TRUE.equals(request.getAcknowledgeConfinement()));
         return result.offer() == null ? ResponseEntity.noContent().build()
@@ -66,7 +68,7 @@ public class OrgMemberController {
     @PutMapping("/{orgId}/members/{userId}")
     public ResponseEntity<?> setMember(@PathVariable int orgId, @PathVariable int userId,
             @Valid @RequestBody OrgMemberRequest request) {
-        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, authService.getCurrentUser().getId(), userId, null, request.getOrgRole(),
+        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, currentUserId(), userId, null, request.getOrgRole(),
                 Boolean.TRUE.equals(request.getAcknowledgeConfinement()));
         return result.offer() == null ? ResponseEntity.noContent().build()
             : ResponseEntity.accepted().body(OwnershipOfferCreatedDto.from(result));
@@ -75,7 +77,7 @@ public class OrgMemberController {
     @DeleteMapping("/{orgId}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable int orgId, @PathVariable int userId) {
-        ownershipOfferService.removeOrganizationMember(orgId, authService.getCurrentUser().getId(), userId);
+        ownershipOfferService.removeOrganizationMember(orgId, currentUserId(), userId);
     }
 
     /**
@@ -86,7 +88,7 @@ public class OrgMemberController {
     @PostMapping("/{orgId}/leave")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void leave(@PathVariable int orgId) {
-        ownershipOfferService.leaveOrganization(orgId, authService.getCurrentUser().getId());
+        ownershipOfferService.leaveOrganization(orgId, currentUserId());
     }
 
     /**
@@ -105,5 +107,9 @@ public class OrgMemberController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revokeMfaAttestation(@PathVariable int orgId, @PathVariable int userId) {
         attestationService.revokeForOrganization(orgId, authService.getCurrentUser().getId(), userId);
+    }
+
+    private int currentUserId() {
+        return tenantWorkScope.unroutedRead(() -> authService.getCurrentUser().getId());
     }
 }

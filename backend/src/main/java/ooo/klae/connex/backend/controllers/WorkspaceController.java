@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Workspace membership and switching. Lists the caller's workspaces, creates a
@@ -60,6 +61,7 @@ public class WorkspaceController {
     private final InviteLinkService inviteLinkService;
     private final AllowedDomainService allowedDomainService;
     private final AuthService authService;
+    private final TenantWorkScope tenantWorkScope;
     private final WorkspaceCookie workspaceCookie;
 
     @GetMapping
@@ -197,7 +199,7 @@ public class WorkspaceController {
     @PatchMapping("/{id}/members/{userId}")
     public ResponseEntity<?> updateMemberRole(@PathVariable int id, @PathVariable int userId,
             @Valid @RequestBody UpdateMemberRoleRequest request) {
-        int actorId = authService.getCurrentUser().getId();
+        int actorId = tenantWorkScope.unroutedRead(() -> authService.getCurrentUser().getId());
         boolean acknowledged = Boolean.TRUE.equals(request.getAcknowledgeConfinement());
         MemberRoleChange<MemberDto> result = ownershipOfferService.changeWorkspaceRole(
             id, actorId, userId, request.getRole(), request.getRoleId(), acknowledged);

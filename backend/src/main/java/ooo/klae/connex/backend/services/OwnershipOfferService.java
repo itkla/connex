@@ -72,23 +72,28 @@ public class OwnershipOfferService {
         });
     }
 
-    /** Accepts consent, then refreshes standing after its promotion transaction commits. */
+    /**
+     * Accepts consent, then refreshes labels and standing after the promotion commits. An
+     * enrichment failure propagates without a refusal audit; an accepted retry returns the
+     * current membership and standing without granting ownership again.
+     */
     public OwnershipOfferAcceptanceDto accept(long id, int userId, boolean acknowledged) {
         requireCompatibleEnclosingTransaction();
         OwnershipOffer offer = find(id);
         if (offer.getOffereeUserId() != userId) {
             throw notFound();
         }
+        OwnershipOfferAcceptanceDto result;
         try {
-            OwnershipOfferAcceptanceDto result = routed(offer, userId,
+            result = routed(offer, userId,
                 () -> transaction.accept(id, userId, acknowledged));
-            return tenantWorkScope.unroutedRead(() -> new OwnershipOfferAcceptanceDto(
-                displayLabelsFor(userId, false).apply(result.offer()), result.membership(), privilegedAccountService.standing(userId),
-                privilegedAccountService.enforcedStanding(userId)));
         } catch (RuntimeException failure) {
             refusalAfterRollback(offer, "accept", failure);
             throw failure;
         }
+        return tenantWorkScope.unroutedRead(() -> new OwnershipOfferAcceptanceDto(
+            displayLabelsFor(userId, false).apply(result.offer()), result.membership(), privilegedAccountService.standing(userId),
+            privilegedAccountService.enforcedStanding(userId)));
     }
 
     /** Declines one's own consent without granting privilege or requiring step-up. */
@@ -186,57 +191,59 @@ public class OwnershipOfferService {
     public MemberRoleChange<MemberDto> changeWorkspaceRole(int workspaceId, int actorId, int targetId,
             String role, Integer roleId, boolean acknowledged) {
         requireCompatibleEnclosingTransaction();
-        if (workspaceMapper.getRole(workspaceId, actorId) == null) {
+        if (tenantWorkScope.unroutedRead(() -> workspaceMapper.getRole(workspaceId, actorId)) == null) {
             throw new ForbiddenException("Requires member management permission in this workspace");
         }
         OwnershipOffer scope = new OwnershipOffer();
-        scope.setOrgId(workspaceMapper.getOrgId(workspaceId));
+        scope.setOrgId(tenantWorkScope.unroutedRead(() -> workspaceMapper.getOrgId(workspaceId)));
         scope.setWorkspaceId(workspaceId);
         scope.setDeliveryWorkspaceId(workspaceId);
         scope.setDeliveryState("DELIVERED");
         scope.setOffereeUserId(targetId);
+        MemberRoleChange<MemberDto> result;
         try {
-            MemberRoleChange<MemberDto> result = routed(scope, actorId, () -> roleId == null
+            result = routed(scope, actorId, () -> roleId == null
                 ? workspaceService.changeMemberRole(workspaceId, actorId, targetId, role, acknowledged)
                 : MemberRoleChange.direct(workspaceService.assignCustomRole(workspaceId, actorId, targetId, roleId, acknowledged)));
-            return withCreationLabels(result, actorId);
         } catch (RuntimeException failure) {
             if ("owner".equalsIgnoreCase(role)) {
                 refusalAfterRollback(scope, "create", failure);
             }
             throw failure;
         }
+        return withCreationLabels(result, actorId);
     }
 
     /** Pins organization membership edits before their transaction, retaining eligibility secrecy. */
     public MemberRoleChange<OrgMemberDto> changeOrganizationRole(int orgId, int actorId, Integer targetId,
             String email, String role, boolean acknowledged) {
         requireCompatibleEnclosingTransaction();
-        orgMemberService.requireOrgOwner(orgId, actorId);
+        requireOrganizationOwner(orgId, actorId);
         OwnershipOffer scope = organizationRoute(orgId);
         scope.setOffereeUserId(targetId == null ? actorId : targetId);
+        MemberRoleChange<OrgMemberDto> result;
         try {
-            MemberRoleChange<OrgMemberDto> result = routed(scope, actorId, () -> targetId == null
+            result = routed(scope, actorId, () -> targetId == null
                 ? orgMemberService.setMemberByEmail(orgId, actorId, email, role, acknowledged)
                 : orgMemberService.setMember(orgId, actorId, targetId, role, acknowledged));
-            return withCreationLabels(result, actorId);
         } catch (RuntimeException failure) {
             if ("owner".equalsIgnoreCase(role)) {
                 refusalAfterRollback(scope, "create", failure);
             }
             throw failure;
         }
+        return withCreationLabels(result, actorId);
     }
 
     /** Routes organization removal before its existing owner and last-owner checks. */
     public void removeOrganizationMember(int orgId, int actorId, int targetId) {
-        orgMemberService.requireOrgOwner(orgId, actorId);
+        requireOrganizationOwner(orgId, actorId);
         routed(organizationRoute(orgId), actorId, () -> { orgMemberService.removeMember(orgId, actorId, targetId); return true; });
     }
 
     /** Routes self-only organization departure without introducing a step-up requirement. */
     public void leaveOrganization(int orgId, int actorId) {
-        if (orgMemberMapper.getRole(orgId, actorId) == null) {
+        if (tenantWorkScope.unroutedRead(() -> orgMemberMapper.getRole(orgId, actorId)) == null) {
             throw new ResourceNotFoundException("You are not a member of this organization");
         }
         routed(organizationRoute(orgId), actorId, () -> { orgMemberService.leave(orgId, actorId); return true; });
@@ -254,9 +261,17 @@ public class OwnershipOfferService {
     private OwnershipOffer organizationRoute(int orgId) {
         OwnershipOffer scope = new OwnershipOffer();
         scope.setOrgId(orgId);
-        scope.setDeliveryWorkspaceId(workspaceMapper.findByOrgId(orgId).stream().map(workspace -> workspace.getId()).findFirst().orElse(null));
+        scope.setDeliveryWorkspaceId(tenantWorkScope.unroutedRead(() -> workspaceMapper.findByOrgId(orgId)
+            .stream().map(workspace -> workspace.getId()).findFirst().orElse(null)));
         scope.setDeliveryState("DELIVERED");
         return scope;
+    }
+
+    private void requireOrganizationOwner(int orgId, int actorId) {
+        tenantWorkScope.unroutedRead(() -> {
+            orgMemberService.requireOrgOwner(orgId, actorId);
+            return true;
+        });
     }
 
     private OwnershipOffer find(long id) {

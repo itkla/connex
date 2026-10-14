@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -11,9 +12,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -27,6 +31,7 @@ import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -36,6 +41,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import tools.jackson.databind.JsonNode;
@@ -47,6 +53,7 @@ import tools.jackson.databind.ObjectMapper;
 class OwnershipOfferHttpIntegrationTest {
     @Autowired private JdbcTemplate jdbc;
     @MockitoSpyBean private UserMapper users;
+    @MockitoSpyBean private PrivilegedAccountService privilegedAccountService;
     @Autowired private WorkspaceMapper workspaces;
     @Autowired private OrganizationMapper organizations;
     @Autowired private OrgMemberMapper members;
@@ -108,6 +115,58 @@ class OwnershipOfferHttpIntegrationTest {
         assertEquals(200, request("POST", "/api/ownership-offers/" + id + "/accept", targetSession, "{}", true).statusCode());
         assertEquals(200, request("PATCH", "/api/workspaces/" + workspace.getId() + "/members/" + target.getId(), ownerSession, "{\"role\":\"owner\"}", false).statusCode());
         assertEquals(0, json.readTree(request("GET", "/api/ownership-offers", targetSession, null, true).body()).size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"WORKSPACE", "ORGANIZATION"})
+    void postCommitStandingFailureDoesNotRefuseOrRepeatTheCommittedGrant(String scope) throws Exception {
+        boolean workspaceOffer = "WORKSPACE".equals(scope);
+        var offered = workspaceOffer
+            ? request("PATCH", "/api/workspaces/" + workspace.getId() + "/members/" + target.getId(),
+                ownerSession, "{\"role\":\"owner\"}", false)
+            : request("PUT", "/api/orgs/" + org.getId() + "/members/" + target.getId(),
+                ownerSession, "{\"orgRole\":\"owner\"}", false);
+        assertEquals(202, offered.statusCode(), offered.body());
+        String id = json.readTree(offered.body()).path("offer").path("id").asString();
+        AtomicBoolean failRefresh = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            String role = workspaceOffer ? workspaces.getRole(workspace.getId(), target.getId())
+                : members.getRole(org.getId(), target.getId());
+            if (!TransactionSynchronizationManager.isActualTransactionActive()
+                    && "owner".equals(role) && failRefresh.compareAndSet(true, false)) {
+                throw new RuntimeException("Post-commit standing read failed");
+            }
+            return invocation.callRealMethod();
+        }).when(privilegedAccountService).standing(target.getId());
+
+        var failed = request("POST", "/api/ownership-offers/" + id + "/accept", targetSession, "{}", true);
+        assertEquals(500, failed.statusCode(), failed.body());
+        assertFalse(failRefresh.get());
+        assertEquals("owner", workspaceOffer ? workspaces.getRole(workspace.getId(), target.getId())
+            : members.getRole(org.getId(), target.getId()));
+        assertEquals("ACCEPTED", jdbc.queryForObject(
+            "SELECT state FROM ownership_offer WHERE id = ?", String.class, id));
+        assertEquals(0, consentAudits("ownership.offer.refused"));
+        assertEquals(1, consentAudits("ownership.offer.accepted"));
+        JsonNode committedMember = workspaceOffer ? json.valueToTree(workspaces.getMember(workspace.getId(), target.getId()))
+            : json.readTree(request("GET", "/api/orgs/" + org.getId() + "/members", ownerSession, null, false).body())
+                .valueStream().filter(member -> member.path("id").asInt() == target.getId()).findFirst().orElseThrow();
+
+        var retried = request("POST", "/api/ownership-offers/" + id + "/accept", targetSession, "{}", true);
+        assertEquals(200, retried.statusCode(), retried.body());
+        JsonNode accepted = json.readTree(retried.body());
+        assertEquals(committedMember, accepted.path("membership"));
+        assertEquals("ACCEPTED", accepted.path("offer").path("state").asString());
+        assertEquals(privilegedAccountService.standing(target.getId()).name(), accepted.path("standing").asString());
+        assertEquals(privilegedAccountService.enforcedStanding(target.getId()).name(), accepted.path("enforcedStanding").asString());
+        assertEquals(0, consentAudits("ownership.offer.refused"));
+        assertEquals(1, consentAudits("ownership.offer.accepted"));
+        assertEquals(1, consentAudits(workspaceOffer ? "workspace.member.role" : "org.member.set"));
+    }
+
+    private int consentAudits(String action) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND entity_id = ? AND action = ?",
+            Integer.class, org.getId(), target.getId(), action);
     }
 
     @Test void orgAbsentMembershipAndAdminChangesKeepTheirExactContracts() throws Exception {
@@ -184,6 +243,21 @@ class OwnershipOfferHttpIntegrationTest {
         assertEquals(404, request("DELETE", "/api/workspaces/" + workspace.getId() + "/ownership-offers/" + id, targetSession, null, false).statusCode());
         assertEquals(204, request("DELETE", "/api/workspaces/" + workspace.getId() + "/ownership-offers/" + id, ownerSession, null, false).statusCode());
         assertEquals(204, request("DELETE", "/api/workspaces/" + workspace.getId() + "/ownership-offers/" + id, ownerSession, null, false).statusCode());
+        assertEquals(409, request("POST", "/api/ownership-offers/" + id + "/accept", targetSession, "{}", true).statusCode());
+    }
+
+    @Test void organizationRevokeUsesTheAuthenticatedOwnerAndResolvesConsent() throws Exception {
+        var offered = request("PUT", "/api/orgs/" + org.getId() + "/members/" + target.getId(),
+            ownerSession, "{\"orgRole\":\"owner\"}", false);
+        assertEquals(202, offered.statusCode(), offered.body());
+        String id = json.readTree(offered.body()).path("offer").path("id").asString();
+        String path = "/api/orgs/" + org.getId() + "/ownership-offers/" + id;
+        assertEquals(404, request("DELETE", path, targetSession, null, false).statusCode());
+        assertEquals(204, request("DELETE", path, ownerSession, null, false).statusCode());
+        assertEquals(204, request("DELETE", path, ownerSession, null, false).statusCode());
+        assertEquals("REVOKED", jdbc.queryForObject(
+            "SELECT state FROM ownership_offer WHERE id = ?", String.class, id));
+        assertNull(members.getRole(org.getId(), target.getId()));
         assertEquals(409, request("POST", "/api/ownership-offers/" + id + "/accept", targetSession, "{}", true).statusCode());
     }
 

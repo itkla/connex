@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,6 +44,7 @@ class WorkspaceControllerTest {
     @Mock private PrivilegedMfaAttestationService attestationService;
     @Mock private AllowedDomainService allowedDomainService;
     @Mock private AuthService authService;
+    @Mock private TenantWorkScope tenantWorkScope;
     @Mock private WorkspaceCookie workspaceCookie;
 
     private WorkspaceController controller;
@@ -57,6 +59,7 @@ class WorkspaceControllerTest {
             inviteLinkService,
             allowedDomainService,
             authService,
+            tenantWorkScope,
             workspaceCookie
         );
         User user = new User();
