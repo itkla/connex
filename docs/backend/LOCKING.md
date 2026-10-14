@@ -916,10 +916,14 @@ that mutex, and every later segment-condition and eligibility query shares it. M
 snapshot-version rows are ordinary reads, not locking reads, so unrelated campaigns' first child-row
 inserts do not acquire conflicting index-gap locks.
 
-- Campaign update locks actor and requested-owner memberships in one ascending union before role
-  authorization and the campaign mutex. The requested owner's membership uses `FOR UPDATE NOWAIT`;
-  create uses the same non-waiting membership barrier before insertion. No target account root or
-  target reservation fence is added: active reserved targets remain admitted until the cascade.
+- Campaign creation and update lock actor and requested-owner memberships in one ascending union
+  before role authorization; update then takes the campaign mutex. The requested owner's membership
+  uses `FOR UPDATE NOWAIT`;
+  creation first retains the actor's account root and active workspace shared, then locks the
+  membership union and actor authority before insertion and audit. This prevents a role change from
+  holding the workspace while waiting for the owner's membership as creation reaches its audit.
+  No target account root or target reservation fence is added: active reserved targets remain
+  admitted until the cascade.
   Only MySQL 3572 / SQLSTATE `HY000` becomes the existing 409 membership-changing conflict; callers
   resubmit and the transaction never retries. Waiting while holding the workspace would close the
   three-transaction campaign → target-membership/task → task-actor/role → workspace cycle.

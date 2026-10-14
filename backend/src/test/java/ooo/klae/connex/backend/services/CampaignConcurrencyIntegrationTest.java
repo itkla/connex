@@ -134,6 +134,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
 
     @Autowired private CampaignService campaignService;
     @Autowired private CampaignSendService campaignSendService;
+    @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleService roleService;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private CampaignMapper campaignMapper;
@@ -189,8 +190,87 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
         }
     }
 
-    @Test
-    void busyAdditionalMembershipBreaksTheThreeConnectionCycleWith409() throws Exception {
+    @ParameterizedTest
+    @CsvSource({"true", "false"})
+    void creationRetainsWorkspaceBeforeOwnerMembershipUntilItsAuditCommits(
+            boolean ownerBelowActor) throws Exception {
+        User owner = ownerBelowActor ? currentUser : newCampaignAdmin(workspace);
+        User actor = ownerBelowActor ? newCampaignAdmin(workspace) : currentUser;
+        User roleActor = newCampaignAdmin(workspace);
+        CampaignRequest request = new CampaignRequest(
+                "Creation lock order", null, "event", "draft", owner.getId(),
+                null, null, null, null, null);
+        CountDownLatch membershipAcquired = new CountDownLatch(1);
+        CountDownLatch allowCreation = new CountDownLatch(1);
+        CountDownLatch roleStarted = new CountDownLatch(1);
+        AtomicLong creationConnection = new AtomicLong();
+        AtomicLong roleConnection = new AtomicLong();
+        doAnswer(call -> {
+            var locked = assignmentSqlSession.getMapper(WorkspaceMapper.class)
+                    .lockAuthorizationMembershipWithoutWaiting(workspace.getId(), owner.getId());
+            assertNotNull(locked);
+            creationConnection.set(connectionId(DataSourceUtils.getConnection(dataSource)));
+            membershipAcquired.countDown();
+            assertTrue(allowCreation.await(30, TimeUnit.SECONDS));
+            return locked;
+        }).when(membershipBarrier).lockAuthorizationMembershipWithoutWaiting(workspace.getId(), owner.getId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try (Connection observer = dataSource.getConnection()) {
+            JdbcTemplate observation = new JdbcTemplate(new SingleConnectionDataSource(observer, true));
+            Future<CampaignDto> creation = executor.submit(() -> {
+                authenticateAs(actor, workspace.getId());
+                try {
+                    return campaignService.create(request);
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            assertTrue(membershipAcquired.await(30, TimeUnit.SECONDS));
+            Future<?> roleChange = executor.submit(() -> {
+                authenticateAs(roleActor, workspace.getId());
+                try {
+                    TransactionTemplate transaction = transaction();
+                    transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    return transaction.execute(status -> {
+                        roleConnection.set(connectionId(DataSourceUtils.getConnection(dataSource)));
+                        roleStarted.countDown();
+                        return workspaceService.changeMemberRole(
+                                workspace.getId(), roleActor.getId(), owner.getId(), "member");
+                    });
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            assertTrue(roleStarted.await(30, TimeUnit.SECONDS));
+            assertNotEquals(creationConnection.get(), roleConnection.get());
+            assertNotEquals(connectionId(observer), creationConnection.get());
+            assertNotEquals(connectionId(observer), roleConnection.get());
+            MySqlLockWaitProbe.awaitExclusiveRecordLock(
+                    observation, roleConnection.get(), "workspace", String.valueOf(workspace.getId()));
+            assertFalse(roleChange.isDone());
+            assertFalse(creation.isDone());
+            allowCreation.countDown();
+            CampaignDto created = awaitNoDeadlock(creation, "Campaign creation audit");
+            awaitNoDeadlock(roleChange, "Owner role change");
+            assertEquals(owner.getId(), created.ownerUserId());
+            assertEquals("member", workspaceMapper.getRole(workspace.getId(), owner.getId()));
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_id = ?"
+                            + " AND action = 'campaign.create' AND actor_id = ?",
+                    Integer.class, workspace.getId(), created.id(), actor.getId()));
+        } finally {
+            allowCreation.countDown();
+            try {
+                shutdown(executor);
+            } finally {
+                org.mockito.Mockito.reset(membershipBarrier);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true", "false"})
+    void busyAdditionalMembershipBreaksTheThreeConnectionCycleWith409(boolean create) throws Exception {
         User actorA = currentUser;
         User targetB = newCampaignAdmin(workspace);
         User actorC = newCampaignAdmin(workspace);
@@ -213,10 +293,10 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             taskWrite.setAutoCommit(false);
             roleWrite.setAutoCommit(false);
             JdbcTemplate observation = new JdbcTemplate(new SingleConnectionDataSource(observer, true));
-            Future<?> campaignUpdate = executor.submit(() -> {
+            Future<?> campaignWrite = executor.submit(() -> {
                 authenticateAs(actorA, workspace.getId());
                 try {
-                    return campaignService.update(campaign.id(), request);
+                    return create ? campaignService.create(request) : campaignService.update(campaign.id(), request);
                 } finally {
                     clearAuthentication();
                 }
@@ -254,11 +334,12 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             MySqlLockWaitProbe.awaitSharedRecordLock(observation, taskConnection, "app_user", String.valueOf(actorC.getId()));
             allowNowait.countDown();
             ExecutionException failed = assertThrows(ExecutionException.class,
-                () -> campaignUpdate.get(10, TimeUnit.SECONDS));
+                () -> campaignWrite.get(10, TimeUnit.SECONDS));
             assertTrue(failed.getCause() instanceof ConflictException, String.valueOf(failed.getCause()));
             role.get(30, TimeUnit.SECONDS);
             task.get(30, TimeUnit.SECONDS);
             assertEquals(null, campaignMapper.getCampaign(workspace.getId(), campaign.id()).getOwnerUserId());
+            assertEquals(1, campaignMapper.getCampaigns(workspace.getId()).size());
         } finally {
             allowNowait.countDown();
             org.mockito.Mockito.reset(membershipBarrier);

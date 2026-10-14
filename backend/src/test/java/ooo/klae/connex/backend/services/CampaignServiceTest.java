@@ -107,6 +107,9 @@ class CampaignServiceTest extends CampaignRealDbTestSupport {
         assertTrue(campaignService.list().isEmpty());
         assertThrows(ForbiddenException.class,
                 () -> campaignService.create(campaignRequest("Denied", null)));
+        CampaignService target = AopTestUtils.getTargetObject(campaignService);
+        assertThrows(ForbiddenException.class,
+                () -> target.create(campaignRequest("Denied", null)));
     }
 
     /**

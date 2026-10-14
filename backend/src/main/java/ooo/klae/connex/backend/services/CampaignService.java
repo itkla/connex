@@ -80,13 +80,19 @@ public class CampaignService {
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignDto create(CampaignRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        WorkspaceService.LockedMemberPermissionsAndMemberships authority =
+                workspaceService.lockedMemberPermissionsAndMemberships(
+                        workspaceId, actorId,
+                        request != null && request.ownerUserId() != null
+                                ? Set.of(request.ownerUserId()) : Set.of());
+        if (!authority.permissions().contains(Permission.CAMPAIGN_MANAGE)) {
+            throw new ForbiddenException("Requires the CAMPAIGN_MANAGE permission in this workspace");
+        }
         Campaign campaign = new Campaign();
         campaign.setWorkspaceId(workspaceId);
-        campaign.setCreatedById(authService.getCurrentUser().getId());
-        Set<Integer> owners = request != null && request.ownerUserId() != null
-                && workspaceService.lockActiveMemberWithoutWaiting(workspaceId, request.ownerUserId())
-                ? Set.of(request.ownerUserId()) : Set.of();
-        applyRequest(campaign, request, workspaceId, null, owners);
+        campaign.setCreatedById(actorId);
+        applyRequest(campaign, request, workspaceId, null, authority.activeMembershipIds());
         campaignMapper.insertCampaign(campaign);
         auditService.record("campaign.create", "campaign", campaign.getId(), campaign.getName(),
                 "Created campaign " + campaign.getName(), null);
