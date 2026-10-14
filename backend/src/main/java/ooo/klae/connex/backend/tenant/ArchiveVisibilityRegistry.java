@@ -250,6 +250,9 @@ public final class ArchiveVisibilityRegistry {
                 + "keyed by an already-authorised contact. The recent-moves feed projects the "
                 + "contact's own name and picture and is returned verbatim by EmploymentService, so "
                 + "its join carries the archive predicate itself.");
+        declare(entries, "AssignmentSweepMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Catalog-pinned assignment maintenance discovers numeric keys and locks exact parent ids; "
+                + "it projects no identifying person or company fields and must reach archived rows.");
         declare(entries, "PersonLifecyclePassMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
             "Lifecycle passes join the contact only to resolve its key and copy the pass's own "
                 + "response timestamps, and project no identifying person column. Archiving a "

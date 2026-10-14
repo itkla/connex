@@ -110,6 +110,49 @@ over the limit stays bounded by the retained intake backstop.
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
 
+## Post-delete assignment recovery (#1941)
+
+The deletion reservation, initial per-catalog erasure, and final control-plane transaction retain
+their existing ordering. Initial erasure can commit before a locking assignment writer finishes.
+The final `app_user` delete cascades memberships and waits for their exclusive locks, so its commit
+is the assignment barrier. `UserService` then runs a fresh sweep, including when an absence read
+confirms that an ambiguous deletion commit succeeded, before expiring sessions. Sweep failures
+leave recovery pending and do not replace the deletion result or prevent session revocation.
+
+Coverage is eight references: company, person and deal ownership; deal collaborator seats; task
+assignment; intervention and campaign ownership; and lifecycle-pass ownership. A successful sweep
+removes those references in every catalog returned by `PlacementRegistry.activeCatalogs()`, across
+all workspace and record lifecycle states. It does not promise cleanup for unavailable or unserved
+catalogs, report goals/approvers (#1953), or self-only asynchronous writers.
+
+Discovery returns numeric keys without locks or an ambient snapshot. Bounded account-existence
+reads use `UserMapper.findExistingIds` through `unroutedRead` on the control plane; existing accounts,
+including reserved accounts, are preserved. Each catalog is pinned before opening a separate
+`REQUIRES_NEW`, `READ_COMMITTED` transaction for each candidate. The sweep locks the exact parent
+through `PRIMARY`, then conditionally clears the unchanged user pointer; missing records and changed
+pointers are successful no-ops. Collaborators lock deal X before deleting the exact seat and its
+secondary-index entries, matching replacement's parent-before-child ordering. Person and lifecycle
+pass units lock person X, clear that person's matching owner, then clear matching owners on its
+passes in the same transaction. The sole lifecycle owner-snapshot writer,
+`PersonLifecycleService.recordPass`, follows `applyStage`'s `getOwnedPersonByIdForUpdate`, so a raced
+insertion, milestone or closure commits before that person lock or snapshots the cleared owner.
+Intervention ownership clearing increments `source_version` only when it changes the pointer.
+
+These recovery units acquire no account, workspace, membership, role, workflow-gate, or audit-head
+roots and reuse no full-erasure transaction. Existing #1582 cycles remain unchanged. A failed unit
+rolls back before siblings continue; no retry runs inside a poisoned transaction. Failures log only
+catalog and exception type and increment `connex.account.assignment.sweep.failures` with bounded
+`mode=immediate|periodic` and `phase=catalogs|page|existence|record` tags.
+
+Immediate recovery drains matching pages. Periodic recovery visits one page per catalog/kind per
+run (default 200). Each traversal captures a fixed scalar `MAX(id)` watermark, advances past failed
+records, and wraps on an empty bounded page. Collaborators instead use their complete
+`(workspace_id, deal_id, user_id)` primary-key tuple as cursor and greatest-key watermark with
+`cursor < key <= watermark`. An empty page wraps even if the watermark row was deleted. Appends
+cannot extend a traversal and starve an earlier failure; a restart discards cursors and safely
+rediscovers residual references. Recovery remains contingent on later successful catalog access and
+record transactions.
+
 ## Sequence template authoring
 
 Sequence mutations acquire and revalidate the actor's permission locks before the exact sequence row. The account-deletion reservation check in that locked authorization path is itself a locking read so it cannot establish a stale consistent-read snapshot before later contention. Update and archive then re-read the locked sequence and enforce personal-versus-shared visibility before writing. Publish retains the sequence root, reads draft steps and content with shared locks, and allocates the next version number with a locking maximum query before inserting its immutable definition and hash. Draft replacement remains inside the same transaction.
@@ -873,8 +916,19 @@ that mutex, and every later segment-condition and eligibility query shares it. M
 snapshot-version rows are ordinary reads, not locking reads, so unrelated campaigns' first child-row
 inserts do not acquire conflicting index-gap locks.
 
-- Campaign update performs any membership, parent-campaign, and other ordinary validation reads
-  only after the campaign mutex.
+- Campaign creation and update lock actor and requested-owner memberships in one ascending union
+  before role authorization; update then takes the campaign mutex. The requested owner's membership
+  uses `FOR UPDATE NOWAIT`;
+  creation first retains the actor's account root and active workspace shared, then locks the
+  membership union and actor authority before insertion and audit. This prevents a role change from
+  holding the workspace while waiting for the owner's membership as creation reaches its audit.
+  No target account root or target reservation fence is added: active reserved targets remain
+  admitted until the cascade.
+  Only MySQL 3572 / SQLSTATE `HY000` becomes the existing 409 membership-changing conflict; callers
+  resubmit and the transaction never retries. Waiting while holding the workspace would close the
+  three-transaction campaign → target-membership/task → task-actor/role → workspace cycle.
+  Ordinary lifecycle, parent-campaign and other validation reads remain after the campaign mutex.
+  Invalid owners retain 400, missing campaigns 404, and insufficient actor authority 403.
 - Live-audience replacement reads the previous audience ordinarily after the mutex, then upserts
   and audits the transition under the same mutex.
 - Snapshot creation ordinarily reads the live audience and next snapshot version after the mutex,

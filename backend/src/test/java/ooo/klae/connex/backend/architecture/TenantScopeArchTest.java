@@ -80,6 +80,8 @@ class TenantScopeArchTest {
      * tombstones.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findWatermark",
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countsByCategory",

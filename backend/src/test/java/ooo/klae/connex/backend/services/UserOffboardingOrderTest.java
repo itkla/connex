@@ -423,8 +423,9 @@ class UserOffboardingOrderTest {
         order.verify(apiCredentialLifecycleService).deleteForAccount(9, credentialRoots);
         order.verify(userMapper).delete(9);
 
-        InOrder revocationOrder = inOrder(userMapper, accountSessionRevocationService);
+        InOrder revocationOrder = inOrder(userMapper, catalogOffboardingService, accountSessionRevocationService);
         revocationOrder.verify(userMapper).delete(9);
+        revocationOrder.verify(catalogOffboardingService).sweepAssignmentsAfterDeletion(9);
         revocationOrder.verify(accountSessionRevocationService).expireAll(9);
     }
 
@@ -432,7 +433,8 @@ class UserOffboardingOrderTest {
             UserMapper userMapper,
             TenantWorkScope tenantWorkScope,
             UserDeletionTransaction deletionTransaction,
-            AccountSessionRevocationService accountSessionRevocationService) {
+            AccountSessionRevocationService accountSessionRevocationService,
+            UserAccountCatalogOffboardingService cleanup) {
         return new UserService(
             userMapper,
             mock(ActivityMapper.class),
@@ -446,7 +448,7 @@ class UserOffboardingOrderTest {
             mock(UserProfilePictureTransaction.class),
             tenantWorkScope,
             mock(ProviderAccountOffboardingService.class),
-            mock(UserAccountCatalogOffboardingService.class),
+            cleanup,
             deletionTransaction,
             accountSessionRevocationService);
     }
@@ -464,6 +466,9 @@ class UserOffboardingOrderTest {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
         AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(tenantWorkScope.unroutedRead(any()))
+            .thenAnswer(invocation -> invocation.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
@@ -473,10 +478,12 @@ class UserOffboardingOrderTest {
         when(userMapper.getUserById(11)).thenReturn(null);
 
         assertThrows(IllegalStateException.class,
-            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation, cleanup)
                 .delete(11));
 
-        verify(revocation).expireAll(11);
+        var order = inOrder(cleanup, revocation);
+        order.verify(cleanup).sweepAssignmentsAfterDeletion(11);
+        order.verify(revocation).expireAll(11);
     }
 
     /** A deletion that genuinely rolled back must leave the surviving account's sessions alone. */
@@ -486,6 +493,9 @@ class UserOffboardingOrderTest {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
         AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(tenantWorkScope.unroutedRead(any()))
+            .thenAnswer(invocation -> invocation.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
@@ -495,10 +505,30 @@ class UserOffboardingOrderTest {
         when(userMapper.getUserById(12)).thenReturn(new ooo.klae.connex.backend.beans.User());
 
         assertThrows(IllegalStateException.class,
-            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation, cleanup)
                 .delete(12));
 
         verify(revocation, never()).expireAll(12);
+        verify(cleanup, never()).sweepAssignmentsAfterDeletion(12);
+    }
+
+    @Test
+    void cleanupFailureStillRevokesAndPreservesTheOriginalAmbiguousFailure() {
+        UserMapper users = mock(UserMapper.class);
+        TenantWorkScope scope = mock(TenantWorkScope.class);
+        UserDeletionTransaction deletion = mock(UserDeletionTransaction.class);
+        AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(scope.unrouted(any())).thenAnswer(call -> call.<java.util.function.Supplier<Object>>getArgument(0).get());
+        when(scope.unroutedRead(any())).thenAnswer(call -> call.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
+        doThrow(new IllegalArgumentException()).when(cleanup).sweepAssignmentsAfterDeletion(15);
+        UserService userService = deletionOnlyUserService(users, scope, deletion, revocation, cleanup);
+        userService.delete(15);
+        verify(revocation).expireAll(15);
+        RuntimeException original = new IllegalStateException("ambiguous commit");
+        doThrow(original).when(deletion).delete(eq(15), anyString());
+        assertEquals(original, assertThrows(IllegalStateException.class, () -> userService.delete(15)));
+        verify(revocation, org.mockito.Mockito.times(2)).expireAll(15);
     }
 
 }

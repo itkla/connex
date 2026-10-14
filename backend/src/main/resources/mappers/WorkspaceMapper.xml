@@ -117,6 +117,13 @@
     FOR UPDATE
   </select>
 
+  <select id="lockAuthorizationMembershipWithoutWaiting" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR UPDATE NOWAIT
+  </select>
+
   <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
     SELECT workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member

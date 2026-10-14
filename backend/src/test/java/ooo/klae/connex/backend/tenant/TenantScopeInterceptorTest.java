@@ -48,6 +48,18 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void assignmentMaintenanceHasExactExemptionsAndAControlOnlyIdentityLookup() {
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(NS + "AssignmentSweepMapper"));
+        for (String method : Set.of("findWatermark", "findReferencesAnywhere", "lockParent", "clearOwner",
+                "removeCollaborator", "unassignTask", "clearInterventionOwner", "clearCampaignOwner",
+                "clearPersonPassOwners")) {
+            assertFalse(interceptor.requiresResolvedContext(NS + "AssignmentSweepMapper." + method));
+        }
+        assertTrue(interceptor.requiresResolvedContext(NS + "AssignmentSweepMapper.futureStatement"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.findExistingIds"));
+    }
+
+    @Test
     void routedModeRequiresACatalogScopeOffTheRequestThread() {
         TenantScopeInterceptor routed = new TenantScopeInterceptor(tenantContext, true, true);
 
