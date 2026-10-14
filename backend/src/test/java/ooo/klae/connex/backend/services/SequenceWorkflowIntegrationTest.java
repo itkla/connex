@@ -84,6 +84,7 @@ import ooo.klae.connex.backend.exceptions.SequenceException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
@@ -110,7 +111,7 @@ class SequenceWorkflowIntegrationTest {
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private UserOffboardingService offboardingService;
-    @Autowired private OrgMemberService orgMemberService;
+    @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private DealMapper dealMapper;
     @Autowired private OrganizationMapper organizationMapper;
@@ -156,7 +157,7 @@ class SequenceWorkflowIntegrationTest {
             otherWorkspace,
             "sequence_other_" + suffix,
             List.of("SEQUENCE_VIEW", "SEQUENCE_MANAGE"));
-        orgMemberService.addFoundingOwner(organization.getId(), manager.getId());
+        orgMemberMapper.addMember(organization.getId(), manager.getId(), "owner");
     }
 
     @AfterEach

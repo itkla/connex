@@ -23,8 +23,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
-import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
@@ -62,6 +62,7 @@ class SsoLifecycleFenceUnitTest {
     @Mock private SsoUserProvisioner userProvisioner;
     @Mock private FreshMembershipTransaction freshMembershipTransaction;
     @Mock private TransactionTemplate transactionTemplate;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private SsoLinkService linkService;
     private SsoLoginService loginService;
@@ -261,9 +262,8 @@ class SsoLifecycleFenceUnitTest {
                 "subject"))
             .thenReturn(identity);
         when(userMapper.getUserByIdForShare(USER_ID)).thenReturn(user);
-        when(transactionTemplate.execute(any())).thenAnswer(invocation ->
-            ((TransactionCallback<?>) invocation.getArgument(0))
-                .doInTransaction(new SimpleTransactionStatus()));
+        when(transactionTemplate.getTransactionManager()).thenReturn(transactionManager);
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         assertThrows(
             ForbiddenException.class,

@@ -32,6 +32,8 @@ import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
@@ -124,6 +126,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void resolve_provisionsWhenTheOrgCeilingAllowsTheDomain() {
         orgAllowedDomainMapper.add(orgId, OWNED_DOMAIN);
 
@@ -265,6 +268,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void newVerifiedEmailInOwnedDomain_provisionsMemberAndIdentity() {
         String email = "newcomer@" + OWNED_DOMAIN;
 

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
@@ -34,6 +36,7 @@ class RegistrationVerificationGateTest extends AbstractRegistrationVerificationT
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void domainRestricted_unverifiedEmail_blocked() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
@@ -44,6 +47,7 @@ class RegistrationVerificationGateTest extends AbstractRegistrationVerificationT
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void domainRestricted_verifiedEmail_allowed() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
@@ -56,6 +60,7 @@ class RegistrationVerificationGateTest extends AbstractRegistrationVerificationT
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void noAllowlist_unverifiedEmail_stillAllowed() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
         User user = outsider("anywhere.com");

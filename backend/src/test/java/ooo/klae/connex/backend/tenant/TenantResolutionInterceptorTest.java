@@ -31,6 +31,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
@@ -144,6 +145,61 @@ class TenantResolutionInterceptorTest {
         assertFalse(liveContext.isResolved());
         verify(workspaceService).rememberedWorkspaceIdFor(7);
         verify(workspaceService).firstMembershipWorkspaceIdFor(7);
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "GET, /api/ownership-offers, ''",
+        "POST, /api/ownership-offers/23/accept, ''",
+        "POST, /api/ownership-offers/23/decline, ''",
+        "GET, /connex/api/ownership-offers, /connex",
+        "POST, /connex/api/ownership-offers/23/accept, /connex",
+        "POST, /connex/api/ownership-offers/23/decline, /connex",
+        "GET, /api/%6fwnership-offers, ''",
+        "POST, /api/ownership-offers/23/%61ccept, ''",
+        "POST, /api/ownership-offers/23/%64ecline, ''"
+    })
+    void ownershipSelfRoutesBypassStaleSelectionWithoutInstallingAScope(
+            String method, String uri, String contextPath) {
+        liveContext.set(11, 3, 7, "member", null);
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "11"));
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertFalse(liveContext.isResolved());
+        assertNull(request.getAttribute(TenantResolutionInterceptor.ORGANIZATION_ID_ATTRIBUTE));
+        verifyNoInteractions(workspaceService, workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "/connexx/api/ownership-offers/23/decline, /connex",
+        "/api/ownership-offers/23/decline%01, ''",
+        "/api/ownership-offers/23%2Fdecline, ''",
+        "/api/ownership-offers/23/%2e%2e/decline, ''"
+    })
+    void rejectedOwnershipSelfPathsTakeOrdinaryStaleWriteResolution(
+            String uri, String contextPath) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", uri);
+        request.setContextPath(contextPath);
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "11"));
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService).getRole(11, 7);
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
         verifyNoInteractions(workspaceCookie, catalogResolver);
     }
 

@@ -154,7 +154,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             return retainPublicApiBinding(request, auth);
         }
         tenantContext.clear();
-        String selfPath = RequestPathNormalizer.apiPath(request);
+        String selfPath = normalizedPathOrNull(request);
         if (("GET".equals(request.getMethod()) && "/api/ownership-offers".equals(selfPath))
                 || ("POST".equals(request.getMethod()) && selfPath != null
                     && selfPath.matches("/api/ownership-offers/\\d+/(?:accept|decline)"))) {
