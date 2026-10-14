@@ -93,37 +93,60 @@ multi-replica deployments must enforce the same all-replicas-down boundary befor
 The 2026-10-12 owner decision authorizes build and merge when green; staging's next deployment is
 the coordinated restart. This supersedes the earlier merge hold and needs no additional restart
 window approval. V226 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
-and backfills **every delivery, irrespective of status**. V227 drops both token indexes, the
-generated hash column, and the raw bearer column in one ALTER. Existing fragment links keep working
-for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
+and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V226
+and V227 together with all writers stopped; there is no manual checkpoint between them. V227 first
+reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
+then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
+Existing fragment links keep working for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
 and previously generated export ZIPs are outside this remediation.
 
 1. Close ingress and stop **every old backend replica and writer**, including scheduler workers.
    Drain bounded provider calls where possible. Do not run old and new replicas concurrently; the
    previous binary reads and writes the removed columns. The coordinated Compose restart boundary
    used for V170 applies here too.
-2. Inventory every tenant catalog (pooled and dedicated), take the normal pre-cutover backup, and
-   record each catalog's delivery count. Apply the tenant lineage through V226 with writers stopped.
-   In **each catalog**, require this missing/mismatched backfill count to be zero and the child count
-   to equal the recorded delivery count before allowing V227:
+2. Inventory every tenant catalog (pooled and dedicated) and take the normal pre-cutover backup.
+   With writers stopped, record each catalog's delivery count, maximum delivery id, and a protected
+   inventory of `(workspace_id, id, unsubscribe_token_hash)` for post-cutover comparison. Preserve
+   that inventory with the backup; it contains digests, never raw bearers.
+3. With writers stopped, run the tenant lineage through V227 for every inventoried catalog other
+   than the configured default, using the normal catalog migration tooling. Each run applies V226
+   and V227 together. Activate only the new release: its automatic startup applies both migrations
+   together in the configured default catalog; it does not enumerate dedicated catalogs. V227
+   enforces the backfill before removing its source. Keep ingress closed until verification finishes,
+   and keep every old writer stopped. In **each catalog**, verify both token
+   columns and indexes are absent and the composite cascading FK is present. Substitute the recorded
+   maximum id in the post-cutover query below and require zero missing deliveries. Confirm the
+   surviving delivery count within that boundary equals the recorded count, and compare every
+   legacy digest and its workspace/delivery ownership with the protected inventory. New deliveries
+   legitimately have no digest until dispatch, and later attempts can add digests, so an unbounded
+   delivery count or exact total child count is not a completeness check after activation.
 
    ```sql
-   SELECT COUNT(*) AS missing_hashes
+   SELECT COUNT(*) AS missing_legacy_deliveries
    FROM campaign_delivery d
-   LEFT JOIN campaign_delivery_unsubscribe_token t
-     ON t.workspace_id = d.workspace_id AND t.delivery_id = d.id
-    AND t.token_hash = d.unsubscribe_token_hash
-   WHERE t.token_hash IS NULL;
-   SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token;
+   WHERE d.id <= <recorded_max_delivery_id>
+     AND NOT EXISTS (
+       SELECT 1 FROM campaign_delivery_unsubscribe_token t
+       WHERE t.workspace_id = d.workspace_id AND t.delivery_id = d.id
+     );
+   SELECT COUNT(*) AS surviving_legacy_deliveries
+   FROM campaign_delivery
+   WHERE id <= <recorded_max_delivery_id>;
    ```
 
-3. Apply V227 across the same catalog inventory. Verify both delivery token columns and indexes are
-   absent, the child count still matches the pre-cutover count, and the composite cascading FK is
-   present. Start only the new binary, verify unsubscribe exchange/preview/confirmation, then reopen
-   ingress. Do not touch suppression, consent, or recovery evidence during migration.
+   Verify unsubscribe exchange/preview/confirmation, then reopen writers and ingress. Do not touch
+   suppression, consent, or recovery evidence during migration.
 
 **No previous-binary rollback is supported after V227.** Recovery must move forward with the new
-binary. A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
+binary. **Staging's automatic deploy currently rolls back to the previous release if a failure
+occurs after activation during this cutover deploy.** That previous backend cannot run against
+V227's schema: campaign materialization, dispatch, and unsubscribe lookups fail until the next
+deploy re-activates the new release. Operators must not keep a rolled-back pre-V227 backend serving;
+close ingress and stop it, then restore service with a release containing V227 using forward
+recovery. An enforced deployment rollback floor is tracked in
+[#2065](https://github.com/itkla/connex/issues/2065).
+
+A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
 replay keeps its submission key but renders a fresh link. A body-comparing provider rejects it and
 the delivery becomes ambiguous, requiring the existing provider/suppression reconciliation check;
 a body-insensitive provider returns the original receipt. No automatic replay is enabled for SMTP
@@ -133,8 +156,11 @@ or connectors without the explicit deduplication guarantee. Previously emailed l
 history independently, and preserve the digest table. MySQL DDL commits independently of Flyway's
 history bookkeeping; `repair` alone never undoes it. If V226 created the child but backfill/history
 failed while both legacy columns remain, the raw-derived source still exists: drop only that new
-child table, repair the failed V226 entry using the normal migration tooling, then rerun V226 and
-require the catalog-wide checks above before V227. Do not drop the child once legacy columns are gone.
+child table, repair the failed V226 entry using the normal migration tooling, then rerun the
+automatic migration boot. V227 reasserts the backfill before its ALTER; require the post-cutover
+catalog-wide checks above before reopening service. Do not drop the child once legacy columns
+are gone.
+
 If V227's ALTER committed but history recording failed, first verify the preserved child against the
 recorded inventory and verify that V226 is recorded successful. Recreate **empty removable columns
 and indexes only**, while every writer remains stopped, then repair the failed V227 entry and rerun
@@ -150,7 +176,9 @@ ALTER TABLE campaign_delivery
 ```
 
 These temporary NULL columns reconstruct no bearer and cannot serve an old binary; all lookup
-continues from the preserved child. If the ALTER did not commit, leave its original columns alone
+continues from the preserved child. V227 ignores these NULL source hashes while preserving all
+existing child rows. Its `NOT EXISTS` backfill also makes a retry safe if the INSERT committed but
+the ALTER or history recording failed. If the ALTER did not commit, leave its original columns alone
 and repair/rerun the failed V227 entry. If schema/history or the recorded digest inventory do not
 match either state, keep the deployment closed and recover from the pre-cutover backup in an isolated
 catalog through the new lineage; never guess at missing digests or start the previous binary.

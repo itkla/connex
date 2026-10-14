@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
@@ -852,6 +853,39 @@ class CampaignDispatchServiceTest {
     }
 
     @ParameterizedTest
+    @EnumSource(DispatchStatus.class)
+    void providerDiagnosticsAreScrubbedBeforeEveryOutcomeIsPersisted(DispatchStatus status) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        CampaignMessageRevision revision = revision();
+        revision.setBodyHtml("<a href=\"{{unsubscribe_url}}\">Unsubscribe</a>");
+        CampaignMessageMapper messageMapper = (CampaignMessageMapper) ReflectionTestUtils.getField(service, "campaignMessageMapper");
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
+        when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
+            DeliveryRequest request = invocation.getArgument(1);
+            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(request.content().bodyHtml());
+            assertTrue(token.find());
+            return new DispatchReceipt(status, null,
+                    "554 rejected " + token.group(1) + " diagnostic " + "AB".repeat(32) + " retained", false);
+        });
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        when(deliveryMapper.markTriggeredFailed(eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        when(deliveryMapper.markTriggeredAmbiguous(eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        assertTrue(service.processSend(7, 11));
+        String expected = (status == DispatchStatus.AMBIGUOUS ? "AMBIGUOUS: " : "")
+                + "554 rejected [redacted] diagnostic [redacted] retained";
+        ArgumentCaptor<CampaignDeliveryEvent> event = ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(deliveryMapper).insertEvent(event.capture());
+        assertEquals(expected, event.getValue().getDetail());
+        if (status == DispatchStatus.REJECTED) {
+            verify(deliveryMapper).markTriggeredFailed(eq(7), eq(13), anyString(), eq(expected), anyString());
+        } else if (status == DispatchStatus.AMBIGUOUS) {
+            verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(), eq(expected), anyString());
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void registrationFailureStopsEgressAndPreservesEarlierUncertainty(boolean earlierUncertainty) {
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
@@ -895,6 +929,25 @@ class CampaignDispatchServiceTest {
         verifyNoInteractions(dispatcher);
         verify(admission, never()).reserve(anyInt(), anyInt(), anyInt(), anyString(), any(), anyInt());
         verify(deliveryMapper, never()).markTriggeredFailed(anyInt(), anyInt(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void registrationFailureScrubsEarlierDiagnosticsWhilePreservingSubmissionUncertainty() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        CampaignUnsubscribeTokenRegistrationService registration = mock(CampaignUnsubscribeTokenRegistrationService.class);
+        when(registration.register(eq(7), eq(13), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("private SQL detail"));
+        ReflectionTestUtils.setField(service, "unsubscribeTokenRegistrationService", registration);
+        CampaignDelivery attempt = delivery();
+        attempt.setLastError("AMBIGUOUS: 554 rejected " + "a".repeat(64) + " retained");
+        attempt.setLastErrorCode("deadline_ambiguous");
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(attempt);
+        assertTrue(service.processSend(7, 11));
+        verifyNoInteractions(dispatcher);
+        verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(),
+                eq("AMBIGUOUS: 554 rejected [redacted] retained"), eq("deadline_ambiguous"));
     }
 
     private static CampaignUnsubscribeTokenRegistrationService registration() {

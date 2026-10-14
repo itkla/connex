@@ -114,7 +114,7 @@ public class CampaignDispatchService {
             } catch (Exception exception) {
                 failed++;
                 log.warn("Campaign send {} dispatch failed in workspace {}: {}",
-                        sendId, workspaceId, exception.getMessage());
+                        sendId, workspaceId, bounded(exception.getMessage()));
             }
         }
         return failed;
@@ -200,7 +200,7 @@ public class CampaignDispatchService {
                     () -> deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel));
             dispatcher = deliveryProviderRouter.dispatcherFor(target.providerId());
         } catch (RuntimeException exception) {
-            log.warn("Campaign send {} has no usable provider: {}", sendId, exception.getMessage());
+            log.warn("Campaign send {} has no usable provider: {}", sendId, bounded(exception.getMessage()));
             return false;
         }
         CampaignMessageRevision revision =
@@ -304,7 +304,7 @@ public class CampaignDispatchService {
                     leaseOwner,
                     lastError,
                     CampaignDeliveryFailureReason.classify(lastError, false).token());
-            log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, exception.getMessage());
+            log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, lastError);
         }
     }
 
@@ -430,6 +430,7 @@ public class CampaignDispatchService {
             receipt = DispatchReceipt.ambiguous(
                     "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
+        String diagnostic = CampaignDeliveryDiagnostics.scrub(receipt.detail(), unsubscribeToken);
         if (receipt.status() == DispatchStatus.SENT) {
             int updated;
             try {
@@ -443,7 +444,7 @@ public class CampaignDispatchService {
                 throw new AmbiguousDispatchException(exception);
             }
             if (updated == 1) {
-                appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+                appendEvent(workspaceId, deliveryId, "dispatched", diagnostic);
             } else if (leaseOwner == null) {
                 attachLateAudienceProviderCorrelation(
                         workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
@@ -453,8 +454,8 @@ public class CampaignDispatchService {
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
-                    ? "AMBIGUOUS: " + receipt.detail()
-                    : receipt.detail();
+                    ? "AMBIGUOUS: " + diagnostic
+                    : diagnostic;
             String failureCode = CampaignDeliveryFailureReason.classify(
                     failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
             if (receipt.provenBeforeEgress()) {
@@ -518,9 +519,9 @@ public class CampaignDispatchService {
         }
         return leaseOwner == null
             ? campaignDeliveryMapper.markFailed(
-                    workspaceId, deliveryId, lastError, lastErrorCode)
+                    workspaceId, deliveryId, bounded(lastError), lastErrorCode)
             : campaignDeliveryMapper.markTriggeredFailed(
-                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+                    workspaceId, deliveryId, leaseOwner, bounded(lastError), lastErrorCode);
     }
 
     private boolean hasEarlierSubmissionUncertainty(CampaignDelivery history) {
@@ -552,9 +553,9 @@ public class CampaignDispatchService {
             String lastErrorCode) {
         return leaseOwner == null
             ? campaignDeliveryMapper.markAmbiguous(
-                    workspaceId, deliveryId, lastError, lastErrorCode)
+                    workspaceId, deliveryId, bounded(lastError), lastErrorCode)
             : campaignDeliveryMapper.markTriggeredAmbiguous(
-                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+                    workspaceId, deliveryId, leaseOwner, bounded(lastError), lastErrorCode);
     }
 
     private int markAmbiguousOrThrow(
@@ -974,7 +975,7 @@ public class CampaignDispatchService {
         if (message == null || message.isBlank()) {
             return null;
         }
-        String trimmed = message.trim();
+        String trimmed = CampaignDeliveryDiagnostics.scrub(message, null).trim();
         return trimmed.length() > ERROR_LIMIT ? trimmed.substring(0, ERROR_LIMIT) : trimmed;
     }
 

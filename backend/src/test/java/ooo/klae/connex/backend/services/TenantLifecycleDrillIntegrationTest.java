@@ -40,6 +40,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxyUtil;
+import ch.qos.logback.core.read.ListAppender;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +58,13 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryCredentials;
+import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
+import ooo.klae.connex.backend.mail.ResolvedMailConfig;
+import ooo.klae.connex.backend.support.SmtpCaptureServer;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.CustomFieldValue;
 import ooo.klae.connex.backend.beans.Deal;
@@ -97,6 +112,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
     properties = {
         "connex.tenant-lifecycle.teardown-settle-delay=0s",
+        "connex.delivery.enabled=true",
     })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
@@ -109,6 +125,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private TenantLifecycleControlOperations controlOperations;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private TenantExportService exportService;
+    @Autowired private CampaignDispatchService campaignDispatchService;
+    @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
     @Autowired private UploadContentInspector uploadContentInspector;
@@ -132,6 +150,78 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     private Workspace drillWorkspace;
     private Workspace otherWorkspace;
     private User concurrentLeaver;
+
+    @Test
+    void rejectingSmtpDiagnosticsCannotExportOrLogTheAttemptBearer() throws Exception {
+        createDedicatedDrillRoots();
+        seedUnsubscribeDigest();
+        int workspaceId = drillWorkspace.getId();
+        int sendId = jdbcTemplate.queryForObject("SELECT id FROM campaign_send WHERE workspace_id = ?",
+                Integer.class, workspaceId);
+        int messageId = jdbcTemplate.queryForObject("SELECT message_id FROM campaign_send WHERE id = ?",
+                Integer.class, sendId);
+        int deliveryId = jdbcTemplate.queryForObject("SELECT id FROM campaign_delivery WHERE send_id = ?",
+                Integer.class, sendId);
+        jdbcTemplate.update("""
+                INSERT INTO campaign_message_revision
+                    (workspace_id, message_id, version, locale, subject, body_html)
+                VALUES (?, ?, 1, 'en', 'Rejected SMTP', '<a href="{{unsubscribe_url}}">Unsubscribe</a>')
+                """, workspaceId, messageId);
+        jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE id = ?", sendId);
+        jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending' WHERE id = ?", deliveryId);
+        Logger logger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.DEBUG);
+        try (SmtpCaptureServer smtp = new SmtpCaptureServer(true)) {
+            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+            org.mockito.Mockito.when(deliveryProviderConfigService.resolveForWorkspace(workspaceId, DeliveryChannel.EMAIL))
+                    .thenReturn(new ResolvedDeliveryProvider("smtp", DeliveryChannel.EMAIL, workspaceId,
+                            null, null, null, DeliveryCredentials.none(), false, "f".repeat(64), config));
+            assertTrue(campaignDispatchService.processSend(workspaceId, sendId));
+            String bearer = SmtpCaptureServer.unsubscribeBearer(smtp.awaitMessage());
+            assertNotNull(bearer);
+            String diagnostic = jdbcTemplate.queryForObject("SELECT last_error FROM campaign_delivery WHERE id = ?",
+                    String.class, deliveryId);
+            assertNotNull(diagnostic);
+            assertTrue(diagnostic.contains("554 rejected [redacted] diagnostic [redacted] retained"));
+            assertFalse(diagnostic.contains(bearer));
+            assertFalse(diagnostic.contains("C".repeat(64)));
+            String detail = jdbcTemplate.queryForObject("SELECT detail FROM campaign_delivery_event WHERE delivery_id = ?",
+                    String.class, deliveryId);
+            assertEquals(diagnostic, detail);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            exportService.prepare(drillOrganization.getId(), workspaceId, currentUser.getId()).writeTo(output);
+            Map<String, byte[]> entries = zipEntries(output.toByteArray());
+            assertTrue(text(entries, "data/campaign_delivery.jsonl").contains("[redacted]"));
+            assertTrue(text(entries, "data/campaign_delivery_event.jsonl").contains("[redacted]"));
+            assertTrue(entries.values().stream().noneMatch(bytes ->
+                    new String(bytes, StandardCharsets.UTF_8).contains(bearer)));
+            assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == Level.DEBUG));
+            assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == Level.DEBUG
+                    && "org.eclipse.angus.mail.smtp".equals(event.getLoggerName())
+                    && event.getFormattedMessage().contains("554 rejected [redacted] diagnostic [redacted] retained")));
+            for (ILoggingEvent event : appender.list) {
+                assertFalse(event.getFormattedMessage().contains(bearer));
+                assertFalse(event.getMessage().contains(bearer));
+                if (event.getArgumentArray() != null) {
+                    for (Object argument : event.getArgumentArray()) {
+                        assertFalse(String.valueOf(argument).contains(bearer));
+                    }
+                }
+                if (event.getThrowableProxy() != null) {
+                    assertFalse(ThrowableProxyUtil.asString(event.getThrowableProxy()).contains(bearer));
+                }
+            }
+        } finally {
+            logger.setLevel(previousLevel);
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
 
     @AfterEach
     void cleanCommittedDrillRoots() {

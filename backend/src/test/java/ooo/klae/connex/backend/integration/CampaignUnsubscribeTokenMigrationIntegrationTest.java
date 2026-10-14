@@ -77,6 +77,8 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'campaign_delivery'
                           AND COLUMN_NAME IN ('unsubscribe_token', 'unsubscribe_token_hash')
                         """));
+                statement.executeUpdate("DELETE FROM campaign_delivery_unsubscribe_token WHERE delivery_id = 22605");
+                assertEquals(7, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             }
             assertEquals(MigrationVersion.fromVersion("227"),
                     migrate(catalog, "227").info().current().getVersion());
@@ -140,7 +142,11 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 interruptedExpand.repair();
                 interruptedExpand.migrate();
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
-                statement.execute(sql("V227__drop_campaign_delivery_unsubscribe_tokens.sql"));
+                for (String command : sql("V227__drop_campaign_delivery_unsubscribe_tokens.sql").split(";")) {
+                    if (!command.isBlank()) {
+                        statement.execute(command);
+                    }
+                }
                 Flyway interruptedContract = recoveryFlyway(catalog, "227");
                 assertThrows(FlywayException.class, interruptedContract::migrate);
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
@@ -159,6 +165,43 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"
                         + " WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))"));
             }
+        }
+    }
+
+    @Test
+    void contractBackfillCommitsBeforeFailedAlterAndCanRerunAfterHistoryRepair() throws SQLException {
+        try (MySqlScratchCatalog catalog = catalog();
+                Connection connection = connection(catalog);
+                Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE campaign_delivery (
+                        id INT PRIMARY KEY, workspace_id INT NOT NULL,
+                        unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+                            GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
+                        UNIQUE KEY uq_campaign_delivery_workspace_id (workspace_id, id),
+                        UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token),
+                        UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash)
+                    )
+                    """);
+            statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
+                    + " VALUES (1, 22601, REPEAT('a', 64))");
+            recoveryFlyway(catalog, "226").migrate();
+            statement.executeUpdate("INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token)"
+                    + " VALUES (2, 22601, REPEAT('b', 64))");
+            assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
+            statement.execute("ALTER TABLE campaign_delivery DROP INDEX uq_campaign_delivery_token");
+            Flyway contract = recoveryFlyway(catalog, "227");
+            assertThrows(FlywayException.class, contract::migrate);
+            assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
+            statement.execute("ALTER TABLE campaign_delivery ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token)");
+            contract.repair();
+            contract.migrate();
+            assertContract(statement);
+            assertEquals(2, scalar(statement, """
+                    SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token
+                    WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))
+                    """));
         }
     }
 

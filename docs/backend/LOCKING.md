@@ -1036,7 +1036,9 @@ Campaign dispatch mints a fresh random 64-character lowercase hexadecimal unsubs
 one rendered attempt; materialization and triggered enrollment mint none. Only its SHA-256 digest
 enters `campaign_delivery_unsubscribe_token`. Every attempt's digest, including migrated legacy
 digests and unused attempts, remains valid until its delivery is deleted. The bearer lives only in
-the rendered message and provider request; export contains digests alone.
+the rendered message and provider request; export contains digests alone. Provider diagnostics are
+scrubbed of the exact attempt bearer and all 64-hex runs before truncation, error/event persistence,
+or logging. Named Angus SMTP loggers also scrub library diagnostics before forwarding to handlers.
 
 After lease renewal and before frequency admission, the proxied
 `CampaignUnsubscribeTokenRegistrationService.register` opens a short `READ_COMMITTED` transaction:
