@@ -39,6 +39,7 @@ public final class MaskingContext {
     private final Set<String> trustedStaticFields = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
     private final Set<String> exposedTokens = new LinkedHashSet<>();
+    private final Set<String> reservedTokens = new LinkedHashSet<>();
     private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
     private Set<String> replayMemberValues = Set.of();
     private final AiPrivacyMode privacyMode;
@@ -75,6 +76,11 @@ public final class MaskingContext {
         if (kind == EntityKind.MEMBER) {
             memberIdentifierValues.add(rawValue);
         }
+        registerIdentifier(kind, rawValue, originalValueToToken.get(rawValue));
+        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
+        if (entry != null && entry.placeholderShaped()) {
+            return MaskingEngine.REDACTED;
+        }
         String token = originalValueToToken.get(rawValue);
         if (token == null) {
             token = nextToken(kind);
@@ -83,8 +89,8 @@ public final class MaskingContext {
             tokenToKind.put(token, kind);
         }
         registerIdentifier(kind, rawValue, token);
-        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
-        return entry != null && entry.unsafe() ? MaskingEngine.REDACTED : token;
+        return (entry != null && entry.unsafe()) || originalValueForToken(token) == null
+                ? MaskingEngine.REDACTED : token;
     }
 
     /** Registers a member label for replacement and scanning without issuing a token. */
@@ -103,17 +109,25 @@ public final class MaskingContext {
             if (existing.token() == null && token != null) {
                 rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue,
                         existing.canonicalValue(), existing.labelValue(), token,
-                        Objects.requireNonNull(tokenToKind.get(token)), existing.unsafe()));
+                        Objects.requireNonNull(tokenToKind.get(token)), existing.unsafe(), existing.placeholderShaped()));
             }
             return;
         }
         CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
+        var placeholders = DISPATCHED_TOKEN.matcher(java.text.Normalizer.normalize(
+                rawValue, java.text.Normalizer.Form.NFKC).toUpperCase(java.util.Locale.ROOT));
+        boolean placeholderShaped = false;
+        while (placeholders.find()) {
+            placeholderShaped = true;
+            reservedTokens.add("{{" + placeholders.group(1) + "}}");
+        }
         String canonicalValue = stored.literal();
         if (isCanonicalDictionaryEligible(canonicalValue)
                 || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
             identifierDictionary.add(rawValue);
             rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue, canonicalValue,
-                    stored.label(), token, token == null ? kind : tokenToKind.get(token), !stored.converged()));
+                    stored.label(), token, token == null ? kind : tokenToKind.get(token),
+                    !stored.converged() || placeholderShaped, placeholderShaped));
             if (!stored.converged()) {
                 unsafeIdentifierValues.add(canonicalValue);
                 log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
@@ -129,7 +143,7 @@ public final class MaskingContext {
         var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(serializedPayload, "serializedPayload"));
         while (matcher.find()) {
             String token = "{{" + matcher.group(1) + "}}";
-            if (tokenToOriginalValue.containsKey(token)) {
+            if (originalValueForToken(token) != null) {
                 exposedTokens.add(token);
             }
         }
@@ -140,7 +154,7 @@ public final class MaskingContext {
     }
 
     boolean isExposedMemberToken(String token) {
-        return exposedTokens.contains(token) && memberIdentifierValues.contains(tokenToOriginalValue.get(token));
+        return exposedTokens.contains(token) && memberIdentifierValues.contains(originalValueForToken(token));
     }
 
     /**
@@ -380,7 +394,7 @@ public final class MaskingContext {
                 tokenToOriginalValue.size(),
                 rawIdentifierEntries.size(),
                 unsafeIdentifierValues.size(), new LinkedHashMap<>(rawIdentifierEntries),
-                new LinkedHashSet<>(memberIdentifierValues));
+                new LinkedHashSet<>(memberIdentifierValues), new LinkedHashSet<>(reservedTokens));
     }
 
     /**
@@ -427,6 +441,8 @@ public final class MaskingContext {
         rawIdentifierEntries.putAll(checkpoint.entries);
         memberIdentifierValues.clear();
         memberIdentifierValues.addAll(checkpoint.memberValues);
+        reservedTokens.clear();
+        reservedTokens.addAll(checkpoint.reservedTokens);
         unsafeIdentifierValues.removeAll(
                 withdrawn(unsafeIdentifierValues, checkpoint.unsafeIdentifiers));
     }
@@ -436,8 +452,9 @@ public final class MaskingContext {
         return "MaskingContext{redacted}";
     }
 
+    /** Refuses literal identifier spellings even when their colliding binding predates registration. */
     String originalValueForToken(String token) {
-        return tokenToOriginalValue.get(token);
+        return reservedTokens.contains(token) ? null : tokenToOriginalValue.get(token);
     }
 
     List<IdentifierEntry> identifierEntries() {
@@ -449,8 +466,12 @@ public final class MaskingContext {
     }
 
     private String nextToken(EntityKind kind) {
-        int next = tokenCounts.merge(kind, 1, Integer::sum);
-        return "{{" + kind.tokenPrefix() + next + "}}";
+        String token;
+        do {
+            int next = tokenCounts.merge(kind, 1, Integer::sum);
+            token = "{{" + kind.tokenPrefix() + next + "}}";
+        } while (reservedTokens.contains(token));
+        return token;
     }
 
     /** A position in one context's binding order, which only that context can restore to. */
@@ -461,21 +482,24 @@ public final class MaskingContext {
         private final int unsafeIdentifiers;
         private final Map<String, IdentifierEntry> entries;
         private final Set<String> memberValues;
+        private final Set<String> reservedTokens;
 
         private Checkpoint(
                 MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers,
-                Map<String, IdentifierEntry> entries, Set<String> memberValues) {
+                Map<String, IdentifierEntry> entries, Set<String> memberValues, Set<String> reservedTokens) {
             this.context = context;
             this.tokens = tokens;
             this.identifiers = identifiers;
             this.unsafeIdentifiers = unsafeIdentifiers;
             this.entries = entries;
             this.memberValues = memberValues;
+            this.reservedTokens = reservedTokens;
         }
     }
 
     record IdentifierEntry(
-            String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind, boolean unsafe) {
+            String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind,
+            boolean unsafe, boolean placeholderShaped) {
         boolean replacementEligible() {
             return isCanonicalDictionaryEligible(canonicalValue);
         }

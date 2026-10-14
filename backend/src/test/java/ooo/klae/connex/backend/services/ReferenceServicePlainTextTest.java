@@ -152,4 +152,13 @@ class ReferenceServicePlainTextTest {
         assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
             assertEquals("a note", ReferenceService.toPlainText(content)));
     }
+    @Test
+    void memberCollectorCoversCommonMarkReadingsConservatively() {
+        for (var reading : MemberReferenceReadings.all()) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    ReferenceService.memberLabelsFromReaderVisibleContent(reading.content()).contains(reading.label()),
+                    reading.rule() + ": " + reading.name());
+        }
+    }
+
 }

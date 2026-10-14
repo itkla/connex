@@ -486,9 +486,12 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         Company customer = company("Wexley Cartage");
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertTrue(journal().dispatched().getFirst().messages().stream()
+                .anyMatch(message -> message.content().contains("hand this company to {{M1}}")),
+                "the scripted owner token must have been exposed before the model chooses it");
         AiChatToolCall proposal = proposal(trajectory, "assign_owner");
         JsonNode stored = objectMapper.readTree(proposal.getArgumentsJson());
         assertEquals(
@@ -574,7 +577,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals(
                 objectMapper.createArrayNode().add(reviewed.getId()),
@@ -600,7 +603,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals(
                 objectMapper.createArrayNode().add(reviewed.getId()),
@@ -626,7 +629,7 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
         });
 
         Trajectory trajectory = run(
-                "connex_script_pinned_owner_drift", "hand this company to Grace");
+                "connex_script_pinned_owner_drift", "hand this company to Grace Hopper");
 
         assertEquals("failed", trajectory.status());
         assertEquals("internal_error", trajectory.terminalReason(),

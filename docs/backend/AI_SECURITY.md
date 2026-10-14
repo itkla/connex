@@ -71,8 +71,16 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. Full assistant note reads bypass display previews so a label cannot be cut before this
-boundary. Shared sessions exclude private notes in SQL before the result limit, including company
+labels, including both authored HTML-entity spellings and decoded labels. Recognition deliberately
+forms a superset of [CommonMark member-link readings](https://spec.commonmark.org/0.31.2/#link-reference-definitions):
+an independent canonical-token pass runs everywhere, and the structural collector considers every
+bracket without code-span suppression and unions code/HTML-aware readings, accepts container and
+continuation definitions, retains
+shortcut fallbacks and folds reference keys with Unicode case and whitespace normalization.
+Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
+Current active members are masked everywhere through directory candidates. Prose mentions of
+former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
+bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company
 notes; private sessions retain the requester's own private notes. These reads retain the existing
 workspace/reader predicates and assistant history limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
 
@@ -104,7 +112,9 @@ the name or create an owner proposal. This includes dropped tool rows, oversized
 redaction-only matches and omitted replay messages. Candidate and bound values both participate in
 the outbound scan, including short Unicode names, with the replacer's matching rules. These rules
 apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
-separate pre-existing issue.
+separate pre-existing issue. Registered identifiers containing placeholder syntax are irreversible:
+they receive `[redacted]`, never reversible bindings. Their placeholder spellings are reserved even
+if another identifier already holds that binding, so a literal member label cannot authorize it.
 
 Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
 MEMBER tokens before envelope/schema validation or repair retention. Noncanonical lowercase or
@@ -225,7 +235,10 @@ CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
 
 - **Run it with `./gradlew scriptedTrajectoryTest`, not `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache. `check` depends on the task. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the pattern — so a trajectory class CI would silently skip fails the build instead.
 - **A golden that writes must load its toolset first.** A turn starts holding only the `core` toolset, so every write tool sits behind a `find_tools` step; the fixtures spell that sequence out and the goldens assert the durable tool order, which is where a regression in toolset loading becomes visible.
-- **A journaled request has two authors, and a leak assertion may only read one of them.** The server authors the system prompt, its directives and every masked tool result; the model authors its tool-call arguments, which native replay carries back verbatim and never re-masks. Scanning both halves measures the fixture rather than the pipeline: a fixture that simply never quotes its own seeded record passes trivially, and a real leak in a server-authored field could hide behind it. Assert absence against the server-authored half, and say so in the assertion message. The rule for fixture authors follows from the same replay: `OutboundLeakScan` refuses any payload containing a registered raw identifier, so a fixture's search query must be a distinctive **fragment** of a record's name rather than the whole name. That is a constraint on writing fixtures, not evidence that no raw identifier travels.
+- **A journaled request has two authors, and a leak assertion may only read one of them.** The server authors the system prompt, its directives and every masked tool result; the model authors its tool-call arguments, which native replay carries back verbatim and never re-masks. Scanning both halves measures the fixture rather than the pipeline: a fixture that simply never quotes its own seeded record passes trivially, and a real leak in a server-authored field could hide behind it. Assert absence against the server-authored half, and say so in the assertion message. The rule for fixture authors follows from the same replay: `OutboundLeakScan` refuses any payload containing a registered raw identifier, so a fixture's search query must be a distinctive **fragment** of a record's name rather than the whole name. That is a constraint on writing fixtures, not evidence that no raw identifier travels. Raw member
+  names remain valid incoming tool arguments; their verbatim native replay is subject to that same
+  outbound guard. A masked fixture assigning a member uses a MEMBER token actually exposed in its
+  user request, rather than inventing a token or replaying the complete raw label.
 - **Proposal freshness lives on the approval path only.** `AiAssistantWriteToolService.approve` refuses a CONFIRM proposal whose target was written in the proposal's own second. Proposing a write and executing an AUTO write never consult `AiAssistantProposalFreshness`, and the read service uses it only for a display-only staleness flag. The harness backdates seeded write targets so a future golden that *approves* is not silently converted into a staleness test — and a golden that means to pin that refusal must therefore not backdate its target.
 - **The harness is not transactional.** The loop runs on a worker thread that reloads the initiating identity from committed rows, so every fixture is committed and then deleted, in one fresh organization per test method. A turn that outruns the harness deadline is cancelled before teardown, because a worker still calling the provider would keep appending to the context-scoped request journal and fail the *next* golden's egress count.
 

@@ -136,4 +136,44 @@ class MaskingContextTest {
         return members;
     }
 
+    @Test
+    void placeholderShapedIdentifiersNeverAllocateOrAuthorizeReversibleTokens() {
+        for (String label : List.of("{{M1}}", "{{ M2 }}", "｛｛Ｍ１｝｝", "{{m1}}", "Team {{M1}}", "{{P1}}")) {
+            var context = new MaskingContext();
+            context.registerMemberCandidate(label);
+            assertEquals(MaskingEngine.REDACTED, context.tokenFor(EntityKind.MEMBER, label), label);
+            assertEquals(List.of(), context.tokenBindings());
+            assertEquals("Ask " + MaskingEngine.REDACTED, MaskingEngine.maskFreeText("Ask " + label, context).replaceAll(" +", " ").strip(), label);
+            context.exposeDispatchedPayload("{{M1}} {{M2}} {{P1}}");
+            assertEquals(1, Demasker.demask("{{M1}}", context).warnings(), label);
+            OutboundLeakScan.assertNoLeakInServerEnvelope("{\"content\":\"[redacted]\"}", context,
+                    new tools.jackson.databind.ObjectMapper());
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    new tools.jackson.databind.ObjectMapper().writeValueAsString(Map.of("content", label)), context,
+                    new tools.jackson.databind.ObjectMapper()), label);
+        }
+        for (EntityKind kind : EntityKind.values()) {
+            var context = new MaskingContext();
+            assertEquals(MaskingEngine.REDACTED, context.tokenFor(kind, "{{" + kind.tokenPrefix() + "1}}"));
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+    }
+
+    @Test
+    void placeholderReservationsSurviveLateCollisionsAndRestoreWithTheirCheckpoint() {
+        var context = new MaskingContext();
+        assertEquals("{{M1}}", context.tokenFor(EntityKind.MEMBER, "First Member"));
+        context.exposeDispatchedPayload("{{M1}}");
+        var checkpoint = context.checkpoint();
+        context.registerMemberCandidate("{{M1}}");
+        assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+        assertEquals(MaskingEngine.REDACTED, context.tokenFor(EntityKind.MEMBER, "First Member"));
+        context.registerMemberCandidate("{{M2}}");
+        assertEquals("{{M3}}", context.tokenFor(EntityKind.MEMBER, "Second Member"));
+        context.restore(checkpoint);
+        assertEquals("First Member", Demasker.demask("{{M1}}", context).text());
+        assertEquals("{{M4}}", context.tokenFor(EntityKind.MEMBER, "Third Member"));
+        assertEquals(1, Demasker.demask("{{M3}}", context).warnings());
+    }
+
 }

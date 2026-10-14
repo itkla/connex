@@ -597,4 +597,83 @@ class AiAssistantMemberExposureTest {
         assertEquals(0, capture.warnings());
     }
 
+    static Stream<Arguments> memberReferenceReadings() {
+        return Stream.of(false, true).flatMap(nativeProtocol ->
+                ooo.klae.connex.backend.services.MemberReferenceReadings.all().stream()
+                        .map(reading -> Arguments.of(nativeProtocol, reading)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("memberReferenceReadings")
+    void everyConservativeMemberReadingIsMaskedInActualPayload(
+            boolean nativeProtocol, ooo.klae.connex.backend.services.MemberReferenceReadings.Reading reading) throws Exception {
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(reading.content(), context);
+        assertTrue(context.tokenBindings().isEmpty());
+        var result = new AiAssistantToolResult(Map.of("description", reading.content()),
+                AiAssistantMemberIdentifiers.referenceIdentifiers(reading.content()));
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains(reading.label().replace("\\", "\\\\")), reading.rule() + ": " + reading.name());
+        assertFalse(payload.contains("Alice"), reading.rule() + ": " + reading.name());
+        assertEquals(0, capture.warnings());
+        assertTrue(context.tokenBindings().stream().anyMatch(binding -> reading.label().equals(binding.getValue())),
+                reading.rule() + ": " + reading.name());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,1", "true,1", "false,2", "true,2"})
+    void placeholderShapedMemberLabelsAreIrreversiblyRedactedAtDispatch(boolean nativeProtocol, int ordinal) throws Exception {
+        var context = new MaskingContext();
+        String label = "{{M" + ordinal + "}}";
+        if (ordinal == 2) {
+            context.registerMemberCandidate("Prior Member");
+        }
+        context.registerMemberCandidate(label);
+        String text = (ordinal == 2 ? "Prior Member then " : "") + label;
+        var result = new AiAssistantToolResult(Map.of("description", text), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, label), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains(label));
+        assertTrue(payload.contains(MaskingEngine.REDACTED));
+        assertTrue(context.tokenBindings().stream().noneMatch(binding -> label.equals(binding.getValue())));
+        assertEquals("invented_placeholder", capture.refusalReason());
+        assertFalse(capture.repairPresent());
+        assertEquals(1, Demasker.demask(label, context).warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void literalMemberCannotExposeAnotherMembersPreviouslyAllocatedToken(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        assertEquals("{{M1}}", context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Unsent Member"));
+        context.registerMemberCandidate("{{M1}}");
+        var result = new AiAssistantToolResult(Map.of("description", "{{M1}}"), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "{{M1}}"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("{{M1}}"));
+        assertFalse(payload.contains("Unsent Member"));
+        assertTrue(payload.contains(MaskingEngine.REDACTED));
+        assertEquals("invented_placeholder", capture.refusalReason());
+        assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+    }
+
 }

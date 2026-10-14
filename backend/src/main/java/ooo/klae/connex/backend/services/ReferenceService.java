@@ -93,11 +93,22 @@ public class ReferenceService {
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
             + ":(\\d+)>?(?:[ \\t].*)?$");
     private static final Pattern MEMBER_REFERENCE_DEFINITION = Pattern.compile(
-        "(?m)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
-            + "(?:\\r?\\n[ \\t]++)?([^\\r\\n]++)$");
+        "\\[((?:\\\\.|[^\\[\\]\\\\])++)\\]:");
     private static final Pattern MEMBER_REFERENCE_DESTINATION = Pattern.compile(
         "(?i)<?user:(\\d+)>?(?:[ \\t].*)?");
     private static final Pattern MEMBER_DEFINITION_DESTINATION = Pattern.compile("(?i)<?user:(\\d+)>?");
+    private static final String MEMBER_INLINE_SPACE = "[ \\t]*(?:(?:\\r\\n|[\\r\\n])[ \\t]*)?";
+    private static final String MEMBER_ATTRIBUTE_SPACE = "(?:[ \\t]++|[ \\t]*(?:\\r\\n|[\\r\\n])[ \\t]*)";
+    private static final String MEMBER_ATTRIBUTE_VALUE = "(?:[^ \\t\\r\\n\\\"'=<>`]++|'[^']*+'|\\\"[^\\\"]*+\\\")";
+    private static final Pattern MEMBER_OPAQUE_INLINE = Pattern.compile(
+        "(?:<[A-Za-z][A-Za-z0-9-]*+(?:" + MEMBER_ATTRIBUTE_SPACE
+            + "[A-Za-z_:][A-Za-z0-9_.:-]*+(?:" + MEMBER_INLINE_SPACE + "=" + MEMBER_INLINE_SPACE
+            + MEMBER_ATTRIBUTE_VALUE + ")?+)*+" + MEMBER_INLINE_SPACE + "/?>"
+            + "|</[A-Za-z][A-Za-z0-9-]*+" + MEMBER_INLINE_SPACE + ">"
+            + "|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\\x00-\\x20]*+>"
+            + "|<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]++@"
+            + "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+            + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*+>)");
 
     /**
      * Reader-scoped prose and structured references after invisible targets are removed.
@@ -646,13 +657,37 @@ public class ReferenceService {
         String content = readerVisibleContent;
         List<MemberLabelSpan> labels = new ArrayList<>();
         Set<String> memberDefinitions = new HashSet<>();
+        Matcher canonical = TOKEN.matcher(content);
+        while (canonical.find()) {
+            if (TYPE_USER.equals(canonical.group(2))
+                    && parseReferenceTarget(TYPE_USER, canonical.group(3)).isPresent()) {
+                labels.add(new MemberLabelSpan(canonical.start(1), canonical.end(1)));
+            }
+        }
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
-            if (isMemberReferenceDestination(definitions.group(2), true)) {
+            if (isMemberReferenceDestination(memberDefinitionDestination(content, definitions.end()), true)) {
+                memberDefinitions.add(referenceLabelKey(definitions.group(1)));
                 memberDefinitions.add(referenceLabelKey(normalizeReferenceSyntax(definitions.group(1))));
             }
         }
-        int[] labelEnds = matchingLabelEnds(content);
+        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, false));
+        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, true));
+        collectMemberLabels(content, memberDefinitions, labels, matchingLabelEnds(content, true, true));
+        labels.sort(java.util.Comparator.comparingInt(MemberLabelSpan::start).thenComparingInt(MemberLabelSpan::end));
+        var candidates = new java.util.LinkedHashSet<String>();
+        labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
+        labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
+        return List.copyOf(candidates);
+    }
+
+    /**
+     * Unions independent readings without consuming brackets. Only an adjacent plain label gives
+     * its following bracket an unambiguous key role; nested, opaque and block readings keep shortcuts.
+     */
+    private static void collectMemberLabels(
+            String content, Set<String> memberDefinitions, List<MemberLabelSpan> labels, int[] labelEnds) {
+        Set<Integer> referenceKeys = new HashSet<>();
         for (int index = 0; index < content.length(); index++) {
             int end = labelEnds[index];
             if (end < 0 || isEscaped(content, index)) {
@@ -671,30 +706,25 @@ public class ReferenceService {
                 if (isMemberReferenceDestination(content.substring(destinationStart, destinationEnd), false)) {
                     labels.add(new MemberLabelSpan(index + 1, end));
                 }
-                index = end;
-                continue;
             }
             if (next < content.length() && content.charAt(next) == ':') {
-                index = end;
                 continue;
             }
-            String key = label;
-            if (next < content.length() && content.charAt(next) == '[' && labelEnds[next] >= 0) {
-                String explicit = content.substring(next + 1, labelEnds[next]);
-                if (!explicit.isBlank()) {
-                    key = explicit;
-                }
-                next = labelEnds[next];
-            }
-            if (memberDefinitions.contains(referenceLabelKey(normalizeReferenceSyntax(key)))) {
+            if (!referenceKeys.contains(index) && memberDefinitionMatches(memberDefinitions, label)) {
                 labels.add(new MemberLabelSpan(index + 1, end));
             }
-            index = Math.max(end, next - 1);
+            if (next == end + 1 && next < content.length()
+                    && content.charAt(next) == '[' && labelEnds[next] >= 0) {
+                String explicit = content.substring(next + 1, labelEnds[next]);
+                String key = explicit.isBlank() ? label : explicit;
+                if (memberDefinitionMatches(memberDefinitions, key)) {
+                    labels.add(new MemberLabelSpan(index + 1, end));
+                    if (next == end + 1 && label.chars().noneMatch(value -> "[<`\r\n".indexOf(value) >= 0)) {
+                        referenceKeys.add(next);
+                    }
+                }
+            }
         }
-        var candidates = new java.util.LinkedHashSet<String>();
-        labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
-        labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
-        return List.copyOf(candidates);
     }
 
     private static boolean isMemberReferenceDestination(String source, boolean complete) {
@@ -707,7 +737,35 @@ public class ReferenceService {
 
     /** Extracts the original destination so authored title content cannot suppress member detection. */
     private static String memberDefinitionDestination(String source) {
-        int start = skipWhitespace(source, 0);
+        return memberDefinitionDestination(source, 0);
+    }
+
+    /** Accepts container and continuation layouts conservatively without interpreting title text. */
+    private static String memberDefinitionDestination(String source, int offset) {
+        int start = offset;
+        while (start < source.length()) {
+            start = skipWhitespace(source, start);
+            if (start == source.length()) {
+                return "";
+            }
+            if (source.charAt(start) == '>') {
+                start++;
+                continue;
+            }
+            int markerEnd = start;
+            while (markerEnd < source.length() && Character.isDigit(source.charAt(markerEnd))) {
+                markerEnd++;
+            }
+            boolean bullet = "-+*".indexOf(source.charAt(start)) >= 0;
+            boolean ordered = markerEnd > start && markerEnd < source.length()
+                    && ".)".indexOf(source.charAt(markerEnd)) >= 0;
+            int end = bullet ? start + 1 : ordered ? markerEnd + 1 : start;
+            if (end > start && end < source.length() && Character.isWhitespace(source.charAt(end))) {
+                start = end;
+                continue;
+            }
+            break;
+        }
         if (start == source.length()) {
             return "";
         }
@@ -726,17 +784,33 @@ public class ReferenceService {
         return source.substring(start, end);
     }
 
+    private static boolean memberDefinitionMatches(Set<String> definitions, String label) {
+        return definitions.contains(referenceLabelKey(label))
+                || definitions.contains(referenceLabelKey(normalizeReferenceSyntax(label)));
+    }
+
     private record MemberLabelSpan(int start, int end) {
     }
 
     private static String referenceLabelKey(String label) {
-        return label.strip().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+        return label.replaceAll("(?U)\\s+", " ").strip()
+                .toLowerCase(java.util.Locale.ROOT).toUpperCase(java.util.Locale.ROOT);
     }
 
     private static int[] matchingLabelEnds(String content) {
+        return matchingLabelEnds(content, true);
+    }
+
+    private static int[] matchingLabelEnds(String content, boolean skipCodeSpans) {
+        return matchingLabelEnds(content, skipCodeSpans, false);
+    }
+
+    private static int[] matchingLabelEnds(String content, boolean skipCodeSpans, boolean skipOpaqueInlines) {
         int[] labelEnds = new int[content.length()];
         Arrays.fill(labelEnds, -1);
         int[] closingBacktickRuns = closingBacktickRuns(content);
+        Matcher opaque = MEMBER_OPAQUE_INLINE.matcher(content);
+        Map<String, Integer> terminators = new HashMap<>();
         Deque<Integer> labelStarts = new ArrayDeque<>();
         int precedingBackslashes = 0;
         for (int index = 0; index < content.length(); index++) {
@@ -750,7 +824,14 @@ public class ReferenceService {
             if (escaped) {
                 continue;
             }
-            if (value == '`') {
+            if (skipOpaqueInlines && value == '<') {
+                int opaqueEnd = memberOpaqueInlineEnd(content, index, opaque, terminators);
+                if (opaqueEnd > index) {
+                    index = opaqueEnd - 1;
+                    continue;
+                }
+            }
+            if (value == '`' && skipCodeSpans) {
                 int delimiterLength = backtickRunLength(content, index);
                 int closingDelimiter = closingBacktickRuns[index];
                 if (closingDelimiter >= 0) {
@@ -765,6 +846,44 @@ public class ReferenceService {
             }
         }
         return labelEnds;
+    }
+
+    /** Recognizes opaque inline grammar without letting a missing terminator hide later labels. */
+    private static int memberOpaqueInlineEnd(
+            String content, int start, Matcher opaque, Map<String, Integer> terminators) {
+        if (content.startsWith("<!-->", start)) {
+            return start + 5;
+        }
+        if (content.startsWith("<!--->", start)) {
+            return start + 6;
+        }
+        String closing = null;
+        int openingLength = 0;
+        if (content.startsWith("<!--", start)) {
+            closing = "-->";
+            openingLength = 4;
+        } else if (content.startsWith("<?", start)) {
+            closing = "?>";
+            openingLength = 2;
+        } else if (content.startsWith("<![CDATA[", start)) {
+            closing = "]]>";
+            openingLength = 9;
+        } else if (content.startsWith("<!", start) && start + 2 < content.length()
+                && (content.charAt(start + 2) >= 'A' && content.charAt(start + 2) <= 'Z'
+                    || content.charAt(start + 2) >= 'a' && content.charAt(start + 2) <= 'z')) {
+            closing = ">";
+            openingLength = 2;
+        }
+        if (closing != null) {
+            int from = start + openingLength;
+            Integer end = terminators.get(closing);
+            if (end == null || end >= 0 && end < from) {
+                end = content.indexOf(closing, from);
+                terminators.put(closing, end);
+            }
+            return end < 0 ? -1 : end + closing.length();
+        }
+        return opaque.region(start, content.length()).lookingAt() ? opaque.end() : -1;
     }
 
     private static int backtickRunLength(String content, int start) {
