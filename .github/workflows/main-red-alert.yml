@@ -147,17 +147,24 @@ jobs:
             --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
+            target="$existing"
           else
-            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+            created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
+            echo "$created"
+            target="${created##*/}"
           fi
 
           # Converge on exactly one OPEN rolling issue, without serialisation.
           #
-          # If the sweep finds none open, the issue this run touched was closed underneath it -- a
-          # maintainer closing on an observed recovery just as a new failure arrives -- and gh issue
-          # comment does not reopen; recreate so main-red stays visible, then LIST AGAIN so a
-          # concurrent recreate is deduplicated in this run rather than left as a second open alert.
-          # If it finds several, keep the lowest-numbered and close the rest.
+          # If the sweep finds none open, either the issue this run touched was closed underneath it
+          # -- a maintainer closing on an observed recovery just as a new failure arrives -- or the
+          # list has not yet caught up with a create made seconds earlier. The list lags fresh
+          # creates: one run that read an empty list as a close opened #2047, #2048 and #2049 for a
+          # single failure. So the touched issue is read directly first, and only a confirmed close
+          # recreates; an unreadable state is left to the next event, as a failed list is. gh issue
+          # comment does not reopen, so a confirmed close recreates to keep main-red visible, then
+          # LISTS AGAIN so a concurrent recreate is deduplicated in this run rather than left as a
+          # second open alert. If it finds several, keep the lowest-numbered and close the rest.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
@@ -171,7 +178,14 @@ jobs:
             mapfile -t open_issues < <(printf '%s' "$issues_json" \
               | jq -r 'sort_by(.number) | .[].number')
             if [ "${#open_issues[@]}" -eq 0 ]; then
-              gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+              state="$(gh api "repos/$REPO/issues/$target" --jq '.state' 2>/dev/null || true)"
+              if [ "$state" != "closed" ]; then
+                echo "Issue #$target reads as ${state:-unreadable}; the list has not caught up."
+                break
+              fi
+              created="$(gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body")"
+              echo "$created"
+              target="${created##*/}"
               continue
             fi
             keep="${open_issues[0]}"
