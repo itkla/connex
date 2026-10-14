@@ -14,8 +14,9 @@ import lombok.NoArgsConstructor;
  *
  * <p>The deadline is frozen the same way: {@code dueIntervalHours} and {@code onExpiry} are copied
  * off the policy step, while {@code activatedAt} and {@code dueAt} are stamped when the step opens.
- * {@code assignments} are appended facts layered over {@code approvers}, which remains the immutable
- * frozen snapshot.
+ * {@code assignments} are appended facts layered over the frozen {@code approvers} snapshot.
+ * Departure cleanup removes a departing member's frozen approver rows; appended assignments and
+ * decisions remain historical evidence.
  */
 @Data
 @NoArgsConstructor

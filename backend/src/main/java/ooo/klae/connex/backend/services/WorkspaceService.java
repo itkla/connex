@@ -788,26 +788,67 @@ public class WorkspaceService {
      * system actor through an ordinary database read.
      */
     public Set<Permission> lockedMemberPermissionsFor(int workspaceId, int userId) {
+        return lockedMemberPermissionsAndMemberships(workspaceId, userId, Set.of()).permissions();
+    }
+
+    /**
+     * Retains the actor's existing root and permission locks, locking the actor and requested
+     * memberships in one ascending pass. Additional memberships use NOWAIT to avoid cycles with
+     * membership-first writes; they require no target account root or reservation check.
+     */
+    public LockedMemberPermissionsAndMemberships lockedMemberPermissionsAndMemberships(
+            int workspaceId, int userId, Set<Integer> additionalIds) {
         if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
-            return EnumSet.noneOf(Permission.class);
+            return new LockedMemberPermissionsAndMemberships(Set.of(), Set.of());
         }
         if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
-            return EnumSet.noneOf(Permission.class);
+            return new LockedMemberPermissionsAndMemberships(Set.of(), Set.of());
         }
-        WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
-        if (!isExactMembership(membership, workspaceId, userId)
-                || !"active".equals(membership.getStatus())) {
-            return EnumSet.noneOf(Permission.class);
+        Set<Integer> ids = new TreeSet<>(additionalIds);
+        ids.add(userId);
+        Set<Integer> activeAdditionalIds = new TreeSet<>();
+        WorkspaceMember membership = null;
+        for (int id : ids) {
+            WorkspaceMember locked = additionalIds.contains(id)
+                ? lockWithoutWaiting(() -> workspaceMapper.lockAuthorizationMembershipWithoutWaiting(workspaceId, id))
+                : workspaceMapper.lockAuthorizationMembership(workspaceId, id);
+            if (id == userId) {
+                membership = locked;
+            }
+            if (additionalIds.contains(id) && isExactMembership(locked, workspaceId, id)
+                    && "active".equals(locked.getStatus())) {
+                activeAdditionalIds.add(id);
+            }
         }
-        if (membership.getRoleId() == null) {
-            Role role = Role.of(membership.getRole());
-            return role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        Set<Permission> permissions = EnumSet.noneOf(Permission.class);
+        if (isExactMembership(membership, workspaceId, userId)
+                && "active".equals(membership.getStatus())) {
+            if (membership.getRoleId() == null) {
+                Role role = Role.of(membership.getRole());
+                if (role != null) {
+                    permissions = builtInPermissions(role);
+                }
+            } else {
+                int roleId = membership.getRoleId();
+                if (roleMapper.lockRole(workspaceId, roleId) != null) {
+                    permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+                }
+            }
         }
-        int roleId = membership.getRoleId();
-        if (roleMapper.lockRole(workspaceId, roleId) == null) {
-            return EnumSet.noneOf(Permission.class);
-        }
-        return parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+        return new LockedMemberPermissionsAndMemberships(Set.copyOf(permissions), Set.copyOf(activeAdditionalIds));
+    }
+
+    /** Locks a create request's target membership without acquiring any target account root. */
+    public boolean lockActiveMemberWithoutWaiting(int workspaceId, int userId) {
+        WorkspaceMember membership = lockWithoutWaiting(() ->
+            workspaceMapper.lockAuthorizationMembershipWithoutWaiting(workspaceId, userId));
+        return isExactMembership(membership, workspaceId, userId)
+            && "active".equals(membership.getStatus());
+    }
+
+    /** Actor authority and active additional memberships retained by the same transaction. */
+    public record LockedMemberPermissionsAndMemberships(
+            Set<Permission> permissions, Set<Integer> activeMembershipIds) {
     }
 
     /**
@@ -1924,6 +1965,7 @@ public class WorkspaceService {
                 locks.ownerRecovery(), targetUserId, "A workspace must keep at least one owner");
         }
         MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
+        userOffboardingService.assertCanDepart(workspaceId, targetUserId);
         userOffboardingService.detachMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
         notificationStateVersionService.markChanged(targetUserId);
@@ -1931,6 +1973,7 @@ public class WorkspaceService {
             "workspace.member.remove", "workspace", workspaceId, workspaceId, orgId,
             target.getDisplayName(),
             "Removed " + target.getDisplayName() + " from the workspace", null);
+        userOffboardingService.cleanupDepartureReferences(workspaceId, targetUserId);
     }
 
     /**
@@ -2057,12 +2100,14 @@ public class WorkspaceService {
             throw pendingMembershipNotFound();
         }
         requirePendingMembership(workspaceId, userId);
+        userOffboardingService.assertCanDepart(workspaceId, userId);
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
         auditService.recordScoped(
             "workspace.member.decline", "workspace", workspaceId, workspaceId, orgId,
             null, "Declined invitation", null);
+        userOffboardingService.cleanupDepartureReferences(workspaceId, userId);
     }
 
     /**
@@ -2078,6 +2123,7 @@ public class WorkspaceService {
             () -> requireActiveMembershipRole(workspaceId, userId),
             (scopedWorkspaceId, scopedOrgId) -> {
                 leaveWorkspaceInTransaction(scopedWorkspaceId, scopedOrgId, userId);
+                userOffboardingService.cleanupDepartureReferences(scopedWorkspaceId, userId);
                 return true;
             });
     }
@@ -2096,6 +2142,7 @@ public class WorkspaceService {
             requireOwnerRemains(lockOwnerRecovery(workspaceId), userId,
                 "Transfer ownership before leaving; a workspace must keep an owner");
         }
+        userOffboardingService.assertCanDepart(workspaceId, userId);
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
@@ -2123,6 +2170,7 @@ public class WorkspaceService {
                 } else {
                     forgetActive(userId);
                 }
+                userOffboardingService.cleanupDepartureReferences(scopedWorkspaceId, userId);
                 return Optional.ofNullable(nextWorkspaceId);
             }).orElse(null);
     }

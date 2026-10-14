@@ -110,6 +110,49 @@ over the limit stays bounded by the retained intake backstop.
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
 
+## Post-delete assignment recovery (#1941)
+
+The deletion reservation, initial per-catalog erasure, and final control-plane transaction retain
+their existing ordering. Initial erasure can commit before a locking assignment writer finishes.
+The final `app_user` delete cascades memberships and waits for their exclusive locks, so its commit
+is the assignment barrier. `UserService` then runs a fresh sweep, including when an absence read
+confirms that an ambiguous deletion commit succeeded, before expiring sessions. Sweep failures
+leave recovery pending and do not replace the deletion result or prevent session revocation.
+
+Coverage is eight references: company, person and deal ownership; deal collaborator seats; task
+assignment; intervention and campaign ownership; and lifecycle-pass ownership. A successful sweep
+removes those references in every catalog returned by `PlacementRegistry.activeCatalogs()`, across
+all workspace and record lifecycle states. It does not promise cleanup for unavailable or unserved
+catalogs, report goals/approvers (#1953), or self-only asynchronous writers.
+
+Discovery returns numeric keys without locks or an ambient snapshot. Bounded account-existence
+reads use `UserMapper.findExistingIds` through `unroutedRead` on the control plane; existing accounts,
+including reserved accounts, are preserved. Each catalog is pinned before opening a separate
+`REQUIRES_NEW`, `READ_COMMITTED` transaction for each candidate. The sweep locks the exact parent
+through `PRIMARY`, then conditionally clears the unchanged user pointer; missing records and changed
+pointers are successful no-ops. Collaborators lock deal X before deleting the exact seat and its
+secondary-index entries, matching replacement's parent-before-child ordering. Person and lifecycle
+pass units lock person X, clear that person's matching owner, then clear matching owners on its
+passes in the same transaction. The sole lifecycle owner-snapshot writer,
+`PersonLifecycleService.recordPass`, follows `applyStage`'s `getOwnedPersonByIdForUpdate`, so a raced
+insertion, milestone or closure commits before that person lock or snapshots the cleared owner.
+Intervention ownership clearing increments `source_version` only when it changes the pointer.
+
+These recovery units acquire no account, workspace, membership, role, workflow-gate, or audit-head
+roots and reuse no full-erasure transaction. Existing #1582 cycles remain unchanged. A failed unit
+rolls back before siblings continue; no retry runs inside a poisoned transaction. Failures log only
+catalog and exception type and increment `connex.account.assignment.sweep.failures` with bounded
+`mode=immediate|periodic` and `phase=catalogs|page|existence|record` tags.
+
+Immediate recovery drains matching pages. Periodic recovery visits one page per catalog/kind per
+run (default 200). Each traversal captures a fixed scalar `MAX(id)` watermark, advances past failed
+records, and wraps on an empty bounded page. Collaborators instead use their complete
+`(workspace_id, deal_id, user_id)` primary-key tuple as cursor and greatest-key watermark with
+`cursor < key <= watermark`. An empty page wraps even if the watermark row was deleted. Appends
+cannot extend a traversal and starve an earlier failure; a restart discards cursors and safely
+rediscovers residual references. Recovery remains contingent on later successful catalog access and
+record transactions.
+
 ## Sequence template authoring
 
 Sequence mutations acquire and revalidate the actor's permission locks before the exact sequence row. The account-deletion reservation check in that locked authorization path is itself a locking read so it cannot establish a stale consistent-read snapshot before later contention. Update and archive then re-read the locked sequence and enforce personal-versus-shared visibility before writing. Publish retains the sequence root, reads draft steps and content with shared locks, and allocates the next version number with a locking maximum query before inserting its immutable definition and hash. Draft replacement remains inside the same transaction.
@@ -226,6 +269,46 @@ placement resolution, then installs that path workspace's tenant identity and ca
 transaction. The locked authorization recheck remains inside the transaction. Active removal,
 pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
 cleanup cannot inherit the active-header workspace.
+
+### Bounded goal and approval departure cleanup (#1953)
+
+The sole named approver guard uses fresh non-locking MyBatis reads (`flushCache="true"`) inside each
+existing departure transaction, after its existing lock prefix and before destructive work. Routing
+replay is pure Java; named routes are distinct from permission-filtered decision eligibility. It
+adds no policy, document, deal, or goal aggregate lock and no writer fence. Each read first discovers
+candidate step ids through user-leading indexes on frozen/policy approvers and assignment users or
+delegators, then loads every routing fact only for those steps in the same statement snapshot.
+Steps whose routing facts never mention the departing user cannot make that user their sole named
+approver and are omitted; unrelated catalog approval traffic is not materialized.
+
+Catalog goal-erasure discovery projects only row and workspace ids and unions separate owner and
+creator equality reads, each served by a user-leading covering index. The union deduplicates goals
+that reference the account in both roles. These discovery reads remain non-locking and flush the
+MyBatis cache.
+
+Goal and policy/frozen approver cleanup uses conditional single-table statements keyed exactly by
+workspace, row id, and departing user. It runs last, after the workspace-cleanup and catalog-erasure
+tails (workflow, version, rule, team, deal and existing audit locks); leave-and-select-next also
+finishes its selection update first. No earlier lock class is acquired after this cleanup within the
+transaction body. The only later acquisition is the commit-time tail every writer shares:
+`NotificationStateVersionService` runs its queued `bumpStateVersions` upserts in `beforeCommit`,
+locking `notification_recipient_state` rows after all domain rows. Departure therefore keeps the
+same domain-rows-then-notification-state order as the policy, approval and goal writers, and adds no
+inversion against them. A concurrent aggregate edit can deadlock with these final statements:
+propagate the failure and retry the operation in a fresh transaction, never retry in place.
+
+The guard is exact for references committed before departure. A concurrently created request naming
+the departed member can survive departure and follows existing reconciliation in its existing order:
+its deadline rules apply first; expiration records `expired`, while escalation appends `any_approver`
+and clears the deadline and can still pass with enough surviving approvers. Only when quorum remains
+impossible after those rules does the bounded sweep terminate it as `unsatisfiable`, cancel other
+open steps, and return the document to `draft`.
+
+A concurrently created personal goal remains until account erasure removes it. For erased accounts
+this is exactly #1941's dangling-reference case. #1941 merged in #2063; a small follow-up adds
+`report_goal` owner and creator to its periodic orphan sweep to make erasure eventually complete.
+[Governance deletion and retention](../GOVERNANCE_DELETION_AND_RETENTION.md) defines the product bound.
+The existing final-deletion reservation precheck is #2059 and is unchanged here.
 
 ### Public API credentials
 
@@ -389,11 +472,34 @@ Control writes share this root order:
 6. Lock operation/request rows.
 7. Revalidate every root before side effects.
 
-APPI mutations perform preliminary workspace/person validation outside the write, then retain actor user, all previous/requested subject workspace roots ascending, and the shared organization lock while locking the requested tenant person.
+Linked APPI request create/update mutations perform preliminary workspace/person validation outside the write, then retain actor user, all previous/requested subject workspace roots ascending, and the shared organization lock while locking the requested tenant person.
 
 Linked mutations use the established reserved tenant-connection pattern: reserve non-auto-commit tenant connection before control locks, prove the person through a separate short session, then join the final control write to the root-lock transaction while retaining the person lock through commit. Roll back the reserved transaction before release.
 
 Updates lock the exact organization-scoped request after roots and compare persisted state to the preliminary snapshot before deriving/writing the diff.
+
+Disclosure assembly is a CSRF-protected POST (#2004), with three separate phases; it does not use
+the linked-mutation person-lock path. `DataSubjectRequestService` suspends ambient transactions:
+
+1. Control preparation opens its own read-only transaction, locks the matching
+   `org_member(orgId, actorId)` rows `FOR SHARE`, validates step-up, then reads the request,
+   workspaces and audit trail without additional locks. The membership lock is released before
+   tenant assembly.
+2. Payload reads run in one read-only snapshot transaction in the linked subject workspace's
+   tenant catalog, including bounded note pages. Caller tenant context is restored afterwards.
+3. After assembly ends, the control audit transaction takes actor `app_user FOR SHARE`, target
+   `organization FOR SHARE`, then the organization integrity head exclusively (`ensureHead`'s
+   upsert followed by `lockHead FOR UPDATE`). It INSERTs the audit row, conditionally advances the
+   head, and commits before returning the response. Organization events have null workspace scope.
+
+No preparation, person or workspace lock is carried into the audit. This preserves the
+account-before-organization-before-child order and adds no database wait edge. Authority, step-up,
+request linkage or lifecycle can still change between preparation and audit; no revalidation or
+serialization is added. The first-head initialization deadlock documented above remains possible.
+Preparation/assembly failures prevent the success audit; a final audit exception returns 503
+without disclosure data and rolls back the INSERT and head advance together. A committed audit
+survives a subsequent response/download failure. Explicit retries assemble and audit again, and
+database rollback failures may only be retried through a fresh request/transaction.
 
 SSO returning/existing-user paths discover non-locking then lock user, stored workspace when applicable, and organization before revalidation. New JIT paths without a user lock stored workspace and organization before revalidating absence/inserting.
 
@@ -850,8 +956,19 @@ that mutex, and every later segment-condition and eligibility query shares it. M
 snapshot-version rows are ordinary reads, not locking reads, so unrelated campaigns' first child-row
 inserts do not acquire conflicting index-gap locks.
 
-- Campaign update performs any membership, parent-campaign, and other ordinary validation reads
-  only after the campaign mutex.
+- Campaign creation and update lock actor and requested-owner memberships in one ascending union
+  before role authorization; update then takes the campaign mutex. The requested owner's membership
+  uses `FOR UPDATE NOWAIT`;
+  creation first retains the actor's account root and active workspace shared, then locks the
+  membership union and actor authority before insertion and audit. This prevents a role change from
+  holding the workspace while waiting for the owner's membership as creation reaches its audit.
+  No target account root or target reservation fence is added: active reserved targets remain
+  admitted until the cascade.
+  Only MySQL 3572 / SQLSTATE `HY000` becomes the existing 409 membership-changing conflict; callers
+  resubmit and the transaction never retries. Waiting while holding the workspace would close the
+  three-transaction campaign → target-membership/task → task-actor/role → workspace cycle.
+  Ordinary lifecycle, parent-campaign and other validation reads remain after the campaign mutex.
+  Invalid owners retain 400, missing campaigns 404, and insufficient actor authority 403.
 - Live-audience replacement reads the previous audience ordinarily after the mutex, then upserts
   and audits the transition under the same mutex.
 - Snapshot creation ordinarily reads the live audience and next snapshot version after the mutex,

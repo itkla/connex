@@ -58,6 +58,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * the workspace predicate.
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
+        MAPPERS + "AssignmentSweepMapper",
         MAPPERS + "AiAssistantIdentifierMapper",
         MAPPERS + "AiBriefScheduleMapper",
         MAPPERS + "AiChatMapper",
@@ -244,6 +245,16 @@ public class TenantScopeInterceptor implements Interceptor {
      * workspace set resolved by the service from the current workspace's organization.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
+        MAPPERS + "AssignmentSweepMapper.findWatermark",
+        MAPPERS + "AssignmentSweepMapper.findReferencesAnywhere",
+        MAPPERS + "AssignmentSweepMapper.lockParent",
+        MAPPERS + "AssignmentSweepMapper.clearOwner",
+        MAPPERS + "AssignmentSweepMapper.removeCollaborator",
+        MAPPERS + "AssignmentSweepMapper.unassignTask",
+        MAPPERS + "AssignmentSweepMapper.clearInterventionOwner",
+        MAPPERS + "AssignmentSweepMapper.clearCampaignOwner",
+        MAPPERS + "AssignmentSweepMapper.clearPersonPassOwners",
+
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "AuditLogMapper.findOrgExport",
@@ -283,9 +294,15 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiChatMapper.deleteParticipantsForUser",
         MAPPERS + "AiChatMapper.deleteParticipantsForUserAnywhere",
         MAPPERS + "AiChatMapper.clearSessionCreatorsAnywhere",
+        MAPPERS + "AiChatMapper.clearParticipantInvitersAnywhere",
         MAPPERS + "AiChatMapper.clearMessageAuthorsAnywhere",
         MAPPERS + "AiChatMapper.clearToolCallExecutorsAnywhere",
         MAPPERS + "AiChatMapper.clearTurnRequestersAnywhere",
+        MAPPERS + "RecordCommentMapper.clearAuthorsAnywhere",
+        MAPPERS + "RecordCommentMapper.clearDeletersAnywhere",
+        MAPPERS + "RecordCommentMapper.clearThreadCreatorsAnywhere",
+        MAPPERS + "RecordCommentMapper.clearThreadResolversAnywhere",
+        MAPPERS + "RecordCommentMapper.deleteReactionsAnywhere",
         MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonLifecyclePassMapper.clearOwnerAnywhere",
@@ -322,7 +339,16 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "SequenceMapper.clearSequenceVersionPublishersAnywhere",
         MAPPERS + "TeamMapper.findReferencesForUserAnywhere",
         MAPPERS + "TeamMapper.deleteMembershipsAnywhere",
-        MAPPERS + "TeamMapper.clearManagerAnywhere"
+        MAPPERS + "TeamMapper.clearManagerAnywhere",
+        MAPPERS + "GoalMapper.findDepartureReferencesAnywhere",
+        MAPPERS + "GoalMapper.deleteDepartingOwnerAnywhere",
+        MAPPERS + "GoalMapper.clearDepartingCreatorAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.deleteDepartingApproverAnywhere",
+        MAPPERS + "DocumentApprovalMapper.deleteDepartingApproverAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.findActiveStepsForDepartureAnywhere",
+        MAPPERS + "ApprovalPolicyMapper.findDepartureReferencesAnywhere",
+        MAPPERS + "DocumentApprovalMapper.findOpenStepsForDepartureAnywhere",
+        MAPPERS + "DocumentApprovalMapper.findDepartureReferencesAnywhere"
     );
 
     private final TenantContext tenantContext;

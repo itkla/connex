@@ -994,3 +994,35 @@ boots every profile with instance-managed mail configured and asserts the result
 matrix fails the build. The profile-boot job runs with dev-relaxed transport to isolate the profile
 dimension; a full image-and-Caddy end-to-end bring-up is exercised locally and on release rather
 than per-PR.
+
+## Account assignment recovery (#1941)
+
+Post-delete assignment cleanup is best effort after the committed account/membership cascade.
+Successful cleanup covers eight reference kinds across all lifecycle states in the default catalog
+and every servable dedicated handle returned by `PlacementRegistry.activeCatalogs()`. An unavailable
+catalog or failed record remains pending; restored catalog access and later periodic transactions
+are required for erasure completeness. Unserved silo/dedicated placements are outside this fleet's
+coverage. Goals/approvers (#1953) and self-only asynchronous writers are separate residuals.
+
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_DELAY_MS` and
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_INITIAL_DELAY_MS` default to 300000 (five minutes).
+`CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_PAGE_SIZE` defaults to 200 candidates per catalog/kind/run.
+Immediate cleanup drains matching pages; periodic cleanup batches control-only existence reads and
+uses one new `READ_COMMITTED` transaction per orphan. Fixed upper watermarks prevent continuing
+inserts from starving retries; collaborators use the full `(workspace_id, deal_id, user_id)` key.
+The empty-page wrap includes deleted watermark rows. Cursors are in memory, and restart safely
+rediscovers residuals without a durable retry queue.
+
+Monitor `connex.account.assignment.sweep.failures`, tagged only by
+`mode=immediate|periodic` and `phase=catalogs|page|existence|record`. Logs contain catalog and exception
+type, without driver SQL or row content. Sweep failures never turn a completed deletion into a
+retryable HTTP failure or prevent session revocation. Investigate repeated failures and restore
+catalog access; recovery time depends on traversal length and successful unit commits.
+
+During rolling deployment, an older binary's unlocked campaign owner validation can still write
+past the cascade. The immediate sweep alone cannot provide fleet-wide completeness until those
+writers have drained. After the upgraded fleet is fully serving traffic, allow a complete periodic
+traversal of every served catalog and kind and resolve failure signals before certifying the eight
+assignment types absent. No schema migration or new dependency is required. Campaign owner writes
+can now return the existing 409 membership-changing conflict when the target row is busy; callers
+resubmit rather than retry inside the transaction.

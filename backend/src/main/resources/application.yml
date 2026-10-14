@@ -49,6 +49,11 @@ management:
                 exclude: "*"
 
 connex:
+    account:
+        assignment-sweep:
+            delay-ms: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_DELAY_MS:300000}
+            initial-delay-ms: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_INITIAL_DELAY_MS:300000}
+            page-size: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_PAGE_SIZE:200}
     record-creation:
         guided-cutover-enabled: "${CONNEX_RECORD_CREATION_GUIDED_CUTOVER_ENABLED:false}"
     sequences:

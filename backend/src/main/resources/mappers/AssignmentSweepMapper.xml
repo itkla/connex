@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AssignmentSweepMapper">
+  <resultMap id="cursor" type="ooo.klae.connex.backend.mappers.AssignmentSweepMapper$Cursor">
+    <constructor>
+      <arg column="id" javaType="_long"/>
+      <arg column="workspace_id" javaType="_int"/>
+      <arg column="parent_id" javaType="_long"/>
+      <arg column="user_id" javaType="_int"/>
+    </constructor>
+  </resultMap>
+  <resultMap id="reference" type="ooo.klae.connex.backend.mappers.AssignmentSweepMapper$Reference">
+    <constructor>
+      <arg column="id" javaType="_long"/>
+      <arg column="workspace_id" javaType="_int"/>
+      <arg column="parent_id" javaType="_long"/>
+      <arg column="user_id" javaType="_int"/>
+    </constructor>
+  </resultMap>
+
+  <select id="findWatermark" resultMap="cursor">
+    <choose>
+      <when test="kind.name() == 'COLLABORATOR'">
+        SELECT deal_id AS id, workspace_id, deal_id AS parent_id, user_id
+        FROM deal_collaborator
+        ORDER BY workspace_id DESC, deal_id DESC, user_id DESC LIMIT 1
+      </when>
+      <when test="kind.name() == 'COMPANY'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM company HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'PERSON'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM person HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'DEAL'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM deal HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'TASK'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM task HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'INTERVENTION'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM workflow_intervention HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'CAMPAIGN'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM campaign HAVING MAX(id) IS NOT NULL
+      </when>
+      <when test="kind.name() == 'LIFECYCLE_PASS'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM person_lifecycle_pass HAVING MAX(id) IS NOT NULL
+      </when>
+      <otherwise>SELECT 0 AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id WHERE FALSE</otherwise>
+    </choose>
+  </select>
+
+  <select id="findReferencesAnywhere" resultMap="reference">
+    <choose>
+      <when test="kind.name() == 'COLLABORATOR'">
+        SELECT deal_id AS id, workspace_id, deal_id AS parent_id, user_id
+        FROM deal_collaborator
+        WHERE (workspace_id, deal_id, user_id) &gt; (#{cursor.workspaceId}, #{cursor.parentId}, #{cursor.userId})
+          AND (workspace_id, deal_id, user_id) &lt;= (#{watermark.workspaceId}, #{watermark.parentId}, #{watermark.userId})
+        <if test="userId != null">AND user_id = #{userId}</if>
+        ORDER BY workspace_id, deal_id, user_id
+      </when>
+      <when test="kind.name() == 'COMPANY'">
+        SELECT id, workspace_id, id AS parent_id, owner_id AS user_id
+        FROM company
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
+        <if test="userId != null">AND owner_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'PERSON'">
+        SELECT id, workspace_id, id AS parent_id, owner_id AS user_id
+        FROM person
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
+        <if test="userId != null">AND owner_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'DEAL'">
+        SELECT id, workspace_id, id AS parent_id, owner_id AS user_id
+        FROM deal
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
+        <if test="userId != null">AND owner_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'TASK'">
+        SELECT id, workspace_id, id AS parent_id, assigned_to_id AS user_id
+        FROM task
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND assigned_to_id IS NOT NULL
+        <if test="userId != null">AND assigned_to_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'INTERVENTION'">
+        SELECT id, workspace_id, id AS parent_id, owner_user_id AS user_id
+        FROM workflow_intervention
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_user_id IS NOT NULL
+        <if test="userId != null">AND owner_user_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'CAMPAIGN'">
+        SELECT id, workspace_id, id AS parent_id, owner_user_id AS user_id
+        FROM campaign
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_user_id IS NOT NULL
+        <if test="userId != null">AND owner_user_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'LIFECYCLE_PASS'">
+        SELECT id, workspace_id, person_id AS parent_id, owner_id AS user_id
+        FROM person_lifecycle_pass
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
+        <if test="userId != null">AND owner_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <otherwise>SELECT 0 AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id WHERE FALSE</otherwise>
+    </choose>
+    LIMIT #{limit}
+  </select>
+
+  <select id="lockParent" resultType="long" flushCache="true">
+    <choose>
+      <when test="kind.name() == 'COMPANY'">
+        SELECT id FROM company FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'PERSON'">
+        SELECT id FROM person FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'LIFECYCLE_PASS'">
+        SELECT id FROM person FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'DEAL'">
+        SELECT id FROM deal FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'COLLABORATOR'">
+        SELECT id FROM deal FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'TASK'">
+        SELECT id FROM task FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'INTERVENTION'">
+        SELECT id FROM workflow_intervention FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <when test="kind.name() == 'CAMPAIGN'">
+        SELECT id FROM campaign FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
+      <otherwise>SELECT NULL WHERE FALSE</otherwise>
+    </choose>
+  </select>
+
+  <update id="clearOwner">
+    <choose>
+      <when test="kind.name() == 'COMPANY'">UPDATE company</when>
+      <when test="kind.name() == 'DEAL'">UPDATE deal</when>
+      <when test="kind.name() == 'PERSON' or kind.name() == 'LIFECYCLE_PASS'">UPDATE person</when>
+      <otherwise>UPDATE person</otherwise>
+    </choose>
+    SET owner_id = NULL
+    WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId} AND owner_id = #{ref.userId}
+    <if test="kind.name() != 'COMPANY' and kind.name() != 'PERSON' and kind.name() != 'DEAL' and kind.name() != 'LIFECYCLE_PASS'">AND FALSE</if>
+  </update>
+
+  <delete id="removeCollaborator">
+    DELETE FROM deal_collaborator
+    WHERE workspace_id = #{ref.workspaceId} AND deal_id = #{ref.parentId} AND user_id = #{ref.userId}
+  </delete>
+
+  <update id="unassignTask">
+    UPDATE task SET assigned_to_id = NULL
+    WHERE workspace_id = #{ref.workspaceId} AND id = #{ref.id} AND assigned_to_id = #{ref.userId}
+  </update>
+
+  <update id="clearInterventionOwner">
+    UPDATE workflow_intervention SET owner_user_id = NULL, source_version = source_version + 1
+    WHERE workspace_id = #{ref.workspaceId} AND id = #{ref.id} AND owner_user_id = #{ref.userId}
+  </update>
+
+  <update id="clearCampaignOwner">
+    UPDATE campaign SET owner_user_id = NULL
+    WHERE workspace_id = #{ref.workspaceId} AND id = #{ref.id} AND owner_user_id = #{ref.userId}
+  </update>
+
+  <update id="clearPersonPassOwners">
+    UPDATE person_lifecycle_pass SET owner_id = NULL
+    WHERE workspace_id = #{ref.workspaceId} AND person_id = #{ref.parentId} AND owner_id = #{ref.userId}
+  </update>
+</mapper>
