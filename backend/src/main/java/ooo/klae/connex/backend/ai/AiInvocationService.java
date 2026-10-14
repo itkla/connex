@@ -1532,6 +1532,7 @@ public class AiInvocationService {
         public synchronized void beforeSend() {
             checkpoint();
             Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
+            invocation.context().exposeDispatchedPayload(serializedPrompt);
         }
 
         @Override

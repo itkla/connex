@@ -1734,4 +1734,58 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(refused.getMessages().getLast().getContent()
                 .contains("\"error\":\"toolset_already_loaded\""));
     }
+    @Test
+    void memberAnswerAndSummaryProvenanceRehydratesAFreshContextWithoutPersistedTokens() throws Exception {
+        String metadata = assembler.finalMetadata(41, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), List.of("Former Member"));
+        assertFalse(metadata.contains("{{M"));
+        assertTrue(metadata.contains("\"kind\":\"member\""));
+        AiChatMessage answer = new AiChatMessage();
+        answer.setAuthorKind("assistant");
+        answer.setContent("Former Member handled it.");
+        answer.setStructuredJson(metadata);
+        for (boolean compaction : List.of(false, true)) {
+            MaskingContext context = new MaskingContext();
+            AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+            MaskedPrompt prompt = compaction
+                    ? assembler.assembleSummary(null, List.of(answer), context, resources)
+                    : assembler.assemble(List.of(answer), new AiAssistantToolResult(Map.of(), List.of()),
+                            List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            String payload = objectMapper.writeValueAsString(prompt.getMessages());
+            assertFalse(payload.contains("Former Member"));
+            assertTrue(payload.contains("{{M1}}"));
+            assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+            context.exposeDispatchedPayload(payload);
+            assertEquals("Former Member", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+        }
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("Former Member handled it.");
+        summary.setStructuredJson("{\"kind\":\"history_summary\",\"resources\":[],\"identifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+        MaskingContext context = new MaskingContext();
+        String payload = objectMapper.writeValueAsString(assembler.assemble(List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()), List.of(), context,
+                new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL).getMessages());
+        assertFalse(payload.contains("Former Member"));
+        assertTrue(payload.contains("{{M1}}"));
+    }
+
+    @Test
+    void stageAndTagRemainVocabularyWithOrdinaryMemberCollisionScreening() throws Exception {
+        var result = new AiAssistantToolResult(Map.of("owner", "Assigned Member", "stage", "Qualified", "tag", "Priority"),
+                List.of(new Identifier("member", "Assigned Member")));
+        var context = new MaskingContext();
+        var prompt = assembler.assemble(List.of(), result, List.of(), context, new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains("Assigned Member"));
+        assertTrue(payload.contains("{{M1}}"));
+        assertTrue(payload.contains("Qualified"));
+        assertTrue(payload.contains("Priority"));
+        var collision = new AiAssistantToolResult(Map.of("tag", "Assigned Member"), List.of());
+        String screened = objectMapper.writeValueAsString(assembler.assemble(List.of(), collision, List.of(), context,
+                new AiChatResourceRegistry(context), AiAssistantToolCatalog.ALL).getMessages());
+        assertFalse(screened.contains("Assigned Member"));
+        assertTrue(screened.contains("{{M1}}"));
+    }
+
 }

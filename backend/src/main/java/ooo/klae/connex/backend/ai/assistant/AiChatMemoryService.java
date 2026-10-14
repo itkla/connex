@@ -394,6 +394,10 @@ public class AiChatMemoryService {
                             "kind", identifierKind(binding.getKey()),
                             "value", binding.getValue()))
                     .toList();
+            if (storedIdentifiers.size() > 200
+                    || storedIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)) {
+                throw new IllegalStateException("Assistant summary identifier metadata is invalid");
+            }
             java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
             metadata.put("kind", "history_summary");
             metadata.put("sourceFromSeq", sourceFromSeq);
@@ -450,6 +454,7 @@ public class AiChatMemoryService {
             case 'D' -> "deal";
             case 'E' -> "email";
             case 'H' -> "phone";
+            case 'M' -> "member";
             default -> throw new IllegalStateException(
                     "Assistant summary identifier token is invalid");
         };

@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -70,6 +72,7 @@ public class AiAssistantWorkBriefReadService {
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final Clock clock;
+    private final ReferenceService referenceService;
 
     /**
      * Reads the actor's overdue and imminently due open commitments.
@@ -103,6 +106,18 @@ public class AiAssistantWorkBriefReadService {
                 new Identifier("person", name).seed(resources.maskingContext()));
         labels.deals().values().forEach(name ->
                 new Identifier("deal", name).seed(resources.maskingContext()));
+        List<Task> storedProse = bounded.stream().map(commitment -> {
+            Task task = new Task();
+            task.setId(commitment.id());
+            task.setDescription(commitment.description());
+            return task;
+        }).toList();
+        Map<Integer, String> descriptions = new LinkedHashMap<>();
+        for (Task task : referenceService.hydrateTasks(workspaceId, storedProse)) {
+            AiAssistantMemberIdentifiers.seedReferences(task.getReferences(), resources.maskingContext());
+            AiAssistantMemberIdentifiers.seedReferenceText(task.getDescription(), resources.maskingContext());
+            descriptions.put(task.getId(), task.getDescription());
+        }
         List<Identifier> identifiers = new ArrayList<>();
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -110,7 +125,7 @@ public class AiAssistantWorkBriefReadService {
         for (AiAssistantWorkCommitment commitment : bounded) {
             Map<String, Object> row = new LinkedHashMap<>();
             AiAssistantScopeReadService.putBounded(
-                    row, "description", commitment.description(), budget,
+                    row, "description", descriptions.get(commitment.id()), budget,
                     resources.maskingContext());
             AiAssistantScopeReadService.putTemporal(
                     row, "dueDate", commitment.dueDate(), budget, resources.maskingContext());

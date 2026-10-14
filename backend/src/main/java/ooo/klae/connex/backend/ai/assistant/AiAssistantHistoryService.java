@@ -107,6 +107,22 @@ public class AiAssistantHistoryService {
                         workspaceId, companyId, organizationWorkspaceIds, limit));
     }
 
+    /** Loads full reader-authorized note prose before assistant screening or truncation. */
+    List<Note> notesForPerson(int personId, int limit) {
+        requireLimit(limit);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(
+                workspaceId, personId, workspaceService.getCurrentUserId(), limit, 0));
+    }
+
+    /** Loads full reader-authorized deal note prose before assistant screening or truncation. */
+    List<Note> notesForDeal(int dealId, int limit) {
+        requireLimit(limit);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(
+                workspaceId, dealId, workspaceService.getCurrentUserId(), limit, 0));
+    }
+
     List<Note> notesForCompany(int companyId, int limit) {
         requireLimit(limit);
         int workspaceId = workspaceService.getCurrentWorkspaceId();

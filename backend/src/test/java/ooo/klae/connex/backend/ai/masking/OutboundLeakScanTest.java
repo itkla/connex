@@ -178,4 +178,34 @@ class OutboundLeakScanTest {
                 "result", "{}")));
         return objectMapper.writeValueAsString(payload);
     }
+    @org.junit.jupiter.api.Test
+    void unissuedMemberCandidatesRemainInTheLeakScanWithUnicodeAndLabelParity() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Ａｌｉｃｅ Smith");
+        context.registerMemberCandidate("山田 太郎");
+        org.junit.jupiter.api.Assertions.assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Alice Smith", context, objectMapper));
+        org.junit.jupiter.api.Assertions.assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("山田 太郎", context, objectMapper));
+        String masked = MaskingEngine.maskFreeText("Alice Smith met 山田 太郎", context);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        assertEquals(2, context.tokenBindings().size());
+    }
+
+    @Test
+    void shortMemberCandidatesShareTheReplacersUnicodeAndWordBoundaries() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("李");
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Ask Li", context, objectMapper));
+        assertThrows(MaskingLeakException.class, () ->
+                OutboundLeakScan.assertNoLeakStrict("Ask 李", context, objectMapper));
+        assertDoesNotThrow(() ->
+                OutboundLeakScan.assertNoLeakStrict("Little", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(
+                MaskingEngine.maskFreeText("Ask Li and 李", context), context, objectMapper));
+    }
+
 }

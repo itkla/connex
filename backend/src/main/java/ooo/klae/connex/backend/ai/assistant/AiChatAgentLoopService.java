@@ -246,6 +246,7 @@ public class AiChatAgentLoopService {
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
             MaskingContext maskingContext = new MaskingContext(turn.privacyMode());
+            AiAssistantMemberIdentifiers.seed(workspaceService.getMembers(turn.workspaceId()), maskingContext);
             AiChatResourceRegistry resources = new AiChatResourceRegistry(maskingContext);
             AiChatStreamingProgress streamingProgress = turn.streamed()
                     ? new AiChatStreamingProgress(turn, persistenceService, maskingContext)
@@ -700,7 +701,8 @@ public class AiChatAgentLoopService {
                         state.toolBudgetAudit,
                         skillReference,
                         omitted ? List.of() : List.copyOf(narration),
-                        omitted ? List.of() : List.copyOf(state.todos));
+                        omitted ? List.of() : List.copyOf(state.todos),
+                        omitted ? List.of() : maskingContext.referencedMemberValues(persistedText));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);

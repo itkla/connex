@@ -52,6 +52,66 @@ Features do not build raw prompts.
 
 Any new feature must preserve the same masking and leak-scan boundary for every provider/protocol path.
 
+### Ask Connex member identifiers
+
+The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, company, deal,
+email and phone identifiers. A member's nonblank display name is protected; username is protected
+only when it supplies the existing blank-display-name fallback. Exact raw values retain the shared
+cross-kind deduplication rule. No member resource handle or new model-visible read field is added.
+
+Before memory preparation or compaction, the loop registers every active member label from the
+exact current workspace through `WorkspaceService.getMembers`. Directory labels are match
+candidates, not reversible bindings, and the directory is never serialized to a provider. Queue-time
+member mentions use the same canonical mention gate and combined 20-identifier limit as record
+mentions, without adding resources. Directory read failures abort before provider dispatch; the
+candidate dictionary is never truncated and a failed masked request is never retried unmasked.
+Approved `UNMASKED` disclosure retains its existing posture.
+
+Stored prose can name a member who has renamed themselves or is still pending. Notes, activities,
+task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
+from reader-authorized content before assistant screening or truncation, regardless of current name
+or membership status. Repeated references to one user and reference-style Markdown retain all
+labels. Full assistant note reads bypass display previews so a label cannot be cut before this
+boundary. These reads retain the existing SQL workspace/reader predicates and the assistant history
+limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
+
+`AiAssistantWriteTool.modelIdentifiers` is a pure stored-outcome projection. `assign_owner` declares
+the committed owner label as MEMBER provenance, excluding the removal sentinel. Fresh execution
+and replay use that same label without a new directory lookup, including after rename or
+offboarding. Member cards and raw stored write outcomes retain their existing content. Final answer
+metadata stores only exposed member labels referenced in the final replay text, and summary
+metadata stores referenced raw provenance, within the existing count and value-length limits.
+Readers reseed that provenance for ordinary history and compaction under a fresh masking context;
+no token binding is persisted.
+
+Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
+member tokens present in the final payload after screening, budgeting and truncation. Only tokens
+exposed in an actual dispatch during the current run can demask; earlier dispatches in the run remain
+valid, and history inside a dispatched payload counts. A guessed unissued or unexposed member token
+in a final answer, stream or tool argument follows invented-placeholder refusal and cannot reveal
+the name or create an owner proposal. This includes dropped tool rows, oversized attachments,
+redaction-only matches and omitted replay messages. Candidate and bound values both participate in
+the outbound scan, including short Unicode names, with the replacer's matching rules. These rules
+apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
+separate pre-existing issue.
+
+Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
+Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary
+masking, screening and leak detection. The P1.1 hold on member-name string classes is lifted only
+when those labels enter the MEMBER boundary above; unrelated P1.1 scope is unchanged.
+
+`complete_task` and `reschedule_task` also declare every authored member-reference label in their
+stored description snapshots. The task delegates hydrate those descriptions through the existing
+reader-visibility boundary before storing the outcome. Fresh projection and replay register the
+labels as candidates before masking, including labels authored before a rename and references to
+pending members. MEMBER identifiers carried by tool results register as candidates without eager
+allocation; actual dispatch exposure remains required for demasking. This adds no directory lookup,
+mutation, outcome field or token kind.
+
+Deploy MEMBER-compatible answer, user-message and summary metadata readers before enabling
+MEMBER metadata writers. Once member provenance exists, rollback past that compatibility release
+is prohibited. No migration or historical metadata rewrite accompanies this contract.
+
 ## Image/media exception
 
 Pixels cannot be masked like text. Image-powered AI is an explicit policy exception and must use `AiInputImage` plus all of the following:

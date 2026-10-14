@@ -26,6 +26,10 @@ public record AiAssistantToolResult(
             if (value == null || value.isBlank()) {
                 return;
             }
+            if ("member".equals(kind)) {
+                context.registerMemberCandidate(value);
+                return;
+            }
             EntityKind entityKind = switch (kind) {
                 case "person" -> EntityKind.PERSON;
                 case "company" -> EntityKind.COMPANY;

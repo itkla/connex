@@ -1855,4 +1855,20 @@ class AiAssistantWriteToolServiceTest {
         activity.setPerson(person);
         return activity;
     }
+    @Test
+    void replayedOwnerProvenanceUsesTheStoredLabelWithoutDirectoryReadsAndRemovalHasNone() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member(21, "Grace Hopper")));
+        AiAssistantPreparedWrite write = prepared("assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}", "person", 31);
+        org.mockito.Mockito.clearInvocations(workspaceService);
+        AiAssistantToolResult replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
+                "{\"tier\":\"confirm\",\"outcome\":{\"recordType\":\"person\",\"owner\":\"Former Label\"}}", true));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Label")), replay.identifiers());
+        assertTrue(objectMapper.writeValueAsString(replay.data()).contains("Former Label"));
+        verify(workspaceService, never()).getMembers(anyInt());
+        AiAssistantAssignOwnerWriteTool declared = new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService);
+        assertEquals(List.of(), declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"unassigned\"}")));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "fallback-username")),
+                declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"fallback-username\"}")));
+    }
+
 }

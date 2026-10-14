@@ -516,6 +516,16 @@ Restart only a release at or above the rollback floor. Have affected accounts re
 vouching grantor, or use operator break-glass recovery where that route is unavailable, before
 reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
 
+### Ask Connex member masking (#1822): rollback floor
+
+The release that masks workspace member names in Ask Connex (issue #1822) has **no schema change**. It does persist member provenance (raw labels, never token bindings) in assistant answer, user-message and summary metadata. Earlier releases do not recognise that provenance: they throw while reading it, so any conversation carrying it fails closed on an older binary.
+
+- **Rolling forward** needs no operator action.
+- **Rollback floor:** once this release has served assistant traffic, do not roll back to a release that predates it.
+  - Automatic deploy rollback returns to the last release that passed its smoke checks, which is this release or a later one once it has served, so it stays above the floor.
+  - A manual rollback must stay above it too.
+- **If a rollback past the floor is unavoidable,** affected conversations work again after rolling forward. Nothing is lost: the stored metadata is unchanged.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close

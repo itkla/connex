@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -23,6 +24,7 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
  */
 public final class MaskingContext {
     private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
+    private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
@@ -31,6 +33,8 @@ public final class MaskingContext {
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
+    private final Set<String> exposedTokens = new LinkedHashSet<>();
+    private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
     private final AiPrivacyMode privacyMode;
 
     /** Creates a request-local masked context. */
@@ -62,6 +66,9 @@ public final class MaskingContext {
         if (rawValue == null || rawValue.isBlank()) {
             throw new IllegalArgumentException("Cannot tokenize a blank identifier");
         }
+        if (kind == EntityKind.MEMBER) {
+            memberIdentifierValues.add(rawValue);
+        }
         String token = originalValueToToken.get(rawValue);
         if (token == null) {
             token = nextToken(kind);
@@ -69,24 +76,88 @@ public final class MaskingContext {
             tokenToOriginalValue.put(token, rawValue);
             tokenToKind.put(token, kind);
         }
-        if (!rawIdentifierEntries.containsKey(rawValue)) {
-            CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
-            String canonicalValue = stored.literal();
-            if (isCanonicalDictionaryEligible(canonicalValue)
-                    || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
-                identifierDictionary.add(rawValue);
-                rawIdentifierEntries.put(rawValue,
-                        new IdentifierEntry(rawValue, canonicalValue,
-                                stored.label(), token,
-                                Objects.requireNonNull(tokenToKind.get(token)), !stored.converged()));
-                if (!stored.converged()) {
-                    unsafeIdentifierValues.add(canonicalValue);
-                    log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
-                }
-            }
-        }
+        registerIdentifier(kind, rawValue, token);
         IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
         return entry != null && entry.unsafe() ? MaskingEngine.REDACTED : token;
+    }
+
+    /** Registers a member label for replacement and scanning without issuing a token. */
+    public void registerMemberCandidate(String rawValue) {
+        if (rawValue != null && !rawValue.isBlank()
+                && (privacyMode != AiPrivacyMode.UNMASKED
+                    || !CanonicalText.storedIdentifier(rawValue).converged())) {
+            memberIdentifierValues.add(rawValue);
+            registerIdentifier(EntityKind.MEMBER, rawValue, originalValueToToken.get(rawValue));
+        }
+    }
+
+    private void registerIdentifier(EntityKind kind, String rawValue, String token) {
+        IdentifierEntry existing = rawIdentifierEntries.get(rawValue);
+        if (existing != null) {
+            if (existing.token() == null && token != null) {
+                rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue,
+                        existing.canonicalValue(), existing.labelValue(), token,
+                        Objects.requireNonNull(tokenToKind.get(token)), existing.unsafe()));
+            }
+            return;
+        }
+        CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
+        String canonicalValue = stored.literal();
+        if (isCanonicalDictionaryEligible(canonicalValue)
+                || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+            identifierDictionary.add(rawValue);
+            rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue, canonicalValue,
+                    stored.label(), token, token == null ? kind : tokenToKind.get(token), !stored.converged()));
+            if (!stored.converged()) {
+                unsafeIdentifierValues.add(canonicalValue);
+                log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
+            }
+        }
+    }
+
+    /**
+     * Records member tokens in the final envelope at the actual provider dispatch boundary.
+     * Earlier dispatched tokens remain reversible throughout this request.
+     */
+    public void exposeDispatchedPayload(String serializedPayload) {
+        var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(serializedPayload, "serializedPayload"));
+        while (matcher.find()) {
+            String token = "{{" + matcher.group(1) + "}}";
+            if (tokenToOriginalValue.containsKey(token)) {
+                exposedTokens.add(token);
+            }
+        }
+    }
+
+    boolean isMemberIdentifier(String rawValue) {
+        return memberIdentifierValues.contains(rawValue);
+    }
+
+    /** Detects invented or undispatched member placeholders before publishing a streamed fragment. */
+    public boolean containsUnexposedMemberToken(String text) {
+        var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(text, "text"));
+        while (matcher.find()) {
+            if (matcher.group(1).startsWith("M")
+                    && demaskableValueForToken("{{" + matcher.group(1) + "}}") == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    String demaskableValueForToken(String token) {
+        return tokenToKind.get(token) == EntityKind.MEMBER && !exposedTokens.contains(token)
+                ? null : originalValueForToken(token);
+    }
+
+    /** Returns exposed member provenance whose raw label occurs in the final replay text. */
+    public List<String> referencedMemberValues(String replayText) {
+        return tokenToOriginalValue.entrySet().stream()
+                .filter(entry -> exposedTokens.contains(entry.getKey())
+                        && memberIdentifierValues.contains(entry.getValue()))
+                .filter(entry -> MaskingEngine.containsIdentifierMention(replayText, entry.getValue()))
+                .map(Map.Entry::getValue)
+                .toList();
     }
 
     /** Recognizes an unsafe structured value without projecting its exhausted label again. */
@@ -155,6 +226,11 @@ public final class MaskingContext {
         if (trustedStaticTexts.isEmpty()) {
             return false;
         }
+        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
+        if (entry != null && isMemberIdentifier(rawValue)
+                && trustedStaticTexts.stream().anyMatch(text -> MaskingEngine.containsShortMemberMatch(text, entry))) {
+            return true;
+        }
         String candidate = OutboundLeakScan.normalizeForScan(rawValue);
         String labelCandidate = CanonicalText.storedIdentifier(rawValue).label();
         for (String segment : trustedStaticTexts) {
@@ -192,7 +268,9 @@ public final class MaskingContext {
     /** Detects identifier reuse anywhere in a value, including short structured identifiers. */
     public boolean containsSeededIdentifierValue(String value) {
         String candidate = OutboundLeakScan.normalizeForScan(value);
-        for (String original : originalValueToToken.keySet()) {
+        Set<String> originals = new LinkedHashSet<>(originalValueToToken.keySet());
+        originals.addAll(rawIdentifierEntries.keySet());
+        for (String original : originals) {
             CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(original);
             if (!stored.literal().isEmpty() && candidate.contains(stored.literal())
                     || !stored.label().isEmpty() && candidate.contains(stored.label())) {
@@ -234,7 +312,8 @@ public final class MaskingContext {
                 this,
                 tokenToOriginalValue.size(),
                 rawIdentifierEntries.size(),
-                unsafeIdentifierValues.size());
+                unsafeIdentifierValues.size(), new LinkedHashMap<>(rawIdentifierEntries),
+                new LinkedHashSet<>(memberIdentifierValues));
     }
 
     /**
@@ -271,11 +350,16 @@ public final class MaskingContext {
         for (String token : withdrawn(tokenToOriginalValue.keySet(), checkpoint.tokens)) {
             originalValueToToken.remove(tokenToOriginalValue.remove(token));
             tokenToKind.remove(token);
+            exposedTokens.remove(token);
         }
         for (String rawValue : withdrawn(rawIdentifierEntries.keySet(), checkpoint.identifiers)) {
             rawIdentifierEntries.remove(rawValue);
             identifierDictionary.remove(rawValue);
         }
+        rawIdentifierEntries.clear();
+        rawIdentifierEntries.putAll(checkpoint.entries);
+        memberIdentifierValues.clear();
+        memberIdentifierValues.addAll(checkpoint.memberValues);
         unsafeIdentifierValues.removeAll(
                 withdrawn(unsafeIdentifierValues, checkpoint.unsafeIdentifiers));
     }
@@ -308,13 +392,18 @@ public final class MaskingContext {
         private final int tokens;
         private final int identifiers;
         private final int unsafeIdentifiers;
+        private final Map<String, IdentifierEntry> entries;
+        private final Set<String> memberValues;
 
         private Checkpoint(
-                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers) {
+                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers,
+                Map<String, IdentifierEntry> entries, Set<String> memberValues) {
             this.context = context;
             this.tokens = tokens;
             this.identifiers = identifiers;
             this.unsafeIdentifiers = unsafeIdentifiers;
+            this.entries = entries;
+            this.memberValues = memberValues;
         }
     }
 

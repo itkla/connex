@@ -100,7 +100,7 @@ public final class OutboundLeakScan {
         List<String> canonicalFields = unprotectedFields.stream().map(OutboundLeakScan::normalizeForScan).toList();
         List<String> labelFields = unprotectedFields.stream()
                 .map(field -> CanonicalText.projectLabels(field).value()).toList();
-        Set<String> leakedTokens = new LinkedHashSet<>();
+        Set<String> leakedIdentifiers = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
             String identifier = entry.canonicalValue();
@@ -110,14 +110,17 @@ public final class OutboundLeakScan {
                     && labelFields.stream().anyMatch(field -> field.contains(entry.labelValue()));
             boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
                     && unprotectedFields.stream().anyMatch(field -> field.contains(entry.rawValue()));
-            if ((canonicalLeak || labelLeak || exactRawLeak)
+            boolean shortMemberLeak = ctx.isMemberIdentifier(entry.rawValue())
+                    && unprotectedFields.stream().anyMatch(field ->
+                            MaskingEngine.containsShortMemberMatch(field, entry));
+            if ((canonicalLeak || labelLeak || exactRawLeak || shortMemberLeak)
                     && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
-                leakedTokens.add(entry.token());
+                leakedIdentifiers.add(entry.rawValue());
                 leakedKinds.add(entry.kind());
             }
         }
-        if (!leakedTokens.isEmpty()) {
-            throw new MaskingLeakException(leakedKinds, leakedTokens.size());
+        if (!leakedIdentifiers.isEmpty()) {
+            throw new MaskingLeakException(leakedKinds, leakedIdentifiers.size());
         }
     }
 

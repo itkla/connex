@@ -37,4 +37,10 @@ class AiGeneratedContentScreenTest {
         assertTrue(AiGeneratedContentScreen.containsPlaceholder(
                 "Compare {{P1}} with the renewal."));
     }
+    @org.junit.jupiter.api.Test
+    void memberBareAndBracedPlaceholdersAreRecognized() {
+        org.junit.jupiter.api.Assertions.assertTrue(AiGeneratedContentScreen.containsBarePlaceholder("Ask M1"));
+        org.junit.jupiter.api.Assertions.assertFalse(AiGeneratedContentScreen.containsBarePlaceholder("Ask {{M1}}"));
+    }
+
 }

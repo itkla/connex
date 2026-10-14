@@ -1111,7 +1111,10 @@ public class AiAssistantWriteToolService {
         result.put("tier", tier);
         result.put("status", status);
         result.put("outcome", modelOutcome(tool, outcome));
-        return new AiAssistantToolResult(result, List.of());
+        List<AiAssistantToolResult.Identifier> identifiers = outcome != null && outcome.isObject()
+                ? writeToolRegistry.find(tool).map(declared -> declared.modelIdentifiers(outcome)).orElse(List.of())
+                : List.of();
+        return new AiAssistantToolResult(result, identifiers);
     }
 
     /**

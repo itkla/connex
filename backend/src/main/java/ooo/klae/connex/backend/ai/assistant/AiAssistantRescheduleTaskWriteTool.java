@@ -151,6 +151,11 @@ public class AiAssistantRescheduleTaskWriteTool implements AiAssistantWriteTool 
     }
 
     @Override
+    public List<AiAssistantToolResult.Identifier> modelIdentifiers(JsonNode storedOutcome) {
+        return AiAssistantMemberIdentifiers.referenceIdentifiers(storedOutcome.path("description").asString());
+    }
+
+    @Override
     public List<String> memberOutcomeFields() {
         return List.of("description", "dueDate");
     }

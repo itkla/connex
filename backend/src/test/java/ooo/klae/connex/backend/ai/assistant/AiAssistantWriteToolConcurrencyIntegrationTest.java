@@ -1146,4 +1146,97 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         return task;
     }
 
+    @Test
+    void profileRenameWaitsForAssignmentIdentityAndStoredLabelReplayMasksAfterRename() throws Exception {
+        Company target = company("Rename owner target");
+        String originalLabel = secondActor.getDisplayName();
+        authenticate(firstActor);
+        ToolFixture fixture = ownerProposal(firstActor, target.getId(), originalLabel);
+        AiChatResourceRegistry preparationResources = new AiChatResourceRegistry();
+        preparationResources.register("company", target.getId());
+        AiAssistantPreparedWrite prepared = writeToolService.prepare("assign_owner",
+                objectMapper.valueToTree(java.util.Map.of("handle", "r1", "owner", originalLabel)), preparationResources,
+                restrictionEpoch.current(workspace.getId()));
+        clearAuthentication();
+        CountDownLatch userLocksHeld = new CountDownLatch(1);
+        CountDownLatch releaseApproval = new CountDownLatch(1);
+        AtomicBoolean intercept = new AtomicBoolean(true);
+        AtomicLong renameConnection = new AtomicLong();
+        AiChatMapper realChatMapper = sqlSessionTemplate.getMapper(AiChatMapper.class);
+        doAnswer(invocation -> {
+            if (intercept.compareAndSet(true, false)) {
+                userLocksHeld.countDown();
+                assertTrue(releaseApproval.await(30, TimeUnit.SECONDS));
+            }
+            return realChatMapper.getSessionByIdForUpdate(workspace.getId(), firstActor.getId(), fixture.sessionId());
+        }).when(chatMapperSpy).getSessionByIdForUpdate(workspace.getId(), firstActor.getId(), fixture.sessionId());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> approval = executor.submit(() -> {
+                authenticate(firstActor);
+                try {
+                    assertEquals("executed", writeToolService.approve(fixture.sessionId(), fixture.toolCallId()).status());
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            assertTrue(userLocksHeld.await(10, TimeUnit.SECONDS));
+            CountDownLatch renameStarted = new CountDownLatch(1);
+            Future<?> rename = executor.submit(() -> {
+                TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                transaction.executeWithoutResult(status -> {
+                    renameConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    renameStarted.countDown();
+                    assertEquals(1, jdbcTemplate.update("UPDATE app_user SET display_name = 'Renamed Assignment Member' WHERE id = ?", secondActor.getId()));
+                });
+            });
+            assertTrue(renameStarted.await(10, TimeUnit.SECONDS));
+            MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, renameConnection.get(), "app_user", Integer.toString(secondActor.getId()));
+            assertFalse(rename.isDone());
+            releaseApproval.countDown();
+            approval.get(20, TimeUnit.SECONDS);
+            rename.get(20, TimeUnit.SECONDS);
+            assertEquals(secondActor.getId(), companyMapper.getCompanyById(workspace.getId(), target.getId()).getOwnerId());
+            authenticate(firstActor);
+            AiChatToolCall stored = chatMapper.getToolCallById(workspace.getId(), jdbcTemplate.queryForObject(
+                    "SELECT message_id FROM ai_chat_tool_call WHERE id = ?", Integer.class, fixture.toolCallId()), fixture.toolCallId());
+            assertEquals(originalLabel, objectMapper.readTree(stored.getResultJson()).path("outcome").path("owner").asString());
+            AiAssistantToolResult result = writeToolService.proposalResult(prepared, new AiAssistantToolProposal(
+                    fixture.toolCallId(), "executed", stored.getResultJson(), true));
+            assertEquals(List.of(new AiAssistantToolResult.Identifier("member", originalLabel)), result.identifiers());
+            AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
+            try {
+                var assembler = new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog());
+                for (boolean nativeProtocol : List.of(false, true)) {
+                    var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+                    AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+                    var resources = new AiChatResourceRegistry(context);
+                    var turn = AiAssistantPromptAssembler.ToolTurn.soleCall(1, "assign_owner", result);
+                    var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+                    var empty = new AiAssistantToolResult(java.util.Map.of(), List.of());
+                    var prompt = nativeProtocol ? assembler.assembleNative(List.of(), empty, List.of(turn), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                            : assembler.assemble(List.of(), empty, List.of(turn), context, resources, AiAssistantToolCatalog.ALL);
+                    var exchanges = nativeProtocol ? assembler.nativeReplay(List.of(turn), java.util.Map.of(turn.ref(),
+                            new ooo.klae.connex.backend.ai.provider.AiToolCall("stored-owner", "assign_owner", "{}")), context, budget, null).exchanges()
+                            : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+                    var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, exchanges,
+                            "{\"text\":\"Ready\"}", false, null);
+                    String payload = objectMapper.writeValueAsString(capture.request().messages()) + objectMapper.writeValueAsString(capture.request().nativeTools());
+                    assertFalse(payload.contains(originalLabel));
+                    assertFalse(payload.contains("Renamed Assignment Member"));
+                    assertTrue(payload.contains("{{M1}}"));
+                    assertEquals(originalLabel, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).text());
+                }
+            } finally {
+                support.releaseFixtureMocks();
+            }
+        } finally {
+            releaseApproval.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+            org.mockito.Mockito.reset(chatMapperSpy);
+            clearAuthentication();
+        }
+    }
+
 }

@@ -68,7 +68,8 @@ class AiConversationPreprocessingArchTest {
                 "citations.add", "handles.put", "stored.handle", "message.getContent",
                 "message.getStructuredJson", "metadata.get", "objectMapper.readTree", "orElse",
                 "resources.handleFor", "stored.id", "stored.kind", "storedCitations.isArray", "storedResource",
-                "storedResources.isArray"));
+                "storedResources.isArray", "identifiers.isArray", "identifiers.size", "storedSummaryIdentifier",
+                "stored.value", "MaskingEngine.maskField"));
         assertCalls(assembler, "reauthorizeSummary", Set.of(
                 "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
@@ -86,17 +87,23 @@ class AiConversationPreprocessingArchTest {
                 .contains("return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));"));
         assertProseAssignments(assembler, "appendHistory", List.of(
                 "summary = reauthorizeSummary(message, resources, context);",
-                "replay = reauthorizeAnswer(message, resources);",
+                "replay = reauthorizeAnswer(message, resources, context);",
                 "masked = MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles());",
                 "content = reauthorizeUser(message, resources, context);",
                 "masked = MaskingEngine.maskConversationalFreeText( content, context);",
                 "serialized = serialize(Map.of( , masked));"));
         assertProseAssignments(assembler, "assembleSummary", List.of(
                 "content = message.getContent();",
-                "replay = reauthorizeAnswer(message, resources);",
+                "replay = reauthorizeAnswer(message, resources, context);",
                 "content = replay.content();",
                 "content = reauthorizeUser(message, resources, context);",
                 "content = reauthorizeSummary(existingSummary, resources, context);"));
+        String answer = compact(methodBody(assembler, "reauthorizeAnswer"));
+        assertTrue(answer.contains("identifiers.size() > MAX_SUMMARY_IDENTIFIERS"));
+        assertTrue(answer.contains("if (stored.kind() != EntityKind.MEMBER)"));
+        assertTrue(answer.contains("MaskingEngine.maskField(stored.kind(), stored.value(), context);"));
+        assertEquals(1, Pattern.compile(Pattern.quote("MaskingEngine.maskField"))
+                .matcher(answer).results().count());
         assertReturns(assembler, "reauthorizeAnswer", List.of(
                 "new ReplayAnswer(message.getContent(), List.of(), Map.of())", "null", "null",
                 "new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles))"));

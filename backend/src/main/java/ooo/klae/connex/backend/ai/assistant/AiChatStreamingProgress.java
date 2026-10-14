@@ -79,6 +79,9 @@ final class AiChatStreamingProgress {
         if (excluded || streamTruncated || taskHandle) {
             return;
         }
+        if (demasking && maskingContext.containsUnexposedMemberToken(text)) {
+            throw AiAssistantLoopException.malformed("invented_placeholder");
+        }
         String decoded = demasking && !text.isBlank()
                 ? Demasker.demask(text, maskingContext).text()
                 : text;

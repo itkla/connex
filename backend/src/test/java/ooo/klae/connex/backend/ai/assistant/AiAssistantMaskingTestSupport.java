@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SegmentService;
@@ -114,10 +115,12 @@ final class AiAssistantMaskingTestSupport {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
         when(scope.getForWorkspace(workspaceId)).thenReturn(new WorkspaceScope(
                 organizationId, List.of(workspaceId), "[" + workspaceId + "]"));
+        ReferenceService references = fixtureMock(ReferenceService.class);
+        when(references.hydrateActivities(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         AiAssistantScopeReadService service = new AiAssistantScopeReadService(
                 activities, fixtureMock(SegmentService.class), fixtureMock(SegmentMapper.class), fixtureMock(SavedViewService.class),
                 fixtureMock(ScoringService.class), fixtureMock(DealRiskService.class), people, fixtureMock(CompanyMapper.class), fixtureMock(DealMapper.class),
-                workspaceService, scope, mapper, Clock.systemUTC());
+                workspaceService, scope, mapper, Clock.systemUTC(), references);
         return new ScopeHarness(service, people, activities,
                 List.copyOf(fixtureMocks.subList(firstMock, fixtureMocks.size())));
     }
@@ -156,6 +159,90 @@ final class AiAssistantMaskingTestSupport {
         }
     }
 
+    void allowUnmaskedDisclosure(ObjectMapper mapper) {
+        var config = providerHarness(mapper).mocks().stream()
+                .filter(AiProviderConfigService.class::isInstance)
+                .map(AiProviderConfigService.class::cast).findFirst().orElseThrow();
+        when(config.resolveForOrg(organizationId, 11)).thenReturn(new ResolvedAiProvider(
+                "deterministic", null, "deterministic-model", "https://provider.example.test/v1",
+                null, null, null, false, true, ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED,
+                AiCredentials.of(Map.of())));
+    }
+
+    AssistantCapture captureAssistantPayload(
+            ooo.klae.connex.backend.ai.masking.MaskedPrompt prompt, MaskingContext context,
+            ObjectMapper mapper, boolean nativeProtocol,
+            List<ooo.klae.connex.backend.ai.provider.AiToolExchange> exchanges,
+            String output, boolean assignment, AiChatStreamingProgress.Observer observer) {
+        ProviderHarness harness = providerHarness(mapper);
+        AiProvider provider = harness.provider();
+        when(provider.toolCallingCapability(any())).thenReturn(
+                ooo.klae.connex.backend.ai.provider.AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(provider.supportsStreaming(any())).thenReturn(observer != null);
+        java.util.function.Function<AiCompletionRequest, AiCompletionResult> completion = request -> {
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                if (observer != null && !assignment) {
+                    observer.onContentDelta(output);
+                }
+                return "";
+            });
+            return new AiCompletionResult(output, 1, 1, assignment ? "tool_calls" : "stop",
+                    ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                    "", ooo.klae.connex.backend.ai.provider.AiReasoningMode.NONE,
+                    nativeProtocol && assignment ? List.of(new ooo.klae.connex.backend.ai.provider.AiToolCall(
+                            "member-guess", "assign_owner", "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}")) : List.of());
+        };
+        org.mockito.Mockito.doAnswer(call -> completion.apply(call.getArgument(0))).when(provider).complete(any());
+        org.mockito.Mockito.doAnswer(call -> completion.apply(call.getArgument(0))).when(provider).completeStreaming(any(), any());
+        AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context, prompt,
+                List.of(), 256, 0.1, false, null,
+                nativeProtocol ? ooo.klae.connex.backend.ai.provider.AiInvocationProtocol.NATIVE_TOOLS
+                        : ooo.klae.connex.backend.ai.provider.AiInvocationProtocol.JSON_REACT,
+                null, false, observer);
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(mapper, catalog);
+        var schema = new AiAssistantStepSchema(mapper, catalog);
+        var admission = fixtureMock(AiInvocationAdmissionService.DirectAdmission.class);
+        int warnings;
+        if (nativeProtocol) {
+            var outcome = harness.service().completeNativeToolsRepairable(invocation,
+                    tools.jackson.databind.JsonNode.class,
+                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
+                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
+                    schema.finalResponseSchema(),
+                    new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
+                            assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), exchanges),
+                    admission, () -> { });
+            warnings = switch (outcome) {
+                case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool<?> tool -> tool.demaskWarnings();
+                case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Content<?> content -> parsedWarnings(content.attempt().outcome());
+                case ooo.klae.connex.backend.ai.AiNativeToolCompletion.Malformed<?> malformed -> malformed.demaskWarnings();
+            };
+        } else {
+            warnings = parsedWarnings(harness.service().completeStructuredRepairable(invocation,
+                    tools.jackson.databind.JsonNode.class,
+                    ooo.klae.connex.backend.ai.AiRawOutputGuard.PERMIT_ALL,
+                    schema.responseSchema(AiAssistantToolCatalog.ALL), admission, () -> { }).outcome());
+        }
+        ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        if (observer == null) {
+            verify(provider).complete(request.capture());
+        } else {
+            verify(provider).completeStreaming(request.capture(), any());
+        }
+        clearInvocations(harness.mocks().toArray());
+        return new AssistantCapture(request.getValue(), warnings);
+    }
+
+    private static int parsedWarnings(ooo.klae.connex.backend.ai.AiStructuredOutcome<?> outcome) {
+        return org.junit.jupiter.api.Assertions.assertInstanceOf(
+                ooo.klae.connex.backend.ai.AiStructuredOutcome.Parsed.class, outcome).demaskWarnings();
+    }
+
+    record AssistantCapture(AiCompletionRequest request, int warnings) {
+    }
+
     private ProviderHarness newProviderHarness(ObjectMapper mapper) {
         int firstMock = fixtureMocks.size();
         AiProvider provider = fixtureMock(AiProvider.class);
@@ -164,7 +251,10 @@ final class AiAssistantMaskingTestSupport {
         when(provider.contextWindowTokens(any())).thenReturn(128_000);
         when(provider.complete(any())).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
-            String output = request.providerAttemptExecutor().execute(() -> "Ready");
+            String output = request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                return "Ready";
+            });
             return new AiCompletionResult(output, 1, 1, "stop");
         });
         WorkspaceService workspaceService = fixtureMock(WorkspaceService.class);

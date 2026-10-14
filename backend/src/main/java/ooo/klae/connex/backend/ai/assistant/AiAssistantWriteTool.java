@@ -388,8 +388,9 @@ public interface AiAssistantWriteTool {
     /**
      * Projects a stored outcome into the model's view of it.
      *
-     * <p>No identifier, no undo or verification metadata, and no string class beyond what the tool
-     * already reports: server-resolved scalars, workspace-authored labels such as a stage name, and
+     * <p>No record ids, undo or verification metadata enter this projection. Member labels must
+     * be declared by {@link #modelIdentifiers}; other values are server-resolved scalars,
+     * workspace vocabulary such as stage and tag names, and
      * echoes of the model's own arguments such as a task description or a note title. A tool may
      * copy a field only by naming it, so a key the stored outcome gains later never reaches the
      * provider by accident.
@@ -398,6 +399,17 @@ public interface AiAssistantWriteTool {
      * @return the model-visible outcome in stable key order
      */
     Map<String, Object> modelOutcome(JsonNode storedOutcome);
+
+    /**
+     * Declares masking provenance from the stored outcome without reads or side effects.
+     * Fresh execution and replay use the same snapshot, including after a member rename.
+     * Member labels register as match candidates before tool-result text is masked.
+     * @param storedOutcome stored outcome object
+     * @return identifiers required by the model projection
+     */
+    default List<AiAssistantToolResult.Identifier> modelIdentifiers(JsonNode storedOutcome) {
+        return List.of();
+    }
 
     /** @return the ordered outcome fields a card may render, before screening and capping */
     List<String> memberOutcomeFields();

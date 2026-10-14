@@ -98,7 +98,7 @@ public final class Demasker {
         while (matcher.find()) {
             demasked.append(masked, lastEnd, matcher.start());
             String token = "{{" + matcher.group(1) + "}}";
-            String originalValue = ctx.originalValueForToken(token);
+            String originalValue = ctx.demaskableValueForToken(token);
             if (originalValue == null) {
                 demasked.append(UNKNOWN_REFERENCE);
                 warnings++;

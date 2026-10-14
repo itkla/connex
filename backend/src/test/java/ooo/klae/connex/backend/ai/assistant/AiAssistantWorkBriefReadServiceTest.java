@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.ObjectMapper;
@@ -56,10 +57,12 @@ class AiAssistantWorkBriefReadServiceTest {
         deal.setName("Renewal Agreement");
         when(personMapper.getByIds(eq(7), anyList())).thenReturn(List.of(person));
         when(dealMapper.getByIds(eq(7), anyList())).thenReturn(List.of(deal));
+        ReferenceService references = mock(ReferenceService.class);
+        when(references.hydrateTasks(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantWorkBriefReadService(
                 taskMapper, activityMapper, personMapper, mock(CompanyMapper.class), dealMapper,
                 mock(ScoringService.class), workspaceService, workspaceScope,
-                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references);
     }
 
     @Test
@@ -107,4 +110,19 @@ class AiAssistantWorkBriefReadServiceTest {
         assertTrue(providerInput.contains("{{P"));
         assertTrue(providerInput.contains("{{D"));
     }
+    @Test
+    void commitmentMemberReferencesAreCandidatesBeforeDescriptionTruncation() throws Exception {
+        when(taskMapper.getAiAssistantWorkCommitments(anyInt(), anyInt(), any(), any(), anyList(), anyInt()))
+                .thenReturn(List.of(new AiAssistantWorkCommitment(1,
+                        "x".repeat(490) + " [Former Member](user:42) and [Pending Alias](user:43)", null, true, null, null)));
+        MaskingContext context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        var result = service.workCommitments(11, 7, 10, resources);
+        assertTrue(context.identifierDictionary().containsAll(List.of("Former Member", "Pending Alias")));
+        String projected = new ObjectMapper().writeValueAsString(result.data());
+        assertFalse(projected.contains("Former"));
+        assertFalse(projected.contains("Pending"));
+        org.junit.jupiter.api.Assertions.assertEquals(0, context.tokenBindings().size());
+    }
+
 }

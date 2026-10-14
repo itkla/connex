@@ -4981,4 +4981,55 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
+    @Test
+    void workspaceMembersAreCandidatesBeforeMemoryCompactionAndDirectoryFailurePreventsDispatch() throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Current Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        org.mockito.Mockito.doAnswer(call -> {
+            MaskingContext context = call.getArgument(1);
+            assertTrue(context.identifierDictionary().contains("Current Member"));
+            assertEquals(0, context.tokenBindings().size());
+            throw new ForbiddenException("Stop after observing initial seeding");
+        }).when(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        service.run(TURN);
+        verify(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenThrow(new IllegalStateException("Directory unavailable"));
+        AiGenerationTaskResult<AiChatTurnGenerationResult> failed = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, failed.outcome());
+        assertEquals("internal_error", failed.reason());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void inventedMemberWarningsEndTheTurnBeforeAnyOwnerProposal(boolean nativeProtocol, boolean assignment) throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Unused Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> outcome = assignment
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "assign_owner", "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}"),
+                            objectMapper.readTree("{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}"), 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(outcome);
+        } else {
+            AiAssistantStep step = assignment
+                    ? toolStep("assign_owner", "{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}")
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        assertTerminal("malformed_output");
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
 }

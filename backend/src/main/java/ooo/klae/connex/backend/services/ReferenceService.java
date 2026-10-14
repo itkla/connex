@@ -89,7 +89,7 @@ public class ReferenceService {
         "\\[([^\\]]+)\\]\\(" + REFERENCE_TYPE_PATTERN
             + REFERENCE_SEPARATOR + "(\\d+)\\)");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}+\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*+"
+        "(?im)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
             + ":(\\d+)>?(?:[ \\t].*)?$");
 
@@ -552,11 +552,11 @@ public class ReferenceService {
     private static void collectReferenceTargets(
             Matcher matcher, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
         while (matcher.find()) {
-            Optional<ReferenceTarget> target = parseReferenceTarget(matcher.group(1), matcher.group(2));
+            Optional<ReferenceTarget> target = parseReferenceTarget(matcher.group(2), matcher.group(3));
             if (target.isPresent()) {
                 targets.add(target.get());
             } else {
-                String type = canonicalReferenceType(matcher.group(1));
+                String type = canonicalReferenceType(matcher.group(2));
                 if (type != null) {
                     unparseableTypes.add(type);
                 }
@@ -566,6 +566,12 @@ public class ReferenceService {
 
     private static void collectInlineTargets(
             String content, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
+        collectInlineTargets(content, targets, unparseableTypes, new ArrayList<>());
+    }
+
+    private static void collectInlineTargets(
+            String content, List<ReferenceTarget> targets, Set<String> unparseableTypes,
+            List<String> memberLabels) {
         int[] labelEnds = matchingLabelEnds(content);
         for (int index = 0; index < content.length(); index++) {
             if (content.charAt(index) != '[' || isEscaped(content, index)) {
@@ -610,12 +616,67 @@ public class ReferenceService {
                     type, content.substring(idStart, idEnd));
                 if (target.isPresent()) {
                     targets.add(target.get());
+                    if (TYPE_USER.equals(target.get().type())) {
+                        memberLabels.add(content.substring(index + 1, labelEnd));
+                    }
                 } else {
                     unparseableTypes.add(type);
                 }
             }
             index = labelEnd;
         }
+    }
+
+    /**
+     * Extracts every authored member-reference label from prose already scoped by
+     * {@link #redactInvisibleTargets}, including repeated targets and reference-style Markdown.
+     * This pure parser grants no visibility and must receive only reader-authorized content.
+     */
+    public static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
+        if (readerVisibleContent == null || readerVisibleContent.isBlank()) {
+            return List.of();
+        }
+        String content = normalizeReferenceSyntax(readerVisibleContent);
+        List<String> labels = new ArrayList<>();
+        collectInlineTargets(content, new ArrayList<>(), new HashSet<>(), labels);
+        Set<String> memberDefinitions = new HashSet<>();
+        Matcher definitions = REFERENCE_DEFINITION.matcher(content);
+        while (definitions.find()) {
+            if (TYPE_USER.equals(canonicalReferenceType(definitions.group(2)))
+                    && parseReferenceTarget(definitions.group(2), definitions.group(3)).isPresent()) {
+                memberDefinitions.add(referenceLabelKey(definitions.group(1)));
+            }
+        }
+        int[] labelEnds = matchingLabelEnds(content);
+        for (int index = 0; index < content.length(); index++) {
+            int end = labelEnds[index];
+            if (end < 0 || isEscaped(content, index)) {
+                continue;
+            }
+            String label = content.substring(index + 1, end);
+            int next = skipWhitespace(content, end + 1);
+            if (next < content.length() && (content.charAt(next) == ':' || content.charAt(next) == '(')) {
+                index = end;
+                continue;
+            }
+            String key = label;
+            if (next < content.length() && content.charAt(next) == '[' && labelEnds[next] >= 0) {
+                String explicit = content.substring(next + 1, labelEnds[next]);
+                if (!explicit.isBlank()) {
+                    key = explicit;
+                }
+                next = labelEnds[next];
+            }
+            if (memberDefinitions.contains(referenceLabelKey(key))) {
+                labels.add(label);
+            }
+            index = Math.max(end, next - 1);
+        }
+        return List.copyOf(new java.util.LinkedHashSet<>(labels));
+    }
+
+    private static String referenceLabelKey(String label) {
+        return label.strip().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
     }
 
     private static int[] matchingLabelEnds(String content) {

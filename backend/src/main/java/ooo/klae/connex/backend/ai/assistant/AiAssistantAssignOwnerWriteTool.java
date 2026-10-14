@@ -242,6 +242,14 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
+    public List<AiAssistantToolResult.Identifier> modelIdentifiers(JsonNode storedOutcome) {
+        JsonNode owner = storedOutcome == null ? null : storedOutcome.get(OWNER_FIELD);
+        return owner != null && owner.isString() && !owner.asString().isBlank()
+                && !UNASSIGNED.equals(owner.asString())
+                ? List.of(new AiAssistantToolResult.Identifier("member", owner.asString())) : List.of();
+    }
+
+    @Override
     public List<String> memberOutcomeFields() {
         return List.of(OWNER_FIELD);
     }

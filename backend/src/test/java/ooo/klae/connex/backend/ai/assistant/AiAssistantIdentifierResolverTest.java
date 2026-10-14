@@ -303,4 +303,35 @@ class AiAssistantIdentifierResolverTest {
         mention.setValue(value);
         return mention;
     }
+    @Test
+    void memberMentionsShareTheTwentyIdentifierLimitWithoutResourceHandles() {
+        AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
+        WorkspaceService workspace = mock(WorkspaceService.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        OrganizationWorkspaceScopeControlAccess scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        List<ooo.klae.connex.backend.beans.User> members = IntStream.rangeClosed(1, 21).mapToObj(index -> {
+            var member = new ooo.klae.connex.backend.beans.User();
+            member.setDisplayName("Member " + index);
+            member.setUsername("username" + index);
+            return member;
+        }).toList();
+        when(workspace.getMembers(7)).thenReturn(members);
+        AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope);
+        String twenty = members.subList(0, 20).stream().map(member -> member.getDisplayName())
+                .collect(Collectors.joining(", "));
+        var resolution = resolver.resolve(twenty);
+        assertEquals(20, resolution.identifiers().size());
+        assertEquals(List.of(), resolution.resources());
+        assertEquals(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER,
+                resolution.identifiers().getFirst().kind());
+        var refusal = assertThrows(AiAssistantLoopException.class, () -> resolver.resolve(twenty + ", Member 21"));
+        assertEquals("identifier_limit_exceeded", refusal.detailReason());
+        var fallback = new ooo.klae.connex.backend.beans.User();
+        fallback.setUsername("fallback-member");
+        when(workspace.getMembers(7)).thenReturn(List.of(fallback, fallback));
+        assertEquals(List.of("fallback-member"), AiAssistantMemberIdentifiers.labels(List.of(fallback, fallback)));
+        assertEquals(1, resolver.resolve("Ask fallback-member").identifiers().size());
+    }
+
 }

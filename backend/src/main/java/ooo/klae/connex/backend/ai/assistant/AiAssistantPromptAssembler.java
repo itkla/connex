@@ -1359,6 +1359,27 @@ public class AiAssistantPromptAssembler {
             SkillReference skill,
             List<AiChatNarration> narration,
             List<AiChatTodo> todos) {
+        return finalMetadata(turnId, citations, suggestions, resources, observations,
+                toolBudgetAudit, skill, narration, todos, List.of());
+    }
+
+    /** Persists referenced member labels as bounded raw provenance, never as token bindings. */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
+            ToolBudgetAudit toolBudgetAudit,
+            SkillReference skill,
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos,
+            List<String> memberIdentifiers) {
+        if (memberIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS
+                || memberIdentifiers.stream().anyMatch(value -> value == null || value.isBlank()
+                        || value.length() > MAX_SUMMARY_IDENTIFIER_CHARS)) {
+            throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+        }
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
@@ -1388,6 +1409,10 @@ public class AiAssistantPromptAssembler {
             metadata.put("citations", resolved);
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
+            if (!memberIdentifiers.isEmpty()) {
+                metadata.put("identifiers", memberIdentifiers.stream()
+                        .map(value -> Map.of("kind", "member", "value", value)).toList());
+            }
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
             }
@@ -1460,7 +1485,7 @@ public class AiAssistantPromptAssembler {
                 if (message.getStructuredJson() == null) {
                     continue;
                 }
-                ReplayAnswer replay = reauthorizeAnswer(message, resources);
+                ReplayAnswer replay = reauthorizeAnswer(message, resources, context);
                 if (replay == null) {
                     continue;
                 }
@@ -1713,7 +1738,7 @@ public class AiAssistantPromptAssembler {
             return;
         }
         if ("assistant".equals(message.getAuthorKind())) {
-            ReplayAnswer replay = reauthorizeAnswer(message, resources);
+            ReplayAnswer replay = reauthorizeAnswer(message, resources, context);
             if (replay == null || AiAssistantStepGuard.containsTaskHandle(replay.content())) {
                 return;
             }
@@ -1738,7 +1763,7 @@ public class AiAssistantPromptAssembler {
     }
 
     private ReplayAnswer reauthorizeAnswer(
-            AiChatMessage message, AiChatResourceRegistry resources) {
+            AiChatMessage message, AiChatResourceRegistry resources, MaskingContext context) {
         if (message.getStructuredJson() == null) {
             return new ReplayAnswer(message.getContent(), List.of(), Map.of());
         }
@@ -1774,6 +1799,19 @@ public class AiAssistantPromptAssembler {
                 }
                 citations.add(freshHandle);
                 handles.put(stored.handle(), freshHandle);
+            }
+        }
+        JsonNode identifiers = metadata.get("identifiers");
+        if (identifiers != null) {
+            if (!identifiers.isArray() || identifiers.size() > MAX_SUMMARY_IDENTIFIERS) {
+                throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+            }
+            for (JsonNode identifier : identifiers) {
+                StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+                if (stored.kind() != EntityKind.MEMBER) {
+                    throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+                }
+                MaskingEngine.maskField(stored.kind(), stored.value(), context);
             }
         }
         return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));
@@ -1895,6 +1933,7 @@ public class AiAssistantPromptAssembler {
             case "deal" -> EntityKind.DEAL;
             case "email" -> EntityKind.EMAIL;
             case "phone" -> EntityKind.PHONE;
+            case "member" -> EntityKind.MEMBER;
             default -> throw new IllegalStateException(
                     "Assistant summary identifier metadata is invalid");
         };

@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -374,6 +375,7 @@ class AiAssistantToolExecutorTest {
         person.setId(17);
         person.setName("Ada Lovelace");
         person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(workspaceNote, privateNote));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -405,6 +407,7 @@ class AiAssistantToolExecutorTest {
         person.setId(17);
         person.setName("Ada Lovelace");
         person.setNotes(new Note[] {workspaceNote, privateNote});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(workspaceNote, privateNote));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -515,7 +518,7 @@ class AiAssistantToolExecutorTest {
         when(dealService.getDealById(8)).thenReturn(deal);
         when(historyService.activitiesForDeal(8, null, null, 5)).thenReturn(
                 List.of(activity, referencedActivity));
-        when(dealService.getNotesByDealId(8)).thenReturn(List.of(note));
+        when(historyService.notesForDeal(8, 10)).thenReturn(List.of(note));
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("company", 5);
         resources.register("deal", 8);
@@ -561,6 +564,7 @@ class AiAssistantToolExecutorTest {
                 })
                 .toArray(Note[]::new);
         person.setNotes(notes);
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(Arrays.asList(notes));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -594,6 +598,7 @@ class AiAssistantToolExecutorTest {
         note.setContent(
                 "x".repeat(3_989) + " victim@example.com " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
@@ -622,6 +627,7 @@ class AiAssistantToolExecutorTest {
         note.setVisibility("workspace");
         note.setContent("x".repeat(3_988) + " Ada Lovelace " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -650,6 +656,7 @@ class AiAssistantToolExecutorTest {
         note.setVisibility("workspace");
         note.setContent("x".repeat(3_985) + " The contact discussed a diagnosis.");
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -674,6 +681,7 @@ class AiAssistantToolExecutorTest {
         note.setCreatedAt("2026-08-21 12:34:56");
         note.setContent("Follow up next week");
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
@@ -701,6 +709,7 @@ class AiAssistantToolExecutorTest {
         note.setPerson(linkedPerson);
         note.setContent("x".repeat(3_988) + " Grace Hopper " + "tail".repeat(20));
         person.setNotes(new Note[] {note});
+        when(historyService.notesForPerson(person.getId(), 10)).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(personMapper.getByIds(7, List.of(18))).thenReturn(List.of(linkedPerson));

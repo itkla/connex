@@ -834,4 +834,47 @@ class AiChatMemoryServiceTest {
     }
 
 
+    @Test
+    void memberSummaryProvenancePersistsRawLabelsAndReplaysInAFreshContext() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+        AiChatMessage early = message(101, 1, "user", "Member Continuity " + "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(early, initiating));
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500)).thenReturn(List.of(early));
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantSummary.class),
+                same(fixture.summaryGuard()), same(fixture.summarySchema().responseSchema()), same(fixture.admission()), any(Runnable.class)))
+                .thenAnswer(call -> {
+                    AiInvocation invocation = call.getArgument(0);
+                    assertFalse(promptText(invocation.prompt()).contains("Member Continuity"));
+                    assertTrue(promptText(invocation.prompt()).contains("{{M1}}"));
+                    invocation.context().exposeDispatchedPayload(promptText(invocation.prompt()));
+                    return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantSummary("Member Continuity has a followup."), 0, 11, 4, "stop"), Optional.empty());
+                });
+        when(fixture.persistenceService().upsertHistorySummary(same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
+                .thenAnswer(call -> {
+                    AiChatMessage summary = message(103, 3, "system", call.getArgument(3));
+                    summary.setStructuredJson(call.getArgument(4));
+                    return summary;
+                });
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Member Continuity");
+        AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
+        AiChatMessage summary = memory.history().getFirst();
+        assertTrue(summary.getStructuredJson().contains("\"kind\":\"member\""));
+        assertTrue(summary.getStructuredJson().contains("Member Continuity"));
+        assertFalse(summary.getStructuredJson().contains("{{M1}}"));
+        MaskingContext fresh = new MaskingContext();
+        String replay = promptText(fixture.assembler().assembleSummary(summary, List.of(), fresh, new AiChatResourceRegistry(fresh)));
+        assertFalse(replay.contains("Member Continuity"));
+        assertTrue(replay.contains("{{M1}}"));
+    }
+
 }

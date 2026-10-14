@@ -292,4 +292,17 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertTrue(stored(note).isEmpty());
     }
 
+    @Test
+    void readerVisibleMemberLabelsIncludeRepeatedTargetsAndReferenceStyleLabels() {
+        assertEquals(List.of("Old Alice", "Other Old Label", "Pending Invitee", "Shortcut"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Old Alice](user:42) and [Other Old Label](user:42) "
+                                + "[Pending Invitee][pending] and [Shortcut]\n"
+                                + "[pending]: user:43\n[Shortcut]: user:44"));
+        assertEquals(List.of("Nested [Alice]"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Nested [Alice]](user:42)"));
+        assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Contact](person:42) (unavailable member)"));
+    }
+
 }

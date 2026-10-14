@@ -906,6 +906,20 @@ public final class MaskingEngine {
      * always redact. Resolving their union before substitution prevents any match from destroying
      * the evidence needed to remove another identifier before truncation or provider egress.
      */
+    /** Shares short-member primary matching with the final outbound leak scan. */
+    static boolean containsShortMemberMatch(String text, MaskingContext.IdentifierEntry entry) {
+        boolean literal = entry.replacementEligible()
+                && entry.canonicalValue().length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH;
+        boolean label = entry.labelEligible()
+                && entry.labelValue().length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH;
+        if (!literal && !label) {
+            return false;
+        }
+        ScreenText input = screenText(text);
+        return literal && !identifierSpans(text, input.literal(), entry.canonicalValue()).isEmpty()
+                || label && !identifierSpans(text, input.labels(), entry.labelValue()).isEmpty();
+    }
+
     private static List<ReplacementSpan> sensitiveSpans(
             String text, MaskingContext ctx, boolean preserveTrustedCollisions, boolean tokenize) {
         return sensitiveSpans(screenText(text), ctx, preserveTrustedCollisions, tokenize);
@@ -923,16 +937,19 @@ public final class MaskingEngine {
                     || preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
                 continue;
             }
-            addReplacementSpans(spans,
-                    coalesceIdentifierRuns(identifierSpans(text, projection, entry.canonicalValue())),
-                    tokenize && !entry.unsafe() ? entry.token() : REDACTED, false, 2, entry.rawValue());
+            List<TextSpan> primary = coalesceIdentifierRuns(
+                    identifierSpans(text, projection, entry.canonicalValue()));
+            List<TextSpan> aliases = entry.labelEligible()
+                    ? coalesceIdentifierRuns(identifierSpans(text, labels, entry.labelValue())) : List.of();
+            String replacement = tokenize && !entry.unsafe() && (!primary.isEmpty() || !aliases.isEmpty())
+                    ? ctx.tokenFor(entry.kind(), entry.rawValue()) : REDACTED;
+            addReplacementSpans(spans, primary, replacement, false, 2, entry.rawValue());
             if (residualEligible(entry.canonicalValue())) {
                 addReplacementSpans(spans, identifierResidualSpans(text, projection, entry.canonicalValue()), REDACTED, false);
             }
             if (entry.labelEligible()) {
                 addReplacementSpans(spans,
-                        coalesceIdentifierRuns(identifierSpans(text, labels, entry.labelValue())),
-                        tokenize ? entry.token() : REDACTED, false, 1, entry.rawValue());
+                        aliases, replacement, false, 1, entry.rawValue());
                 if (residualEligible(entry.labelValue())) {
                     addReplacementSpans(spans, identifierResidualSpans(text, labels, entry.labelValue()), REDACTED, false);
                 }

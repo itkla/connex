@@ -70,4 +70,63 @@ class MaskingContextTest {
         assertEquals(List.of(), context.tokenBindings());
         assertEquals(1, Demasker.demask(person, context).warnings());
     }
+    @org.junit.jupiter.api.Test
+    void memberCandidatesAllocateOnlyOnMatchingTextAndKeepCrossKindIdentity() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Unused Member");
+        context.registerMemberCandidate("山田 太郎");
+        context.registerMemberCandidate("山田 太郎");
+        assertEquals(0, context.tokenBindings().size());
+        assertEquals("Ask {{M1}}", MaskingEngine.maskFreeText("Ask 山田 太郎", context));
+        assertEquals("{{M1}}", context.tokenFor(EntityKind.PERSON, "山田 太郎"));
+        assertEquals(1, context.tokenBindings().size());
+        assertEquals(2, context.identifierDictionary().size());
+        assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+        context.exposeDispatchedPayload("{\"content\":\"{{M1}}\"}");
+        assertEquals("山田 太郎", Demasker.demask("{{ M1 }}", context).text());
+        assertEquals(1, Demasker.demask("{{M2}}", context).warnings());
+    }
+
+    @org.junit.jupiter.api.Test
+    void candidateBindingRestoreLeavesTheCandidateAndNeverReusesTheWithdrawnToken() {
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Prior Member");
+        MaskingContext.Checkpoint checkpoint = context.checkpoint();
+        assertEquals("{{M1}}", MaskingEngine.maskFreeText("Prior Member", context));
+        context.restore(checkpoint);
+        assertEquals(0, context.tokenBindings().size());
+        assertEquals("{{M2}}", MaskingEngine.maskFreeText("Prior Member", context));
+        assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+    }
+
+    @org.junit.jupiter.api.Test
+    void unmaskedMemberCandidatesDoNotIssueBindings() {
+        MaskingContext context = new MaskingContext(ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED);
+        context.registerMemberCandidate("Current Member");
+        assertEquals("Current Member", MaskingEngine.maskFreeText("Current Member", context));
+        assertEquals(0, context.tokenBindings().size());
+    }
+
+    @Test
+    void memberProvenanceSurvivesAnExactValueFirstIssuedByAnotherKind() {
+        MaskingContext context = new MaskingContext();
+        assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Shared Label"));
+        context.registerMemberCandidate("Shared Label");
+        assertEquals("{{P1}}", context.tokenFor(EntityKind.MEMBER, "Shared Label"));
+        assertEquals(List.of(), context.referencedMemberValues("Shared Label handled it"));
+        context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
+        assertEquals(List.of("Shared Label"), context.referencedMemberValues("Shared Label handled it"));
+        assertEquals(List.of(), context.referencedMemberValues("A different answer"));
+    }
+
+    @Test
+    void memberProvenanceRecognizesAnExactValueDispatchedBeforeTheMemberReferenceWasRead() {
+        MaskingContext context = new MaskingContext();
+        assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Earlier Label"));
+        context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
+        context.registerMemberCandidate("Earlier Label");
+        assertEquals(List.of("Earlier Label"), context.referencedMemberValues("Earlier Label handled it"));
+        assertEquals(0, Demasker.demask("{{P1}}", context).warnings());
+    }
+
 }

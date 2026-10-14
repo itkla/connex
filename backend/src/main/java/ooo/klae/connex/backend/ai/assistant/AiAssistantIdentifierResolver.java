@@ -88,10 +88,18 @@ public class AiAssistantIdentifierResolver {
                 .map(mention -> new AiChatPageContextDto(
                         mention.getKind(), positiveId(mention)))
                 .toList();
-        List<Identifier> identifiers = mentions.stream()
+        List<Identifier> identifiers = new ArrayList<>(mentions.stream()
                 .map(mention -> new Identifier(
                         entityKind(mention.getKind()), identifierValue(mention)))
-                .toList();
+                .toList());
+        for (String label : AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId))) {
+            if (MaskingEngine.containsIdentifierMention(scanText, label)) {
+                identifiers.add(new Identifier(EntityKind.MEMBER, label));
+                if (identifiers.size() > MAX_IDENTIFIERS) {
+                    throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+                }
+            }
+        }
         return new Resolution(resources, identifiers);
     }
 

@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SegmentService;
@@ -84,11 +85,13 @@ class AiAssistantScopeReadServiceTest {
         when(workspaceScopeControlAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
                 new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
                         1, List.of(WORKSPACE_ID), "[" + WORKSPACE_ID + "]"));
+        ReferenceService referenceService = mock(ReferenceService.class);
+        when(referenceService.hydrateActivities(anyInt(), anyList())).thenAnswer(call -> call.getArgument(1));
         service = new AiAssistantScopeReadService(
                 activityMapper, segmentService, segmentMapper, savedViewService,
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,
                 workspaceService, workspaceScopeControlAccess, objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), referenceService);
     }
 
     @Test

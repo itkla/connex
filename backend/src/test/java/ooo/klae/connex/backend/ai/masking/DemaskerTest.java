@@ -85,4 +85,18 @@ class DemaskerTest {
         assertEquals(0, warnings);
         assertEquals("owned by Mina Patel", root.get(person).asString());
     }
+    @org.junit.jupiter.api.Test
+    void boundMembersRequireExposureAndRetainEarlierDispatchedExposure() {
+        MaskingContext context = new MaskingContext();
+        String token = context.tokenFor(EntityKind.MEMBER, "Alice Member");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        context.exposeDispatchedPayload("{\"content\":\"No member here\"}");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        context.exposeDispatchedPayload("{\"content\":\"" + token + "\"}");
+        context.exposeDispatchedPayload("{\"content\":\"Later step\"}");
+        assertEquals("Alice Member", Demasker.demask(token, context).text());
+        assertEquals(1, Demasker.demask("{{M99}}", context).warnings());
+        assertEquals("M1", Demasker.demask("M1", context).text());
+    }
+
 }
