@@ -203,6 +203,7 @@ export default function OrgMembersPanel({
                 ownershipOffers.remember(result.offer);
                 toastSuccess(t("ownershipOffered", { name: email.trim() }));
             } else {
+                ownershipOffers.refresh();
                 toastSuccess(t("addedToast"));
             }
             await reload(orgId);

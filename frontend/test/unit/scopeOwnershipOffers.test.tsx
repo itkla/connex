@@ -170,6 +170,26 @@ describe('scope ownership offers', () => {
         expect(openIds(mounted.current())).toEqual(['51']);
     });
 
+    it('ignores a change that finishes after the scope switched', async () => {
+        load.mockResolvedValueOnce([offer('41', 11)]);
+        const mounted = await mountOffers();
+        const previousScope = mounted.current();
+        const currentScope = deferred<OwnershipOffer[]>();
+        load.mockReturnValueOnce(currentScope.promise);
+
+        scope.id = 6;
+        await mounted.rerender();
+        expect(load).toHaveBeenCalledTimes(2);
+
+        await act(async () => previousScope.forget('41'));
+        await act(async () => previousScope.remember(offer('42', 12)));
+        await act(async () => previousScope.refresh());
+        expect(load, 'a late change from the previous scope must not read it again').toHaveBeenCalledTimes(2);
+
+        await act(async () => currentScope.resolve([offer('51', 13)]));
+        expect(openIds(mounted.current())).toEqual(['51']);
+    });
+
     it('never reads for a caller who may not see the offers', async () => {
         scope.enabled = false;
         const mounted = await mountOffers();

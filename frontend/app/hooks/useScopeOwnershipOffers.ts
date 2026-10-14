@@ -28,7 +28,9 @@ export type ScopeOwnershipOffers = {
  * sequenced: a newer read supersedes any response still in flight, so a slow list can never
  * overwrite a just-created or just-withdrawn offer. Local changes show at once and are followed by
  * a fresh read, which also drops offers the server closed as a side effect, such as an offeree's
- * removal. A failed read keeps the last list instead of blanking it.
+ * removal. Reads and changes are fenced to the scope on screen, so a mutation that finishes after
+ * a scope switch neither supersedes nor replaces the new scope's list. A failed read keeps the
+ * last list instead of blanking it.
  * @param scopeId the workspace or organization id
  * @param enabled whether the caller may read the scope's offers
  * @param load the scope's offer list request
@@ -41,21 +43,23 @@ export function useScopeOwnershipOffers(
 ): ScopeOwnershipOffers {
     const [loaded, setLoaded] = useState<LoadedOffers>({ scopeId: null, offers: NO_OFFERS });
     const sequence = useRef(0);
+    const activeScope = useRef<number | null>(null);
 
     const read = useCallback((id: number) => {
+        if (activeScope.current !== id) return;
         const request = ++sequence.current;
-        let active = true;
         load(id).then((offers) => {
-            if (active && sequence.current === request) setLoaded({ scopeId: id, offers });
+            if (activeScope.current === id && sequence.current === request) setLoaded({ scopeId: id, offers });
         }, () => undefined);
-        return () => {
-            active = false;
-        };
     }, [load]);
 
     useEffect(() => {
         if (!scopeId || !enabled) return;
-        return read(scopeId);
+        activeScope.current = scopeId;
+        read(scopeId);
+        return () => {
+            activeScope.current = null;
+        };
     }, [scopeId, enabled, read]);
 
     const refresh = useCallback(() => {
@@ -63,7 +67,7 @@ export function useScopeOwnershipOffers(
     }, [scopeId, enabled, read]);
 
     const remember = useCallback((offer: OwnershipOffer) => {
-        if (!scopeId) return;
+        if (!scopeId || activeScope.current !== scopeId) return;
         setLoaded((current) => ({
             scopeId,
             offers: [
@@ -76,7 +80,7 @@ export function useScopeOwnershipOffers(
     }, [scopeId, refresh]);
 
     const forget = useCallback((offerId: string) => {
-        if (!scopeId) return;
+        if (!scopeId || activeScope.current !== scopeId) return;
         setLoaded((current) => current.scopeId === scopeId
             ? { scopeId, offers: current.offers.filter((existing) => existing.id !== offerId) }
             : current);

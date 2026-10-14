@@ -410,6 +410,7 @@ function MembersWorkspacePanel({
             if (result.member) {
                 const member = result.member;
                 setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
+                ownershipOffers.refresh();
                 toastSuccess(t("memberInvited"));
             } else if (result.invite) {
                 const invite = result.invite;
