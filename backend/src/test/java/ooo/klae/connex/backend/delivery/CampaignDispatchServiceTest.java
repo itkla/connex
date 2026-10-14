@@ -854,7 +854,7 @@ class CampaignDispatchServiceTest {
 
     @ParameterizedTest
     @CsvSource({"false, false", "false, true", "true, false", "true, true"})
-    void providerMessageIdsAreScrubbedBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late) {
+    void providerMessageIdsLoseOnlyTheAttemptBearerBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late) {
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         MessageDispatcher dispatcher = mock(MessageDispatcher.class);
         CampaignDelivery attempt = delivery();
@@ -877,7 +877,7 @@ class CampaignDispatchServiceTest {
         when(deliveryMapper.markDispatched(eq(7), eq(13), eq("smtp"), any())).thenReturn(late ? 0 : 1);
         when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any()))
                 .thenReturn(late ? 0 : 1);
-        String expected = "receipt [redacted] diagnostic [redacted] retained";
+        String expected = "receipt [redacted] diagnostic " + "AB".repeat(32) + " retained";
         assertTrue(service.processSend(7, 11));
         if (triggered) {
             verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), eq(expected));

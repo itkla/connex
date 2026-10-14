@@ -21,6 +21,11 @@ JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = 
 SET e.detail = REPLACE(e.detail, d.unsubscribe_token, '[redacted]')
 WHERE e.detail LIKE CONCAT('%', d.unsubscribe_token, '%');
 
+UPDATE campaign_delivery_event e
+JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = d.id
+SET e.provider_event_id = REPLACE(e.provider_event_id, d.unsubscribe_token, d.unsubscribe_token_hash)
+WHERE e.provider_event_id LIKE CONCAT('%', d.unsubscribe_token, '%');
+
 ALTER TABLE campaign_delivery
     DROP INDEX uq_campaign_delivery_token_hash,
     DROP INDEX uq_campaign_delivery_token,

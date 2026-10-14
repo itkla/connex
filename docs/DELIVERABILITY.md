@@ -373,9 +373,11 @@ have no digest until dispatch reaches registration. Workspace exports reveal dig
 cannot be exchanged as bearers.
 
 Provider diagnostics and returned message ids can echo the rendered message. Before truncation,
-storage in delivery errors, events or provider correlation ids, or logging, Connex replaces the
-attempt's bearer and any 64-hex run with `[redacted]`, keeping
-the remaining diagnostic text. Named Angus SMTP loggers receive the same scrubbing before their
+storage in delivery errors or event details, or logging, Connex replaces the attempt's bearer and
+any 64-hex run with `[redacted]`, keeping the remaining diagnostic text. Returned provider message
+ids replace only the exact attempt bearer: unrelated opaque ids, including 64-hex ids, must survive
+unchanged so later bounce and complaint webhooks can correlate, suppress, and revoke consent.
+Named Angus SMTP loggers receive the free-text scrubbing before their
 diagnostics reach logging handlers. SMTP MIME DATA tracing is suppressed entirely, including at
 TRACE, regardless of body encoding; command and response diagnostics remain available.
 

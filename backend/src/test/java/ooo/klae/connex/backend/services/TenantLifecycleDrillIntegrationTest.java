@@ -33,6 +33,8 @@ import java.util.zip.ZipInputStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -63,6 +65,9 @@ import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.DispatchReceipt;
 import ooo.klae.connex.backend.delivery.DeliveryRequest;
+import ooo.klae.connex.backend.delivery.DeliveryEvent;
+import ooo.klae.connex.backend.delivery.DeliveryEventType;
+import ooo.klae.connex.backend.delivery.ProviderEventSource;
 import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
 import ooo.klae.connex.backend.delivery.MessageDispatcher;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
@@ -83,6 +88,7 @@ import ooo.klae.connex.backend.beans.TeamMember;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
+import ooo.klae.connex.backend.dto.ContactChannelConsentRequest;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateCreateRequestDto;
@@ -131,6 +137,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private TenantExportService exportService;
     @Autowired private CampaignDispatchService campaignDispatchService;
+    @Autowired private DeliveryWebhookService deliveryWebhookService;
+    @Autowired private ConsentService consentService;
+    @Autowired private SuppressionService suppressionService;
     @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
     @MockitoSpyBean private DeliveryProviderRouter deliveryProviderRouter;
     @Autowired private TenantTeardownService teardownService;
@@ -194,14 +203,79 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertNotNull(bearer.get());
         assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
-        assertEquals("receipt [redacted] other [redacted] retained",
+        String expected = "receipt [redacted] other " + "C".repeat(64) + " retained";
+        assertEquals(expected,
                 jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
                         String.class, deliveryId));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         exportService.prepare(drillOrganization.getId(), workspaceId, currentUser.getId()).writeTo(output);
         Map<String, byte[]> entries = zipEntries(output.toByteArray());
-        assertTrue(text(entries, "data/campaign_delivery.jsonl").contains("receipt [redacted] other [redacted] retained"));
+        assertTrue(text(entries, "data/campaign_delivery.jsonl").contains(expected));
         assertTrue(entries.values().stream().noneMatch(bytes -> new String(bytes, StandardCharsets.UTF_8).contains(bearer.get())));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DeliveryEventType.class, names = {"BOUNCED", "COMPLAINED"})
+    void opaqueHexProviderIdSurvivesDispatchAndCorrelatesSuppressingWebhook(DeliveryEventType type) {
+        createDedicatedDrillRoots();
+        seedUnsubscribeDigest();
+        int workspaceId = drillWorkspace.getId();
+        Person recipient = newPerson(newCompany());
+        consentService.setForPerson(recipient.getId(), new ContactChannelConsentRequest(
+                "email", "marketing", "granted", "initial", null, null));
+        int sendId = jdbcTemplate.queryForObject("SELECT id FROM campaign_send WHERE workspace_id = ?",
+                Integer.class, workspaceId);
+        int messageId = jdbcTemplate.queryForObject("SELECT message_id FROM campaign_send WHERE id = ?",
+                Integer.class, sendId);
+        int deliveryId = jdbcTemplate.queryForObject("SELECT id FROM campaign_delivery WHERE send_id = ?",
+                Integer.class, sendId);
+        jdbcTemplate.update("""
+                INSERT INTO campaign_message_revision
+                    (workspace_id, message_id, version, locale, subject, body_html)
+                VALUES (?, ?, 1, 'en', 'Opaque provider id', '<a href="{{unsubscribe_url}}">Unsubscribe</a>')
+                """, workspaceId, messageId);
+        jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE id = ?", sendId);
+        jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending', person_id = ?, address = ? WHERE id = ?",
+                recipient.getId(), recipient.getEmail(), deliveryId);
+        String providerMessageId = "AB".repeat(32);
+        MessageDispatcher dispatcher = org.mockito.Mockito.mock(MessageDispatcher.class);
+        org.mockito.Mockito.when(dispatcher.dispatch(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(DispatchReceipt.sent(providerMessageId, "accepted"));
+        org.mockito.Mockito.doReturn(dispatcher).when(deliveryProviderRouter).dispatcherFor(HttpEspDeliveryProvider.PROVIDER_ID);
+        ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(
+                HttpEspDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId, DeliveryCredentials.none());
+        org.mockito.Mockito.when(deliveryProviderConfigService.resolveForWorkspace(workspaceId, DeliveryChannel.EMAIL)).thenReturn(target);
+        org.mockito.Mockito.when(deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, null)).thenReturn(true);
+
+        assertTrue(campaignDispatchService.processSend(workspaceId, sendId));
+        assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
+                String.class, deliveryId));
+        assertEquals(providerMessageId, jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
+                String.class, deliveryId));
+        assertEquals("granted", consentService.getForPerson(recipient.getId()).getFirst().status());
+        assertTrue(suppressionService.list().isEmpty());
+
+        ProviderEventSource source = org.mockito.Mockito.mock(ProviderEventSource.class);
+        byte[] body = "authenticated webhook".getBytes(StandardCharsets.UTF_8);
+        Map<String, String> headers = Map.of("signature", "verified-by-provider");
+        org.mockito.Mockito.when(deliveryProviderConfigService.resolveByWebhookToken(
+                org.mockito.ArgumentMatchers.eq("webhook-token"), org.mockito.ArgumentMatchers.any())).thenReturn(target);
+        org.mockito.Mockito.doReturn(source).when(deliveryProviderRouter).eventSourceFor(HttpEspDeliveryProvider.PROVIDER_ID);
+        org.mockito.Mockito.when(source.translate(body)).thenReturn(List.of(
+                new DeliveryEvent(providerMessageId, "opaque-id-event", type, null, type.token())));
+
+        assertEquals(1, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
+        assertEquals(0, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
+        org.mockito.Mockito.verify(source, org.mockito.Mockito.times(2)).verifySignature(target, body, headers);
+        assertEquals(type.token(), jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
+                String.class, deliveryId));
+        String reason = type == DeliveryEventType.BOUNCED ? "hard_bounce" : "complaint";
+        assertEquals(1, suppressionService.list().stream().filter(entry -> reason.equals(entry.reason())
+                && recipient.getEmail().equals(entry.address())).count());
+        assertEquals("revoked", consentService.getForPerson(recipient.getId()).getFirst().status());
+        assertEquals(2, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM contact_channel_consent_event WHERE workspace_id = ? AND person_id = ?
+                """, Integer.class, workspaceId, recipient.getId()));
     }
 
     @Test

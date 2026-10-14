@@ -98,6 +98,8 @@ and V227 together with all writers stopped; there is no manual checkpoint betwee
 reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
 then uses the still-present bearer to replace historical copies in delivery errors, provider message
 ids, and delivery event details with `[redacted]`, joining events on both workspace and delivery ids.
+Historical provider event ids replace the exact bearer with its digest instead, preserving distinct
+event keys and the provider-event unique constraint used for webhook deduplication.
 It then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
 Existing fragment links keep working for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
 and previously generated export ZIPs are outside this remediation.
@@ -159,7 +161,7 @@ history independently, and preserve the digest table. MySQL DDL commits independ
 history bookkeeping; `repair` alone never undoes it. If V226 created the child but backfill/history
 failed while both legacy columns remain, the raw-derived source still exists: drop only that new
 child table, repair the failed V226 entry using the normal migration tooling, then rerun the
-automatic migration boot. V227 reasserts the backfill and repeats the idempotent diagnostic cleanup
+automatic migration boot. V227 reasserts the backfill and repeats the idempotent diagnostic and event-key cleanup
 before its ALTER; require the post-cutover
 catalog-wide checks above before reopening service. Do not drop the child once legacy columns
 are gone.

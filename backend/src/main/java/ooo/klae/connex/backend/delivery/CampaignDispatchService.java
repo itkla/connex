@@ -431,7 +431,7 @@ public class CampaignDispatchService {
                     "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
         String diagnostic = CampaignDeliveryDiagnostics.scrub(receipt.detail(), unsubscribeToken);
-        String providerMessageId = CampaignDeliveryDiagnostics.scrub(receipt.providerMessageId(), unsubscribeToken);
+        String providerMessageId = CampaignDeliveryDiagnostics.scrubIdentifier(receipt.providerMessageId(), unsubscribeToken);
         if (receipt.status() == DispatchStatus.SENT) {
             int updated;
             try {

@@ -1039,6 +1039,8 @@ digests and unused attempts, remains valid until its delivery is deleted. The be
 the rendered message and provider request; export contains digests alone. Provider diagnostics are
 scrubbed of the exact attempt bearer and all 64-hex runs before truncation, error/event persistence,
 or logging. Named Angus SMTP loggers also scrub library diagnostics before forwarding to handlers.
+Provider message ids replace only the exact attempt bearer, preserving unrelated opaque hex ids
+for webhook correlation and the resulting suppression and consent revocation.
 
 After lease renewal and before frequency admission, the proxied
 `CampaignUnsubscribeTokenRegistrationService.register` opens a short `READ_COMMITTED` transaction:

@@ -27,4 +27,16 @@ class CampaignDeliveryDiagnosticsTest {
         assertEquals("554 rate limit; retry tomorrow", CampaignDeliveryDiagnostics.scrub(
                 "554 rate limit; retry tomorrow", "a".repeat(64)));
     }
+
+    @Test
+    void identifierScrubbingPreservesOpaqueHexIdsAndRemovesOnlyExactBearerOccurrences() {
+        String bearer = "a".repeat(64);
+        String identifier = "AB".repeat(32);
+        assertEquals(identifier, CampaignDeliveryDiagnostics.scrubIdentifier(identifier, bearer));
+        assertEquals("[redacted]:" + identifier + ":[redacted]",
+                CampaignDeliveryDiagnostics.scrubIdentifier(bearer + ":" + identifier + ":" + bearer, bearer));
+        assertNull(CampaignDeliveryDiagnostics.scrubIdentifier(null, bearer));
+        assertEquals(identifier, CampaignDeliveryDiagnostics.scrubIdentifier(identifier, null));
+        assertEquals(identifier, CampaignDeliveryDiagnostics.scrubIdentifier(identifier, ""));
+    }
 }

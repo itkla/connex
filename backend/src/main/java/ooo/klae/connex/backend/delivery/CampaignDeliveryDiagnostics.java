@@ -2,7 +2,7 @@ package ooo.klae.connex.backend.delivery;
 
 import java.util.regex.Pattern;
 
-/** Removes unsubscribe bearers from provider diagnostics before persistence, logging, or truncation. */
+/** Removes unsubscribe bearers while preserving provider identifiers used for webhook correlation. */
 public final class CampaignDeliveryDiagnostics {
     private static final Pattern HEX_BEARER = Pattern.compile("[a-fA-F0-9]{64,}");
     private static final String REDACTED = "[redacted]";
@@ -21,8 +21,18 @@ public final class CampaignDeliveryDiagnostics {
         if (message == null) {
             return null;
         }
-        String scrubbed = bearer == null || bearer.isEmpty()
-                ? message : message.replace(bearer, REDACTED);
-        return HEX_BEARER.matcher(scrubbed).replaceAll(REDACTED);
+        return HEX_BEARER.matcher(scrubIdentifier(message, bearer)).replaceAll(REDACTED);
+    }
+
+    /**
+     * Removes only the exact attempt bearer, preserving unrelated opaque identifiers including hex ids.
+     *
+     * @param identifier provider-returned identifier, possibly null
+     * @param bearer current attempt's bearer
+     * @return identifier with exact bearer occurrences replaced, preserving null
+     */
+    public static String scrubIdentifier(String identifier, String bearer) {
+        return identifier == null || bearer == null || bearer.isEmpty()
+                ? identifier : identifier.replace(bearer, REDACTED);
     }
 }

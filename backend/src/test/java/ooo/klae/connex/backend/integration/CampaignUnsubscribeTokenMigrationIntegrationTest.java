@@ -91,6 +91,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                         """));
                 assertContract(statement);
                 assertScrubbedDiagnostics(statement, 8);
+                assertPreservedEventKeys(statement, 8);
                 assertThrows(SQLException.class, () -> statement.executeUpdate("""
                         INSERT INTO campaign_delivery_unsubscribe_token (token_hash, workspace_id, delivery_id)
                         VALUES (REPEAT('a', 64), 22602, 22601)
@@ -168,6 +169,7 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 interruptedContract.migrate();
                 assertContract(statement);
                 assertScrubbedDiagnostics(statement, 2);
+                assertPreservedEventKeys(statement, 2);
                 assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"
                         + " WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))"));
             }
@@ -204,11 +206,13 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
             assertThrows(FlywayException.class, contract::migrate);
             assertEquals(2, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
             assertScrubbedDiagnostics(statement, 2);
+            assertPreservedEventKeys(statement, 2);
             statement.execute("ALTER TABLE campaign_delivery ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token)");
             contract.repair();
             contract.migrate();
             assertContract(statement);
             assertScrubbedDiagnostics(statement, 2);
+            assertPreservedEventKeys(statement, 2);
             assertEquals(2, scalar(statement, """
                     SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token
                     WHERE token_hash IN (LOWER(SHA2(REPEAT('a', 64), 256)), LOWER(SHA2(REPEAT('b', 64), 256)))
@@ -221,6 +225,8 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 CREATE TABLE campaign_delivery_event (
                     workspace_id INT NOT NULL, delivery_id INT NOT NULL,
                     event_type VARCHAR(16) NOT NULL, detail VARCHAR(512) NULL,
+                    provider_id VARCHAR(32) NULL, provider_event_id VARCHAR(255) NULL,
+                    UNIQUE KEY uq_campaign_delivery_event_provider (workspace_id, provider_id, provider_event_id),
                     FOREIGN KEY (workspace_id, delivery_id)
                         REFERENCES campaign_delivery(workspace_id, id) ON DELETE CASCADE
                 )
@@ -234,9 +240,11 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                     provider_message_id = CONCAT('receipt ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained')
                 """);
         statement.executeUpdate("""
-                INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail)
+                INSERT INTO campaign_delivery_event
+                    (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)
                 SELECT workspace_id, id, 'failed',
-                       CONCAT('event ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained')
+                       CONCAT('event ', unsubscribe_token, ' repeated ', unsubscribe_token, ' retained'),
+                       'http_esp', CONCAT('legacy:', unsubscribe_token, ':event')
                 FROM campaign_delivery
                 """);
     }
@@ -251,6 +259,27 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
                 SELECT COUNT(*) FROM campaign_delivery_event
                 WHERE detail = 'event [redacted] repeated [redacted] retained'
                 """));
+    }
+
+    private static void assertPreservedEventKeys(Statement statement, int deliveries) throws SQLException {
+        assertEquals(deliveries, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_delivery_event e
+                JOIN campaign_delivery_unsubscribe_token t
+                  ON t.workspace_id = e.workspace_id AND t.delivery_id = e.delivery_id
+                WHERE e.provider_id = 'http_esp'
+                  AND e.provider_event_id = CONCAT('legacy:', t.token_hash, ':event')
+                """));
+        assertEquals(deliveries, scalar(statement, """
+                SELECT COUNT(DISTINCT provider_event_id) FROM campaign_delivery_event
+                WHERE provider_id = 'http_esp'
+                """));
+        SQLException duplicate = assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                INSERT INTO campaign_delivery_event
+                    (workspace_id, delivery_id, event_type, provider_id, provider_event_id)
+                SELECT workspace_id, delivery_id, event_type, provider_id, provider_event_id
+                FROM campaign_delivery_event WHERE provider_id = 'http_esp' LIMIT 1
+                """));
+        assertEquals(1062, duplicate.getErrorCode());
     }
 
     private static String sql(String filename) throws IOException {
