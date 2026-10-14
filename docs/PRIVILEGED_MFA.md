@@ -77,8 +77,10 @@ The denial row's context keeps the reason in `error` and, when the request suppl
 cross-site rows, but non-browser clients can forge every value. Fetch metadata never skips a row,
 changes audit admission or changes the rate-limit key. Values pass through audit text sanitization,
 have control characters replaced with spaces and surrounding whitespace stripped, and are capped
-at 64 characters each. Absent headers produce no fields. Server-rendered reads that forward only
-the session cookie consequently have no fetch-metadata fields
+at 64 characters each. Absent headers produce no fields. Neither does a value the request
+firewall refuses when it is read, such as a C1 control character arriving as an obs-text byte:
+that field is dropped and the row is still written. Server-rendered reads that forward only the
+session cookie consequently have no fetch-metadata fields
 ([#1936](https://github.com/itkla/connex/issues/1936)).
 
 Anyone reading or alerting on this trail should expect:

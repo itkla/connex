@@ -19,6 +19,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +28,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -702,6 +706,25 @@ class AuditServiceTest {
         ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
         verify(auditIntegrityService).appendIndependent(appended.capture());
         assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required")),
+                objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
+    void strictFailureAuditOmitsFetchMetadataTheFirewallRejects() {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.addHeader("Sec-Fetch-Site", "cross\u0085site");
+        raw.addHeader("Sec-Fetch-Mode", "no-cors");
+        raw.addHeader("Sec-Fetch-Dest", "image\u009f");
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Site"));
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("Sec-Fetch-Dest"));
+
+        service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request);
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchMode", "no-cors")),
                 objectMapper.readTree(appended.getValue().getContext()));
     }
 
