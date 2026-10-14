@@ -92,8 +92,17 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
-        boolean honorTrustedText = !providerAuthored;
         List<ScannedField> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
+        assertNoLeak(fields, ctx, providerAuthored);
+    }
+
+    /** Checks one already-masked message while its recorded MEMBER containment scope is active. */
+    static void assertNoLeakInReplay(String text, MaskingContext ctx) {
+        assertNoLeak(List.of(new ScannedField(text, true, false)), ctx, false);
+    }
+
+    private static void assertNoLeak(List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored) {
+        boolean honorTrustedText = !providerAuthored;
         List<PreparedField> preparedFields = fields.stream()
                 .filter(field -> providerAuthored || field.tenantBearing())
                 .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream()
@@ -108,9 +117,12 @@ public final class OutboundLeakScan {
             List<PreparedField> matchingFields = member
                     ? memberFields : preparedFields;
             String identifier = entry.canonicalValue();
-            boolean canonicalLeak = identifier.length() >= MIN_IDENTIFIER_LENGTH
+            boolean containment = member && ctx.requiresMemberContainment(entry.rawValue());
+            boolean canonicalLeak = (containment || identifier.length() >= MIN_IDENTIFIER_LENGTH)
+                    && !identifier.isEmpty()
                     && matchingFields.stream().anyMatch(field -> field.input().literal().value().contains(identifier));
-            boolean labelLeak = entry.labelEligible() && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
+            boolean labelLeak = entry.labelEligible()
+                    && (containment || entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH)
                     && matchingFields.stream().anyMatch(field -> field.input().labels().value().contains(entry.labelValue()));
             boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
                     && matchingFields.stream().anyMatch(field -> field.input().original().contains(entry.rawValue()));

@@ -113,10 +113,10 @@ class MaskingContextTest {
         assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Shared Label"));
         context.registerMemberCandidate("Shared Label");
         assertEquals("{{P1}}", context.tokenFor(EntityKind.MEMBER, "Shared Label"));
-        assertEquals(List.of(), context.referencedMemberValues("Shared Label handled it"));
+        assertEquals(List.of(), demaskedMembers(context, "{{P1}} handled it"));
         context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
-        assertEquals(List.of("Shared Label"), context.referencedMemberValues("Shared Label handled it"));
-        assertEquals(List.of(), context.referencedMemberValues("A different answer"));
+        assertEquals(List.of("Shared Label"), demaskedMembers(context, "{{P1}} handled it"));
+        assertEquals(List.of(), demaskedMembers(context, "A different answer"));
     }
 
     @Test
@@ -125,8 +125,15 @@ class MaskingContextTest {
         assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Earlier Label"));
         context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
         context.registerMemberCandidate("Earlier Label");
-        assertEquals(List.of("Earlier Label"), context.referencedMemberValues("Earlier Label handled it"));
+        assertEquals(List.of("Earlier Label"), demaskedMembers(context, "{{P1}} handled it"));
         assertEquals(0, Demasker.demask("{{P1}}", context).warnings());
+    }
+
+    private static List<String> demaskedMembers(MaskingContext context, String text) {
+        var tree = new tools.jackson.databind.ObjectMapper().createObjectNode().put("text", text);
+        var members = new java.util.ArrayList<String>();
+        Demasker.demaskTree(tree, context, (path, member) -> members.add(member));
+        return members;
     }
 
 }

@@ -230,7 +230,8 @@ public class AiChatMemoryService {
                         throughSeq,
                         summaryResources.snapshot(),
                         context,
-                        generated);
+                        generated,
+                        parsed.memberIdentifiers().getOrDefault("/summary", List.of()));
                 requireBeforeDeadline(deadline);
                 summary = persistenceService.upsertHistorySummary(
                         turn,
@@ -379,7 +380,8 @@ public class AiChatMemoryService {
             int throughSeq,
             java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
             MaskingContext context,
-            String generatedSummary) {
+            String generatedSummary,
+            List<String> demaskedMembers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -395,7 +397,7 @@ public class AiChatMemoryService {
                             "kind", identifierKind(binding.getKey()),
                             "value", binding.getValue()))
                     .toList();
-            var memberIdentifiers = context.referencedMemberValues(generatedSummary).stream()
+            var memberIdentifiers = demaskedMembers.stream()
                     .map(value -> java.util.Map.of("kind", "member", "value", value)).toList();
             if (storedIdentifiers.size() + memberIdentifiers.size() > 200
                     || memberIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)

@@ -22,6 +22,32 @@ class OutboundLeakScanTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void recordedMemberProvenanceRequiresContainmentOnlyWithinItsMessageForReplacementAndScanning() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        String text = "Bob_team xBob BobBob Little xLi Li_team";
+        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(text, context, objectMapper));
+        context.withReplayMemberValues(List.of("Bob"), () -> {
+            assertThrows(MaskingLeakException.class,
+                    () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("Little xLi Li_team", context));
+            return null;
+        });
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Bob"));
+        assertEquals("{{M1}}_team x{{M1}} {{M1}}{{M1}} Little xLi Li_team", masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+        assertThrows(IllegalStateException.class, () -> context.withReplayMemberValues(List.of("Bob"), () -> {
+            throw new IllegalStateException("scope failed");
+        }));
+        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
+    }
+
+    @Test
     void topLevelJsonNullIsSkippedButTheStringNullIsScreened() {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "null", context);

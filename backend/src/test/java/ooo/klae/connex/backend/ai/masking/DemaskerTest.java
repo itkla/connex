@@ -12,6 +12,24 @@ class DemaskerTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     @Test
+    void memberProvenanceComesOnlyFromReplacedTokensAtTheirExactJsonPointers() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Bob");
+        context.tokenFor(EntityKind.MEMBER, "Li");
+        context.exposeDispatchedPayload("{{M1}}");
+        var tree = mapper.createObjectNode();
+        tree.putObject("final").put("text", "{{M1}}_team x{{M1}} Bob {{M2}} {{M99}}");
+        tree.putArray("a/b~c").add("x{{M1}}");
+        var provenance = new java.util.LinkedHashMap<String, java.util.List<String>>();
+        int warnings = Demasker.demaskTree(tree, context, (path, member) ->
+                provenance.computeIfAbsent(path, ignored -> new java.util.ArrayList<>()).add(member));
+        assertEquals(2, warnings);
+        assertEquals("Bob_team xBob Bob [unknown reference] [unknown reference]", tree.path("final").path("text").asString());
+        assertEquals(java.util.Map.of("/final/text", java.util.List.of("Bob", "Bob"),
+                "/a~1b~0c/0", java.util.List.of("Bob")), provenance);
+    }
+
+    @Test
     void demaskRoundTripsIssuedTokens() {
         MaskingContext ctx = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);

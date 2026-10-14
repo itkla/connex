@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -525,7 +526,12 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     rejectionReason, stripped, true, captureRepair);
         }
-        int warnings = demaskTree(object, invocation.context());
+        Map<String, Set<String>> memberReplacements = new LinkedHashMap<>();
+        int warnings = invocation.context().privacyMode() == AiPrivacyMode.UNMASKED ? 0
+                : Demasker.demaskTree(object, invocation.context(), (path, member) ->
+                        memberReplacements.computeIfAbsent(path, ignored -> new LinkedHashSet<>()).add(member));
+        Map<String, List<String>> memberIdentifiers = new LinkedHashMap<>();
+        memberReplacements.forEach((path, members) -> memberIdentifiers.put(path, List.copyOf(members)));
         T value;
         try {
             value = objectMapper.treeToValue(object, type);
@@ -544,7 +550,7 @@ public class AiInvocationService {
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
         return new AiStructuredRepairAttempt<>(
                 new AiStructuredOutcome.Parsed<>(value, warnings,
-                        result.inputTokens(), result.outputTokens(), result.stopReason()),
+                        result.inputTokens(), result.outputTokens(), result.stopReason(), memberIdentifiers),
                 Optional.empty(), reasoning.rejectionReason() == null
                         ? reasoning.content()
                         : Optional.empty());

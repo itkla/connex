@@ -1044,15 +1044,19 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                             activityTurn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-activity", "list_activities", "{\"handle\":\"r1\",\"limit\":10}"),
                             taskTurn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-task", "list_tasks", "{\"handle\":\"r1\",\"limit\":10}")),
                     context, budget, null).exchanges() : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+            String modelFinal = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Prior Member Label")
+                    + " and " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Other Prior Label")
+                    + " met " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Pending Member Label")
+                    + " and " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Pending Alias") + ".";
             var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
-                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, modelFinal), false, null);
             String payload = mapper.writeValueAsString(capture.request().messages()) + mapper.writeValueAsString(capture.request().nativeTools());
             for (String label : List.of("Prior Member", "Other Prior", "Pending Member", "Pending Alias", "Renamed Member", "Foreign Member")) {
                 assertFalse(payload.contains(label), label);
             }
             assertTrue(payload.contains("{{M1}}"));
             String finalText = "Prior Member Label and Other Prior Label met Pending Member Label and Pending Alias.";
-            List<String> provenance = context.referencedMemberValues(finalText);
+            List<String> provenance = capture.memberIdentifiers().getOrDefault(nativeProtocol ? "/text" : "/final/text", List.of());
             assertEquals(Set.of("Prior Member Label", "Other Prior Label", "Pending Member Label", "Pending Alias"), Set.copyOf(provenance));
             AiChatMessage priorAnswer = new AiChatMessage();
             priorAnswer.setAuthorKind("assistant");

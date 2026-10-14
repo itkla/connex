@@ -1500,14 +1500,14 @@ public class AiAssistantPromptAssembler {
             transcript.add(Map.of(
                     "role", message.getAuthorKind(),
                     "content", MaskingEngine.maskFreeText(
-                            content, context, replayHandles)));
+                            content, context, replayHandles, replayMemberValues(message))));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         if (existingSummary != null) {
             String content = reauthorizeSummary(existingSummary, resources, context);
             if (content != null) {
                 data.put("priorSummary", MaskingEngine.maskFreeText(
-                        content, context));
+                        content, context, Map.of(), replayMemberValues(existingSummary)));
             }
         }
         data.put("messages", transcript);
@@ -1734,7 +1734,7 @@ public class AiAssistantPromptAssembler {
                 return;
             }
             prompt.userTurn(crmDataMasked("conversation_summary", objectMapper.valueToTree(Map.of(
-                    "summary", MaskingEngine.maskFreeText(summary, context)))));
+                    "summary", MaskingEngine.maskFreeText(summary, context, Map.of(), replayMemberValues(message))))));
             return;
         }
         if ("assistant".equals(message.getAuthorKind())) {
@@ -1743,7 +1743,7 @@ public class AiAssistantPromptAssembler {
                 return;
             }
             String masked = MaskingEngine.maskConversationalFreeText(
-                    replay.content(), context, replay.handles());
+                    replay.content(), context, replay.handles(), replayMemberValues(message));
             if (AiAssistantStepGuard.containsTaskHandle(masked)) {
                 return;
             }
@@ -1757,7 +1757,7 @@ public class AiAssistantPromptAssembler {
             return;
         }
         String masked = MaskingEngine.maskConversationalFreeText(
-                content, context);
+                content, context, Map.of(), replayMemberValues(message));
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }
@@ -1897,6 +1897,31 @@ public class AiAssistantPromptAssembler {
             MaskingEngine.maskField(stored.kind(), stored.value(), context);
         }
         return message.getContent();
+    }
+
+    /** Reads only provenance from a message whose metadata and authority were already validated. */
+    private List<String> replayMemberValues(AiChatMessage message) {
+        if (message.getStructuredJson() == null) {
+            return List.of();
+        }
+        try {
+            JsonNode metadata = objectMapper.readTree(message.getStructuredJson());
+            Set<String> members = new LinkedHashSet<>();
+            for (String field : List.of("identifiers", "memberIdentifiers")) {
+                JsonNode identifiers = metadata.get(field);
+                if (identifiers != null && identifiers.isArray()) {
+                    for (JsonNode identifier : identifiers) {
+                        StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+                        if (stored.kind() == EntityKind.MEMBER) {
+                            members.add(stored.value());
+                        }
+                    }
+                }
+            }
+            return List.copyOf(members);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Assistant member identifier metadata could not be read", exception);
+        }
     }
 
     private void seedMemberIdentifiers(JsonNode metadata, MaskingContext context, int limit) {

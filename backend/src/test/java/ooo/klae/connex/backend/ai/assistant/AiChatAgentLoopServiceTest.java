@@ -4981,6 +4981,31 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,Bob_team", "false,xBob", "true,Bob_team", "true,xBob"})
+    void finalMetadataUsesExactDemaskProvenanceWithoutRescanningJoinedShortLabels(
+            boolean nativeProtocol, String text) throws Exception {
+        var answer = new AiAssistantStep.FinalAnswer(text, List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop", Map.of("/text", List.of("Bob"))),
+                            Optional.empty()), 3, 5, "stop", Optional.empty()));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(null, answer), 0, 3, 5, "stop", Map.of("/final/text", List.of("Bob"))),
+                            Optional.empty()));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        var metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), eq(text), metadata.capture(), anyInt(), anyInt());
+        assertEquals("Bob", objectMapper.readTree(metadata.getValue()).path("memberIdentifiers").path(0).path("value").asString());
+    }
+
     @Test
     void workspaceMembersAreCandidatesBeforeMemoryCompactionAndDirectoryFailurePreventsDispatch() throws Exception {
         var member = new ooo.klae.connex.backend.beans.User();

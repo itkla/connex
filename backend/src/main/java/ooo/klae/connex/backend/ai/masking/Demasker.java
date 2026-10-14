@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.ai.masking;
 
 import java.util.ArrayList;
 import java.util.Objects;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,7 +61,26 @@ public final class Demasker {
      * @return total number of unknown placeholder references encountered across the tree
      */
     public static int demaskTree(JsonNode node, MaskingContext ctx) {
+        return demaskTree(node, ctx, (path, value) -> { });
+    }
+
+    /**
+     * Demasks a tree and reports each replaced MEMBER value with its textual JSON pointer.
+     * Provenance comes from successful token replacement, independently of surrounding text.
+     * @param node parsed JSON tree, mutated in place
+     * @param ctx request-local masking context
+     * @param memberProvenance recipient of textual-value pointers and raw member labels
+     * @return total unknown-placeholder warnings
+     */
+    public static int demaskTree(
+            JsonNode node, MaskingContext ctx, BiConsumer<String, String> memberProvenance) {
         Objects.requireNonNull(ctx, "ctx");
+        Objects.requireNonNull(memberProvenance, "memberProvenance");
+        return demaskTree(node, ctx, memberProvenance, "");
+    }
+
+    private static int demaskTree(
+            JsonNode node, MaskingContext ctx, BiConsumer<String, String> memberProvenance, String path) {
         if (node == null) {
             return 0;
         }
@@ -67,23 +88,27 @@ public final class Demasker {
         if (node instanceof ObjectNode object) {
             for (String name : new ArrayList<>(object.propertyNames())) {
                 JsonNode child = object.get(name);
+                String childPath = path + "/" + name.replace("~", "~0").replace("/", "~1");
                 if (child != null && child.isString()) {
-                    DemaskResult value = demaskString(child.asString(), ctx);
+                    DemaskResult value = demaskString(child.asString(), ctx,
+                            member -> memberProvenance.accept(childPath, member));
                     warnings += value.warnings();
                     object.put(name, value.text());
                 } else {
-                    warnings += demaskTree(child, ctx);
+                    warnings += demaskTree(child, ctx, memberProvenance, childPath);
                 }
             }
         } else if (node instanceof ArrayNode array) {
             for (int index = 0; index < array.size(); index++) {
                 JsonNode child = array.get(index);
+                String childPath = path + "/" + index;
                 if (child != null && child.isString()) {
-                    DemaskResult value = demaskString(child.asString(), ctx);
+                    DemaskResult value = demaskString(child.asString(), ctx,
+                            member -> memberProvenance.accept(childPath, member));
                     warnings += value.warnings();
                     array.set(index, array.textNode(value.text()));
                 } else {
-                    warnings += demaskTree(child, ctx);
+                    warnings += demaskTree(child, ctx, memberProvenance, childPath);
                 }
             }
         }
@@ -91,6 +116,11 @@ public final class Demasker {
     }
 
     private static DemaskResult demaskString(String masked, MaskingContext ctx) {
+        return demaskString(masked, ctx, member -> { });
+    }
+
+    private static DemaskResult demaskString(
+            String masked, MaskingContext ctx, Consumer<String> memberProvenance) {
         Matcher matcher = TOKEN_PATTERN.matcher(masked);
         StringBuilder demasked = new StringBuilder();
         int lastEnd = 0;
@@ -104,6 +134,9 @@ public final class Demasker {
                 warnings++;
             } else {
                 demasked.append(originalValue);
+                if (ctx.isExposedMemberToken(token)) {
+                    memberProvenance.accept(originalValue);
+                }
             }
             lastEnd = matcher.end();
         }

@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.ai;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Result of a structured AI invocation. A {@link Parsed} carries the demasked, type-bound content;
@@ -24,13 +27,22 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
      * @param inputTokens provider-reported input token count
      * @param outputTokens provider-reported output token count
      * @param stopReason provider stop reason
+     * @param memberIdentifiers raw MEMBER provenance by textual JSON pointer, captured during demasking
      * @param <T> feature content type
      */
-    record Parsed<T>(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason)
+    record Parsed<T>(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason,
+            Map<String, List<String>> memberIdentifiers)
             implements AiStructuredOutcome<T> {
 
         public Parsed {
             Objects.requireNonNull(value, "value");
+            memberIdentifiers = Objects.requireNonNull(memberIdentifiers, "memberIdentifiers").entrySet().stream()
+                    .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
+        }
+
+        /** Creates a completion with no MEMBER replacements. */
+        public Parsed(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason) {
+            this(value, demaskWarnings, inputTokens, outputTokens, stopReason, Map.of());
         }
 
         @Override

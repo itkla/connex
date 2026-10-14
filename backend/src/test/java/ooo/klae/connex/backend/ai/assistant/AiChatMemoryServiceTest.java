@@ -856,7 +856,8 @@ class AiChatMemoryServiceTest {
                     assertTrue(promptText(invocation.prompt()).contains("{{M1}}"));
                     invocation.context().exposeDispatchedPayload(promptText(invocation.prompt()));
                     return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
-                            new AiAssistantSummary("Member Continuity has a followup."), 0, 11, 4, "stop"), Optional.empty());
+                            new AiAssistantSummary("Member Continuity has a followup."), 0, 11, 4, "stop",
+                            java.util.Map.of("/summary", List.of("Member Continuity"))), Optional.empty());
                 });
         when(fixture.persistenceService().upsertHistorySummary(same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
                 .thenAnswer(call -> {

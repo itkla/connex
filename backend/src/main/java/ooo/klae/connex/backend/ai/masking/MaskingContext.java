@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -36,6 +37,7 @@ public final class MaskingContext {
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
     private final Set<String> exposedTokens = new LinkedHashSet<>();
     private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
+    private Set<String> replayMemberValues = Set.of();
     private final AiPrivacyMode privacyMode;
 
     /** Creates a request-local masked context. */
@@ -134,6 +136,10 @@ public final class MaskingContext {
         return memberIdentifierValues.contains(rawValue);
     }
 
+    boolean isExposedMemberToken(String token) {
+        return exposedTokens.contains(token) && memberIdentifierValues.contains(tokenToOriginalValue.get(token));
+    }
+
     /**
      * Detects unexposed member placeholders, including tokens reconstructed by link cleanup.
      * The identity source map preserves doubled braces that ordinary prose canonicalization cancels.
@@ -163,15 +169,19 @@ public final class MaskingContext {
                 ? null : originalValueForToken(token);
     }
 
-    /** Returns exposed member provenance whose raw label occurs in the final replay text. */
-    public List<String> referencedMemberValues(String replayText) {
-        MaskingEngine.ScreenText input = MaskingEngine.screenText(replayText);
-        return tokenToOriginalValue.entrySet().stream()
-                .filter(entry -> exposedTokens.contains(entry.getKey())
-                        && memberIdentifierValues.contains(entry.getValue()))
-                .filter(entry -> MaskingEngine.containsIdentifierCoverage(input, rawIdentifierEntries.get(entry.getValue())))
-                .map(Map.Entry::getValue)
-                .toList();
+    /** Applies containment only while masking and scanning the one message owning this provenance. */
+    <T> T withReplayMemberValues(List<String> values, Supplier<T> work) {
+        Set<String> previous = replayMemberValues;
+        replayMemberValues = Set.copyOf(values);
+        try {
+            return work.get();
+        } finally {
+            replayMemberValues = previous;
+        }
+    }
+
+    boolean requiresMemberContainment(String rawValue) {
+        return replayMemberValues.contains(rawValue);
     }
 
     /** Recognizes an unsafe structured value without projecting its exhausted label again. */

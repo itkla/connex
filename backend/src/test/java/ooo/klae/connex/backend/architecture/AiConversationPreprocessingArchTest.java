@@ -33,14 +33,14 @@ class AiConversationPreprocessingArchTest {
 
         String assembler = code(source("assistant/AiAssistantPromptAssembler"));
         String history = compact(methodBody(assembler, "appendHistory"));
-        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( content, context)"));
-        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles())"));
-        assertTrue(history.contains("MaskingEngine.maskFreeText(summary, context)"));
+        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( content, context, Map.of(), replayMemberValues(message))"));
+        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles(), replayMemberValues(message))"));
+        assertTrue(history.contains("MaskingEngine.maskFreeText(summary, context, Map.of(), replayMemberValues(message))"));
         String summary = compact(methodBody(assembler, "assembleSummary"));
         assertEquals(1, Pattern.compile(Pattern.quote(
-                "MaskingEngine.maskFreeText( content, context)"))
+                "MaskingEngine.maskFreeText( content, context, Map.of(), replayMemberValues(existingSummary))"))
                 .matcher(summary).results().count());
-        assertTrue(summary.contains("MaskingEngine.maskFreeText( content, context, replayHandles)"));
+        assertTrue(summary.contains("MaskingEngine.maskFreeText( content, context, replayHandles, replayMemberValues(message))"));
         assertTrue(summary.contains("replayHandles = replay.handles();"));
         assertFalse(assembler.contains("stripDurableLinks"));
         assertFalse(assembler.contains("remapHandles"));
@@ -56,13 +56,13 @@ class AiConversationPreprocessingArchTest {
                 "AiAssistantStepGuard.containsTaskHandle", "Map.of", "MaskingEngine.maskConversationalFreeText",
                 "MaskingEngine.maskFreeText", "crmDataMasked", "equals", "message.getAuthorKind",
                 "objectMapper.valueToTree", "prompt.assistantTurn", "prompt.userTurn", "reauthorizeAnswer",
-                "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize"));
+                "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize", "replayMemberValues"));
         assertCalls(assembler, "assembleSummary", Set.of(
                 "Map.of", "MaskingEngine.maskFreeText", "PromptAssembly.builder",
                 "crmDataMasked", "data.put", "equals", "message.getAuthorKind",
                 "message.getContent", "message.getStructuredJson", "objectMapper.valueToTree", "prompt.build",
                 "prompt.userTurn", "reauthorizeAnswer", "reauthorizeSummary", "reauthorizeUser", "replay.content",
-                "replay.handles", "system", "transcript.add"));
+                "replay.handles", "system", "transcript.add", "replayMemberValues"));
         assertCalls(assembler, "reauthorizeAnswer", Set.of(
                 "IllegalStateException", "List.of", "Map.of", "Map.copyOf", "ReplayAnswer",
                 "citations.add", "handles.put", "stored.handle", "message.getContent",
@@ -88,6 +88,10 @@ class AiConversationPreprocessingArchTest {
         assertTrue(members.contains("metadata.get( )"));
         assertTrue(members.contains("members.size() > limit - otherCount"));
         assertTrue(members.contains("if (stored.kind() != EntityKind.MEMBER)"));
+        assertCalls(assembler, "replayMemberValues", Set.of(
+                "message.getStructuredJson", "List.of", "objectMapper.readTree", "metadata.get",
+                "identifiers.isArray", "storedSummaryIdentifier", "stored.kind", "stored.value", "members.add",
+                "List.copyOf", "IllegalStateException"));
         assertCalls(assembler, "crmDataMasked", Set.of("Map.of", "serialize"));
         assertCalls(assembler, "serialize", Set.of("IllegalStateException", "objectMapper.writeValueAsString"));
         assertTrue(compact(methodBody(assembler, "reauthorizeAnswer"))
@@ -95,9 +99,9 @@ class AiConversationPreprocessingArchTest {
         assertProseAssignments(assembler, "appendHistory", List.of(
                 "summary = reauthorizeSummary(message, resources, context);",
                 "replay = reauthorizeAnswer(message, resources, context);",
-                "masked = MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles());",
+                "masked = MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles(), replayMemberValues(message));",
                 "content = reauthorizeUser(message, resources, context);",
-                "masked = MaskingEngine.maskConversationalFreeText( content, context);",
+                "masked = MaskingEngine.maskConversationalFreeText( content, context, Map.of(), replayMemberValues(message));",
                 "serialized = serialize(Map.of( , masked));"));
         assertProseAssignments(assembler, "assembleSummary", List.of(
                 "content = message.getContent();",

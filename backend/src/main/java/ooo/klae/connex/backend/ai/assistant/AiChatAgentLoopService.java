@@ -707,7 +707,8 @@ public class AiChatAgentLoopService {
                         skillReference,
                         omitted ? List.of() : List.copyOf(narration),
                         omitted ? List.of() : List.copyOf(state.todos),
-                        omitted ? List.of() : maskingContext.referencedMemberValues(persistedText));
+                        omitted ? List.of() : parsed.memberIdentifiers().getOrDefault(
+                                nativeTools ? "/text" : "/final/text", List.of()));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);
@@ -1962,7 +1963,8 @@ public class AiChatAgentLoopService {
                                     parsed.demaskWarnings(),
                                     parsed.inputTokens(),
                                     parsed.outputTokens(),
-                                    parsed.stopReason());
+                                    parsed.stopReason(),
+                                    parsed.memberIdentifiers());
                     case AiStructuredOutcome.Malformed<AiAssistantStep.FinalAnswer> malformed ->
                             new AiStructuredOutcome.Malformed<>(
                                     malformed.reason(),

@@ -79,10 +79,12 @@ limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact cal
 the committed owner label as MEMBER provenance, excluding the removal sentinel. Fresh execution
 and replay use that same label without a new directory lookup, including after rename or
 offboarding. Member cards and raw stored write outcomes retain their existing content. Final answer
-metadata stores only exposed member labels referenced in the final replay text, and summary
-metadata stores referenced raw provenance, within the existing count and value-length limits.
-Readers reseed that provenance for ordinary history and compaction under a fresh masking context;
-no token binding is persisted.
+metadata stores raw member labels captured from tokens actually replaced while demasking its text,
+and summary metadata captures the same provenance from summary demasking, within the existing count
+and value-length limits. Readers reseed that provenance for ordinary history and compaction under
+a fresh masking context; no token binding is persisted. In that stored message only, every recorded
+member label is replaced and leak-scanned by containment, regardless of label length or adjacency.
+Other labels and other messages retain ordinary short-label word boundaries.
 
 Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
 member tokens present in the final payload after screening, budgeting and truncation. Only tokens
@@ -98,8 +100,9 @@ separate pre-existing issue.
 Provider-authored output is checked for unexposed MEMBER tokens before schema validation or
 repair retention. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
-Field projections are built once and reused across the complete candidate dictionary. Final replay
-provenance uses replacer/scanner coverage, including joined occurrences such as `Alice_team`.
+Field projections are built once and reused across the complete candidate dictionary. Provenance
+comes from successful demasking rather than a rescan of the result, so joined short labels such as
+`Bob_team` and `xBob` retain protection after a rename and a fresh-context replay.
 
 Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
 Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary
