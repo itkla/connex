@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -856,7 +857,7 @@ class CampaignDispatchServiceTest {
     @CsvSource({"false, false, upper", "false, true, upper", "true, false, upper", "true, true, upper",
             "false, false, mixed", "false, true, mixed", "true, false, mixed", "true, true, mixed",
             "false, false, long", "false, true, long", "true, false, long", "true, true, long"})
-    void providerMessageIdsUseDeliveryHistoryBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late, String variant) {
+    void providerMessageIdsUseWorkspaceHistoryBeforeNormalAndLateCorrelationWrites(boolean triggered, boolean late, String variant) {
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         MessageDispatcher dispatcher = mock(MessageDispatcher.class);
         CampaignDelivery attempt = delivery();
@@ -871,7 +872,8 @@ class CampaignDispatchServiceTest {
         when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
         String earlierBearer = "ab09".repeat(16);
         String earlierDigest = ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(earlierBearer);
-        when(deliveryMapper.getUnsubscribeTokenDeliveryId(7, earlierDigest)).thenReturn(13);
+        when(deliveryMapper.getUnsubscribeTokenDeliveryId(eq(7), anyString())).thenReturn(null);
+        when(deliveryMapper.getUnsubscribeTokenDeliveryId(7, earlierDigest)).thenReturn(99);
         java.util.concurrent.atomic.AtomicReference<String> currentDigest = new java.util.concurrent.atomic.AtomicReference<>();
         when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
             DeliveryRequest request = invocation.getArgument(1);
@@ -903,6 +905,50 @@ class CampaignDispatchServiceTest {
             if (late) {
                 verify(deliveryMapper).attachLateAudienceProviderCorrelation(eq(7), eq(13), eq("smtp"), eq(expected), any(), anyString());
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void overlappingReceiptBearersAreRemovedAndUnusableIdsAreNotStored(boolean unusable) {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        var fixture = ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.create();
+        java.util.Set<String> digests = java.util.Set.of(
+                ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.first()),
+                ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.second()));
+        when(deliveryMapper.getUnsubscribeTokenDeliveryId(eq(7), anyString())).thenAnswer(invocation ->
+                unusable || digests.contains(invocation.getArgument(1)) ? Integer.valueOf(99) : null);
+        String identifier = fixture.identifier().toUpperCase(java.util.Locale.ROOT);
+        when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent(identifier, "accepted"));
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger(CampaignDispatchService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+                new ch.qos.logback.core.read.ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            assertTrue(service.processSend(7, 11));
+            ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
+            verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), stored.capture());
+            if (unusable) {
+                assertNull(stored.getValue());
+                assertTrue(logs.list.stream().anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && event.getFormattedMessage().contains("unusable provider identifier")));
+            } else {
+                assertEquals(ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.first()).substring(0, 63)
+                        + ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.second()), stored.getValue());
+                assertFalse(stored.getValue().toLowerCase(java.util.Locale.ROOT).contains(fixture.first()));
+                assertFalse(stored.getValue().toLowerCase(java.util.Locale.ROOT).contains(fixture.second()));
+            }
+            assertTrue(logs.list.stream().noneMatch(event -> event.getFormattedMessage().contains(identifier)
+                    || event.getFormattedMessage().toLowerCase(java.util.Locale.ROOT).contains(fixture.first())
+                    || event.getFormattedMessage().toLowerCase(java.util.Locale.ROOT).contains(fixture.second())));
+        } finally {
+            logger.detachAppender(logs);
+            logs.stop();
         }
     }
 

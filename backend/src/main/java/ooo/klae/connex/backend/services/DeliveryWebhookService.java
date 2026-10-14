@@ -42,6 +42,8 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * and free-text details redact every 64-hex run before persistence.
  * Message identifiers exceeding the 255-code-point column limit cannot correlate and are ignored
  * without digest probes. Event identifier persistence retains the column limit's rejection behavior.
+ * Correlation rescans replacement output for at most four passes. Unusable message identifiers find
+ * no delivery; unusable event identifiers are stored as null without provider-key deduplication.
  *
  * <p>Provider callers carry no session, so {@code TenantResolutionInterceptor} leaves the request
  * thread unresolved and every workspace-scoped statement would otherwise be refused by the
@@ -122,8 +124,12 @@ public class DeliveryWebhookService {
                 || !CampaignDeliveryDiagnostics.fitsIdentifierColumn(event.providerMessageId())) {
             return false;
         }
+        String providerMessageId = correlationForm(workspaceId, event.providerMessageId());
+        if (providerMessageId == null) {
+            return false;
+        }
         CampaignDelivery delivery = campaignDeliveryMapper.findByProviderMessage(
-                workspaceId, target.providerId(), correlationForm(workspaceId, event.providerMessageId()));
+                workspaceId, target.providerId(), providerMessageId);
         if (delivery == null) {
             return false;
         }
@@ -139,7 +145,7 @@ public class DeliveryWebhookService {
 
     private boolean recordEvent(int workspaceId, int deliveryId, String providerId, DeliveryEvent event) {
         String providerEventId = correlationForm(workspaceId, event.providerEventId());
-        if ((providerEventId == null || providerEventId.isBlank())
+        if ((event.providerEventId() == null || event.providerEventId().isBlank())
                 && campaignDeliveryMapper.hasEvent(workspaceId, deliveryId, event.type().token())) {
             return false;
         }

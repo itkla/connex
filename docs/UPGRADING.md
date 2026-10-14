@@ -104,7 +104,16 @@ This covers collisions with existing canonical keys and between multiple legacy 
 including rows belonging to different deliveries. A second update sets every event key still
 containing its delivery's bearer to NULL. One canonical key survives each collision; multiple NULL
 keys are permitted, and webhook redeliveries still deduplicate against the surviving canonical key.
+V228 also clears any provider message id still containing its owning delivery's bearer after the
+single replacement pass, including self-overlap recreated by that replacement.
 These updates can run again after a failed history row.
+
+V228 rewrites each delivery's **own** bearer. A different delivery's bearer embedded in a historical
+identifier can exist only if a provider echoed foreign bearers before the upgrade; those copies are outside
+V228's guarantee. Matching every workspace token against every historical identifier would require
+a quadratic scan. Runtime dispatch and webhooks instead use workspace-scoped digest matching.
+Runtime correlation rescans replacements for at most four passes and fails closed if a recorded
+bearer remains: NULL message/event id storage, or no match on webhook message lookup.
 After the upgrade, incoming raw provider ids use the same correlation form before lookup and dedupe,
 so historical message ids still correlate. Only 64-hex windows whose lowercased SHA-256 digest is
 recorded in the resolved workspace match; unrelated identifiers stay byte-identical. Digest probes

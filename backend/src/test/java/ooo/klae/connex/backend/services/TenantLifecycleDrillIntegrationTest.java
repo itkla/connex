@@ -215,7 +215,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     }
 
     @ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource({"BOUNCED, opaque", "COMPLAINED, opaque", "BOUNCED, current", "COMPLAINED, current", "BOUNCED, legacy", "COMPLAINED, legacy"})
+    @org.junit.jupiter.params.provider.CsvSource({"BOUNCED, opaque", "COMPLAINED, opaque", "BOUNCED, current", "COMPLAINED, current", "BOUNCED, legacy", "COMPLAINED, legacy", "BOUNCED, foreign", "COMPLAINED, foreign", "BOUNCED, overlap", "COMPLAINED, overlap"})
     void providerIdsCorrelateSuppressingWebhooksAndPreserveOpaqueHexIds(DeliveryEventType type, String idKind) {
         createDedicatedDrillRoots();
         String legacyBearer = seedUnsubscribeDigest();
@@ -237,6 +237,35 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE campaign_send SET status = 'queued' WHERE id = ?", sendId);
         jdbcTemplate.update("UPDATE campaign_delivery SET status = 'pending', person_id = ?, address = ? WHERE id = ?",
                 recipient.getId(), recipient.getEmail(), deliveryId);
+        var overlap = "overlap".equals(idKind)
+                ? ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.create() : null;
+        String overlapCorrelation = overlap == null ? null
+                : OneTimeTokenDigest.sha256(overlap.first()).substring(0, 63) + OneTimeTokenDigest.sha256(overlap.second());
+        if (overlap != null) {
+            jdbcTemplate.update("""
+                    INSERT INTO campaign_delivery_unsubscribe_token (workspace_id, delivery_id, token_hash)
+                    VALUES (?, ?, ?), (?, ?, ?)
+                    """, workspaceId, deliveryId, OneTimeTokenDigest.sha256(overlap.first()),
+                    workspaceId, deliveryId, OneTimeTokenDigest.sha256(overlap.second()));
+        }
+        Integer foreignDeliveryId = null;
+        if ("foreign".equals(idKind)) {
+            jdbcTemplate.update("""
+                    INSERT INTO campaign_delivery (workspace_id, send_id, address, status)
+                    SELECT workspace_id, send_id, 'foreign@example.test', 'dispatched'
+                    FROM campaign_delivery WHERE id = ?
+                    """, deliveryId);
+            foreignDeliveryId = jdbcTemplate.queryForObject("SELECT MAX(id) FROM campaign_delivery WHERE send_id = ?",
+                    Integer.class, sendId);
+            jdbcTemplate.update("""
+                    UPDATE campaign_delivery_unsubscribe_token SET delivery_id = ?
+                    WHERE workspace_id = ? AND token_hash = ?
+                    """, foreignDeliveryId, workspaceId, OneTimeTokenDigest.sha256(legacyBearer));
+            assertEquals(foreignDeliveryId, jdbcTemplate.queryForObject("""
+                    SELECT delivery_id FROM campaign_delivery_unsubscribe_token
+                    WHERE workspace_id = ? AND token_hash = ?
+                    """, Integer.class, workspaceId, OneTimeTokenDigest.sha256(legacyBearer)));
+        }
         AtomicReference<String> bearer = new AtomicReference<>();
         AtomicReference<String> providerMessageId = new AtomicReference<>();
         MessageDispatcher dispatcher = org.mockito.Mockito.mock(MessageDispatcher.class);
@@ -247,7 +276,14 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                             .matcher(request.content().bodyHtml());
                     assertTrue(token.find());
                     bearer.set(token.group(1));
-                    providerMessageId.set(!"opaque".equals(idKind) ? "receipt:0" + bearer.get().toUpperCase(java.util.Locale.ROOT) + "f"
+                    if ("foreign".equals(idKind)) {
+                        bearer.set(legacyBearer);
+                    }
+                    if (overlap != null) {
+                        bearer.set(overlap.first());
+                    }
+                    String rawId = overlap == null ? bearer.get() : overlap.identifier();
+                    providerMessageId.set(!"opaque".equals(idKind) ? "receipt:0" + rawId.toUpperCase(java.util.Locale.ROOT) + "f"
                             : "AB".repeat(32));
                     return DispatchReceipt.sent(providerMessageId.get(), "accepted");
                 });
@@ -267,7 +303,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         }
         assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
-        String expectedMessageId = !"opaque".equals(idKind) ? "receipt:0" + OneTimeTokenDigest.sha256(bearer.get()) + "f" : "AB".repeat(32);
+        String expectedMessageId = !"opaque".equals(idKind)
+                ? "receipt:0" + (overlapCorrelation == null ? OneTimeTokenDigest.sha256(bearer.get()) : overlapCorrelation) + "f"
+                : "AB".repeat(32);
         assertEquals(expectedMessageId, jdbcTemplate.queryForObject("SELECT provider_message_id FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
         assertEquals("granted", consentService.getForPerson(recipient.getId()).getFirst().status());
@@ -280,13 +318,13 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 org.mockito.ArgumentMatchers.eq("webhook-token"), org.mockito.ArgumentMatchers.any())).thenReturn(target);
         org.mockito.Mockito.doReturn(source).when(deliveryProviderRouter).eventSourceFor(HttpEspDeliveryProvider.PROVIDER_ID);
         org.mockito.Mockito.when(source.translate(body)).thenReturn(List.of(
-                new DeliveryEvent(providerMessageId.get(), "event:" + bearer.get(), type, null,
+                new DeliveryEvent(providerMessageId.get(), "event:" + (overlap == null ? bearer.get() : overlap.identifier()), type, null,
                         type.token() + " reason " + bearer.get().toUpperCase(java.util.Locale.ROOT))));
 
         assertEquals(1, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
         assertEquals(0, deliveryWebhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, "webhook-token", body, headers));
         org.mockito.Mockito.verify(source, org.mockito.Mockito.times(2)).verifySignature(target, body, headers);
-        assertEquals("event:" + OneTimeTokenDigest.sha256(bearer.get()), jdbcTemplate.queryForObject(
+        assertEquals("event:" + (overlapCorrelation == null ? OneTimeTokenDigest.sha256(bearer.get()) : overlapCorrelation), jdbcTemplate.queryForObject(
                 "SELECT provider_event_id FROM campaign_delivery_event WHERE delivery_id = ? AND event_type = ?",
                 String.class, deliveryId, type.token()));
         assertEquals(type.token() + " reason [redacted]", jdbcTemplate.queryForObject(
@@ -294,6 +332,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 String.class, deliveryId, type.token()));
         assertEquals(type.token(), jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
                 String.class, deliveryId));
+        if (foreignDeliveryId != null) {
+            assertEquals("dispatched", jdbcTemplate.queryForObject("SELECT status FROM campaign_delivery WHERE id = ?",
+                    String.class, foreignDeliveryId));
+        }
         String reason = type == DeliveryEventType.BOUNCED ? "hard_bounce" : "complaint";
         assertEquals(1, suppressionService.list().stream().filter(entry -> reason.equals(entry.reason())
                 && recipient.getEmail().equals(entry.address())).count());

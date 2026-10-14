@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -274,6 +275,53 @@ class DeliveryWebhookServiceTest {
         org.mockito.ArgumentCaptor<CampaignDeliveryEvent> row = org.mockito.ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
         verify(campaignDeliveryMapper).insertEvent(row.capture());
         assertEquals(unrelated, row.getValue().getProviderEventId());
+    }
+
+    @Test
+    void ingestRescansOverlappingMessageAndEventIdentifiers() {
+        var fixture = ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.create();
+        java.util.Set<String> digests = java.util.Set.of(OneTimeTokenDigest.sha256(fixture.first()),
+                OneTimeTokenDigest.sha256(fixture.second()));
+        String raw = fixture.identifier().toUpperCase(java.util.Locale.ROOT);
+        String expected = OneTimeTokenDigest.sha256(fixture.first()).substring(0, 63)
+                + OneTimeTokenDigest.sha256(fixture.second());
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent(raw, raw, DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> digests.contains(invocation.getArgument(1)) ? Integer.valueOf(500) : null);
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, expected))
+                .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        org.mockito.ArgumentCaptor<CampaignDeliveryEvent> row = org.mockito.ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(campaignDeliveryMapper).insertEvent(row.capture());
+        assertEquals(expected, row.getValue().getProviderEventId());
+        assertTrue(!expected.toLowerCase(java.util.Locale.ROOT).contains(fixture.first()));
+        assertTrue(!expected.toLowerCase(java.util.Locale.ROOT).contains(fixture.second()));
+    }
+
+    @Test
+    void ingestIgnoresAnUnusableMessageIdentifier() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("a".repeat(64), "event", DeliveryEventType.BOUNCED, null, null)));
+        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any())).thenReturn(500);
+        scopeInline();
+        assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        verify(campaignDeliveryMapper, never()).findByProviderMessage(anyInt(), any(), any());
+        verify(campaignDeliveryMapper, never()).insertEvent(any());
+        verifyNoInteractions(campaignSendMapper, suppressionService, consentService);
+    }
+
+    @Test
+    void ingestStoresNullForAnUnusableEventIdentifierWithoutKeyDeduplication() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "a".repeat(64), DeliveryEventType.DELIVERED, null, null)));
+        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any())).thenReturn(500);
+        when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
+                .thenReturn(delivery(WORKSPACE_A));
+        scopeInline();
+        assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        org.mockito.ArgumentCaptor<CampaignDeliveryEvent> row = org.mockito.ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(campaignDeliveryMapper).insertEvent(row.capture());
+        assertNull(row.getValue().getProviderEventId());
+        verify(campaignDeliveryMapper, never()).hasEvent(anyInt(), anyInt(), any());
     }
 
     @Test

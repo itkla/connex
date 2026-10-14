@@ -1142,9 +1142,13 @@ cleanup and also hides BDAT commands and replies. Send/close finally blocks clea
 Provider identifiers share a digest correlation form: every case-insensitive 64-hex window is
 hashed after lowercasing, including windows inside longer runs. Matching recorded digests replace
 the bearer window; unrelated identifier bytes, including opaque 64-hex ids, survive. Dispatch uses
-this delivery's complete digest history plus the current attempt's digest, including when a replay
-returns the original receipt. Webhook message lookup and event dedupe use the resolved workspace's
-digests; free-text webhook reasons redact all 64-hex runs. `getUnsubscribeTokenDeliveryId` probes
+the resolved workspace's digest history plus the current attempt's digest, including when a replay
+returns the original receipt. Webhook message lookup and event dedupe use the same workspace scope.
+Correlation rescans replacement output for at most four replacement passes, then checks for residual
+bearers. An unusable id becomes NULL at dispatch (with an identifier-free WARN) or event persistence,
+or no match at webhook message lookup. Unusable event ids give up provider-key deduplication;
+ordinary missing event ids keep the existing fallback. Free-text webhook reasons redact all 64-hex
+runs. `getUnsubscribeTokenDeliveryId` probes
 `token_hash`, the child table's primary key, with a workspace predicate. These are plain consistent
 reads without `FOR UPDATE` or shared locks, and they acquire no row locks even while another
 transaction holds an exclusive child-row lock. Short ids perform no probes. They add no lock-order
@@ -1154,7 +1158,10 @@ Oversized webhook message ids instead return no match without probes; event id p
 rejects oversized ids. V228 rekeys historical identifiers case-insensitively to digests with
 `UPDATE IGNORE`, skipping unique-key conflicts, then sets every event key still containing its
 delivery's bearer to NULL. This covers collisions with existing canonical keys and between legacy
-rows being rekeyed under the same workspace/provider, including rows from different deliveries.
+rows being rekeyed under the same workspace/provider, including rows from different deliveries. V228
+also clears message ids still containing their own
+bearer after replacement; foreign historical bearers remain outside its bounded guarantee, as
+explained in `UPGRADING.md`. Runtime matching uses the workspace scope without locking reads.
 
 After lease renewal and before frequency admission, the proxied
 `CampaignUnsubscribeTokenRegistrationService.register` opens a short `READ_COMMITTED` transaction:

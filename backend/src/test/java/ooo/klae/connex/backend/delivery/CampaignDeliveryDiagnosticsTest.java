@@ -12,6 +12,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture;
 
 /** Pins exact-bearer removal and defensive redaction without discarding surrounding diagnostics. */
 class CampaignDeliveryDiagnosticsTest {
@@ -72,6 +73,39 @@ class CampaignDeliveryDiagnosticsTest {
         String digest = OneTimeTokenDigest.sha256("a".repeat(64));
         assertEquals(digest + "a", CampaignDeliveryDiagnostics.correlationForm("a".repeat(65), digest::equals));
         assertEquals(digest + digest, CampaignDeliveryDiagnostics.correlationForm("a".repeat(128), digest::equals));
+    }
+
+    @Test
+    void correlationRescansOutputUntilOverlappingBearersAreGone() {
+        UnsubscribeCorrelationFixture fixture = UnsubscribeCorrelationFixture.create();
+        Set<String> digests = Set.of(OneTimeTokenDigest.sha256(fixture.first()),
+                OneTimeTokenDigest.sha256(fixture.second()));
+        String expected = OneTimeTokenDigest.sha256(fixture.first()).substring(0, 63)
+                + OneTimeTokenDigest.sha256(fixture.second());
+        for (String identifier : List.of(fixture.identifier(), fixture.identifier().toUpperCase(java.util.Locale.ROOT))) {
+            String result = CampaignDeliveryDiagnostics.correlationForm(identifier, digests::contains);
+            assertEquals(expected, result);
+            assertTrue(!result.toLowerCase(java.util.Locale.ROOT).contains(fixture.first()));
+            assertTrue(!result.toLowerCase(java.util.Locale.ROOT).contains(fixture.second()));
+        }
+    }
+
+    @Test
+    void correlationFailsClosedAfterFourReplacementPassesAndAResidualCheck() {
+        List<String> probes = new ArrayList<>();
+        String bearer = "a".repeat(64);
+        List<String> expected = new ArrayList<>();
+        String current = bearer;
+        for (int pass = 0; pass < 5; pass++) {
+            current = OneTimeTokenDigest.sha256(current);
+            expected.add(current);
+        }
+        Set<String> recordedDigests = Set.copyOf(expected);
+        assertNull(CampaignDeliveryDiagnostics.correlationForm(bearer, hash -> {
+            probes.add(hash);
+            return recordedDigests.contains(hash);
+        }));
+        assertEquals(expected, probes);
     }
 
     @Test

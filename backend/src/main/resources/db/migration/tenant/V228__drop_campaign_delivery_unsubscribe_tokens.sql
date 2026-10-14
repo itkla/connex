@@ -16,6 +16,10 @@ UPDATE campaign_delivery
 SET provider_message_id = REGEXP_REPLACE(provider_message_id, unsubscribe_token, unsubscribe_token_hash, 1, 0, 'i')
 WHERE provider_message_id LIKE CONCAT('%', unsubscribe_token, '%');
 
+UPDATE campaign_delivery
+SET provider_message_id = NULL
+WHERE provider_message_id LIKE CONCAT('%', unsubscribe_token, '%');
+
 UPDATE campaign_delivery_event e
 JOIN campaign_delivery d ON e.workspace_id = d.workspace_id AND e.delivery_id = d.id
 SET e.detail = REGEXP_REPLACE(e.detail, d.unsubscribe_token, '[redacted]', 1, 0, 'i')

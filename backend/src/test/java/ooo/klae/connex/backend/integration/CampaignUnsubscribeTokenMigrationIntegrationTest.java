@@ -220,6 +220,48 @@ class CampaignUnsubscribeTokenMigrationIntegrationTest {
         }
     }
 
+    @Test
+    void selfOverlappingHistoricalMessageIdIsClearedAndHistoryRepairCanRerun() throws SQLException {
+        var fixture = ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.create();
+        try (MySqlScratchCatalog catalog = catalog();
+                Connection connection = connection(catalog);
+                Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE campaign_delivery (
+                        id INT PRIMARY KEY, workspace_id INT NOT NULL,
+                        last_error VARCHAR(512) NULL, provider_message_id VARCHAR(255) NULL,
+                        unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+                            GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
+                        UNIQUE KEY uq_campaign_delivery_workspace_id (workspace_id, id),
+                        UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token),
+                        UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash)
+                    )
+                    """);
+            createLegacyEventTable(statement);
+            try (var insert = connection.prepareStatement("""
+                    INSERT INTO campaign_delivery (id, workspace_id, unsubscribe_token, provider_message_id)
+                    VALUES (1, 22601, ?, ?)
+                    """)) {
+                insert.setString(1, fixture.first());
+                insert.setString(2, fixture.selfOverlappingIdentifier().toUpperCase(java.util.Locale.ROOT));
+                assertEquals(1, insert.executeUpdate());
+            }
+            recoveryFlyway(catalog, "227").migrate();
+            statement.execute("ALTER TABLE campaign_delivery DROP INDEX uq_campaign_delivery_token");
+            Flyway contract = recoveryFlyway(catalog, "228");
+            assertThrows(FlywayException.class, contract::migrate);
+            assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery WHERE provider_message_id IS NULL"));
+            assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
+            statement.execute("ALTER TABLE campaign_delivery ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token)");
+            contract.repair();
+            contract.migrate();
+            assertContract(statement);
+            assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery WHERE provider_message_id IS NULL"));
+            assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM campaign_delivery_unsubscribe_token"));
+        }
+    }
+
     private static void createLegacyEventTable(Statement statement) throws SQLException {
         statement.execute("""
                 CREATE TABLE campaign_delivery_event (

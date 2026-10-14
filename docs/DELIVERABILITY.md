@@ -377,8 +377,13 @@ storage in delivery errors or event details, or logging, Connex replaces the att
 any 64-hex run with `[redacted]`, keeping the remaining diagnostic text. Returned provider message
 ids use one correlation form: inspect every case-insensitive 64-hex window, including windows inside
 longer runs, and replace a matching bearer window with the SHA-256 digest of its lowercase text.
-Matching windows use the leftmost non-overlapping replacements; generated text is never rescanned.
-Dispatch matches this delivery's recorded digests from all attempts plus the current attempt's digest,
+Each pass uses the leftmost non-overlapping replacements and rescans its output, since a replacement
+can recreate an overlapping bearer. After at most four replacement passes, a final scan must find
+no recorded bearer. An identifier still containing one is unusable: dispatch stores a NULL message
+id and logs a WARN without the identifier; webhook message lookup returns no match; event persistence
+stores NULL and gives up provider-key deduplication for that event. Ordinary missing event ids retain
+the existing event-type fallback. Dispatch and webhooks match the same workspace's recorded digests;
+dispatch also recognizes the current attempt's digest explicitly,
 so a replay returning the original receipt is safe. Webhooks normalize both incoming message ids
 before lookup and event ids before deduplication against recorded digests in the resolved workspace.
 Unrelated ids, including opaque 64-hex ids, stay byte-identical, so bounce and complaint webhooks still
@@ -387,7 +392,9 @@ These digest lookups are plain primary-key consistent reads without row locks; s
 Identifiers exceeding the 255-code-point storage limit are rejected before persistence or digest
 probes; accepted receipts then require reconciliation. Oversized incoming webhook message ids
 cannot match stored ids and are ignored without probes; oversized event ids still reject persistence.
-V228 applies the same digest form to historical identifiers case-insensitively. Event rekeying skips
+V228 rewrites each delivery's own historical bearer case-insensitively and clears any message id
+still containing it after replacement. Foreign historical bearers are outside that bounded guarantee
+(see `UPGRADING.md`). Event rekeying skips
 unique-key conflicts, then clears every remaining bearer-bearing key to NULL, covering collisions
 with existing canonical keys and between legacy rows being rekeyed.
 Both the native Angus SMTP loggers and Connex's transport package loggers receive the free-text

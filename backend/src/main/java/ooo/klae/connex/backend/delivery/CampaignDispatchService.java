@@ -437,8 +437,11 @@ public class CampaignDispatchService {
             int updated;
             try {
                 providerMessageId = CampaignDeliveryDiagnostics.correlationForm(receipt.providerMessageId(),
-                        hash -> unsubscribeTokenHash.equals(hash) || Integer.valueOf(deliveryId).equals(
-                                campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash)));
+                        hash -> unsubscribeTokenHash.equals(hash)
+                                || campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash) != null);
+                if (receipt.providerMessageId() != null && providerMessageId == null) {
+                    log.warn("Campaign delivery {} accepted with an unusable provider identifier", deliveryId);
+                }
                 updated = leaseOwner == null
                     ? campaignDeliveryMapper.markDispatched(
                         workspaceId, deliveryId, target.providerId(), providerMessageId)
