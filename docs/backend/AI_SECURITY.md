@@ -84,7 +84,10 @@ and summary metadata captures the same provenance from summary demasking, within
 and value-length limits. Readers reseed that provenance for ordinary history and compaction under
 a fresh masking context; no token binding is persisted. In that stored message only, every recorded
 member label is replaced and leak-scanned by containment, regardless of label length or adjacency.
-Other labels and other messages retain ordinary short-label word boundaries.
+Only matches aligned with complete source characters receive reversible tokens. A containment match
+that cuts through a character's compatibility expansion irreversibly redacts its complete source
+span with `[redacted]`, so demasking cannot replace unmatched characters. Other labels and other
+messages retain ordinary short-label word boundaries.
 
 Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
 member tokens present in the final payload after screening, budgeting and truncation. Only tokens

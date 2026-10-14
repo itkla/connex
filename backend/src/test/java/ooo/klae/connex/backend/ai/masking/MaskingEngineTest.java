@@ -53,6 +53,77 @@ class MaskingEngineTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @ParameterizedTest
+    @CsvSource({"abcdxxxx, {{M1}}, 0", "12345678, [redacted], 1"})
+    void memberOutcomeContactRedactionIsIndependentOfCandidateRegistrationOrder(
+            String suffix, String expected, int warnings) {
+        String first = "First Actor " + suffix;
+        String renamed = "Renamed Assignment Member";
+        String stored = "Second Actor " + suffix;
+        for (List<String> candidates : List.of(
+                List.of(first, renamed, stored), List.of(first, stored, renamed),
+                List.of(renamed, first, stored), List.of(renamed, stored, first),
+                List.of(stored, first, renamed), List.of(stored, renamed, first))) {
+            var context = new MaskingContext();
+            candidates.forEach(context::registerMemberCandidate);
+            String masked = MaskingEngine.maskTemporal(stored, context);
+            assertEquals(expected, masked);
+            assertEquals(List.of(Map.entry("{{M1}}", stored)), context.tokenBindings());
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                    objectMapper.writeValueAsString(Map.of("owner", masked)), context, objectMapper));
+            context.exposeDispatchedPayload(masked);
+            var demasked = Demasker.demask("{{M1}}", context);
+            assertEquals(warnings, demasked.warnings());
+            assertEquals(warnings == 0 ? stored : "[unknown reference]", demasked.text());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "Li, Li x\uFB02i, {{M1}} x[redacted]",
+            "Of, Of o\uFB03ce, {{M1}} [redacted]ce",
+            "F, F x\uFB02, {{M1}} x[redacted]"
+    })
+    void recordedMemberContainmentRedactsPartialSourceExpansions(String member, String text, String expected) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        context.withReplayMemberValues(List.of(member), () -> {
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+            return null;
+        });
+        assertEquals(expected, MaskingEngine.maskFreeText(text, context, Map.of(), List.of(member)));
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of(member));
+        assertEquals(expected, masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(expected.replace("{{M1}}", member), Demasker.demask(masked, context).text());
+        context.withReplayMemberValues(List.of(member), () -> {
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(masked, context));
+            return null;
+        });
+    }
+
+    @Test
+    void partialSourceExpansionCannotBecomeReversibleThroughAnOverlappingIdentifier() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.tokenFor(EntityKind.COMPANY, "xFli");
+        assertEquals("{{M1}} [redacted]",
+                MaskingEngine.maskConversationalFreeText("Li x\uFB02i", context, Map.of(), List.of("Li")));
+    }
+
+    @Test
+    void alignedMemberContainmentRoundTripsWithoutChangingOrdinaryShortLabelBoundaries() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        String text = "Li xLi Li_team LiLi";
+        String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Li"));
+        assertEquals("{{M1}} x{{M1}} {{M1}}_team {{M1}}{{M1}}", masked);
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        assertEquals("{{M1}} xfli Little xLi Li_team",
+                MaskingEngine.maskConversationalFreeText("Li x\uFB02i Little xLi Li_team", context));
+    }
+
     @Test
     void plainSeededNameIsMaskedBeforeAnyLinkCleanupOrTruncation() {
         String name = "vjqvkzjkqj kqkkvvzvqv";

@@ -588,7 +588,7 @@ public final class MaskingEngine {
     }
 
     private record ReplacementSpan(
-            int start, int end, String replacement, boolean contactData, int priority, String identity) {
+            int start, int end, String replacement, boolean irreversible, int priority, String identity) {
     }
 
     /** Splits at complete issued source tokens before any destructive canonicalization. */
@@ -961,23 +961,26 @@ public final class MaskingEngine {
                     || preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
                 continue;
             }
-            boolean containment = ctx.requiresMemberContainment(entry.rawValue());
-            List<TextSpan> primary = containment
-                    ? identifierContainmentSpans(projection, entry.canonicalValue())
-                    : coalesceIdentifierRuns(identifierSpans(text, projection, entry.canonicalValue()));
+            if (ctx.requiresMemberContainment(entry.rawValue())) {
+                spans.addAll(identifierContainmentSpans(projection, entry.canonicalValue(), entry, ctx, tokenize, 4));
+                if (entry.labelEligible()) {
+                    spans.addAll(identifierContainmentSpans(labels, entry.labelValue(), entry, ctx, tokenize, 3));
+                }
+                continue;
+            }
+            List<TextSpan> primary = coalesceIdentifierRuns(identifierSpans(text, projection, entry.canonicalValue()));
             List<TextSpan> aliases = entry.labelEligible()
-                    ? containment ? identifierContainmentSpans(labels, entry.labelValue())
-                            : coalesceIdentifierRuns(identifierSpans(text, labels, entry.labelValue())) : List.of();
+                    ? coalesceIdentifierRuns(identifierSpans(text, labels, entry.labelValue())) : List.of();
             String replacement = tokenize && !entry.unsafe() && (!primary.isEmpty() || !aliases.isEmpty())
                     ? ctx.tokenFor(entry.kind(), entry.rawValue()) : REDACTED;
-            addReplacementSpans(spans, primary, replacement, false, containment ? 4 : 2, entry.rawValue());
-            if (!containment && residualEligible(entry.canonicalValue())) {
+            addReplacementSpans(spans, primary, replacement, false, 2, entry.rawValue());
+            if (residualEligible(entry.canonicalValue())) {
                 addReplacementSpans(spans, identifierResidualSpans(text, projection, entry.canonicalValue()), REDACTED, false);
             }
             if (entry.labelEligible()) {
                 addReplacementSpans(spans,
-                        aliases, replacement, false, containment ? 3 : 1, entry.rawValue());
-                if (!containment && residualEligible(entry.labelValue())) {
+                        aliases, replacement, false, 1, entry.rawValue());
+                if (residualEligible(entry.labelValue())) {
                     addReplacementSpans(spans, identifierResidualSpans(text, labels, entry.labelValue()), REDACTED, false);
                 }
             }
@@ -1005,14 +1008,14 @@ public final class MaskingEngine {
     }
 
     private static void addReplacementSpans(
-            List<ReplacementSpan> target, List<TextSpan> spans, String replacement, boolean contactData) {
-        addReplacementSpans(target, spans, replacement, contactData, 0, "");
+            List<ReplacementSpan> target, List<TextSpan> spans, String replacement, boolean irreversible) {
+        addReplacementSpans(target, spans, replacement, irreversible, 0, "");
     }
 
     private static void addReplacementSpans(List<ReplacementSpan> target, List<TextSpan> spans,
-            String replacement, boolean contactData, int priority, String identity) {
+            String replacement, boolean irreversible, int priority, String identity) {
         for (TextSpan span : spans) {
-            target.add(new ReplacementSpan(span.start(), span.end(), replacement, contactData, priority, identity));
+            target.add(new ReplacementSpan(span.start(), span.end(), replacement, irreversible, priority, identity));
         }
     }
 
@@ -1025,7 +1028,7 @@ public final class MaskingEngine {
      * an occurrence of the same value. Provenance primary spans use priorities above the ordinary
      * primary spans and keep adjacent occurrences distinct so replay demasking restores repetitions.
      * A union that extends across two different replacements,
-     * and every contact-data union, redacts instead.
+     * and every union containing contact data or a partial source-character match, redacts instead.
      * Source offsets, never canonical identifier lengths, determine coverage and precedence.
      */
     private static List<ReplacementSpan> mergeSensitiveSpans(List<ReplacementSpan> spans) {
@@ -1042,16 +1045,16 @@ public final class MaskingEngine {
                 continue;
             }
             ReplacementSpan previous = merged.getLast();
-            boolean contactData = previous.contactData() || next.contactData();
+            boolean irreversible = previous.irreversible() || next.irreversible();
             boolean extendsRegion = next.end() > previous.end();
             boolean sameReplacement = previous.replacement().equals(next.replacement());
             boolean ambiguous = previous.start() == next.start() && previous.end() == next.end()
                     && previous.priority() > 0 && previous.priority() == next.priority()
                     && !previous.identity().equals(next.identity());
-            String replacement = ambiguous || !sameReplacement && (contactData || extendsRegion)
+            String replacement = ambiguous || !sameReplacement && (irreversible || extendsRegion)
                     ? REDACTED : previous.replacement();
             merged.set(merged.size() - 1, new ReplacementSpan(previous.start(),
-                    Math.max(previous.end(), next.end()), replacement, contactData,
+                    Math.max(previous.end(), next.end()), replacement, irreversible,
                     previous.priority(), previous.identity()));
         }
         return merged;
@@ -1076,13 +1079,22 @@ public final class MaskingEngine {
         return spans;
     }
 
-    /** Retains exact source spans for labels whose token replacements are recorded on this message. */
-    private static List<TextSpan> identifierContainmentSpans(CanonicalText.Projection projection, String value) {
-        List<TextSpan> spans = new ArrayList<>();
+    /**
+     * Retains exact source spans for recorded labels. A match that splits a compatibility expansion
+     * irreversibly redacts the complete source span, so demasking cannot replace unmatched characters.
+     */
+    private static List<ReplacementSpan> identifierContainmentSpans(CanonicalText.Projection projection, String value,
+            MaskingContext.IdentifierEntry entry, MaskingContext ctx, boolean tokenize, int priority) {
+        List<ReplacementSpan> spans = new ArrayList<>();
         String canonical = projection.value();
         for (int start = canonical.indexOf(value); start >= 0;
                 start = canonical.indexOf(value, start + value.length())) {
-            spans.add(new TextSpan(projection.sourceStart(start), projection.sourceEnd(start + value.length())));
+            int end = start + value.length();
+            boolean aligned = projection.isSourceBoundary(start) && projection.isSourceBoundary(end);
+            String replacement = aligned && tokenize && !entry.unsafe()
+                    ? ctx.tokenFor(entry.kind(), entry.rawValue()) : REDACTED;
+            spans.add(new ReplacementSpan(projection.sourceStart(start), projection.sourceEnd(end), replacement,
+                    !aligned, priority, entry.rawValue()));
         }
         return spans;
     }

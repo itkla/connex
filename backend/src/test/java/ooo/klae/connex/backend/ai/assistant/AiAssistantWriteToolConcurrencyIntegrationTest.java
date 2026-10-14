@@ -119,9 +119,11 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private Person person;
     private Tag tag;
 
+    /** Keeps identity replay distinct from intentional contact-data redaction of numeric UUID suffixes. */
     @BeforeEach
     void setUp() {
         String unique = UUID.randomUUID().toString().substring(0, 8);
+        String displaySuffix = unique.replaceAll("[0-9]", "x");
         organization = new Organization();
         organization.setName("Assistant write locks " + unique);
         organization.setSlug("assistant-write-locks-" + unique);
@@ -133,8 +135,8 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         workspace.setSlug("assistant-write-locks-" + unique);
         workspaceMapper.insert(workspace);
 
-        firstActor = user("assistant-lock-first-" + unique, "First Actor " + unique);
-        secondActor = user("assistant-lock-second-" + unique, "Second Actor " + unique);
+        firstActor = user("assistant-lock-first-" + unique, "First Actor " + displaySuffix);
+        secondActor = user("assistant-lock-second-" + unique, "Second Actor " + displaySuffix);
         workspaceMapper.addMember(workspace.getId(), firstActor.getId(), "owner");
         workspaceMapper.addMember(workspace.getId(), secondActor.getId(), "owner");
 
