@@ -389,11 +389,34 @@ Control writes share this root order:
 6. Lock operation/request rows.
 7. Revalidate every root before side effects.
 
-APPI mutations perform preliminary workspace/person validation outside the write, then retain actor user, all previous/requested subject workspace roots ascending, and the shared organization lock while locking the requested tenant person.
+Linked APPI request create/update mutations perform preliminary workspace/person validation outside the write, then retain actor user, all previous/requested subject workspace roots ascending, and the shared organization lock while locking the requested tenant person.
 
 Linked mutations use the established reserved tenant-connection pattern: reserve non-auto-commit tenant connection before control locks, prove the person through a separate short session, then join the final control write to the root-lock transaction while retaining the person lock through commit. Roll back the reserved transaction before release.
 
 Updates lock the exact organization-scoped request after roots and compare persisted state to the preliminary snapshot before deriving/writing the diff.
+
+Disclosure assembly is a CSRF-protected POST (#2004), with three separate phases; it does not use
+the linked-mutation person-lock path. `DataSubjectRequestService` suspends ambient transactions:
+
+1. Control preparation opens its own read-only transaction, locks the matching
+   `org_member(orgId, actorId)` rows `FOR SHARE`, validates step-up, then reads the request,
+   workspaces and audit trail without additional locks. The membership lock is released before
+   tenant assembly.
+2. Payload reads run in one read-only snapshot transaction in the linked subject workspace's
+   tenant catalog, including bounded note pages. Caller tenant context is restored afterwards.
+3. After assembly ends, the control audit transaction takes actor `app_user FOR SHARE`, target
+   `organization FOR SHARE`, then the organization integrity head exclusively (`ensureHead`'s
+   upsert followed by `lockHead FOR UPDATE`). It INSERTs the audit row, conditionally advances the
+   head, and commits before returning the response. Organization events have null workspace scope.
+
+No preparation, person or workspace lock is carried into the audit. This preserves the
+account-before-organization-before-child order and adds no database wait edge. Authority, step-up,
+request linkage or lifecycle can still change between preparation and audit; no revalidation or
+serialization is added. The first-head initialization deadlock documented above remains possible.
+Preparation/assembly failures prevent the success audit; a final audit exception returns 503
+without disclosure data and rolls back the INSERT and head advance together. A committed audit
+survives a subsequent response/download failure. Explicit retries assemble and audit again, and
+database rollback failures may only be retried through a fresh request/transaction.
 
 SSO returning/existing-user paths discover non-locking then lock user, stored workspace when applicable, and organization before revalidation. New JIT paths without a user lock stored workspace and organization before revalidating absence/inserting.
 
