@@ -37,9 +37,8 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 /**
  * Proves under placement routing that the email change's revoked-grant cleanup deletes each
  * revoked workspace's notifications and baselines in that workspace's own catalog, across the
- * default catalog and two dedicated ones, including personal goals and policy/frozen approver
- * references, and keeps them where the account holds a membership again. A workspace already
- * tearing down, which ordinary placement routing refuses, is still
+ * default catalog and two dedicated ones, and keeps them where the account holds a membership
+ * again. A workspace already tearing down, which ordinary placement routing refuses, is still
  * cleaned in its catalog, and a workspace whose cleanup fails keeps all of its rows without
  * stopping the next one (#1708).
  */
@@ -52,8 +51,7 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
      * any other tenant statement in a unit fails instead of passing unnoticed.
      */
     private static final List<String> CLEANED_TABLES =
-        List.of("historical_notification_baseline", "notification", "report_goal",
-            "approval_policy_step_approver", "document_approval_step_approver");
+        List.of("historical_notification_baseline", "notification");
 
     @Autowired private RevokedGrantNotificationCleanup cleanup;
     @Autowired private OrganizationMapper organizationMapper;
@@ -128,9 +126,6 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
         seed(firstCatalog, first.getId(), user.getId());
         seed(secondCatalog, second.getId(), user.getId());
         seed(reinvitedCatalog, reinvited.getId(), user.getId());
-        seedDepartureReferences(firstCatalog, first.getId(), user.getId());
-        seedDepartureReferences(secondCatalog, second.getId(), user.getId());
-        seedDepartureReferences(reinvitedCatalog, reinvited.getId(), user.getId());
         workspaceMapper.addPendingMember(reinvited.getId(), user.getId(), "member");
 
         cleanup.cleanUp(user.getId(), List.of(
@@ -145,11 +140,6 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
         assertEquals(1, rows(reinvitedCatalog, "notification", reinvited.getId(), user.getId()));
         assertEquals(1, rows(
             reinvitedCatalog, "historical_notification_baseline", reinvited.getId(), user.getId()));
-        for (String catalog : List.of(firstCatalog, secondCatalog)) {
-            int workspaceId = catalog.equals(firstCatalog) ? first.getId() : second.getId();
-            assertDepartureReferences(catalog, workspaceId, user.getId(), 0);
-        }
-        assertDepartureReferences(reinvitedCatalog, reinvited.getId(), user.getId(), 1);
     }
 
     @Test
@@ -188,56 +178,6 @@ class RevokedGrantNotificationCleanupPlaneRoutingIntegrationTest {
         assertEquals(0, rows(defaultCatalog(), "notification", shared.getId(), user.getId()));
         assertEquals(0, rows(
             defaultCatalog(), "historical_notification_baseline", shared.getId(), user.getId()));
-    }
-
-    @Test
-    void aFailingDepartureCleanupTailRollsBackNotificationsAndKeepsOtherWorkspacesIndependent() {
-        Organization brokenOrganization = newOrganization();
-        Workspace broken = newWorkspace(brokenOrganization);
-        String brokenCatalog = dedicatedCatalog(brokenOrganization, "cnx_revoked_tail_");
-        Workspace shared = newWorkspace(newOrganization());
-        User user = newUser();
-        seed(brokenCatalog, broken.getId(), user.getId());
-        seedDepartureReferences(brokenCatalog, broken.getId(), user.getId());
-        seed(defaultCatalog(), shared.getId(), user.getId());
-        jdbcTemplate.execute("DROP TABLE `" + identifier(brokenCatalog) + "`.`report_goal`");
-
-        cleanup.cleanUp(user.getId(), List.of(revoked(shared), revoked(broken)));
-
-        assertEquals(1, rows(brokenCatalog, "notification", broken.getId(), user.getId()));
-        assertEquals(1, rows(brokenCatalog, "historical_notification_baseline", broken.getId(), user.getId()));
-        assertEquals(1, referenceRows(brokenCatalog, "approval_policy_step_approver", "user_id",
-            broken.getId(), user.getId()));
-        assertEquals(1, referenceRows(brokenCatalog, "document_approval_step_approver", "user_id",
-            broken.getId(), user.getId()));
-        assertEquals(0, rows(defaultCatalog(), "notification", shared.getId(), user.getId()));
-    }
-
-    /** Seeds the sparse dedicated catalogs, whose LIKE tables deliberately contain no parent FKs. */
-    private void seedDepartureReferences(String catalog, int workspaceId, int userId) {
-        String qualified = "`" + identifier(catalog) + "`.";
-        jdbcTemplate.update("INSERT INTO " + qualified + "report_goal "
-            + "(workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by) "
-            + "VALUES (?, ?, 'revenue', 'month', '2026-10-01', 10, 'JPY', ?), "
-            + "(?, NULL, 'revenue', 'month', '2026-10-01', 20, 'JPY', ?)",
-            workspaceId, userId, userId, workspaceId, userId);
-        jdbcTemplate.update("INSERT INTO " + qualified + "approval_policy_step_approver "
-            + "(workspace_id, step_id, approver_kind, user_id) VALUES (?, 1, 'user', ?)", workspaceId, userId);
-        jdbcTemplate.update("INSERT INTO " + qualified + "document_approval_step_approver "
-            + "(workspace_id, step_id, approver_kind, user_id) VALUES (?, 1, 'user', ?)", workspaceId, userId);
-    }
-
-    private void assertDepartureReferences(String catalog, int workspaceId, int userId, int remaining) {
-        assertEquals(remaining, referenceRows(catalog, "report_goal", "owner_id", workspaceId, userId));
-        assertEquals(remaining, referenceRows(catalog, "approval_policy_step_approver", "user_id", workspaceId, userId));
-        assertEquals(remaining, referenceRows(catalog, "document_approval_step_approver", "user_id", workspaceId, userId));
-        assertEquals(1 + remaining, referenceRows(catalog, "report_goal", "created_by", workspaceId, userId));
-    }
-
-    private int referenceRows(String catalog, String table, String column, int workspaceId, int userId) {
-        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM `" + identifier(catalog) + "`.`"
-            + identifier(table) + "` WHERE workspace_id = ? AND `" + identifier(column) + "` = ?",
-            Integer.class, workspaceId, userId);
     }
 
     private static RevokedInvitationDto revoked(Workspace workspace) {

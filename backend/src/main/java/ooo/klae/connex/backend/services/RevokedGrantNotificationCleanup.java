@@ -16,18 +16,16 @@ import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Clears notifications, personal goals, and policy/frozen approver references in each workspace
- * whose pending invitation a verified email change revoked (#1708, #1953). The revocation itself
- * is control-plane and commits atomically with the change; these references are tenant data and are
- * deleted afterwards, one transaction per workspace under that workspace's routed catalog. A single
+ * Clears the notifications a verified email change left behind in each workspace whose pending
+ * invitation it revoked (#1708). The revocation itself is control-plane and commits atomically
+ * with the change; notifications and their baselines are tenant data, so they are deleted
+ * afterwards, one transaction per workspace under that workspace's routed catalog. A single
  * transaction cannot span catalogs, and the email change's own transaction cannot install one.
  *
  * <p>Each workspace gets one best-effort attempt. A unit that fails (an unservable placement, a
  * lock failure, a crash) leaves that workspace's rows in place, possibly indefinitely, because
- * account erasure does not visit every catalog. Leftover notifications stay out of the inbox,
- * which needs a membership the revocation removed, and a fresh membership purges them. Goal and
- * approver references remain until a later cleanup. No sole-approver guard runs after commit;
- * requests that become unsatisfiable follow the existing deadline-first reconciliation rules.
+ * account erasure does not visit every catalog. Those rows stay out of the inbox, which needs a
+ * membership the revocation removed, and a fresh membership purges them.
  */
 @Slf4j
 @Component
@@ -40,13 +38,12 @@ public class RevokedGrantNotificationCleanup {
     private final WorkspaceMapper workspaceMapper;
     private final NotificationMapper notificationMapper;
     private final NotificationStateVersionService notificationStateVersionService;
-    private final UserOffboardingService userOffboardingService;
 
     /**
      * Runs one cleanup unit per revoked workspace, in ascending workspace id. Each unit locks the
      * account root, the workspace root and then the account's ordered membership set, as declining
      * an invitation does, and skips a workspace where the account holds any membership again, so a
-     * re-invitation or an acceptance committed since the change keeps its data. A failed
+     * re-invitation or an acceptance committed since the change keeps its notifications. A failed
      * unit is logged by type and never affects the others or the caller.
      *
      * @param userId the account whose address changed
@@ -85,6 +82,5 @@ public class RevokedGrantNotificationCleanup {
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
-        userOffboardingService.cleanupDepartureReferences(workspaceId, userId);
     }
 }

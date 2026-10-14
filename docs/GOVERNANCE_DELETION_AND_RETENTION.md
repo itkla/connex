@@ -116,17 +116,7 @@ terminal requests or steps never block. After the check passes, the member's pol
 approver rows are deleted, including inactive and terminal references. Decisions and appended
 assignment history remain as evidence.
 
-A verified email change revokes pending invitations in its control-plane transaction. After that
-transaction commits, each revoked workspace's existing routed cleanup also deletes personal goals
-and policy/frozen approver rows, retaining surviving goal provenance, decisions, and assignment
-history. This post-commit path cannot refuse the revocation and runs no sole-approver guard. A
-request whose route becomes impossible follows the deadline-first reconciliation rules below.
-Each workspace gets one best-effort transaction; a failure rolls that unit back and leaves its
-references in place until a later cleanup, potentially indefinitely for an unservable catalog.
-If any membership exists again when the locked recheck runs, the unit skips all cleanup, preserving
-the re-invited or accepted member's data.
-
-The guarded-departure guarantee is bounded to references committed before departure; writers take no new departure
+This guarantee is bounded to references committed before departure; writers take no new departure
 fence. A reference created concurrently with departure can survive it. A request naming the departed
 member follows the existing reconciliation rules in their existing order:
 

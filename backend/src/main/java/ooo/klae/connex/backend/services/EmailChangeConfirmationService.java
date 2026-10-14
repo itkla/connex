@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 
 /**
- * Confirms a verified email change and then clears the workspace references its revoked invitations left
+ * Confirms a verified email change and then clears the notifications its revoked invitations left
  * in each workspace's tenant catalog (#1708). The confirmation runs in its own transaction, owned
  * by another bean, and the cleanup only after that transaction commits, so neither entry point
  * may be called from inside a caller's transaction.

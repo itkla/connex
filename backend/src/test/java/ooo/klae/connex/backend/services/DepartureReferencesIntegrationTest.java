@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -57,7 +55,6 @@ import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
-import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
@@ -65,7 +62,6 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.Permission;
-import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Committed MySQL fixtures exercise departure, erasure, session freshness, and the bounded race. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -74,8 +70,6 @@ class DepartureReferencesIntegrationTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private UserAccountCatalogOffboardingService catalogOffboarding;
     @Autowired private DocumentApprovalService approvalService;
-    @Autowired private EmailChangeConfirmationService emailConfirmationService;
-    @Autowired private EmailChangeTokenMapper emailChangeTokenMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
@@ -291,43 +285,6 @@ class DepartureReferencesIntegrationTest {
             "SELECT column_name FROM information_schema.statistics WHERE table_schema = DATABASE() "
                 + "AND table_name = 'report_goal' AND index_name = 'idx_report_goal_departure_creator' "
                 + "ORDER BY seq_in_index", String.class));
-    }
-
-    @Test
-    void verifiedEmailChangeCleansRevokedInvitationReferencesWithoutTheSoleApproverGuard() {
-        jdbc.update("UPDATE workspace_member SET status = 'pending' WHERE workspace_id = ? AND user_id = ?",
-            workspace.getId(), target.getId());
-        DocumentApproval request = request("active", null);
-        terminalEvidence(request);
-        jdbc.update("INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
-            + "assignment_kind, assignment_round, approver_kind, user_id) "
-            + "SELECT workspace_id, approval_id, id, 'reassignment', 1, 'user', ? "
-            + "FROM document_approval_step WHERE approval_id = ? AND step_order = 1", target.getId(), request.getId());
-        String rawToken = UUID.randomUUID().toString();
-        String newEmail = fixturePrefix + "-changed@example.com";
-        emailChangeTokenMapper.insert(target.getId(), newEmail, OneTimeTokenDigest.sha256(rawToken),
-            null, 30, target.getSessionEpoch());
-        authenticate(target);
-
-        var revoked = emailConfirmationService.confirm(rawToken);
-
-        assertEquals(List.of(workspace.getId()), revoked.stream().map(grant -> grant.getWorkspaceId()).toList());
-        assertEquals(newEmail, userMapper.getUserById(target.getId()).getEmail());
-        assertTrue(userMapper.getUserById(target.getId()).isEmailVerified());
-        assertNull(workspaceMapper.getMember(workspace.getId(), target.getId()));
-        assertNotNull(workspaceMapper.getMember(otherWorkspace.getId(), target.getId()));
-        assertEquals(0, countPersonalGoals(workspace.getId()));
-        assertEquals(1, countPersonalGoals(otherWorkspace.getId()));
-        assertEquals(2, goalMapper.getGoals(workspace.getId()).size());
-        assertTrue(goalMapper.getGoals(workspace.getId()).stream()
-            .allMatch(goal -> Integer.valueOf(target.getId()).equals(goal.getCreatedBy())));
-        assertReferencesAndEvidence(0);
-        verify(guard, never()).assertCanDepart(workspace.getId(), target.getId());
-        verify(guard, never()).assertCanErase(target.getId());
-        authenticate(owner);
-        reconcile(request);
-        assertEquals("unsatisfiable", approvalMapper.getById(workspace.getId(), request.getId()).getOutcomeReason());
-        assertEquals("draft", documentMapper.getById(workspace.getId(), document.getId()).getStatus());
     }
 
     @Test

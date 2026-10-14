@@ -45,7 +45,6 @@ class RevokedGrantNotificationCleanupTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private NotificationMapper notificationMapper;
     @Mock private NotificationStateVersionService notificationStateVersionService;
-    @Mock private UserOffboardingService userOffboardingService;
     @Mock private TransactionStatus transactionStatus;
 
     private RevokedGrantNotificationCleanup cleanup;
@@ -53,7 +52,7 @@ class RevokedGrantNotificationCleanupTest {
     @BeforeEach
     void setUp() {
         cleanup = new RevokedGrantNotificationCleanup(tenantWorkScope, transactionTemplate, userMapper,
-            workspaceMapper, notificationMapper, notificationStateVersionService, userOffboardingService);
+            workspaceMapper, notificationMapper, notificationStateVersionService);
         lenient().doAnswer(invocation -> {
             Runnable work = invocation.getArgument(1);
             work.run();
@@ -73,7 +72,7 @@ class RevokedGrantNotificationCleanupTest {
         cleanup.cleanUp(USER_ID, List.of(revoked(9), revoked(4), revoked(9)));
 
         InOrder order = inOrder(tenantWorkScope, userMapper, workspaceMapper, notificationMapper,
-            notificationStateVersionService, userOffboardingService);
+            notificationStateVersionService);
         for (int workspaceId : List.of(4, 9)) {
             order.verify(tenantWorkScope).inLifecycleWorkspace(eq(workspaceId), any(Runnable.class));
             order.verify(userMapper).lockById(USER_ID);
@@ -83,7 +82,6 @@ class RevokedGrantNotificationCleanupTest {
                 .deleteHistoricalNotificationBaselinesForRecipient(workspaceId, USER_ID);
             order.verify(notificationMapper).deleteAllForRecipient(workspaceId, USER_ID);
             order.verify(notificationStateVersionService).markChanged(USER_ID);
-            order.verify(userOffboardingService).cleanupDepartureReferences(workspaceId, USER_ID);
         }
         order.verifyNoMoreInteractions();
     }
@@ -98,8 +96,6 @@ class RevokedGrantNotificationCleanupTest {
         verify(notificationMapper, never()).deleteHistoricalNotificationBaselinesForRecipient(4, USER_ID);
         verify(notificationMapper).deleteAllForRecipient(9, USER_ID);
         verify(notificationMapper).deleteHistoricalNotificationBaselinesForRecipient(9, USER_ID);
-        verify(userOffboardingService, never()).cleanupDepartureReferences(4, USER_ID);
-        verify(userOffboardingService).cleanupDepartureReferences(9, USER_ID);
     }
 
     @Test
@@ -110,7 +106,7 @@ class RevokedGrantNotificationCleanupTest {
 
         verify(workspaceMapper, never()).lockWorkspace(anyInt());
         verify(notificationMapper, never()).deleteAllForRecipient(anyInt(), anyInt());
-        verifyNoInteractions(notificationStateVersionService, userOffboardingService);
+        verifyNoInteractions(notificationStateVersionService);
     }
 
     @Test
@@ -124,8 +120,6 @@ class RevokedGrantNotificationCleanupTest {
 
         verify(notificationMapper).deleteAllForRecipient(12, USER_ID);
         verify(notificationStateVersionService).markChanged(USER_ID);
-        verify(userOffboardingService).cleanupDepartureReferences(12, USER_ID);
-        verify(userOffboardingService, never()).cleanupDepartureReferences(9, USER_ID);
     }
 
     @Test
@@ -137,7 +131,7 @@ class RevokedGrantNotificationCleanupTest {
         } finally {
             TransactionSynchronizationManager.setActualTransactionActive(false);
         }
-        verifyNoInteractions(tenantWorkScope, transactionTemplate, notificationMapper, userOffboardingService);
+        verifyNoInteractions(tenantWorkScope, transactionTemplate, notificationMapper);
     }
 
     private static RevokedInvitationDto revoked(int workspaceId) {
