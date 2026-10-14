@@ -8,12 +8,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.OwnershipOffer;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
@@ -34,6 +36,7 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
     private final List<Integer> accounts = new ArrayList<>();
     private Organization org;
     private User target;
+    private String bulkAccountPrefix;
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void isolatedScope() {
         org = new Organization(); org.setName("Ownership lifecycle"); org.setSlug("ownership-lifecycle-" + unique()); organizations.insert(org);
@@ -49,9 +52,65 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
         jdbc.update("DELETE FROM tenant_cleanup_tombstone WHERE org_id = ?", org.getId());
         jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         jdbc.update("DELETE FROM organization WHERE id = ?", org.getId());
+        if (bulkAccountPrefix != null) {
+            jdbc.update("DELETE FROM app_user WHERE username LIKE ?", bulkAccountPrefix + "%");
+        }
         accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear();
     }
     private long workspaceOffer() { return Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id()); }
+
+    @Test void organizationFenceClosesOnlyFiftyOffersAndTheScheduledPassDrainsTheRemainder() {
+        bulkAccountPrefix = "ownership-fence-" + unique() + "-";
+        assertEquals(57, jdbc.update("""
+            INSERT INTO app_user (username, display_name, email, email_verified, password_hash, timezone, locale)
+            WITH RECURSIVE numbers AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM numbers WHERE n < 57)
+            SELECT CONCAT(?, n), CONCAT('Fence offeree ', n), CONCAT(?, n, '@example.invalid'), TRUE, ?, 'UTC', 'en'
+            FROM numbers
+            """, bulkAccountPrefix, bulkAccountPrefix, currentUser.getPasswordHash()));
+        assertEquals(57, jdbc.update("""
+            INSERT INTO workspace_member (workspace_id, user_id, role)
+            SELECT ?, id, 'member' FROM app_user WHERE username LIKE ?
+            """, workspace.getId(), bulkAccountPrefix + "%"));
+        assertEquals(57, jdbc.update("""
+            INSERT INTO ownership_offer (org_id, workspace_id, scope_kind, offeror_user_id, offeree_user_id,
+                membership_id, created_at, expires_at, delivery_state)
+            SELECT ?, ?, 'WORKSPACE', ?, wm.user_id, wm.membership_id,
+                DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 6 DAY), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 DAY), 'NONE'
+            FROM workspace_member wm JOIN app_user u ON u.id = wm.user_id
+            WHERE wm.workspace_id = ? AND u.username LIKE ?
+            """, org.getId(), workspace.getId(), currentUser.getId(), workspace.getId(), bulkAccountPrefix + "%"));
+        assertEquals(50, ledger.fencedOrganizationOffers(org.getId(), 50).size());
+        assertEquals(57, ledger.fencedOrganizationOffers(org.getId(), 100).size());
+
+        lifecycle.markOrganizationTearingDown(org.getId(), currentUser.getId());
+        assertEquals(50, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM ownership_offer WHERE org_id = ? AND state = 'INVALIDATED'", Integer.class, org.getId()));
+        assertEquals(50, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.invalidated'", Integer.class, org.getId()));
+        List<OwnershipOffer> pending = ledger.fencedOrganizationOffers(org.getId(), 50);
+        assertEquals(7, pending.size());
+        assertEquals(7, ledger.expiredCandidates(100).stream().filter(offer -> offer.getOrgId() == org.getId()).count());
+        OwnershipOffer remaining = pending.getFirst();
+        User offeree = userMapper.getUserById(remaining.getOffereeUserId());
+        authenticateAs(offeree, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, offeree);
+        assertTrue(offers.listForSelf(offeree.getId()).isEmpty());
+        assertThrows(ConflictException.class, () -> offers.accept(remaining.getId(), offeree.getId(), false));
+        assertEquals("OPEN", ledger.findById(remaining.getId()).getState());
+        assertEquals("member", jdbc.queryForObject(
+            "SELECT role FROM workspace_member WHERE workspace_id = ? AND user_id = ?", String.class,
+            workspace.getId(), offeree.getId()));
+
+        SecurityContextHolder.clearContext();
+        new OwnershipOfferScheduler(offers, delivery).reconcile();
+        assertTrue(ledger.fencedOrganizationOffers(org.getId(), 50).isEmpty());
+        assertEquals(57, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM ownership_offer WHERE org_id = ? AND state = 'INVALIDATED'", Integer.class, org.getId()));
+        assertEquals(57, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.invalidated'", Integer.class, org.getId()));
+        assertEquals("member", jdbc.queryForObject(
+            "SELECT role FROM workspace_member WHERE workspace_id = ? AND user_id = ?", String.class,
+            workspace.getId(), offeree.getId()));
+    }
 
     @Test void organizationFenceClosesWorkspaceAndOrgOffersWithoutAnOrgToWorkspaceLockPass() {
         User workspaceTarget = newUser();

@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,7 @@ public class OwnershipOfferService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
+    private static final int FENCED_ORGANIZATION_PAGE_SIZE = 50;
     private static final Logger log = LoggerFactory.getLogger(OwnershipOfferService.class);
 
     /** Lists the authenticated offeree's unexpired, currently eligible control-plane cards. */
@@ -88,7 +90,7 @@ public class OwnershipOfferService {
             result = routed(offer, userId,
                 () -> transaction.accept(id, userId, acknowledged));
         } catch (RuntimeException failure) {
-            refusalAfterRollback(offer, "accept", failure);
+            refusalAfterRollback(offer, "accept", offer.getOffereeUserId(), failure);
             throw failure;
         }
         return tenantWorkScope.unroutedRead(() -> new OwnershipOfferAcceptanceDto(
@@ -106,7 +108,7 @@ public class OwnershipOfferService {
         try {
             routed(offer, userId, () -> { transaction.decline(id, userId); return true; });
         } catch (RuntimeException failure) {
-            refusalAfterRollback(offer, "decline", failure);
+            refusalAfterRollback(offer, "decline", offer.getOffereeUserId(), failure);
             throw failure;
         }
     }
@@ -124,7 +126,7 @@ public class OwnershipOfferService {
         try {
             routed(offer, actorId, () -> { transaction.revoke(id, actorId, kind, scopeId); return true; });
         } catch (RuntimeException failure) {
-            refusalAfterRollback(offer, "revoke", failure);
+            refusalAfterRollback(offer, "revoke", offer.getOffereeUserId(), failure);
             throw failure;
         }
     }
@@ -140,9 +142,14 @@ public class OwnershipOfferService {
         }
     }
 
-    /** Closes fenced-organization candidates individually after the parent fence commits. */
+    /**
+     * Reconciles at most 50 open offers after an organization fence commits, in individual routed
+     * transactions. Scheduled reconciliation drains the remainder; acceptance already rejects
+     * the organization fence under its scope locks before those offers are closed.
+     */
     public void invalidateFencedOrganization(int orgId) {
-        for (OwnershipOffer offer : tenantWorkScope.unroutedRead(() -> mapper.fencedOrganizationOffers(orgId))) {
+        for (OwnershipOffer offer : tenantWorkScope.unroutedRead(() ->
+                mapper.fencedOrganizationOffers(orgId, FENCED_ORGANIZATION_PAGE_SIZE))) {
             try {
                 routed(offer, offer.getOffereeUserId(), () -> { transaction.reconcile(offer.getId()); return true; });
             } catch (RuntimeException failure) {
@@ -207,7 +214,7 @@ public class OwnershipOfferService {
                 : MemberRoleChange.direct(workspaceService.assignCustomRole(workspaceId, actorId, targetId, roleId, acknowledged)));
         } catch (RuntimeException failure) {
             if ("owner".equalsIgnoreCase(role)) {
-                refusalAfterRollback(scope, "create", failure);
+                refusalAfterRollback(scope, "create", targetId, failure);
             }
             throw failure;
         }
@@ -220,15 +227,20 @@ public class OwnershipOfferService {
         requireCompatibleEnclosingTransaction();
         requireOrganizationOwner(orgId, actorId);
         OwnershipOffer scope = organizationRoute(orgId);
-        scope.setOffereeUserId(targetId == null ? actorId : targetId);
+        AtomicReference<Integer> resolvedTarget = new AtomicReference<>(targetId);
         MemberRoleChange<OrgMemberDto> result;
         try {
-            result = routed(scope, actorId, () -> targetId == null
-                ? orgMemberService.setMemberByEmail(orgId, actorId, email, role, acknowledged)
-                : orgMemberService.setMember(orgId, actorId, targetId, role, acknowledged));
+            result = routed(scope, actorId, () -> {
+                if (targetId == null) {
+                    resolvedTarget.set(null);
+                    return orgMemberService.setMemberByEmail(orgId, actorId, email, role, acknowledged,
+                        resolvedTarget::set);
+                }
+                return orgMemberService.setMember(orgId, actorId, targetId, role, acknowledged);
+            });
         } catch (RuntimeException failure) {
             if ("owner".equalsIgnoreCase(role)) {
-                refusalAfterRollback(scope, "create", failure);
+                refusalAfterRollback(scope, "create", resolvedTarget.get(), failure);
             }
             throw failure;
         }
@@ -308,14 +320,14 @@ public class OwnershipOfferService {
         };
     }
 
-    private void refusalAfterRollback(OwnershipOffer offer, String action, RuntimeException failure) {
+    private void refusalAfterRollback(OwnershipOffer offer, String action, Integer offereeId, RuntimeException failure) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            auditService.deferStrictFailureIndependentScoped("ownership.offer.refused", "user", offer.getOffereeUserId(),
+            auditService.deferStrictFailureIndependentScoped("ownership.offer.refused", "user", offereeId,
                 offer.getWorkspaceId(), offer.getOrgId(), null, "Ownership offer " + action + " refused",
                 failure.getClass().getSimpleName());
             return;
         }
-        auditService.recordStrictFailureIndependentScoped("ownership.offer.refused", "user", offer.getOffereeUserId(),
+        auditService.recordStrictFailureIndependentScoped("ownership.offer.refused", "user", offereeId,
             offer.getWorkspaceId(), offer.getOrgId(), null, "Ownership offer " + action + " refused",
             failure.getClass().getSimpleName());
     }

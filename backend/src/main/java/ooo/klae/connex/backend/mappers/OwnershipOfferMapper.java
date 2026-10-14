@@ -25,8 +25,8 @@ public interface OwnershipOfferMapper {
     List<OwnershipOffer> discoverScope(@Param("orgId") int orgId, @Param("workspaceId") Integer workspaceId);
     /** Discovers both party references and nullable closure attribution for erasure. */
     List<OwnershipOffer> discoverAccount(@Param("userId") int userId);
-    /** Discovers organization-fence invalidations for individual scope transactions. */
-    List<OwnershipOffer> fencedOrganizationOffers(@Param("orgId") int orgId);
+    /** Discovers a bounded organization-fence page for individual scope transactions. */
+    List<OwnershipOffer> fencedOrganizationOffers(@Param("orgId") int orgId, @Param("limit") int limit);
 
     /** Discovers a bounded expiry and lifecycle reconciliation sweep. */
     List<OwnershipOffer> expiredCandidates(@Param("limit") int limit);

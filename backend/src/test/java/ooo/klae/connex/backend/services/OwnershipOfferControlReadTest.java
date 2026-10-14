@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import java.util.List;
+import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntConsumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +28,7 @@ import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.dto.OwnershipOfferDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
@@ -124,8 +128,10 @@ class OwnershipOfferControlReadTest {
                     service.changeOrganizationRole(7, 1, 2, null, "admin", false);
                 }
                 case "grant-email" -> {
-                    when(orgMemberService.setMemberByEmail(7, 1, "offeree@example.test", "admin", false)).thenAnswer(invocation -> {
+                    when(orgMemberService.setMemberByEmail(eq(7), eq(1), eq("offeree@example.test"), eq("admin"), eq(false),
+                            any(IntConsumer.class))).thenAnswer(invocation -> {
                         assertEquals("destination_catalog", context.getCatalog());
+                        invocation.getArgument(5, IntConsumer.class).accept(2);
                         return MemberRoleChange.direct(null);
                     });
                     service.changeOrganizationRole(7, 1, null, "offeree@example.test", "admin", false);
@@ -140,6 +146,33 @@ class OwnershipOfferControlReadTest {
             verify(orgMemberService).requireOrgOwner(7, 1);
         }
         verify(workspaceMapper).findByOrgId(7);
+        assertOriginalSelection();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"resolved", "unresolved", "retry-unresolved"})
+    void byEmailRefusalNamesOnlyTheFinalAttemptResolvedTarget(String resolution) {
+        organizationRoute(); organizationOwnerCheck();
+        AtomicInteger attempts = new AtomicInteger();
+        BadRequestException failure = new BadRequestException("Eligibility refused");
+        when(orgMemberService.setMemberByEmail(eq(7), eq(1), eq("offeree@example.test"), eq("owner"), eq(false),
+                any(IntConsumer.class))).thenAnswer(invocation -> {
+            assertEquals("destination_catalog", context.getCatalog());
+            int attempt = attempts.incrementAndGet();
+            if ("resolved".equals(resolution) || ("retry-unresolved".equals(resolution) && attempt == 1)) {
+                invocation.getArgument(5, IntConsumer.class).accept(2);
+            }
+            if ("retry-unresolved".equals(resolution) && attempt == 1) {
+                throw new RuntimeException(new SQLException("Deadlock", "40001", 1213));
+            }
+            throw failure;
+        });
+        assertSame(failure, assertThrows(BadRequestException.class,
+            () -> service.changeOrganizationRole(7, 1, null, "offeree@example.test", "owner", false)));
+        boolean resolved = "resolved".equals(resolution);
+        verify(auditService).recordStrictFailureIndependentScoped("ownership.offer.refused", "user",
+            resolved ? 2 : null, null, 7, null, "Ownership offer create refused", "BadRequestException");
+        assertEquals("retry-unresolved".equals(resolution) ? 2 : 1, attempts.get());
         assertOriginalSelection();
     }
 

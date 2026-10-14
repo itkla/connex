@@ -169,6 +169,60 @@ class OwnershipOfferHttpIntegrationTest {
             Integer.class, org.getId(), target.getId(), action);
     }
 
+    @Test void byEmailOfferConflictAuditsTheResolvedOffereeRatherThanTheActor() throws Exception {
+        User otherOwner = account("ownership-other-owner");
+        members.addMember(org.getId(), otherOwner.getId(), "owner");
+        workspaces.addMember(workspace.getId(), otherOwner.getId(), "member");
+        String otherSession = session(otherOwner, true);
+        var created = request("PUT", "/api/orgs/" + org.getId() + "/members/" + target.getId(), otherSession,
+            "{\"orgRole\":\"owner\"}", false);
+        assertEquals(202, created.statusCode(), created.body());
+        String id = json.readTree(created.body()).path("offer").path("id").asString();
+
+        var refused = request("POST", "/api/orgs/" + org.getId() + "/members", ownerSession,
+            "{\"email\":\"" + target.getEmail() + "\",\"orgRole\":\"owner\"}", false);
+        assertEquals(409, refused.statusCode(), refused.body());
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertEquals(target.getId(), jdbc.queryForObject(
+            "SELECT entity_id FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertEquals("user", jdbc.queryForObject(
+            "SELECT entity_type FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            String.class, org.getId()));
+        assertEquals(owner.getId(), jdbc.queryForObject(
+            "SELECT actor_id FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertEquals(otherOwner.getId(), jdbc.queryForObject(
+            "SELECT offeror_user_id FROM ownership_offer WHERE id = ? AND state = 'OPEN'", Integer.class, id));
+        assertNull(members.getRole(org.getId(), target.getId()));
+    }
+
+    @Test void byEmailFailureBeforeResolutionAuditsNoSubject() throws Exception {
+        String unknown = "ownership-unknown-" + UUID.randomUUID() + "@example.invalid";
+        var refused = request("POST", "/api/orgs/" + org.getId() + "/members", ownerSession,
+            "{\"email\":\"" + unknown + "\",\"orgRole\":\"owner\"}", false);
+        assertEquals(400, refused.statusCode(), refused.body());
+        assertEquals(1, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertNull(jdbc.queryForObject(
+            "SELECT entity_id FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertNull(jdbc.queryForObject(
+            "SELECT target_label FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            String.class, org.getId()));
+        assertEquals("user", jdbc.queryForObject(
+            "SELECT entity_type FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            String.class, org.getId()));
+        assertEquals(owner.getId(), jdbc.queryForObject(
+            "SELECT actor_id FROM audit_log WHERE org_id = ? AND action = 'ownership.offer.refused'",
+            Integer.class, org.getId()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ownership_offer WHERE org_id = ?",
+            Integer.class, org.getId()));
+    }
+
     @Test void orgAbsentMembershipAndAdminChangesKeepTheirExactContracts() throws Exception {
         var direct = request("PUT", "/api/orgs/" + org.getId() + "/members/" + target.getId(), ownerSession, "{\"orgRole\":\"admin\"}", false);
         assertEquals(204, direct.statusCode(), direct.body());

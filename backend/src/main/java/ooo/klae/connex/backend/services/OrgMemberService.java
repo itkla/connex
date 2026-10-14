@@ -3,8 +3,10 @@ package ooo.klae.connex.backend.services;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.IntConsumer;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -177,6 +179,20 @@ public class OrgMemberService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public MemberRoleChange<OrgMemberDto> setMemberByEmail(
             int orgId, int actorId, String emailRaw, String roleRaw, boolean acknowledgeConfinement) {
+        return setMemberByEmail(orgId, actorId, emailRaw, roleRaw, acknowledgeConfinement, targetId -> {});
+    }
+
+    /**
+     * Captures the eligible account resolved by email for refusal attribution before taking roots.
+     * The callback only captures the local target id; it must not acquire locks or append audits.
+     * Failures before resolution do not invoke it. Authorization and mailbox rechecks remain under
+     * this READ COMMITTED transaction, as in the ordinary by-email entry point.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberRoleChange<OrgMemberDto> setMemberByEmail(
+            int orgId, int actorId, String emailRaw, String roleRaw, boolean acknowledgeConfinement,
+            IntConsumer resolvedTarget) {
+        Objects.requireNonNull(resolvedTarget, "resolvedTarget");
         if (roleRaw != null && "owner".equalsIgnoreCase(roleRaw.trim())) {
             OwnershipOfferWriter.requireReadCommitted();
         }
@@ -188,6 +204,7 @@ public class OrgMemberService {
         if (targetId == null) {
             throw notAnActiveTenant();
         }
+        resolvedTarget.accept(targetId);
         lockMembershipUserRoots(actorId, targetId);
         User fresh = userMapper.getUserByIdForShare(targetId);
         if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {

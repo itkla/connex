@@ -46,7 +46,7 @@
     WHERE offeror_user_id = #{userId} OR offeree_user_id = #{userId} OR closed_by_user_id = #{userId} ORDER BY id
   </select>
   <select id="fencedOrganizationOffers" resultType="OwnershipOffer" flushCache="true">
-    SELECT <include refid="columns"/> FROM ownership_offer WHERE org_id = #{orgId} AND state = 'OPEN' ORDER BY id
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE org_id = #{orgId} AND state = 'OPEN' ORDER BY id LIMIT #{limit}
   </select>
   <select id="expiredCandidates" resultType="OwnershipOffer" flushCache="true">
     SELECT <include refid="columns"/> FROM ownership_offer
