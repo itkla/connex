@@ -881,4 +881,57 @@ class AiChatMemoryServiceTest {
         assertTrue(replay.contains("{{M1}}"));
     }
 
+    @Test
+    void unissuedRawShortMemberSummaryPersistsProvenanceAndReplaysAfterRename() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
+        AiChatMessage early = message(101, 1, "user", "Prior discussion " + "history ".repeat(4_000));
+        AiChatMessage initiating = message(102, 2, "user", "Continue");
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(early, initiating));
+        when(fixture.persistenceService().loadCompactionCandidates(turn, 0, 2, 500)).thenReturn(List.of(early));
+        when(fixture.admissionService().acquireDirect()).thenReturn(fixture.admission());
+        when(fixture.invocationService().completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantSummary.class),
+                same(fixture.summaryGuard()), same(fixture.summarySchema().responseSchema()), same(fixture.admission()), any(Runnable.class)))
+                .thenAnswer(call -> {
+                    AiInvocation invocation = call.getArgument(0);
+                    assertFalse(promptText(invocation.prompt()).contains("Bob"));
+                    assertFalse(promptText(invocation.prompt()).contains("{{M1}}"));
+                    var rawSummary = tools.jackson.databind.json.JsonMapper.builder().build()
+                            .createObjectNode().put("summary", "Bob_team xBob");
+                    var provenance = new java.util.LinkedHashMap<String, List<String>>();
+                    ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(rawSummary, invocation.context(),
+                            (path, label) -> provenance.put(path, List.of(label)));
+                    return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantSummary("Bob_team xBob"), 0, 11, 4, "stop",
+                            provenance), Optional.empty());
+                });
+        when(fixture.persistenceService().upsertHistorySummary(same(turn), isNull(), eq(0), anyString(), anyString(), eq(11), eq(4)))
+                .thenAnswer(call -> {
+                    AiChatMessage summary = message(103, 3, "system", call.getArgument(3));
+                    summary.setStructuredJson(call.getArgument(4));
+                    return summary;
+                });
+        MaskingContext context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
+        assertEquals(List.of(), context.tokenBindings());
+        AiChatMessage summary = memory.history().getFirst();
+        assertTrue(summary.getStructuredJson().contains("\"kind\":\"member\""));
+        var metadata = tools.jackson.databind.json.JsonMapper.builder().build().readTree(summary.getStructuredJson());
+        assertEquals(0, metadata.path("identifiers").size());
+        assertEquals("Bob", metadata.path("memberIdentifiers").get(0).path("value").asString());
+        assertTrue(summary.getStructuredJson().contains("Bob"));
+        assertFalse(summary.getStructuredJson().contains("{{M1}}"));
+        MaskingContext fresh = new MaskingContext();
+        fresh.registerMemberCandidate("Renamed Bob");
+        String replay = promptText(fixture.assembler().assembleSummary(summary, List.of(), fresh, new AiChatResourceRegistry(fresh)));
+        assertFalse(replay.contains("Bob"));
+        assertTrue(replay.contains("{{M1}}"));
+    }
+
 }

@@ -305,4 +305,11 @@ class ReferenceServiceTest extends AbstractServiceTest {
                 "[Contact](person:42) (unavailable member)"));
     }
 
+    @Test
+    void readerAuthorizedMemberCandidatesKeepEncodedSourceLabelsAndDecodedLabels() {
+        assertEquals(List.of("Alice & Bob", "Pending <Name>", "Alice &amp; Bob", "Pending &lt;Name&gt;"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43"));
+    }
+
 }

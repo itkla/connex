@@ -388,8 +388,9 @@ public interface AiAssistantWriteTool {
     /**
      * Projects a stored outcome into the model's view of it.
      *
-     * <p>No record ids, undo or verification metadata enter this projection. Member labels must
-     * be declared by {@link #modelIdentifiers}; other values are server-resolved scalars,
+     * <p>No record ids, undo or verification metadata enter this projection. Server-resolved member labels must
+     * be declared by {@link #modelIdentifiers}; argument provenance is retained by the framework.
+     * Other values are server-resolved scalars,
      * workspace vocabulary such as stage and tag names, and
      * echoes of the model's own arguments such as a task description or a note title. A tool may
      * copy a field only by naming it, so a key the stored outcome gains later never reaches the

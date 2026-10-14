@@ -38,9 +38,21 @@ class AiGeneratedContentScreenTest {
                 "Compare {{P1}} with the renewal."));
     }
     @org.junit.jupiter.api.Test
-    void memberBareAndBracedPlaceholdersAreRecognized() {
-        org.junit.jupiter.api.Assertions.assertTrue(AiGeneratedContentScreen.containsBarePlaceholder("Ask M1"));
+    void memberBodiesRequireBracesInTheContextFreeScreen() {
+        org.junit.jupiter.api.Assertions.assertFalse(AiGeneratedContentScreen.containsBarePlaceholder("Ask M1"));
         org.junit.jupiter.api.Assertions.assertFalse(AiGeneratedContentScreen.containsBarePlaceholder("Ask {{M1}}"));
+    }
+
+    @Test
+    void ordinaryMemberShapedProductNamesAreVocabularyWhileBracedTokensRemainPlaceholders() {
+        String vocabulary = "Apple M1, BMW M1 and the M1 motorway";
+        org.junit.jupiter.api.Assertions.assertFalse(AiGeneratedContentScreen.containsBarePlaceholder(vocabulary));
+        org.junit.jupiter.api.Assertions.assertFalse(AiGeneratedContentScreen.containsPlaceholder(vocabulary));
+        org.junit.jupiter.api.Assertions.assertTrue(AiGeneratedContentScreen.containsPlaceholder("{{M1}}"));
+        org.junit.jupiter.api.Assertions.assertTrue(AiGeneratedContentScreen.containsBarePlaceholder("P1"));
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        org.junit.jupiter.api.Assertions.assertNull(new ooo.klae.connex.backend.ai.assistant.AiAssistantSummaryGuard()
+                .rejectionReason(mapper.createObjectNode().put("summary", vocabulary)));
     }
 
 }

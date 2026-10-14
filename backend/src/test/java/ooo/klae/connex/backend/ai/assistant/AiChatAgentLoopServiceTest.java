@@ -5057,4 +5057,73 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void inventedMemberInAStreamAutomaticallyClearsPartialFramesWithoutRepair(boolean nativeProtocol) {
+        AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
+                TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
+                AiPrivacyMode.MASKED, true);
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(streamedTurn.userMessageId());
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Summarize my pipeline");
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
+                .thenReturn(new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
+                .thenReturn(AiChatAttachmentContext.empty());
+        when(persistenceService.appendPartialBatch(
+                eq(streamedTurn), eq(0), any()))
+                .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        java.util.function.Consumer<AiInvocation> stream = invocation -> {
+            String prefix = "Visible partial answer. ".repeat(20);
+            String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + "{{M1}}");
+            int token = output.indexOf("{{M1}}");
+            invocation.streamObserver().onContentDelta(output.substring(0, token));
+            invocation.streamObserver().onContentDelta(output.substring(token));
+        };
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer>(
+                                new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Malformed<>("invented_placeholder", 2, 3, "stop"),
+                                        Optional.empty()), 2, 3, "stop", Optional.empty());
+                    });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiStructuredRepairAttempt<>(
+                                new AiStructuredOutcome.Malformed<AiAssistantStep>("invented_placeholder", 2, 3, "stop"), Optional.empty());
+                    });
+        }
+        var result = service.run(streamedTurn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+        verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
+        verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());
+        if (nativeProtocol) {
+            verify(invocationService, times(1)).completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class));
+        } else {
+            verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        }
+    }
+
 }

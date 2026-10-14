@@ -12,7 +12,7 @@ class DemaskerTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     @Test
-    void memberProvenanceComesOnlyFromReplacedTokensAtTheirExactJsonPointers() {
+    void memberTokenProvenanceRemainsExactAlongsideRawCandidateProvenance() {
         var context = new MaskingContext();
         context.tokenFor(EntityKind.MEMBER, "Bob");
         context.tokenFor(EntityKind.MEMBER, "Li");
@@ -115,6 +115,31 @@ class DemaskerTest {
         assertEquals("Alice Member", Demasker.demask(token, context).text());
         assertEquals(1, Demasker.demask("{{M99}}", context).warnings());
         assertEquals("M1", Demasker.demask("M1", context).text());
+    }
+
+    @Test
+    void rawUnissuedCandidatesProtectSummaryAndNestedArgumentProvenance() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        var tree = mapper.readTree("{\"summary\":\"xBob Bob_team\",\"args\":{\"description\":\"Ask Li\"}}");
+        var provenance = new java.util.LinkedHashMap<String, java.util.List<String>>();
+        assertEquals(0, Demasker.demaskTree(tree, context, (path, member) ->
+                provenance.computeIfAbsent(path, ignored -> new java.util.ArrayList<>()).add(member)));
+        assertEquals(java.util.Map.of("/summary", java.util.List.of("Bob"),
+                "/args/description", java.util.List.of("Li")), provenance);
+        assertEquals(java.util.List.of(), context.tokenBindings());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"{{m1}}", "｛｛Ｍ１｝｝", "{{Ｍ1}}", "{{M１}}"})
+    void noncanonicalMemberSyntaxWarnsEvenForAnExposedToken(String token) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Bob");
+        context.exposeDispatchedPayload("{{M1}}");
+        assertEquals(new Demasker.DemaskResult("[unknown reference]", 1), Demasker.demask(token, context));
+        org.junit.jupiter.api.Assertions.assertTrue(context.containsUnexposedMemberToken(token));
+        assertEquals(new Demasker.DemaskResult("Bob", 0), Demasker.demask("{{ M1 }}", context));
     }
 
 }

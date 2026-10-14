@@ -1871,4 +1871,131 @@ class AiAssistantWriteToolServiceTest {
                 declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"fallback-username\"}")));
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "false,false,create_task", "false,true,create_task", "true,false,create_task", "true,true,create_task",
+            "false,false,create_note", "false,true,create_note", "true,false,create_note", "true,true,create_note"})
+    void echoedWriteArgumentsPersistMemberProvenanceAcrossRenameAndFreshReplay(
+            boolean nativeProtocol, boolean rawLabel, String tool) throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("Ed");
+        context.registerMemberCandidate("Tas");
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        String description = "Bob_team xBob Li xLi Ed Tas";
+        if (!rawLabel) {
+            String token = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+            context.exposeDispatchedPayload(token);
+            var arguments = objectMapper.createObjectNode().put("description", token + "_team x" + token + " Li xLi Ed Tas");
+            assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(arguments, context));
+            description = arguments.get("description").asString();
+        }
+        boolean task = "create_task".equals(tool);
+        var args = objectMapper.createObjectNode().put("handle", "r1");
+        args.put(task ? "description" : "title", description);
+        if (!task) {
+            args.put("content", "Shared follow-up").put("visibility", "workspace");
+        }
+        var write = service.prepare(tool, args, resources, TURN.restrictionEpoch());
+        var provenance = objectMapper.readTree(write.argumentsJson()).path("memberIdentifiers");
+        var expectedLabels = Set.of("Bob", "Li", "Ed", "Tas");
+        var storedLabels = new java.util.HashSet<String>();
+        provenance.forEach(identifier -> storedLabels.add(identifier.path("value").asString()));
+        assertEquals(4, provenance.size());
+        assertEquals(expectedLabels, storedLabels);
+        assertFalse(write.argumentsJson().contains("{{M"));
+        if (task) {
+            doAnswer(invocation -> {
+                Task created = invocation.getArgument(0);
+                created.setId(74);
+                created.setStatus("todo");
+                return created;
+            }).when(taskService).create(any(Task.class));
+        } else {
+            doAnswer(invocation -> {
+                Note created = invocation.getArgument(0);
+                created.setId(75);
+                created.setVisibility("workspace");
+                return created;
+            }).when(noteService).create(any(Note.class));
+        }
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        var resultJson = capturedResultJson();
+        assertEquals(provenance, objectMapper.readTree(resultJson).path("memberIdentifiers"));
+        var fresh = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        fresh.registerMemberCandidate("Renamed Bob");
+        var freshResources = new AiChatResourceRegistry(fresh);
+        freshResources.register("person", 31);
+        var replayWrite = service.prepareReplay(tool, args, freshResources,
+                TURN.restrictionEpoch(), write.argumentsJson());
+        assertEquals(write.argumentsJson(), replayWrite.argumentsJson());
+        var legacyResult = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(resultJson);
+        legacyResult.remove("memberIdentifiers");
+        var replay = service.proposalResult(replayWrite, new AiAssistantToolProposal(
+                29, "executed", objectMapper.writeValueAsString(legacyResult), true));
+        assertEquals(4, replay.identifiers().size());
+        assertEquals(expectedLabels, replay.identifiers().stream().map(AiAssistantToolResult.Identifier::value)
+                .collect(java.util.stream.Collectors.toSet()));
+        assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
+        var support = new AiAssistantMaskingTestSupport(TURN.workspaceId(), 11);
+        try {
+            var assembler = new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog());
+            var turns = List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, tool, replay));
+            var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(), empty, turns, fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(), empty, turns, fresh, freshResources, AiAssistantToolCatalog.ALL);
+            var replayArgs = args.deepCopy();
+            String replayDescription = description;
+            String maskedDescription = fresh.withReplayMemberValues(List.copyOf(expectedLabels), () ->
+                    ooo.klae.connex.backend.ai.masking.MaskingEngine.maskFreeText(replayDescription, fresh));
+            var tokens = fresh.tokenBindings().stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
+            String bob = tokens.get("Bob");
+            org.junit.jupiter.api.Assertions.assertNotNull(bob);
+            replayArgs.put(task ? "description" : "title", maskedDescription);
+            var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
+                    Map.of(new AiAssistantToolCallRef(1, 0), new ooo.klae.connex.backend.ai.provider.AiToolCall(
+                            "create", tool, objectMapper.writeValueAsString(replayArgs))),
+                    fresh, budget, null).exchanges() : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+            var capture = support.captureAssistantPayload(prompt, fresh, objectMapper, nativeProtocol, exchanges,
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = objectMapper.writeValueAsString(capture.request().messages()) + objectMapper.writeValueAsString(exchanges);
+            assertFalse(payload.contains("Bob"));
+            assertTrue(payload.contains(bob + "_team x" + bob));
+            assertEquals("Bob", ooo.klae.connex.backend.ai.masking.Demasker.demask(bob, fresh).text());
+            assertTrue(payload.contains("executed"));
+            assertTrue(payload.contains(tool));
+            assertTrue(payload.contains(task ? "task" : "note"));
+            assertFalse(payload.contains("execut{{M"));
+            assertFalse(payload.contains("create_{{M"));
+            assertEquals(0, capture.warnings());
+        } finally {
+            support.releaseFixtureMocks();
+        }
+        verify(taskService, times(task ? 1 : 0)).create(any(Task.class));
+        verify(noteService, times(task ? 0 : 1)).create(any(Note.class));
+    }
+
+
+    @Test
+    void legacyResultRetainsProposalMemberProvenance() throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        var write = service.prepare("create_task", objectMapper.readTree(
+                "{\"handle\":\"r1\",\"description\":\"Bob_team xBob\"}"), resources, TURN.restrictionEpoch());
+        clearInvocations(workspaceService);
+        var replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
+                "{\"tier\":\"auto\",\"outcome\":{\"recordType\":\"task\",\"description\":\"Bob_team xBob\"}}", true));
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob")), replay.identifiers());
+        assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
+        assertEquals("Bob_team xBob", ((Map<?, ?>) replay.data().get("outcome")).get("description"));
+        verify(workspaceService, never()).getMembers(anyInt());
+    }
+
 }

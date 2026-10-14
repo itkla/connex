@@ -2755,4 +2755,18 @@ class AiInvocationServiceTest {
         assertFalse(serialized.contains("SECRET_ACCESS_KEY"));
         assertFalse(serialized.contains("/9j/"));
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "unknown,{\"owner\":\"{{M1}}\"}",
+            "assign_owner,{\"owner\":\"{{M1}}\"}",
+            "assign_owner,not-json-{{M1}}",
+            "unknown,{\"owner\":\"\\u007b\\u007bM1\\u007d\\u007d\"}"})
+    void singleInvalidNativeCallWithAnUnexposedMemberNeverEarnsRepair(String name, String arguments) {
+        var completion = completeNativeTools(1, List.of(new AiToolCall("guess", name, arguments)));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
 }

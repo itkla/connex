@@ -16,7 +16,7 @@ public final class AiGeneratedContentScreen {
     private static final Pattern BRACED_PLACEHOLDER = Pattern.compile(
             "\\{\\{\\s*[PCDEHM][1-9][0-9]*\\s*}}");
     private static final Pattern BARE_PLACEHOLDER = Pattern.compile(
-            "(?<![\\p{L}\\p{N}_])[PCDEHM][1-9][0-9]*(?![\\p{L}\\p{N}_])");
+            "(?<![\\p{L}\\p{N}_])[PCDEH][1-9][0-9]*(?![\\p{L}\\p{N}_])");
 
     private AiGeneratedContentScreen() {
     }
@@ -58,6 +58,6 @@ public final class AiGeneratedContentScreen {
     public static boolean containsPlaceholder(String content) {
         return content != null
                 && !content.isBlank()
-                && BARE_PLACEHOLDER.matcher(content).find();
+                && (BRACED_PLACEHOLDER.matcher(content).find() || BARE_PLACEHOLDER.matcher(content).find());
     }
 }

@@ -672,6 +672,18 @@ public class ReferenceService {
             }
             index = Math.max(end, next - 1);
         }
+        Set<String> normalizedLabels = Set.copyOf(labels);
+        int[] sourceEnds = matchingLabelEnds(readerVisibleContent);
+        for (int index = 0; index < readerVisibleContent.length(); index++) {
+            int end = sourceEnds[index];
+            if (end >= 0 && !isEscaped(readerVisibleContent, index)) {
+                String sourceLabel = readerVisibleContent.substring(index + 1, end);
+                if (normalizedLabels.contains(normalizeReferenceSyntax(sourceLabel))) {
+                    labels.add(sourceLabel);
+                }
+                index = end;
+            }
+        }
         return List.copyOf(new java.util.LinkedHashSet<>(labels));
     }
 

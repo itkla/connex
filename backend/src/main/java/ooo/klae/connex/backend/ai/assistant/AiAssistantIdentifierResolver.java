@@ -92,12 +92,12 @@ public class AiAssistantIdentifierResolver {
                 .map(mention -> new Identifier(
                         entityKind(mention.getKind()), identifierValue(mention)))
                 .toList());
-        for (String label : AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId))) {
-            if (MaskingEngine.containsIdentifierMention(scanText, label)) {
-                identifiers.add(new Identifier(EntityKind.MEMBER, label));
-                if (identifiers.size() > MAX_IDENTIFIERS) {
-                    throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
-                }
+        MaskingContext members = new MaskingContext();
+        AiAssistantMemberIdentifiers.seed(workspaceService.getMembers(workspaceId), members);
+        for (String label : members.memberCandidatesIn(message)) {
+            identifiers.add(new Identifier(EntityKind.MEMBER, label));
+            if (identifiers.size() > MAX_IDENTIFIERS) {
+                throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
             }
         }
         return new Resolution(resources, identifiers);
@@ -105,8 +105,13 @@ public class AiAssistantIdentifierResolver {
 
     /** Seeds every resolved name into the request-local masking dictionary. */
     public void seed(Resolution resolution, MaskingContext context) {
-        Objects.requireNonNull(resolution, "resolution").identifiers().forEach(identifier ->
-                MaskingEngine.maskField(identifier.kind(), identifier.value(), context));
+        Objects.requireNonNull(resolution, "resolution").identifiers().forEach(identifier -> {
+            if (identifier.kind() == EntityKind.MEMBER) {
+                context.registerMemberCandidate(identifier.value());
+            } else {
+                MaskingEngine.maskField(identifier.kind(), identifier.value(), context);
+            }
+        });
     }
 
     private static int positiveId(AiAssistantIdentifierMention mention) {

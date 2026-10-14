@@ -142,7 +142,7 @@ class NoteBodyReadBoundaryArchTest {
             assertTrue(body.contains("requireLimit(limit);"));
             assertTrue(body.contains("referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesBy" + kind + "Id("));
             assertTrue(body.contains("workspaceId, " + kind.toLowerCase(Locale.ROOT)
-                + "Id, workspaceService.getCurrentUserId(), limit, 0)"));
+                + "Id, workspaceService.getCurrentUserId(), limit, 0, null, includePrivateNotes)"));
         }
     }
 

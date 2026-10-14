@@ -65,8 +65,8 @@ public final class Demasker {
     }
 
     /**
-     * Demasks a tree and reports each replaced MEMBER value with its textual JSON pointer.
-     * Provenance comes from successful token replacement, independently of surrounding text.
+     * Demasks a tree and reports replaced MEMBER values and matching raw candidates at their
+     * textual JSON pointers. Exact token provenance remains independent of surrounding text.
      * @param node parsed JSON tree, mutated in place
      * @param ctx request-local masking context
      * @param memberProvenance recipient of textual-value pointers and raw member labels
@@ -121,10 +121,20 @@ public final class Demasker {
 
     private static DemaskResult demaskString(
             String masked, MaskingContext ctx, Consumer<String> memberProvenance) {
+        var refused = ctx.refusedMemberPlaceholders(masked);
+        StringBuilder canonical = new StringBuilder();
+        int sourceEnd = 0;
+        for (var span : refused) {
+            canonical.append(masked, sourceEnd, span.start()).append(UNKNOWN_REFERENCE);
+            sourceEnd = span.end();
+        }
+        canonical.append(masked, sourceEnd, masked.length());
+        masked = canonical.toString();
         Matcher matcher = TOKEN_PATTERN.matcher(masked);
         StringBuilder demasked = new StringBuilder();
         int lastEnd = 0;
-        int warnings = 0;
+        int warnings = refused.size();
+        var replacedMembers = new java.util.LinkedHashSet<String>();
         while (matcher.find()) {
             demasked.append(masked, lastEnd, matcher.start());
             String token = "{{" + matcher.group(1) + "}}";
@@ -136,11 +146,15 @@ public final class Demasker {
                 demasked.append(originalValue);
                 if (ctx.isExposedMemberToken(token)) {
                     memberProvenance.accept(originalValue);
+                    replacedMembers.add(originalValue);
                 }
             }
             lastEnd = matcher.end();
         }
         demasked.append(masked, lastEnd, masked.length());
-        return new DemaskResult(demasked.toString(), warnings);
+        String text = demasked.toString();
+        ctx.memberCandidatesIn(text).stream().filter(member -> !replacedMembers.contains(member))
+                .forEach(memberProvenance);
+        return new DemaskResult(text, warnings);
     }
 }

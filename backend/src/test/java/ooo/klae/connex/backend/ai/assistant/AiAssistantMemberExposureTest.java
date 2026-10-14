@@ -101,19 +101,13 @@ class AiAssistantMemberExposureTest {
                 ? new AiChatStreamingProgress(new AiChatQueuedTurn(7, 11, 13, 17, 19, 1, 23L, true,
                         List.of(), List.of()), persistence, context).observer(nativeProtocol) : null;
         ooo.klae.connex.backend.ai.provider.AiCompletionRequest dispatched;
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges, output, assignment, observer);
+        assertEquals(1, capture.warnings(), source + "/" + outputKind);
+        dispatched = capture.request();
         if (observer != null) {
-            AiAssistantLoopException refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class, () ->
-                    support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges, output, false, observer));
-            assertEquals("malformed_output", refused.terminalReason());
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                    () -> observer.finish("{{M1}}"));
             assertEquals("invented_placeholder", refused.detailReason());
-            dispatched = org.mockito.Mockito.mockingDetails(support.providerHarness(mapper).provider()).getInvocations().stream()
-                    .filter(call -> call.getMethod().getName().equals("completeStreaming"))
-                    .map(call -> (ooo.klae.connex.backend.ai.provider.AiCompletionRequest) call.getArgument(0))
-                    .findFirst().orElseThrow();
-        } else {
-            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges, output, assignment, null);
-            assertEquals(1, capture.warnings(), source + "/" + outputKind);
-            dispatched = capture.request();
         }
         String payload = mapper.writeValueAsString(dispatched.messages()) + mapper.writeValueAsString(exchanges);
         assertFalse(payload.contains(MEMBER));
@@ -427,6 +421,108 @@ class AiAssistantMemberExposureTest {
         String compactionPayload = mapper.writeValueAsString(compaction.getMessages());
         assertFalse(compactionPayload.contains("Bob"));
         assertTrue(compactionPayload.contains("{{M1}}_team x{{M1}}"));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void unissuedRawMemberAnswerKeepsProvenanceAfterRenameAndFreshReplay(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        var resources = new AiChatResourceRegistry(context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, List.of(), context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Bob_team xBob"), false, null);
+        assertEquals(List.of(), context.tokenBindings());
+        var provenance = capture.memberIdentifiers().getOrDefault(nativeProtocol ? "/text" : "/final/text", List.of());
+        assertEquals(List.of("Bob"), provenance);
+        var stored = new AiChatMessage();
+        stored.setAuthorKind("assistant");
+        stored.setContent("Bob_team xBob");
+        stored.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), provenance));
+        var fresh = new MaskingContext();
+        fresh.registerMemberCandidate("Renamed Bob");
+        var freshResources = new AiChatResourceRegistry(fresh);
+        var replay = nativeProtocol
+                ? assembler.assembleNative(List.of(stored), empty, List.of(), fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(stored), empty, List.of(), fresh, freshResources, AiAssistantToolCatalog.ALL);
+        var replayed = support.captureAssistantPayload(replay, fresh, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(replayed.request().messages());
+        assertFalse(payload.contains("Bob"));
+        assertTrue(payload.contains("{{M1}}_team x{{M1}}"));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,{{m1}}", "true,{{m1}}", "false,｛｛Ｍ１｝｝", "true,｛｛Ｍ１｝｝"})
+    void noncanonicalMemberOutputIsNeverSilentlyRetained(boolean nativeProtocol, String token) throws Exception {
+        var context = new MaskingContext();
+        var result = new AiAssistantToolResult(Map.of("owner", MEMBER), List.of(new Identifier("member", MEMBER)));
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, token), false, null);
+        assertEquals(1, capture.warnings());
+        assertEquals("invented_placeholder", capture.refusalReason());
+        assertFalse(capture.repairPresent());
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        assertFalse(Demasker.demask(token, context).text().contains(token));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void encodedReaderVisibleReferenceLabelsAreMaskedInActualPayload(boolean nativeProtocol) throws Exception {
+        String text = "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43";
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(text, context);
+        var result = new AiAssistantToolResult(Map.of("description", text),
+                AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("Alice"));
+        assertFalse(payload.contains("Pending"));
+        assertEquals(0, capture.warnings());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void recordedContainmentPreservesFixedToolResultVocabularyByPosition(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        var result = new AiAssistantToolResult(Map.of("tool", "create_task", "tier", "auto", "status", "executed",
+                "outcome", Map.of("recordType", "task", "description", "Ask Ed and Tas")),
+                List.of(new Identifier("member", "Ed"), new Identifier("member", "Tas")));
+        var turns = List.of(ToolTurn.soleCall(1, "create_task", result));
+        var resources = new AiChatResourceRegistry(context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, turns, context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, turns, context, resources, AiAssistantToolCatalog.ALL);
+        var exchanges = nativeProtocol ? assembler.nativeReplay(turns, Map.of(new AiAssistantToolCallRef(1, 0),
+                new AiToolCall("create", "create_task", "{\"handle\":\"r1\",\"description\":\"Ask {{M1}} and {{M2}}\"}")),
+                context, budget, null).exchanges() : List.<AiToolExchange>of();
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages()) + mapper.writeValueAsString(exchanges);
+        assertTrue(payload.contains("executed"));
+        assertTrue(payload.contains("create_task"));
+        assertTrue(payload.contains("Ask {{M1}} and {{M2}}"));
+        assertFalse(payload.contains("execut{{M"));
+        assertFalse(payload.contains("create_{{M"));
+        assertEquals(0, capture.warnings());
     }
 
 }

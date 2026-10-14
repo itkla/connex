@@ -62,8 +62,8 @@ cross-kind deduplication rule. No member resource handle or new model-visible re
 Before memory preparation or compaction, the loop registers every active member label from the
 exact current workspace through `WorkspaceService.getMembers`. Directory labels are match
 candidates, not reversible bindings, and the directory is never serialized to a provider. Queue-time
-member mentions use the same canonical mention gate and combined 20-identifier limit as record
-mentions, without adding resources. Directory read failures abort before provider dispatch; the
+member provenance records every contained known label within the combined 20-identifier limit,
+without adding resources; record mentions retain their existing canonical mention gate. Directory read failures abort before provider dispatch; the
 candidate dictionary is never truncated and a failed masked request is never retried unmasked.
 Approved `UNMASKED` disclosure retains its existing posture.
 
@@ -71,23 +71,29 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels. Full assistant note reads bypass display previews so a label cannot be cut before this
-boundary. These reads retain the existing SQL workspace/reader predicates and the assistant history
-limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
+labels, including both authored HTML-entity spellings and decoded labels. Full assistant note reads bypass display previews so a label cannot be cut before this
+boundary. Shared sessions exclude private notes in SQL before the result limit, including company
+notes; private sessions retain the requester's own private notes. These reads retain the existing
+workspace/reader predicates and assistant history limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
 
 `AiAssistantWriteTool.modelIdentifiers` is a pure stored-outcome projection. `assign_owner` declares
 the committed owner label as MEMBER provenance, excluding the removal sentinel. Fresh execution
 and replay use that same label without a new directory lookup, including after rename or
 offboarding. Member cards and raw stored write outcomes retain their existing content. Final answer
-metadata stores raw member labels captured from tokens actually replaced while demasking its text,
-and summary metadata captures the same provenance from summary demasking, within the existing count
-and value-length limits. Readers reseed that provenance for ordinary history and compaction under
+metadata stores both exact member replacements captured during demasking and every known member
+candidate contained in the persisted raw text, even when no token was allocated or exposed. Summary
+metadata follows the same rule, within the existing count and value-length limits. All echoing write
+tools retain raw argument provenance in their server-authored durable envelope and restore it from
+both stored proposal and result on replay, without changing public arguments, outcomes or cards.
+Proposal provenance remains available when an older binary writes its older result format. Readers reseed that provenance for ordinary history and compaction under
 a fresh masking context; no token binding is persisted. In that stored message only, every recorded
 member label is replaced and leak-scanned by containment, regardless of label length or adjacency.
 Only matches aligned with complete source characters receive reversible tokens. A containment match
 that cuts through a character's compatibility expansion irreversibly redacts its complete source
 span with `[redacted]`, so demasking cannot replace unmatched characters. Other labels and other
-messages retain ordinary short-label word boundaries.
+messages retain ordinary short-label word boundaries. Tool-result containment and leak checks
+operate per tenant-bearing textual value; fixed tool, tier, status and record-type fields retain
+their ordinary matching rules.
 
 Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
 member tokens present in the final payload after screening, budgeting and truncation. Only tokens
@@ -100,12 +106,18 @@ the outbound scan, including short Unicode names, with the replacer's matching r
 apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
 separate pre-existing issue.
 
-Provider-authored output is checked for unexposed MEMBER tokens before schema validation or
-repair retention. Such output cannot earn a repair payload or exposure through replay. Static server
+Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
+MEMBER tokens before envelope/schema validation or repair retention. Noncanonical lowercase or
+NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
+syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
+on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
+reset through the transport. Context-free bare-placeholder checks require braces for MEMBER, so
+ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
 Field projections are built once and reused across the complete candidate dictionary. Provenance
-comes from successful demasking rather than a rescan of the result, so joined short labels such as
-`Bob_team` and `xBob` retain protection after a rename and a fresh-context replay.
+includes exact demask replacements independently of adjacency, supplemented by all matching raw
+candidates, so joined short labels such as `Bob_team` and `xBob` retain protection after a rename
+and a fresh-context replay. Exposure controls demasking only, never replay provenance.
 
 Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
 Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary

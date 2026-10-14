@@ -571,7 +571,7 @@ public class AiAssistantToolExecutor {
         }
         seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
-            List<Note> notes = historyService.notesForPerson(person.getId(), MAX_NOTES);
+            List<Note> notes = historyService.notesForPerson(person.getId(), MAX_NOTES, includePrivateNotes);
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
                             notes,
@@ -602,7 +602,7 @@ public class AiAssistantToolExecutor {
         if (includeNotes) {
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            historyService.notesForCompany(company.getId(), MAX_NOTES),
+                            historyService.notesForCompany(company.getId(), MAX_NOTES, includePrivateNotes),
                             Note::getPerson,
                             Note::getReferences,
                             resources.maskingContext())
@@ -657,7 +657,7 @@ public class AiAssistantToolExecutor {
         if (includeNotes) {
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            historyService.notesForDeal(deal.getId(), MAX_NOTES),
+                            historyService.notesForDeal(deal.getId(), MAX_NOTES, includePrivateNotes),
                             Note::getPerson,
                             Note::getReferences,
                             resources.maskingContext())

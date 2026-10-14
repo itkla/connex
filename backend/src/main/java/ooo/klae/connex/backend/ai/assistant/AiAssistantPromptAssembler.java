@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
+import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
@@ -35,6 +36,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 @RequiredArgsConstructor
 public class AiAssistantPromptAssembler {
+    private static final Set<String> FIXED_TOOL_RESULT_FIELDS = Set.of("tool", "tier", "status", "recordType");
     private static final int MAX_USER_IDENTIFIERS = 20;
     private static final int MAX_SUMMARY_IDENTIFIERS = 200;
     private static final int MAX_SUMMARY_IDENTIFIER_CHARS = 1_000;
@@ -1104,11 +1106,38 @@ public class AiAssistantPromptAssembler {
                 && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
         JsonNode rendered = statesTheActiveSet
                 ? requireDeclaredVocabulary(payload)
-                : maskStrings(payload, context);
+                : maskToolStrings(payload, context, turn.result().identifiers().stream()
+                        .filter(identifier -> "member".equals(identifier.kind()))
+                        .map(Identifier::value).toList(), false);
         if (!(rendered instanceof ObjectNode object)) {
             throw new IllegalStateException("Assistant tool result payload is invalid");
         }
         return object;
+    }
+
+    /** Scopes recorded containment to tenant values, retaining ordinary rules for fixed envelope values. */
+    private JsonNode maskToolStrings(JsonNode node, MaskingContext context, List<String> members, boolean fixedValue) {
+        if (node.isString()) {
+            return context.withReplayMemberValues(fixedValue ? List.of() : members, () -> {
+                String masked = MaskingEngine.maskTemporal(node.asString(), context);
+                OutboundLeakScan.assertNoLeakInServerEnvelope(objectMapper.writeValueAsString(masked), context, objectMapper);
+                return objectMapper.getNodeFactory().textNode(masked);
+            });
+        }
+        if (node instanceof ObjectNode object) {
+            ObjectNode masked = objectMapper.createObjectNode();
+            object.properties().forEach(entry -> masked.set(entry.getKey(), maskToolStrings(entry.getValue(), context,
+                    members, FIXED_TOOL_RESULT_FIELDS.contains(entry.getKey()))));
+            return masked;
+        }
+        if (node instanceof ArrayNode array) {
+            ArrayNode masked = objectMapper.createArrayNode();
+            for (JsonNode child : array) {
+                masked.add(maskToolStrings(child, context, members, false));
+            }
+            return masked;
+        }
+        return node;
     }
 
     private JsonNode requireDeclaredVocabulary(JsonNode node) {

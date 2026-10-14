@@ -568,6 +568,18 @@ public class AiInvocationService {
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         List<AiToolCall> calls = result.toolCalls();
+        for (AiToolCall call : calls) {
+            JsonNode decoded = null;
+            try {
+                decoded = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                decoded = null;
+            }
+            if (invocation.context().containsUnexposedMemberToken(call.arguments())
+                    || decoded != null && invocation.context().containsUnexposedMemberToken(decoded.toString())) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", 1);
+            }
+        }
         if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_multiple_calls",

@@ -113,7 +113,7 @@ class MaskingContextTest {
         assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Shared Label"));
         context.registerMemberCandidate("Shared Label");
         assertEquals("{{P1}}", context.tokenFor(EntityKind.MEMBER, "Shared Label"));
-        assertEquals(List.of(), demaskedMembers(context, "{{P1}} handled it"));
+        assertEquals(List.of("Shared Label"), demaskedMembers(context, "{{P1}} handled it"));
         context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
         assertEquals(List.of("Shared Label"), demaskedMembers(context, "{{P1}} handled it"));
         assertEquals(List.of(), demaskedMembers(context, "A different answer"));

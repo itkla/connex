@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.masking;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -26,6 +27,8 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 public final class MaskingContext {
     private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
     private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
+    private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([Mm][1-9][0-9]*)\\s*}}");
+    private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
@@ -145,23 +148,59 @@ public final class MaskingContext {
      * The identity source map preserves doubled braces that ordinary prose canonicalization cancels.
      */
     public boolean containsUnexposedMemberToken(String text) {
-        String normalized = java.text.Normalizer.normalize(Objects.requireNonNull(text, "text"),
-                java.text.Normalizer.Form.NFKC);
-        int[] starts = new int[normalized.length()];
-        int[] ends = new int[normalized.length()];
-        for (int index = 0; index < normalized.length(); index++) {
-            starts[index] = index;
-            ends[index] = index + 1;
-        }
-        String labels = ConversationText.projectLabels(new CanonicalText.Projection(normalized, starts, ends)).value();
-        var matcher = DISPATCHED_TOKEN.matcher(labels.toUpperCase(java.util.Locale.ROOT));
-        while (matcher.find()) {
-            if (matcher.group(1).startsWith("M")
-                    && demaskableValueForToken("{{" + matcher.group(1) + "}}") == null) {
-                return true;
+        return !refusedMemberPlaceholders(text).isEmpty();
+    }
+
+    /** Source spans whose spelling or exposure cannot be demasked by the canonical token parser. */
+    List<PlaceholderSpan> refusedMemberPlaceholders(String text) {
+        Objects.requireNonNull(text, "text");
+        StringBuilder normalized = new StringBuilder();
+        List<Integer> starts = new ArrayList<>();
+        List<Integer> ends = new ArrayList<>();
+        var units = SOURCE_GRAPHEME.matcher(text);
+        while (units.find()) {
+            String unit = java.text.Normalizer.normalize(units.group(), java.text.Normalizer.Form.NFKC);
+            normalized.append(unit);
+            for (int index = 0; index < unit.length(); index++) {
+                starts.add(units.start());
+                ends.add(units.end());
             }
         }
-        return false;
+        var labels = ConversationText.projectLabels(new CanonicalText.Projection(normalized.toString(),
+                starts.stream().mapToInt(Integer::intValue).toArray(),
+                ends.stream().mapToInt(Integer::intValue).toArray()));
+        var matcher = MEMBER_PLACEHOLDER.matcher(labels.value());
+        List<PlaceholderSpan> refused = new ArrayList<>();
+        while (matcher.find()) {
+            int start = labels.starts()[matcher.start()];
+            int end = labels.ends()[matcher.end() - 1];
+            var literal = DISPATCHED_TOKEN.matcher(text.substring(start, end));
+            if (!literal.matches() || !literal.group(1).equals(matcher.group(1).toUpperCase(java.util.Locale.ROOT))
+                    || demaskableValueForToken("{{" + matcher.group(1).toUpperCase(java.util.Locale.ROOT) + "}}") == null) {
+                refused.add(new PlaceholderSpan(start, end));
+            }
+        }
+        return List.copyOf(refused);
+    }
+
+    record PlaceholderSpan(int start, int end) {
+    }
+
+    /**
+     * Captures every known member label contained in persisted raw text, including unissued
+     * candidates. Exposure controls re-identification, never protection of future replay.
+     */
+    public List<String> memberCandidatesIn(String text) {
+        Objects.requireNonNull(text, "text");
+        if (memberIdentifierValues.isEmpty() || text.isBlank()) {
+            return List.of();
+        }
+        var input = MaskingEngine.screenText(text);
+        return rawIdentifierEntries.values().stream()
+                .filter(entry -> isMemberIdentifier(entry.rawValue()))
+                .filter(entry -> entry.replacementEligible() && input.literal().value().contains(entry.canonicalValue())
+                        || entry.labelEligible() && input.labels().value().contains(entry.labelValue()))
+                .map(IdentifierEntry::rawValue).toList();
     }
 
     String demaskableValueForToken(String token) {
@@ -170,7 +209,7 @@ public final class MaskingContext {
     }
 
     /** Applies containment only while masking and scanning the one message owning this provenance. */
-    <T> T withReplayMemberValues(List<String> values, Supplier<T> work) {
+    public <T> T withReplayMemberValues(List<String> values, Supplier<T> work) {
         Set<String> previous = replayMemberValues;
         replayMemberValues = Set.copyOf(values);
         try {

@@ -1238,4 +1238,31 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             ooo.klae.connex.backend.beans.Task task, String suffix) {
     }
 
+    @Test
+    void sharedNoteQueriesExcludePrivateRowsBeforeApplyingTheLimit() {
+        Company company = newCompany("Privacy parent");
+        Person person = newPerson(company, "Privacy contact");
+        String username = "privacy-" + unique();
+        jdbc.update("INSERT INTO app_user (username, display_name, email, password_hash, timezone) "
+                + "VALUES (?, 'Privacy actor', ?, 'fixture-hash', 'UTC')", username, username + "@example.test");
+        var actor = userMapper.getUserByUsername(username);
+        jdbc.update("INSERT INTO note (workspace_id, person_id, author_id, visibility, title, content, created_at, updated_at) "
+                + "SELECT ?, ?, ?, IF(sequence.n < 12, 'private', 'workspace'), CONCAT('note-', sequence.n), 'Visible prose', "
+                + "TIMESTAMP('2026-10-13') - INTERVAL sequence.n MINUTE, "
+                + "TIMESTAMP('2026-10-13') - INTERVAL sequence.n MINUTE "
+                + "FROM (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 "
+                + "UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 "
+                + "UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL SELECT 13) sequence",
+                workspace.getId(), person.getId(), actor.getId());
+        assertEquals(2, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0, null, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0, null, true).size());
+        assertEquals(2, noteMapper.getAiAssistantVisibleNotesByCompanyId(workspace.getId(), company.getId(), actor.getId(),
+                List.of(workspace.getId()), 10, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0).size());
+        Deal deal = newDeal(company, "Privacy deal");
+        jdbc.update("UPDATE note SET deal_id = ? WHERE workspace_id = ? AND person_id = ?", deal.getId(), workspace.getId(), person.getId());
+        assertEquals(2, noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), actor.getId(), 10, 0, null, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), actor.getId(), 10, 0, null, true).size());
+    }
+
 }
