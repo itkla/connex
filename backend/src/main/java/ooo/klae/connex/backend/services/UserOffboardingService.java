@@ -114,6 +114,8 @@ public class UserOffboardingService {
     private final TenantContext tenantContext;
     private final SequenceMapper sequenceMapper;
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
+    private final OwnershipOfferWriter ownershipOfferWriter;
+    private final ooo.klae.connex.backend.mappers.OrganizationMapper ownershipOfferOrganizationMapper;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -177,7 +179,11 @@ public class UserOffboardingService {
     }
 
     private void prepareFreshMembershipInWorkspace(int workspaceId, int userId) {
+        int orgId = Objects.requireNonNull(tenantContext.getOrgId(), "fresh membership organization");
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
+            ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
+            ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
+            ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
             providerCapturePurgeService.purge(
                 workspaceId, userId, ConnectedAccountProviders.GOOGLE);
             providerCapturePurgeService.purge(
@@ -255,6 +261,14 @@ public class UserOffboardingService {
      * @param userId the departing member
      */
     public void detachMemberContent(int workspaceId, int userId) {
+        Integer orgId = tenantContext.isResolved() && Integer.valueOf(workspaceId).equals(tenantContext.getWorkspaceId())
+            ? tenantContext.getOrgId() : workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null) {
+            throw new ooo.klae.connex.backend.exceptions.ResourceNotFoundException("Workspace not found");
+        }
+        ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
+        ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
+        ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
         providerCapturePurgeService.purge(
             workspaceId, userId, ConnectedAccountProviders.GOOGLE);
         providerCapturePurgeService.purge(

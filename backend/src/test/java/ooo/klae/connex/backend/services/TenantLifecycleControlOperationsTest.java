@@ -55,7 +55,7 @@ class TenantLifecycleControlOperationsTest {
 
     @BeforeEach
     void setUp() {
-        operations = new TenantLifecycleControlOperations(mapper, userMapper);
+        operations = new TenantLifecycleControlOperations(mapper, userMapper, org.mockito.Mockito.mock(OwnershipOfferWriter.class), org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
     }
 

@@ -19,6 +19,8 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.tenant.Permission;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Shareable invite links: creation/revocation are MEMBER_MANAGE-gated; redemption joins the
@@ -61,6 +63,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
             () -> inviteLinkService.createLink(workspace.getId(), member, "member", null, null));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberManageDelegateCanCreateMemberLinkButNotAdminLink() {
         User delegate = newUser();
@@ -85,6 +88,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
                 workspace.getId(), delegate, "admin", null, null));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_joinsUserWithLinkRole() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "admin", null, null);
@@ -96,6 +100,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
         assertEquals("admin", workspaceMapper.getRole(workspace.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_revalidatesCreatorsCurrentGrantAuthority() {
         tenantContext.clear();
@@ -123,6 +128,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
         assertFalse(workspaceMapper.isMember(ws.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_revoked_rejected() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
@@ -132,6 +138,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
             () -> inviteLinkService.redeemLink(link.getToken(), outsider()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_honorsMaxUses() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, 1);
@@ -141,6 +148,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
             () -> inviteLinkService.redeemLink(link.getToken(), outsider()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_sameUserTwice_isIdempotent() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, 1);
@@ -152,6 +160,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_afterRemoval_doesNotBypassMaxUses() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, 1);
@@ -164,6 +173,7 @@ class InviteLinkServiceTest extends AbstractServiceTest {
         assertFalse(workspaceMapper.isMember(workspace.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_afterRemoval_revokedLink_rejected() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);

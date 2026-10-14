@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The domain allowlist gates invite-LINK redemption (the broad self-serve channel): a user whose
@@ -32,6 +34,7 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
         return u;
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_blockedWhenDomainNotAllowlisted() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
@@ -41,6 +44,7 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
             () -> inviteLinkService.redeemLink(link.getToken(), outsiderWithDomain("other.com")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_allowedWhenDomainOnAllowlist() {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
@@ -52,6 +56,7 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), user.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeem_allowedWhenNoAllowlist() {
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);

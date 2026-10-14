@@ -51,6 +51,7 @@ class WorkspaceControllerTest {
     void setUp() {
         controller = new WorkspaceController(
             workspaceService,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.services.OwnershipOfferService.class),
             attestationService,
             inviteService,
             inviteLinkService,

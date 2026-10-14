@@ -174,3 +174,7 @@ in for persistence proof.
 - CI runs with `retries: 2` and uploads **traces + screenshots + the HTML report** on failure; locally retries are 0 so flake is visible, not hidden.
 - A test that flakes repeatedly gets fixed or quarantined with `test.fixme()` plus a linked issue — never a lengthened timeout as a "fix", and never deleted silently.
 - The CI job (`Frontend — unit & e2e` in `.github/workflows/ci.yml`) is a **required check** on `main` (#853, graduated in 735d885a). A failure there blocks merges, so every step in that job has to stay deterministic.
+
+## Ownership-offer confinement parity
+
+Slice 4o changes only the shared API confinement gate in this backend lane. Run `pnpm exec vitest run test/unit/passkeyApprovalApi.test.ts` for exact server/client method/path allowlist parity. Authenticated `GET /api/ownership-offers` and self-only `POST /api/ownership-offers/{id}/decline` remain reachable while confined; acceptance, creation and revocation require the normal privileged gate. The frontend implementation owns card/member-panel and browser coverage against [the actual backend contract](backend/OWNERSHIP_OFFERS.md). Shared/default-catalog inbox tests retain ordinary notification behavior; the self-offer card is authoritative on every catalog layout.

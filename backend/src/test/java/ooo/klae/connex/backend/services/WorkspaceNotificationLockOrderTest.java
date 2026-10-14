@@ -71,6 +71,20 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AccountDeletionReservationRead accountDeletionReservationRead;
     @Mock private RegistrationVerificationService registrationVerificationService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void ownershipTransactionContext() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+            java.sql.Connection.TRANSACTION_READ_COMMITTED);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearOwnershipTransactionContext() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
 
     private void runMembershipRemovalWork() {
@@ -229,7 +243,13 @@ class WorkspaceNotificationLockOrderTest {
         stubOwnerActor();
         stubRoleMutationTarget("member");
 
-        service.changeMemberRole(7, 1, 9, "owner");
+        when(workspaceMapper.getActiveById(7)).thenReturn(workspace(7, 3));
+        when(organizationMapper.lockActiveByIdForShare(3)).thenReturn(3);
+        when(ownershipOfferWriter.createLocked(3, 7, 1, 9)).thenReturn(
+            new ooo.klae.connex.backend.dto.OwnershipOfferDto("101", "WORKSPACE", 3, 7, 1, 9, "OPEN",
+                "2026-10-13T00:00:00Z", "2026-10-20T00:00:00Z", null, null, null, null, null, null, null));
+        var result = service.changeMemberRole(7, 1, 9, "owner");
+        assertEquals("101", result.offer().id());
 
         InOrder order = inOrder(workspaceMapper, userMapper, sessionSecurityService);
         order.verify(workspaceMapper).getMemberRoleId(7, 1);
@@ -240,7 +260,8 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(workspaceMapper).lockWorkspace(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 1);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
-        order.verify(workspaceMapper).updateMemberRole(7, 9, "owner");
+        verify(ownershipOfferWriter).createLocked(3, 7, 1, 9);
+        verify(workspaceMapper, never()).updateMemberRole(7, 9, "owner");
     }
 
     @Test

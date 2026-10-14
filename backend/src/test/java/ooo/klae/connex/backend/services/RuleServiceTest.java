@@ -39,6 +39,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RuleServiceTest extends AbstractServiceTest {
 
@@ -106,6 +108,7 @@ class RuleServiceTest extends AbstractServiceTest {
             "run-as must stay the original creator, not the editor");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void create_actionPermissionGate_blocksUnprivilegedManager() {
         User restricted = newUser();

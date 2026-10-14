@@ -37,6 +37,7 @@ class RoleServiceLockOrderTest {
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private PrivilegedAccountService privilegedAccountService;
 
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private RoleService service;
 
     @Test

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OwnershipOfferMapper">
+  <sql id="columns">id, org_id, workspace_id, scope_kind, scope_id, offeror_user_id,
+    offeree_user_id, membership_id, state, created_at, expires_at, closed_at,
+    closed_by_user_id, closure_reason, delivery_state, delivery_workspace_id, delivery_membership_id</sql>
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ownership_offer (org_id, workspace_id, scope_kind, offeror_user_id, offeree_user_id,
+      membership_id, delivery_workspace_id, delivery_membership_id, delivery_state, created_at, expires_at)
+    VALUES (#{orgId}, #{workspaceId}, #{scopeKind}, #{offerorUserId}, #{offereeUserId}, #{membershipId}, #{deliveryWorkspaceId}, #{deliveryMembershipId}, #{deliveryState},
+      UTC_TIMESTAMP(6), DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 7 DAY))
+  </insert>
+  <select id="findById" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE id = #{id}
+  </select>
+  <select id="lockById" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE id = #{id} FOR UPDATE
+  </select>
+  <select id="lockByIdForShare" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE id = #{id} FOR SHARE
+  </select>
+  <select id="lockOpen" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE scope_kind = #{scopeKind} AND scope_id = #{scopeId}
+      AND offeree_user_id = #{offereeUserId} AND open_slot = 1 FOR UPDATE
+  </select>
+  <select id="listForOfferee" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE offeree_user_id = #{userId} AND state = 'OPEN' AND expires_at &gt; UTC_TIMESTAMP(6) ORDER BY id
+  </select>
+  <select id="listForScope" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE scope_kind = #{scopeKind} AND scope_id = #{scopeId}
+      AND state = 'OPEN' AND expires_at &gt; UTC_TIMESTAMP(6) ORDER BY id
+  </select>
+  <select id="discoverScope" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE org_id = #{orgId} AND state = 'OPEN'
+    <choose>
+      <when test="workspaceId != null">AND workspace_id = #{workspaceId}</when>
+      <otherwise>AND workspace_id IS NULL</otherwise>
+    </choose>
+    ORDER BY id
+  </select>
+  <select id="discoverAccount" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE offeror_user_id = #{userId} OR offeree_user_id = #{userId} OR closed_by_user_id = #{userId} ORDER BY id
+  </select>
+  <select id="fencedOrganizationOffers" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer WHERE org_id = #{orgId} AND state = 'OPEN' ORDER BY id
+  </select>
+  <select id="expiredCandidates" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE state = 'OPEN' AND (expires_at &lt;= UTC_TIMESTAMP(6)
+      OR EXISTS (SELECT 1 FROM organization o WHERE o.id = ownership_offer.org_id AND o.lifecycle_state &lt;&gt; 'active')
+      OR EXISTS (SELECT 1 FROM workspace w WHERE w.id = ownership_offer.workspace_id AND w.lifecycle_state &lt;&gt; 'active'))
+    ORDER BY expires_at, id LIMIT #{limit}
+  </select>
+  <select id="deliveryCandidates" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE state = 'OPEN' AND delivery_state = 'PENDING' AND expires_at &gt; UTC_TIMESTAMP(6) ORDER BY id LIMIT #{limit}
+  </select>
+  <update id="accept">
+    UPDATE ownership_offer SET state = 'ACCEPTED', closed_at = UTC_TIMESTAMP(6),
+      closed_by_user_id = #{offereeUserId}, closure_reason = 'accepted'
+    WHERE id = #{id} AND offeree_user_id = #{offereeUserId} AND state = 'OPEN' AND expires_at &gt; UTC_TIMESTAMP(6)
+  </update>
+  <update id="close">
+    UPDATE ownership_offer SET state = #{state}, closed_at = UTC_TIMESTAMP(6),
+      closed_by_user_id = #{actorId}, closure_reason = #{reason}
+    WHERE id = #{id} AND state = 'OPEN'
+  </update>
+  <select id="isExpired" resultType="boolean" flushCache="true">
+    SELECT expires_at &lt;= UTC_TIMESTAMP(6) FROM ownership_offer WHERE id = #{id}
+  </select>
+  <select id="findDeliveryWorkspace" resultType="java.lang.Integer" flushCache="true">
+    SELECT w.id FROM workspace w JOIN workspace_member wm ON wm.workspace_id = w.id
+    WHERE w.org_id = #{orgId} AND w.lifecycle_state = 'active'
+      AND wm.user_id = #{offereeUserId} AND wm.status = 'active' ORDER BY w.id LIMIT 1
+  </select>
+  <update id="markDelivered">
+    UPDATE ownership_offer SET delivery_state = 'DELIVERED', delivery_workspace_id = #{workspaceId},
+      delivery_membership_id = #{membershipId} WHERE id = #{id} AND state = 'OPEN'
+      AND expires_at &gt; UTC_TIMESTAMP(6) AND delivery_state = 'PENDING'
+  </update>
+  <update id="clearClosureActor">
+    UPDATE ownership_offer SET closed_by_user_id = NULL WHERE id = #{id} AND closed_by_user_id = #{userId}
+  </update>
+  <delete id="deletePartyReference">
+    DELETE FROM ownership_offer WHERE id = #{id} AND state &lt;&gt; 'OPEN'
+      AND (offeror_user_id = #{userId} OR offeree_user_id = #{userId})
+  </delete>
+  <select id="hasOtherQualifyingTenancy" resultType="boolean" flushCache="true">
+    SELECT EXISTS(SELECT 1 FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId})
+      OR EXISTS(SELECT 1 FROM workspace_member wm JOIN workspace w ON w.id = wm.workspace_id
+        WHERE w.org_id = #{orgId} AND w.lifecycle_state = 'active'
+          AND wm.user_id = #{userId} AND wm.status = 'active' AND wm.workspace_id &lt;&gt; #{excludedWorkspaceId})
+  </select>
+  <select id="workspaceReferences" resultType="OwnershipOffer" flushCache="true">
+    SELECT <include refid="columns"/> FROM ownership_offer
+    WHERE workspace_id = #{workspaceId} OR delivery_workspace_id = #{workspaceId} ORDER BY id
+  </select>
+  <update id="clearDeliveryWorkspace">
+    UPDATE ownership_offer SET delivery_workspace_id = NULL, delivery_membership_id = NULL, delivery_state = 'NONE'
+    WHERE id = #{id} AND delivery_workspace_id = #{workspaceId}
+  </update>
+  <select id="countWorkspaceReferences" resultType="long" flushCache="true">
+    SELECT COUNT(*) FROM ownership_offer WHERE workspace_id = #{workspaceId} OR delivery_workspace_id = #{workspaceId}
+  </select>
+  <select id="workspaceRootExists" resultType="boolean" flushCache="true">
+    SELECT EXISTS(SELECT 1 FROM workspace WHERE id = #{workspaceId})
+  </select>
+  <update id="bumpExistingNoticeStateVersion">
+    UPDATE notification_recipient_state SET state_version = state_version + 1 WHERE recipient_id = #{recipientId}
+  </update>
+</mapper>

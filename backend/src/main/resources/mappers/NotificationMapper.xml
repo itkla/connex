@@ -643,6 +643,7 @@
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
       AND n.id = #{id}
+      AND (n.type &lt;&gt; 'ownership.offer' OR n.resolved_at IS NULL)
       AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
   </update>
 
@@ -703,6 +704,7 @@
     WHERE <include refid="inboxScope"/>
       AND <include refid="contentAccessible"/>
       AND <include refid="contextAccessible"/>
+      AND n.type &lt;&gt; 'ownership.offer'
       AND n.id &lt;= #{cutoffId}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
@@ -1130,4 +1132,18 @@
     UPDATE notification SET actor_id = NULL WHERE actor_id = #{userId}
   </update>
 
+  <update id="resolveOwnershipOffer">
+    UPDATE notification SET resolved_at = COALESCE(resolved_at, UTC_TIMESTAMP(6)),
+      snoozed_until = NULL, snooze_timezone = NULL
+    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+      AND type = 'ownership.offer' AND source_type IS NULL AND source_id IS NULL
+      AND context_type IS NULL AND context_id IS NULL
+      AND dedupe_key = CONCAT('ownership.offer:', #{offerId}) AND resolved_at IS NULL
+  </update>
+  <delete id="deleteOwnershipOffer">
+    DELETE FROM notification WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+      AND type = 'ownership.offer' AND source_type IS NULL AND source_id IS NULL
+      AND context_type IS NULL AND context_id IS NULL
+      AND dedupe_key = CONCAT('ownership.offer:', #{offerId})
+  </delete>
 </mapper>

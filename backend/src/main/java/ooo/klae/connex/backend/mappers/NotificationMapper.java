@@ -397,4 +397,12 @@ public interface NotificationMapper {
      * SET NULL (#440 increment 3).
      */
     int clearActorAnywhere(@Param("userId") int userId);
+    /** Resolves an ownership notice under its offer X lock in the same routed transaction. */
+    int resolveOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
+    /** Erases an offer notice under its offer X lock, including already resolved history. */
+    int deleteOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
 }

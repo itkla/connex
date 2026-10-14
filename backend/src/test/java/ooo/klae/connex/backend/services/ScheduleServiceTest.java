@@ -35,6 +35,8 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class ScheduleServiceTest extends AbstractServiceTest {
 
@@ -89,6 +91,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
                 reportId, request("weekly", List.of(nonMember.getId()), 9, true)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void reportReadCanViewButCannotManageSchedules() {
         int reportId = createReport("count").id();
@@ -106,6 +109,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class, () -> scheduleService.delete(reportId));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void reportManagerCanScheduleWithoutSnapshotCreateAccess() {
         int reportId = createReport("count").id();
@@ -149,6 +153,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class, () -> scheduleService.get(reportId));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void attainmentScheduleChecksRunAsBeforeRecipientAccess() {
         int reportId = createReport("attainment").id();
@@ -162,6 +167,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
                 reportId, request("monthly", List.of(recipient.getId()), 9, true)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void attainmentScheduleRejectsRecipientWithoutGoalReadOnCreate() {
         int reportId = createReport("attainment").id();
@@ -174,6 +180,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertEquals("Report recipients lack permissions required by this report", exception.getMessage());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void attainmentScheduleRejectsRecipientWithoutGoalReadOnUpdate() {
         int reportId = createReport("attainment").id();
@@ -191,6 +198,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertEquals(List.of(eligible.getId()), unchanged.recipientUserIds());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void attainmentDeliveryExcludesRecipientAfterGoalReadLoss() {
         int reportId = createReport("attainment").id();
@@ -235,6 +243,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
      * confined to members holding the report's own read permissions, so it schedules on its
      * session alone.
      */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anUnprivilegedReportManagerSchedulesWithoutAFreshStepUp() {
         int reportId = createReport("count").id();

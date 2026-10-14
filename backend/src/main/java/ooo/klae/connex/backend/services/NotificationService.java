@@ -58,6 +58,7 @@ public class NotificationService {
     private final ApprovalMutationRetryService approvalMutationRetryService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final OwnershipOfferTransaction ownershipOfferTransaction;
 
     @Transactional(readOnly = true)
     public NotificationPageDto getPage(
@@ -202,10 +203,11 @@ public class NotificationService {
         return new NotificationWorkPage(List.copyOf(items), matchingTotal, overallTotal, asOf);
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public NotificationDto markRead(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
         if (current.getReadAt() != null) {
             return response(recipientId, current);
         }
@@ -213,10 +215,11 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public NotificationDto markUnread(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
         if (current.getReadAt() == null) {
             return response(recipientId, current);
         }
@@ -224,10 +227,11 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public NotificationDto dismiss(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
             return response(recipientId, current);
         }
@@ -253,8 +257,30 @@ public class NotificationService {
         return approvalMutationRetryService.execute(() -> restoreLocked(recipientId, id));
     }
 
+    private Notification lockOwnershipNotice(Notification notice, int recipientId) {
+        if (OwnershipOfferWriter.NOTICE_TYPE.equals(notice.getType())) {
+            ownershipOfferTransaction.lockNotice(ownershipOfferId(notice), recipientId);
+            Notification locked = notificationMapper.findById(recipientId, notice.getId());
+            if (locked == null) { throw new ResourceNotFoundException("Notification not found"); }
+            return locked;
+        }
+        return notice;
+    }
+
+    private long ownershipOfferId(Notification notice) {
+        try {
+            return Long.parseLong(objectMapper.readTree(notice.getData()).path("offerId").asString());
+        } catch (RuntimeException failure) {
+            throw new ConflictException("Ownership notice is unavailable");
+        }
+    }
+
     private NotificationDto restoreLocked(int recipientId, int id) {
         Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
+        if (OwnershipOfferWriter.NOTICE_TYPE.equals(current.getType()) && current.getResolvedAt() != null) {
+            throw new ConflictException("A closed ownership offer cannot be restored");
+        }
         if ("document.approval_request".equals(current.getType())
                 && "deal_document".equals(current.getSourceType())) {
             return restoreApprovalRequest(recipientId, id, current);
@@ -304,10 +330,14 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public NotificationDto snooze(int id, SnoozeRequest request) {
         int recipientId = currentRecipientId();
-        Notification current = requireLockedNotification(recipientId, id);
+        Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
+        if (!OwnershipOfferWriter.NOTICE_TYPE.equals(current.getType())) {
+            current = requireLockedNotification(recipientId, id);
+        }
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
             throw new ConflictException("Dismissed or resolved notifications cannot be snoozed");
         }
@@ -353,10 +383,14 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public NotificationDto unsnooze(int id) {
         int recipientId = currentRecipientId();
-        Notification current = requireLockedNotification(recipientId, id);
+        Notification current = requireNotification(recipientId, id);
+        current = lockOwnershipNotice(current, recipientId);
+        if (!OwnershipOfferWriter.NOTICE_TYPE.equals(current.getType())) {
+            current = requireLockedNotification(recipientId, id);
+        }
         if (current.getSnoozedUntil() == null) {
             return response(recipientId, current);
         }
@@ -371,8 +405,22 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
     public NotificationCountsDto markAllRead() {
+        int recipientId = currentRecipientId();
+        String asOf = notificationMapper.getDatabaseUtcTimestamp();
+        List<Notification> offerNotices;
+        do {
+            offerNotices = notificationMapper.findPage(recipientId, "unread",
+                List.of(OwnershipOfferWriter.NOTICE_TYPE), null, null, null, null, null, asOf, 100, 0);
+            for (Notification notice : offerNotices) {
+                ownershipOfferTransaction.mutateNotice(ownershipOfferId(notice), recipientId,
+                    () -> markRead(notice.getId()));
+            }
+        } while (offerNotices.size() == 100);
+        return approvalMutationRetryService.execute(this::markOrdinaryNotificationsRead);
+    }
+
+    private NotificationCountsDto markOrdinaryNotificationsRead() {
         int recipientId = currentRecipientId();
         notificationMapper.lockRecipientMemberships(recipientId);
         String readAt = notificationMapper.getDatabaseUtcTimestamp();

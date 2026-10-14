@@ -21,6 +21,7 @@ public class UserAccountCatalogOffboardingService {
     private final ProviderCapturePurgeService providerCapturePurgeService;
     private final TenantWorkScope tenantWorkScope;
     private final PlatformTransactionManager transactionManager;
+    private final OwnershipOfferAccountCleanupService ownershipOfferCleanupService;
 
     /** Refuses account deletion if any tenant catalog retains authored content. */
     public void assertNoAuthoredContent(int userId) {
@@ -37,6 +38,7 @@ public class UserAccountCatalogOffboardingService {
 
     /** Erases user references once per distinct tenant catalog. */
     public void eraseReferences(int userId) {
+        ownershipOfferCleanupService.eraseBeforeCatalogs(userId);
         for (String catalog : placementRegistry.activeCatalogs()) {
             tenantWorkScope.withCatalog(
                 catalog,

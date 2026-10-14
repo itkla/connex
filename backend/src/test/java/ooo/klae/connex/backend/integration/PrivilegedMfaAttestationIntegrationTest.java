@@ -75,6 +75,7 @@ class PrivilegedMfaAttestationIntegrationTest {
     @Autowired private PrivilegedMfaAttestationService attestationService;
     @Autowired private PrivilegedAccountService privilegedAccountService;
     @Autowired private OrgMemberService orgMemberService;
+    @Autowired private ooo.klae.connex.backend.services.OwnershipOfferService ownershipOfferService;
     @Autowired private PrivilegedMfaAttestationRedemption redemption;
     @Autowired private WebAuthnService webAuthnService;
     @Autowired private SessionSecurityService sessionSecurityService;
@@ -488,8 +489,11 @@ class PrivilegedMfaAttestationIntegrationTest {
         SoftwarePasskey granteePasskey = register(grantee);
         orgMemberMapper.addMember(organization.getId(), owner.getId(), "owner");
         orgMemberMapper.addMember(organization.getId(), grantee.getId(), "admin");
-        steppedUpWith(owner, ownerPasskey);
-        orgMemberService.setMember(organization.getId(), owner.getId(), member.getId(), "owner");
+        steppedUpWithOwnershipProof(owner, ownerPasskey);
+        var offered = orgMemberService.setMember(organization.getId(), owner.getId(), member.getId(), "owner");
+        assertNull(orgMemberMapper.getRole(organization.getId(), member.getId()));
+        steppedUpWithOwnershipProof(member, promotedPasskey);
+        ownershipOfferService.accept(Long.parseLong(offered.offer().id()), member.getId(), false);
         assertFalse(jdbcTemplate.queryForObject(
             "SELECT founder FROM org_member WHERE org_id = ? AND user_id = ?",
             Boolean.class, organization.getId(), member.getId()));
@@ -715,6 +719,12 @@ class PrivilegedMfaAttestationIntegrationTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         sessionSecurityService.stampSessionEpoch(request, userMapper.currentSessionEpoch(user.getId()));
         return request;
+    }
+
+    private void steppedUpWithOwnershipProof(User user, SoftwarePasskey passkey) {
+        steppedUpWith(user, passkey);
+        var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes()).getRequest();
+        sessionSecurityService.stampSessionEpoch(request, userMapper.currentSessionEpoch(user.getId()));
     }
 
     private void steppedUpWith(User user, SoftwarePasskey passkey) {

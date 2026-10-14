@@ -765,12 +765,20 @@ class IdentityInvitationTrustIntegrationTest {
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
         orgMemberMapper.addMember(target.getOrgId(), account.user().getId(), "admin");
 
-        mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
+        int managerCredential = ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.passkey(jdbcTemplate, manager);
+        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUp(jdbcTemplate, manager, managerSession, managerCredential);
+        MvcResult offered = mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
                 .session(managerSession).with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("orgRole", "owner"))))
-            .andExpect(result -> assertEquals(204, result.getResponse().getStatus(),
-                () -> String.valueOf(result.getResolvedException())));
+            .andExpect(status().isAccepted()).andExpect(jsonPath("$.outcome").value("ownership_offer")).andReturn();
+        assertEquals("admin", orgMemberMapper.getRole(target.getOrgId(), account.user().getId()));
+        int offereeCredential = ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.passkey(jdbcTemplate, account.user());
+        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUp(jdbcTemplate, account.user(), account.session(), offereeCredential);
+        String offerId = objectMapper.readTree(offered.getResponse().getContentAsString()).path("offer").path("id").asString();
+        mockMvc.perform(post("/api/ownership-offers/{id}/accept", offerId).session(account.session())
+                .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON).content("{}"))
+            .andExpect(status().isOk());
         assertEquals("owner", orgMemberMapper.getRole(target.getOrgId(), account.user().getId()));
         assertFalse(userMapper.getUserById(account.user().getId()).isEmailVerified());
 

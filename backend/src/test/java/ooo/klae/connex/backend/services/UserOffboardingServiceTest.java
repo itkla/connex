@@ -65,6 +65,8 @@ import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import tools.jackson.databind.ObjectMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Proves the service-layer offboarding fan-out does what the dropped
@@ -134,6 +136,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(teamMapper.getById(otherWorkspace.getId(), otherTeam.getId()).getManagerUserId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberDetachmentClearsTeamSeatAndManagerReference() {
         User departing = newUser();
@@ -345,6 +348,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             workspace.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberDetachmentCleansContentWhileTheMembershipStillExists() {
         User member = newUser();
@@ -406,6 +410,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberRemovalRetainsOwnedChatTranscriptAndRemovesOnlyParticipantGrant() {
         User departing = newUser();
@@ -429,6 +434,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertChatTranscriptOwnedBy(retainedSession, retainedMessage, retainedOwner);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipPurgesResidualSavedViewDataOnlyInTheRejoinedWorkspace() {
         User returning = newUser();
@@ -454,6 +460,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             otherWorkspace.getId(), returning.getId(), retainedView.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipPurgesResidualTeamSeatsAndManagerReferences() {
         User returning = newUser();
@@ -466,6 +473,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(teamMapper.getById(workspace.getId(), team.getId()).getManagerUserId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void freshMembershipRetainsOwnedTranscriptAndRejoiningOwnerCanReadAndAppend() {
         User returning = newUser();

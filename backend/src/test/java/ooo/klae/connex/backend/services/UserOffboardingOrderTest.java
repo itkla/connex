@@ -110,7 +110,14 @@ class UserOffboardingOrderTest {
     @Mock private ApiCredentialLifecycleService apiCredentialLifecycleService;
     @Spy private TenantContext tenantContext = new TenantContext();
 
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
+    @Mock private ooo.klae.connex.backend.mappers.OrganizationMapper ownershipOfferOrganizationMapper;
     @InjectMocks private UserOffboardingService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void ownershipScopeMetadata() {
+        org.mockito.Mockito.lenient().when(workspaceMapper.getOrgId(7)).thenReturn(13);
+    }
 
     @AfterEach
     void clearTenantContext() {
@@ -372,7 +379,8 @@ class UserOffboardingOrderTest {
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             auditService,
             apiCredentialLifecycleService,
-            tenantContext
+            tenantContext,
+            mock(ooo.klae.connex.backend.mappers.OwnershipOfferMapper.class)
         );
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))

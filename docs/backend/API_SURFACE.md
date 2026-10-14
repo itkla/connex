@@ -169,3 +169,7 @@ claim of a complete penetration test or proof of production usage. Public metada
 choice; compatibility endpoints have no evidence supporting immediate removal. Production deployment
 revision, per-route usage, owner-approved compatibility EOL dates, and historical shutdown evidence
 were not available in this lane.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

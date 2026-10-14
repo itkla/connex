@@ -73,7 +73,8 @@ class NotificationServiceTest {
             documentApprovalService,
             new ImmediateApprovalMutationRetryService(),
             new ObjectMapper(),
-            Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC)
+            Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC),
+            org.mockito.Mockito.mock(OwnershipOfferTransaction.class)
         );
         User user = new User();
         user.setId(42);
@@ -437,6 +438,7 @@ class NotificationServiceTest {
         } else {
             dismissed.setDismissedAt("2026-07-19 00:00:00");
         }
+        when(notificationMapper.findById(42, 99)).thenReturn(dismissed);
         when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(dismissed);
 
         assertThrows(ConflictException.class,
@@ -453,6 +455,7 @@ class NotificationServiceTest {
     void repeatedUnsnoozeIsIdempotentWithoutVersionBump() {
         Notification current = new Notification();
         current.setId(99);
+        when(notificationMapper.findById(42, 99)).thenReturn(current);
         when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(current);
         when(notificationMapper.getStateVersion(42)).thenReturn(17L);
 

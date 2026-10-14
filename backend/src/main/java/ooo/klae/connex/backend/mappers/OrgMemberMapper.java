@@ -92,4 +92,7 @@ public interface OrgMemberMapper {
         @Param("afterUserId") int afterUserId,
         @Param("limit") int limit);
     List<OrgMembershipDto> getMembershipsForUser(@Param("userId") int userId);
+    /** Existing workspace roots fence the founding helper against existing-scope grants. */
+    boolean hasOrganizationWorkspace(@Param("orgId") int orgId);
+
 }

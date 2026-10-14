@@ -1551,3 +1551,9 @@ row now needs quarantine authority. It does not delegate at that point, because 
 holds attachment rows would take membership roots after them. The assistant route already holds the
 caller's membership and session roots, so it re-reads the exact row the same way and checks
 quarantine authority in place.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+Offer closure must not rewrite an account FK's supporting index after scope roots. V229's only offeree-leading index is immutable `(offeree_user_id,id)`; pending lookups use a state-leading index. Nullable closure attribution has no FK and is explicitly cleared before erasure audit heads. Party cascades remain. This preserves deleting-account X → workspace roots → organization roots → guards → offer rows → audit heads without acquiring counterpart accounts after roots.

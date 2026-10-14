@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.function.BiFunction;
@@ -30,6 +31,7 @@ class WorkspaceMembershipRemovalTransactionTest {
     @Mock private TenantWorkScope tenantWorkScope;
     @Mock private TenantContext tenantContext;
     @Mock private TransactionTemplate transactionTemplate;
+    @Mock private org.springframework.transaction.PlatformTransactionManager transactionManager;
 
     @InjectMocks private WorkspaceMembershipRemovalTransaction transaction;
 
@@ -49,10 +51,8 @@ class WorkspaceMembershipRemovalTransactionTest {
                 BiFunction<Integer, String, String> work = invocation.getArgument(1);
                 return work.apply(51, "tenant_b");
             });
-        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
-            TransactionCallback<?> callback = invocation.getArgument(0);
-            return callback.doInTransaction(org.mockito.Mockito.mock(TransactionStatus.class));
-        });
+        when(transactionTemplate.getTransactionManager()).thenReturn(transactionManager);
+        when(transactionManager.getTransaction(any())).thenReturn(org.mockito.Mockito.mock(TransactionStatus.class));
 
         String result = transaction.execute(
             23,
@@ -68,7 +68,8 @@ class WorkspaceMembershipRemovalTransactionTest {
         order.verify(tenantWorkScope).withWorkspacePlacement(
             eq(23), org.mockito.ArgumentMatchers.<BiFunction<Integer, String, String>>any());
         order.verify(tenantContext).set(23, 51, 7, "admin", "tenant_b");
-        order.verify(transactionTemplate).execute(any());
+        order.verify(transactionTemplate).getTransactionManager();
+        verify(transactionManager).commit(any());
         order.verify(tenantContext).set(11, 12, 7, "member", "tenant_a");
     }
 

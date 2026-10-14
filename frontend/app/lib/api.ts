@@ -399,6 +399,7 @@ const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/webauthn/credentials",
     "/api/capabilities",
     "/api/workspaces",
+    "/api/ownership-offers",
 ]);
 const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/logout",
@@ -411,10 +412,10 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/webauthn/attestation",
 ]);
 /**
- * The safe exits (#1534): leaving the workspace or organization whose membership confines the
- * account. Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
+ * The safe actions (#1534): leaving a workspace or organization and declining ownership.
+ * Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
  */
-const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^\/api\/(?:workspaces|orgs)\/\d+\/leave$/;
+const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^(?:\/api\/(?:workspaces|orgs)\/\d+\/leave|\/api\/ownership-offers\/\d+\/decline)$/;
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
