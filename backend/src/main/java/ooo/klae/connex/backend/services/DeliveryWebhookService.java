@@ -38,7 +38,8 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
  * complaint additionally records a suppression entry and revokes consent.
  * Provider message and event identifiers use the same digest correlation form as dispatch before
  * lookup or deduplication. Only recorded digests in the resolved workspace match; their primary-key
- * probes are plain consistent reads without row locks. Unrelated opaque identifiers are preserved,
+ * batch reads are plain consistent reads without row locks. Each pass resolves uncached digests in
+ * one query, with at most five queries per identifier. Unrelated opaque identifiers are preserved,
  * and free-text details redact every 64-hex run before persistence.
  * Message identifiers exceeding the 255-code-point column limit cannot correlate and are ignored
  * without digest probes. Event identifier persistence retains the column limit's rejection behavior.
@@ -174,7 +175,8 @@ public class DeliveryWebhookService {
 
     private String correlationForm(int workspaceId, String identifier) {
         return CampaignDeliveryDiagnostics.correlationForm(identifier,
-                hash -> campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash) != null);
+                hashes -> java.util.Set.copyOf(campaignDeliveryMapper.findUnsubscribeTokenHashes(
+                        workspaceId, List.copyOf(hashes))));
     }
 
     private void suppress(int workspaceId, CampaignDelivery delivery, DeliveryEventType type) {

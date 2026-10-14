@@ -238,8 +238,11 @@ class DeliveryWebhookServiceTest {
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("message:0" + "Ab09".repeat(16) + "f",
                 "event:" + bearer.toUpperCase(java.util.Locale.ROOT), DeliveryEventType.DELIVERED,
                 null, "reason " + bearer + " retained")));
-        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any()))
-                .thenAnswer(invocation -> digest.equals(invocation.getArgument(1)) ? Integer.valueOf(500) : null);
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> {
+                    List<String> hashes = invocation.getArgument(1);
+                    return hashes.contains(digest) ? List.of(digest) : List.of();
+                });
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "message:0" + digest + "f"))
                 .thenReturn(delivery(WORKSPACE_A));
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -264,14 +267,14 @@ class DeliveryWebhookServiceTest {
         String unrelated = "CD".repeat(32);
         resolveTo(WORKSPACE_B, List.of(new DeliveryEvent("foreign:" + foreignBearer,
                 unrelated, DeliveryEventType.DELIVERED, null, null)));
-        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_B), any())).thenReturn(null);
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_B), any())).thenReturn(List.of());
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_B, PROVIDER, "foreign:" + foreignBearer))
                 .thenReturn(delivery(WORKSPACE_B));
         scopeInline();
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
-        verify(campaignDeliveryMapper).getUnsubscribeTokenDeliveryId(
-                WORKSPACE_B, OneTimeTokenDigest.sha256(foreignBearer));
-        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any());
+        verify(campaignDeliveryMapper).findUnsubscribeTokenHashes(
+                eq(WORKSPACE_B), org.mockito.ArgumentMatchers.argThat(hashes -> hashes.contains(OneTimeTokenDigest.sha256(foreignBearer))));
+        verify(campaignDeliveryMapper, never()).findUnsubscribeTokenHashes(eq(WORKSPACE_A), any());
         org.mockito.ArgumentCaptor<CampaignDeliveryEvent> row = org.mockito.ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
         verify(campaignDeliveryMapper).insertEvent(row.capture());
         assertEquals(unrelated, row.getValue().getProviderEventId());
@@ -286,8 +289,11 @@ class DeliveryWebhookServiceTest {
         String expected = OneTimeTokenDigest.sha256(fixture.first()).substring(0, 63)
                 + OneTimeTokenDigest.sha256(fixture.second());
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent(raw, raw, DeliveryEventType.DELIVERED, null, null)));
-        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any()))
-                .thenAnswer(invocation -> digests.contains(invocation.getArgument(1)) ? Integer.valueOf(500) : null);
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> {
+                    List<String> hashes = invocation.getArgument(1);
+                    return hashes.stream().filter(digests::contains).toList();
+                });
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, expected))
                 .thenReturn(delivery(WORKSPACE_A));
         scopeInline();
@@ -302,7 +308,8 @@ class DeliveryWebhookServiceTest {
     @Test
     void ingestIgnoresAnUnusableMessageIdentifier() {
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("a".repeat(64), "event", DeliveryEventType.BOUNCED, null, null)));
-        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any())).thenReturn(500);
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         scopeInline();
         assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
         verify(campaignDeliveryMapper, never()).findByProviderMessage(anyInt(), any(), any());
@@ -313,7 +320,8 @@ class DeliveryWebhookServiceTest {
     @Test
     void ingestStoresNullForAnUnusableEventIdentifierWithoutKeyDeduplication() {
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "a".repeat(64), DeliveryEventType.DELIVERED, null, null)));
-        when(campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(eq(WORKSPACE_A), any())).thenReturn(500);
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_A), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
                 .thenReturn(delivery(WORKSPACE_A));
         scopeInline();
@@ -325,13 +333,32 @@ class DeliveryWebhookServiceTest {
     }
 
     @Test
+    void maximumHexWebhookIdUsesAtMostFiveMembershipQueries() {
+        resolveTo(WORKSPACE_A, List.of(new DeliveryEvent(
+                ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.longHexIdentifier(),
+                "event", DeliveryEventType.DELIVERED, null, null)));
+        List<List<String>> queries = new java.util.ArrayList<>();
+        when(campaignDeliveryMapper.findUnsubscribeTokenHashes(eq(WORKSPACE_A), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            queries.add(List.copyOf(hashes));
+            return hashes;
+        });
+        scopeInline();
+        assertEquals(0, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
+        assertEquals(5, queries.size());
+        assertEquals(192, queries.getFirst().size());
+        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), any());
+        verify(campaignDeliveryMapper, never()).findByProviderMessage(anyInt(), any(), any());
+    }
+
+    @Test
     void ingestShortIdentifiersDoNotProbeDigestHistory() {
         resolveTo(WORKSPACE_A, List.of(new DeliveryEvent("m1", "e1", DeliveryEventType.DELIVERED, null, null)));
         when(campaignDeliveryMapper.findByProviderMessage(WORKSPACE_A, PROVIDER, "m1"))
                 .thenReturn(delivery(WORKSPACE_A));
         scopeInline();
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
-        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), any());
+        verify(campaignDeliveryMapper, never()).findUnsubscribeTokenHashes(anyInt(), any());
     }
 
     @Test
@@ -352,7 +379,7 @@ class DeliveryWebhookServiceTest {
                 .thenReturn(delivery(WORKSPACE_A));
         scopeInline();
         assertThrows(IllegalArgumentException.class, () -> service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
-        verify(campaignDeliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), any());
+        verify(campaignDeliveryMapper, never()).findUnsubscribeTokenHashes(anyInt(), any());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verify(campaignDeliveryMapper, never()).applyProviderStatus(anyInt(), anyInt(), any(), any());
         verifyNoInteractions(campaignSendMapper, suppressionService, consentService);

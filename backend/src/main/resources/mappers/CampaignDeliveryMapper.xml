@@ -121,6 +121,20 @@
     WHERE token_hash = #{tokenHash} AND workspace_id = #{workspaceId}
   </select>
 
+  <select id="findUnsubscribeTokenHashes" resultType="string">
+    SELECT token_hash FROM campaign_delivery_unsubscribe_token
+    WHERE workspace_id = #{workspaceId}
+    <choose>
+      <when test="tokenHashes != null and !tokenHashes.isEmpty()">
+        AND token_hash IN
+        <foreach item="tokenHash" collection="tokenHashes" open="(" separator="," close=")">
+          #{tokenHash}
+        </foreach>
+      </when>
+      <otherwise>AND 1 = 0</otherwise>
+    </choose>
+  </select>
+
   <select id="findByProviderMessage" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
     WHERE workspace_id = #{workspaceId}

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.delivery;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -437,8 +438,16 @@ public class CampaignDispatchService {
             int updated;
             try {
                 providerMessageId = CampaignDeliveryDiagnostics.correlationForm(receipt.providerMessageId(),
-                        hash -> unsubscribeTokenHash.equals(hash)
-                                || campaignDeliveryMapper.getUnsubscribeTokenDeliveryId(workspaceId, hash) != null);
+                        hashes -> {
+                            Set<String> unresolved = new HashSet<>(hashes);
+                            boolean includesCurrent = unresolved.remove(unsubscribeTokenHash);
+                            Set<String> recorded = unresolved.isEmpty() ? new HashSet<>() : new HashSet<>(
+                                    campaignDeliveryMapper.findUnsubscribeTokenHashes(workspaceId, List.copyOf(unresolved)));
+                            if (includesCurrent) {
+                                recorded.add(unsubscribeTokenHash);
+                            }
+                            return recorded;
+                        });
                 if (receipt.providerMessageId() != null && providerMessageId == null) {
                     log.warn("Campaign delivery {} accepted with an unusable provider identifier", deliveryId);
                 }

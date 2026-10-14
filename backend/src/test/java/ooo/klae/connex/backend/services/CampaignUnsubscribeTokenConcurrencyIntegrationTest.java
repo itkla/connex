@@ -182,6 +182,11 @@ class CampaignUnsubscribeTokenConcurrencyIntegrationTest extends CampaignRealDbT
             Future<Integer> reader = executor.submit(() -> deliveryMapper.getUnsubscribeTokenDeliveryId(workspace.getId(), digest));
             assertEquals(originalId, reader.get(10, TimeUnit.SECONDS));
             assertNull(deliveryMapper.getUnsubscribeTokenDeliveryId(Integer.MAX_VALUE, digest));
+            Future<List<String>> batchReader = executor.submit(() -> deliveryMapper.findUnsubscribeTokenHashes(
+                    workspace.getId(), List.of(digest, "b".repeat(64))));
+            assertEquals(List.of(digest), batchReader.get(10, TimeUnit.SECONDS));
+            assertTrue(deliveryMapper.findUnsubscribeTokenHashes(Integer.MAX_VALUE, List.of(digest)).isEmpty());
+            assertTrue(deliveryMapper.findUnsubscribeTokenHashes(workspace.getId(), List.of()).isEmpty());
             release.countDown();
             holder.get(20, TimeUnit.SECONDS);
             assertEquals(replacementId, deliveryMapper.getUnsubscribeTokenDeliveryId(workspace.getId(), digest));

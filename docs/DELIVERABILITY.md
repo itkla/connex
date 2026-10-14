@@ -388,7 +388,10 @@ so a replay returning the original receipt is safe. Webhooks normalize both inco
 before lookup and event ids before deduplication against recorded digests in the resolved workspace.
 Unrelated ids, including opaque 64-hex ids, stay byte-identical, so bounce and complaint webhooks still
 correlate, suppress, and revoke consent. Webhook free-text reasons use the generic `[redacted]` rule.
-These digest lookups are plain primary-key consistent reads without row locks; short ids do not probe.
+Each pass computes every candidate digest before one workspace-scoped `token_hash IN (...)` query
+resolves uncached membership. Positive and negative results are cached for that identifier only.
+There are at most five queries per identifier, including the final residual check; short ids do not
+query. These are plain non-locking consistent reads, and dispatch's current digest needs no lookup.
 Identifiers exceeding the 255-code-point storage limit are rejected before persistence or digest
 probes; accepted receipts then require reconciliation. Oversized incoming webhook message ids
 cannot match stored ids and are ignored without probes; oversized event ids still reject persistence.

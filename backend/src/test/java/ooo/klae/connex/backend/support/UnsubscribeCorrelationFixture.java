@@ -22,6 +22,15 @@ public record UnsubscribeCorrelationFixture(String first, String second) {
         throw new AssertionError("No deterministic overlapping bearer fixture found");
     }
 
+    /** Returns a maximum-length hex identifier with distinct overlapping candidate windows. */
+    public static String longHexIdentifier() {
+        StringBuilder identifier = new StringBuilder();
+        for (int seed = 0; seed < 4; seed++) {
+            identifier.append(OneTimeTokenDigest.sha256("correlation-long-" + seed));
+        }
+        return identifier.substring(0, 255);
+    }
+
     /** Returns copies overlapping by one character, which digest replacement can recreate. */
     public String identifier() {
         return first + second.substring(1);

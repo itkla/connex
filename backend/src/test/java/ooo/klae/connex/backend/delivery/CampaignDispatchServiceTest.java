@@ -872,8 +872,10 @@ class CampaignDispatchServiceTest {
         when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision);
         String earlierBearer = "ab09".repeat(16);
         String earlierDigest = ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(earlierBearer);
-        when(deliveryMapper.getUnsubscribeTokenDeliveryId(eq(7), anyString())).thenReturn(null);
-        when(deliveryMapper.getUnsubscribeTokenDeliveryId(7, earlierDigest)).thenReturn(99);
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            return hashes.contains(earlierDigest) ? List.of(earlierDigest) : List.of();
+        });
         java.util.concurrent.atomic.AtomicReference<String> currentDigest = new java.util.concurrent.atomic.AtomicReference<>();
         when(dispatcher.dispatch(any(), any())).thenAnswer(invocation -> {
             DeliveryRequest request = invocation.getArgument(1);
@@ -918,8 +920,10 @@ class CampaignDispatchServiceTest {
         java.util.Set<String> digests = java.util.Set.of(
                 ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.first()),
                 ooo.klae.connex.backend.util.OneTimeTokenDigest.sha256(fixture.second()));
-        when(deliveryMapper.getUnsubscribeTokenDeliveryId(eq(7), anyString())).thenAnswer(invocation ->
-                unusable || digests.contains(invocation.getArgument(1)) ? Integer.valueOf(99) : null);
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            return hashes.stream().filter(hash -> unusable || digests.contains(hash)).toList();
+        });
         String identifier = fixture.identifier().toUpperCase(java.util.Locale.ROOT);
         when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent(identifier, "accepted"));
         when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
@@ -953,13 +957,34 @@ class CampaignDispatchServiceTest {
     }
 
     @Test
+    void maximumHexReceiptUsesAtMostFiveMembershipQueries() {
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
+        List<List<String>> queries = new java.util.ArrayList<>();
+        when(deliveryMapper.findUnsubscribeTokenHashes(eq(7), any())).thenAnswer(invocation -> {
+            List<String> hashes = invocation.getArgument(1);
+            queries.add(List.copyOf(hashes));
+            return hashes;
+        });
+        when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent(
+                ooo.klae.connex.backend.support.UnsubscribeCorrelationFixture.longHexIdentifier(), "accepted"));
+        when(deliveryMapper.markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), any())).thenReturn(1);
+        assertTrue(service.processSend(7, 11));
+        assertEquals(5, queries.size());
+        assertEquals(192, queries.getFirst().size());
+        verify(deliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), anyString());
+        verify(deliveryMapper).markTriggeredDispatched(eq(7), eq(13), anyString(), eq("smtp"), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
     void oversizedAcceptedReceiptBecomesAmbiguousBeforeProbingOrPersistingItsId() {
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         MessageDispatcher dispatcher = mock(MessageDispatcher.class);
         CampaignDispatchService service = triggeredDispatch(deliveryMapper, dispatcher, admittedFrequency());
         when(dispatcher.dispatch(any(), any())).thenReturn(DispatchReceipt.sent("a".repeat(256), "accepted"));
         assertTrue(service.processSend(7, 11));
-        verify(deliveryMapper, never()).getUnsubscribeTokenDeliveryId(anyInt(), anyString());
+        verify(deliveryMapper, never()).findUnsubscribeTokenHashes(anyInt(), any());
         verify(deliveryMapper, never()).markTriggeredDispatched(anyInt(), anyInt(), anyString(), anyString(), any());
         verify(deliveryMapper).markTriggeredAmbiguous(eq(7), eq(13), anyString(),
                 eq("AMBIGUOUS: Provider outcome could not be persisted definitively"), eq("relay_error"));

@@ -107,6 +107,11 @@ public interface CampaignDeliveryMapper {
             @Param("workspaceId") int workspaceId,
             @Param("tokenHash") String tokenHash);
 
+    /** Resolves a digest batch within the workspace, using a non-locking consistent read. */
+    List<String> findUnsubscribeTokenHashes(
+            @Param("workspaceId") int workspaceId,
+            @Param("tokenHashes") List<String> tokenHashes);
+
     CampaignDelivery findByProviderMessage(
             @Param("workspaceId") int workspaceId,
             @Param("providerId") String providerId,

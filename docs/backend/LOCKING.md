@@ -1148,10 +1148,13 @@ Correlation rescans replacement output for at most four replacement passes, then
 bearers. An unusable id becomes NULL at dispatch (with an identifier-free WARN) or event persistence,
 or no match at webhook message lookup. Unusable event ids give up provider-key deduplication;
 ordinary missing event ids keep the existing fallback. Free-text webhook reasons redact all 64-hex
-runs. `getUnsubscribeTokenDeliveryId` probes
-`token_hash`, the child table's primary key, with a workspace predicate. These are plain consistent
-reads without `FOR UPDATE` or shared locks, and they acquire no row locks even while another
-transaction holds an exclusive child-row lock. Short ids perform no probes. They add no lock-order
+runs. Each pass collects all candidate digests before `findUnsubscribeTokenHashes` resolves uncached
+membership with one workspace-scoped `token_hash IN (...)` query. Positive and negative membership
+is cached per identifier call only, so an identifier needs at most five queries, including the final
+residual scan. Dispatch's current digest is recognized explicitly without a lookup. These are plain
+consistent reads without `FOR UPDATE` or shared locks, and they acquire no row locks even while
+another transaction holds an exclusive child-row lock. Empty batches return no rows; short ids
+perform no queries. They add no lock-order
 edge to dispatch or the existing webhook transaction. Identifiers exceeding the 255-code-point
 storage limit are rejected before persistence or probes; accepted receipts then require reconciliation.
 Oversized webhook message ids instead return no match without probes; event id persistence still
