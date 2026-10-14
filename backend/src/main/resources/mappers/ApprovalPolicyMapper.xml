@@ -183,4 +183,51 @@
     DELETE FROM approval_policy_step
     WHERE workspace_id = #{workspaceId} AND policy_id = #{policyId}
   </delete>
+
+  <select id="findDepartureReferences" resultType="ApprovalStepApprover" flushCache="true">
+    SELECT id, workspace_id, step_id, approver_kind, user_id FROM approval_policy_step_approver
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    ORDER BY id
+  </select>
+
+  <select id="findDepartureReferencesAnywhere" resultType="ApprovalStepApprover" flushCache="true">
+    SELECT id, workspace_id, step_id, approver_kind, user_id FROM approval_policy_step_approver
+    WHERE user_id = #{userId}
+    ORDER BY workspace_id, id
+  </select>
+
+  <delete id="deleteDepartingApprover">
+    DELETE FROM approval_policy_step_approver
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND user_id = #{userId}
+  </delete>
+
+
+  <sql id="departureSteps">
+    SELECT s.id, s.workspace_id, s.policy_id, s.step_order, s.name, s.required_count,
+           a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
+           a.approver_kind, a.user_id AS approver_user_id
+    FROM approval_policy_step s
+    JOIN approval_policy p ON p.workspace_id = s.workspace_id AND p.id = s.policy_id
+    LEFT JOIN approval_policy_step_approver a
+      ON a.workspace_id = s.workspace_id AND a.step_id = s.id
+    WHERE p.active = TRUE
+  </sql>
+
+  <select id="findActiveStepsForDeparture" resultMap="ApprovalPolicyStepResult" flushCache="true">
+    <include refid="departureSteps"/>
+      AND s.workspace_id = #{workspaceId}
+    ORDER BY s.id, a.id
+  </select>
+
+  <select id="findActiveStepsForDepartureAnywhere" resultMap="ApprovalPolicyStepResult" flushCache="true">
+    <include refid="departureSteps"/>
+    ORDER BY s.workspace_id, s.id, a.id
+  </select>
+
+
+  <delete id="deleteDepartingApproverAnywhere">
+    DELETE FROM approval_policy_step_approver
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND user_id = #{userId}
+  </delete>
+
 </mapper>

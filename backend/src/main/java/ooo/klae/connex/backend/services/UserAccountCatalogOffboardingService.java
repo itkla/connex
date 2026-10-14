@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @Service
 @RequiredArgsConstructor
 public class UserAccountCatalogOffboardingService {
+    private final DepartureApprovalGuard departureApprovalGuard;
     private final PlacementRegistry placementRegistry;
     private final UserOffboardingService userOffboardingService;
     private final ProviderCapturePurgeService providerCapturePurgeService;
@@ -46,14 +47,17 @@ public class UserAccountCatalogOffboardingService {
     @Value("${connex.account.assignment-sweep.page-size:200}")
     private int pageSize = 200;
 
-    /** Refuses account deletion if any tenant catalog retains authored content. */
+    /** Refuses account deletion while any catalog retains authored content or a sole named route. */
     public void assertNoAuthoredContent(int userId) {
         for (String catalog : placementRegistry.activeCatalogs()) {
             tenantWorkScope.withCatalog(
                 catalog,
                 () -> {
                     new TransactionTemplate(transactionManager).executeWithoutResult(
-                        status -> userOffboardingService.assertNoAuthoredContent(userId));
+                        status -> {
+                            userOffboardingService.assertNoAuthoredContent(userId);
+                            departureApprovalGuard.assertCanErase(userId);
+                        });
                     return null;
                 });
         }
@@ -67,6 +71,7 @@ public class UserAccountCatalogOffboardingService {
                 () -> {
                     new TransactionTemplate(transactionManager).executeWithoutResult(
                         status -> {
+                            departureApprovalGuard.assertCanErase(userId);
                             providerCapturePurgeService.purgeAccountCatalog(
                                 userId, ConnectedAccountProviders.GOOGLE);
                             providerCapturePurgeService.purgeAccountCatalog(

@@ -1895,6 +1895,7 @@ public class WorkspaceService {
                 locks.ownerRecovery(), targetUserId, "A workspace must keep at least one owner");
         }
         MemberDto target = getLockedRoleMutationTarget(workspaceId, targetUserId);
+        userOffboardingService.assertCanDepart(workspaceId, targetUserId);
         userOffboardingService.detachMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
         notificationStateVersionService.markChanged(targetUserId);
@@ -1902,6 +1903,7 @@ public class WorkspaceService {
             "workspace.member.remove", "workspace", workspaceId, workspaceId, orgId,
             target.getDisplayName(),
             "Removed " + target.getDisplayName() + " from the workspace", null);
+        userOffboardingService.cleanupDepartureReferences(workspaceId, targetUserId);
     }
 
     /**
@@ -2019,12 +2021,14 @@ public class WorkspaceService {
             throw pendingMembershipNotFound();
         }
         requirePendingMembership(workspaceId, userId);
+        userOffboardingService.assertCanDepart(workspaceId, userId);
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
         auditService.recordScoped(
             "workspace.member.decline", "workspace", workspaceId, workspaceId, orgId,
             null, "Declined invitation", null);
+        userOffboardingService.cleanupDepartureReferences(workspaceId, userId);
     }
 
     /**
@@ -2040,6 +2044,7 @@ public class WorkspaceService {
             () -> requireActiveMembershipRole(workspaceId, userId),
             (scopedWorkspaceId, scopedOrgId) -> {
                 leaveWorkspaceInTransaction(scopedWorkspaceId, scopedOrgId, userId);
+                userOffboardingService.cleanupDepartureReferences(scopedWorkspaceId, userId);
                 return true;
             });
     }
@@ -2058,6 +2063,7 @@ public class WorkspaceService {
             requireOwnerRemains(lockOwnerRecovery(workspaceId), userId,
                 "Transfer ownership before leaving; a workspace must keep an owner");
         }
+        userOffboardingService.assertCanDepart(workspaceId, userId);
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
@@ -2085,6 +2091,7 @@ public class WorkspaceService {
                 } else {
                     forgetActive(userId);
                 }
+                userOffboardingService.cleanupDepartureReferences(scopedWorkspaceId, userId);
                 return Optional.ofNullable(nextWorkspaceId);
             }).orElse(null);
     }

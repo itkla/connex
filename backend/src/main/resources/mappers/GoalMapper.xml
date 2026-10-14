@@ -48,4 +48,34 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </delete>
 
+
+  <select id="findDepartureReferences" resultType="ReportGoal" flushCache="true">
+    SELECT <include refid="columns"/> FROM report_goal
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+    ORDER BY id
+  </select>
+
+  <select id="findDepartureReferencesAnywhere" resultType="ReportGoal" flushCache="true">
+    SELECT <include refid="columns"/> FROM report_goal
+    WHERE owner_id = #{userId} OR created_by = #{userId}
+    ORDER BY workspace_id, id
+  </select>
+
+  <delete id="deleteDepartingOwner">
+    DELETE FROM report_goal
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND owner_id = #{userId}
+  </delete>
+
+
+
+  <delete id="deleteDepartingOwnerAnywhere">
+    DELETE FROM report_goal
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND owner_id = #{userId}
+  </delete>
+
+  <update id="clearDepartingCreatorAnywhere">
+    UPDATE report_goal SET created_by = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND created_by = #{userId}
+  </update>
+
 </mapper>

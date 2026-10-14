@@ -74,7 +74,8 @@ class UserAssignmentSweepTest {
     }
 
     private UserAccountCatalogOffboardingService newService() {
-        var result = new UserAccountCatalogOffboardingService(placements, mock(UserOffboardingService.class),
+        var result = new UserAccountCatalogOffboardingService(mock(DepartureApprovalGuard.class), placements,
+            mock(UserOffboardingService.class),
             mock(ProviderCapturePurgeService.class), scope, transactions, mapper, users, metrics);
         ReflectionTestUtils.setField(result, "pageSize", 2);
         return result;

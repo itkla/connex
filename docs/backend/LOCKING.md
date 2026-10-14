@@ -270,6 +270,33 @@ transaction. The locked authorization recheck remains inside the transaction. Ac
 pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
 cleanup cannot inherit the active-header workspace.
 
+### Bounded goal and approval departure cleanup (#1953)
+
+The sole named approver guard uses fresh non-locking MyBatis reads (`flushCache="true"`) inside each
+existing departure transaction, after its existing lock prefix and before destructive work. Routing
+replay is pure Java; named routes are distinct from permission-filtered decision eligibility. It
+adds no policy, document, deal, or goal aggregate lock and no writer fence.
+
+Goal and policy/frozen approver cleanup uses conditional single-table statements keyed exactly by
+workspace, row id, and departing user. It runs last, after the workspace-cleanup and catalog-erasure
+tails (workflow, version, rule, team, deal and existing audit locks); leave-and-select-next also
+finishes its selection update first. No earlier lock class is acquired after this cleanup. A
+concurrent aggregate edit can deadlock with these final statements: propagate the failure and retry
+the operation in a fresh transaction, never retry in place.
+
+The guard is exact for references committed before departure. A concurrently created request naming
+the departed member can survive departure and follows existing reconciliation in its existing order:
+its deadline rules apply first; expiration records `expired`, while escalation appends `any_approver`
+and clears the deadline and can still pass with enough surviving approvers. Only when quorum remains
+impossible after those rules does the bounded sweep terminate it as `unsatisfiable`, cancel other
+open steps, and return the document to `draft`.
+
+A concurrently created personal goal remains until account erasure removes it. For erased accounts
+this is exactly #1941's dangling-reference case; after #1941 merges, a small follow-up adds
+`report_goal` owner and creator to its periodic orphan sweep to make erasure eventually complete.
+[Governance deletion and retention](../GOVERNANCE_DELETION_AND_RETENTION.md) defines the product bound.
+The existing final-deletion reservation precheck is #2059 and is unchanged here.
+
 ### Public API credentials
 
 #### Canonical class order

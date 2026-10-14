@@ -100,6 +100,38 @@ pending requests and terminates a request whose step is unsatisfiable: the block
 `unsatisfiable`, other open steps are cancelled, and the document returns to `draft`. Decisions
 already recorded and every frozen step and approver assignment remain as historical evidence.
 
+## Member departure and account erasure
+
+Administrative removal, leave, and invitation decline delete the member's personal report goals in
+that workspace. Team goals and other members' goals survive with `created_by` unchanged. Account
+erasure deletes personal goals in every active tenant catalog and clears `created_by` on surviving
+goals, including references in workspaces the account already left.
+
+Departure and erasure return the existing 409 conflict while the member is the sole **distinct named
+approver** on an active policy step or an open step of a pending request, including future sequential
+steps. The request check replays the latest reassignment, applicable escalation, and delegation;
+it checks the named route independently of current membership, permissions, separation of duties,
+and decisions. Reassigning away unblocks departure. `any_approver` routes, inactive policies, and
+terminal requests or steps never block. After the check passes, the member's policy-step and frozen
+approver rows are deleted, including inactive and terminal references. Decisions and appended
+assignment history remain as evidence.
+
+This guarantee is bounded to references committed before departure; writers take no new departure
+fence. A reference created concurrently with departure can survive it. A request naming the departed
+member follows the existing reconciliation rules in their existing order:
+
+1. Its deadline rules apply first. If the step expires it records `expired`; if it escalates it
+   appends `any_approver` and clears the deadline, and can then still pass with enough surviving
+   approvers.
+2. Only when quorum remains impossible after those rules does the bounded sweep terminate it as
+   `unsatisfiable`, cancel other open steps, and return the document to `draft`.
+
+A concurrently created personal goal remains until account erasure removes it. For an erased account
+it is a dangling reference of exactly [#1941](https://github.com/itkla/connex/issues/1941)'s kind. Once
+#1941 merges, `report_goal` owner and creator will join its periodic orphan sweep in a small follow-up,
+which makes erasure eventually complete. The pre-existing final-deletion reservation precheck is
+tracked separately in [#2059](https://github.com/itkla/connex/issues/2059).
+
 ## Why a request ended
 
 Every terminal request records an `outcome_reason` in addition to its coarse status:

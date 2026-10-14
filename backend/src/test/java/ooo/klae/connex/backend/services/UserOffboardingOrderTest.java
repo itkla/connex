@@ -44,6 +44,9 @@ import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.GoalMapper;
+import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -72,6 +75,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class UserOffboardingOrderTest {
+    @Mock private DepartureApprovalGuard departureApprovalGuard;
+    @Mock private GoalMapper goalMapper;
+    @Mock private ApprovalPolicyMapper approvalPolicyMapper;
+    @Mock private DocumentApprovalMapper documentApprovalMapper;
     @Mock private NoteMapper noteMapper;
     @Mock private ActivityMapper activityMapper;
     @Mock private AiChatMapper aiChatMapper;
@@ -273,7 +280,8 @@ class UserOffboardingOrderTest {
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
             personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
-            relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper);
+            relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper,
+            departureApprovalGuard, goalMapper, approvalPolicyMapper, documentApprovalMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -281,6 +289,7 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
+        order.verify(departureApprovalGuard).assertCanErase(9);
         order.verify(workflowOffboardingService).offboard(9, plan);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
@@ -321,6 +330,9 @@ class UserOffboardingOrderTest {
         order.verify(teamMapper).getByIdForUpdate(8, 14);
         order.verify(teamMapper).deleteMembershipsAnywhere(9);
         order.verify(teamMapper).clearManagerAnywhere(9);
+        order.verify(goalMapper).findDepartureReferencesAnywhere(9);
+        order.verify(approvalPolicyMapper).findDepartureReferencesAnywhere(9);
+        order.verify(documentApprovalMapper).findDepartureReferencesAnywhere(9);
     }
 
     private Team team(int workspaceId, int id) {
