@@ -762,6 +762,69 @@ class AuditServiceTest {
             objectMapper.readTree(appended.getValue().getContext()));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"denied\u0085agent", "denied\u009fagent"})
+    void onlyDenialAuditsOmitFirewallRejectedUserAgents(String userAgent) {
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.setRemoteAddr("10.0.0.1");
+        raw.addHeader("User-Agent", userAgent);
+        raw.addHeader("Sec-Fetch-Site", "cross-site");
+        raw.getSession();
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        assertThrows(RequestRejectedException.class, () -> request.getHeader("User-Agent"));
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertThrows(RequestRejectedException.class, () ->
+                service.recordStrictIndependentScoped("company.update", "company", 7, 7, 8,
+                    "Company", "Company updated", null));
+            verifyNoInteractions(auditIntegrityService);
+
+            service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                "10.0.0.1");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        AuditLog entry = appended.getValue();
+        assertNull(entry.getUserAgent());
+        assertEquals("10.0.0.1", entry.getIpAddress());
+        assertEquals("auth.mfa.policy.denied", entry.getAction());
+        assertEquals("failure", entry.getOutcome());
+        assertNotNull(entry.getSessionId());
+        assertNotEquals(raw.getSession().getId(), entry.getSessionId());
+        assertNotNull(entry.getRequestId());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "cross-site")),
+            objectMapper.readTree(entry.getContext()));
+    }
+
+    @Test
+    void denialAuditsPropagateOtherUserAgentReadFailures() {
+        IllegalStateException failure = new IllegalStateException("User agent read failed");
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies") {
+            @Override
+            public String getHeader(String name) {
+                if ("User-Agent".equals(name)) {
+                    throw failure;
+                }
+                return super.getHeader(name);
+            }
+        };
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertSame(failure, assertThrows(IllegalStateException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                    "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                    "10.0.0.1")));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+        verifyNoInteractions(auditIntegrityService);
+    }
+
     @Test
     void strictFailureAuditWithFetchMetadataPropagatesAppendFailures() {
         MockHttpServletRequest request = new MockHttpServletRequest();

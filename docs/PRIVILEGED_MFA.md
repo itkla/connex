@@ -83,6 +83,9 @@ that field is dropped and the row is still written. Server-rendered reads that f
 session cookie consequently have no fetch-metadata fields
 ([#1936](https://github.com/itkla/connex/issues/1936)).
 
+The denial-audit writer also omits a `User-Agent` value rejected by the request firewall, retaining
+the row with a null user agent. Other audit writers keep their existing strict header handling.
+
 Anyone reading or alerting on this trail should expect:
 
 - **one row per window, not one per request**, for a user who keeps hitting the same wall from the

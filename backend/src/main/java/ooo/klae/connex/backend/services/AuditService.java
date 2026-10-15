@@ -373,8 +373,9 @@ public class AuditService {
 
     /**
      * Records an already-decided refusal using the address selected for its denial-audit key.
-     * The forwarding header is not read again while building the row; other request metadata
-     * and advisory fetch metadata retain their usual handling. Persistence failures propagate.
+     * The forwarding header is not read again while building the row. A {@code User-Agent}
+     * value rejected by the request firewall is omitted; other request metadata and advisory
+     * fetch metadata retain their usual handling. Persistence failures propagate.
      *
      * @param action action name
      * @param entityType audited entity type
@@ -394,7 +395,7 @@ public class AuditService {
                 summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
         entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
         if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
-            resolveRequestMetadata(entry, attrs);
+            resolveDenialRequestMetadata(entry, attrs);
         }
         appendAndObserve(entry, true);
     }
@@ -905,6 +906,25 @@ public class AuditService {
     private void resolveRequestMetadata(AuditLog entry, ServletRequestAttributes attrs) {
         HttpServletRequest req = attrs.getRequest();
         entry.setUserAgent(truncate(req.getHeader("User-Agent"), USER_AGENT_MAX));
+        entry.setSessionId(sessionHash(req));
+        entry.setRequestId(requestId(attrs));
+        String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
+        Integer orgId = entry.getOrgId();
+        if (CorrelationIds.isValid(clientAssertedCorrelationId) && orgId != null && orgId > 0) {
+            entry.setUntrustedClientAssertedCorrelationHmac(
+                correlationPseudonymizer.forStorage(orgId, clientAssertedCorrelationId));
+        }
+    }
+
+    private void resolveDenialRequestMetadata(AuditLog entry, ServletRequestAttributes attrs) {
+        HttpServletRequest req = attrs.getRequest();
+        String userAgent;
+        try {
+            userAgent = req.getHeader("User-Agent");
+        } catch (RequestRejectedException rejected) {
+            userAgent = null;
+        }
+        entry.setUserAgent(truncate(userAgent, USER_AGENT_MAX));
         entry.setSessionId(sessionHash(req));
         entry.setRequestId(requestId(attrs));
         String clientAssertedCorrelationId = MDC.get(CorrelationIds.MDC_KEY);
