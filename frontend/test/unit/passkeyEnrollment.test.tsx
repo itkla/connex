@@ -144,6 +144,39 @@ describe("enrolling a passkey", () => {
         expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.freshSignInRequired);
     });
 
+    it("returns to the proofs when the server refuses the password step", async () => {
+        mocks.begin.mockRejectedValueOnce(new ApiError("Refused", 403));
+        const callbacks = await mountEnrollment(firstPasskey);
+        await act(async () => current().addPasskey());
+        await act(async () => current().password.setValue("correct horse"));
+
+        await act(async () => current().password.confirm());
+
+        expect(callbacks.onProofRejected).toHaveBeenCalledOnce();
+        expect(current().password.open).toBe(false);
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.freshSignInRequired);
+    });
+
+    it("announces an accepted passkey even when the follow-up refresh fails", async () => {
+        const callbacks = {
+            onEnrolled: vi.fn(async () => {
+                throw new Error("offline");
+            }),
+            onProofRejected: vi.fn(),
+        };
+        await mountEnrollment(firstPasskey, callbacks);
+        await act(async () => current().addPasskey());
+        await act(async () => current().password.setValue("correct horse"));
+
+        await act(async () => current().password.confirm());
+
+        expect(mocks.finish).toHaveBeenCalledOnce();
+        expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.added);
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.loadFailed);
+        expect(mocks.toastError).not.toHaveBeenCalledWith(enAccount.AccountSecurity.addFailed);
+        expect(current().password.open).toBe(false);
+    });
+
     it("runs the caller's follow-up before announcing an accepted passkey", async () => {
         const order: string[] = [];
         const callbacks = {

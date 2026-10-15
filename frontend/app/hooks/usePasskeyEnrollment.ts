@@ -50,8 +50,9 @@ export type PasskeyEnrollment = {
  * no workspace (#1534). A privileged, password-backed account's first passkey needs the emailed
  * confirmation and then its current password; the server checks both proofs again, so this only
  * sequences the ceremony. Once the server accepts a passkey, `onEnrolled` runs before the success
- * toast; a refusal of the first-passkey proofs calls `onProofRejected` so the caller can re-read
- * what is required.
+ * toast; if that follow-up fails, the enrollment is still announced, since the passkey exists, with
+ * a separate note that the list could not be refreshed. A refusal of the first-passkey proofs, with
+ * or without the password step, calls `onProofRejected` so the caller can re-read what is required.
  * @param requirements what the account's requirements say the enrollment needs
  * @param callbacks what to do after an accepted enrollment and after a refused first-passkey proof
  * @returns the enrollment state and actions
@@ -73,8 +74,14 @@ export function usePasskeyEnrollment(
     const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
         const credential = await startRegistration({ optionsJSON });
         await finishPasskeyRegistration(deviceLabel(), credential);
-        await callbacks.onEnrolled();
+        let reconciled = true;
+        try {
+            await callbacks.onEnrolled();
+        } catch {
+            reconciled = false;
+        }
         toastSuccess(t("added"));
+        if (!reconciled) toastError(t("loadFailed"));
     };
 
     const sendConfirmation = async () => {
@@ -145,6 +152,10 @@ export function usePasskeyEnrollment(
                 setPasswordOpen(false);
             } else if (err instanceof ApiError && err.status === 401) {
                 setPasswordError(t("incorrectPassword"));
+            } else if (err instanceof ApiError && err.status === 403) {
+                toastError(emailConfirmationRequired ? t("confirmationRequired") : t("freshSignInRequired"));
+                setPasswordOpen(false);
+                callbacks.onProofRejected();
             } else {
                 toastError(t("addFailed"));
             }
