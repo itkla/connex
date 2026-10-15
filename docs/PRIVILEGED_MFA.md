@@ -587,6 +587,16 @@ account's enforced `standing`, and `approvalGaps`: for each of the account's own
 approved (`credentialId` in the base64url form the passkey list uses, `orgId`, `orgName`). A client
 re-reads it after each ceremony, and releases confinement only on `SATISFIED` or `UNPRIVILEGED`.
 
+The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
+independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is
+`{orgId, orgName, orgRole, workspaces:[{workspaceId, workspaceName}]}`. `orgRole` is explicitly
+`null` without an organization membership. Entries and workspaces are ordered by id. Sources are
+exactly the shared standing privilege branches: active organizations, active workspaces and active
+workspace memberships; built-in owner/admin only when `role_id IS NULL`; custom roles with the
+management permission list above; and organization authority from `org_member`. Permission joins
+are deduplicated, so each workspace appears once. Only the signed-in account's memberships are
+returned, including custom-role workspace exits and org-only privilege with no workspace exits.
+
 The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
 holding passkeys of which none is sufficient. These are the accounts that enforcement confines.
 Beside it, `grandfatheredCoverageCount` counts the per-organization coverage rows whose source is
@@ -600,6 +610,32 @@ replacement passkey carries `BREAK_GLASS` assurance and satisfies standing in ev
 
 **Do not switch it on yet.** Enforcement ships dark. It is switched on by its own release, after
 the cutover below, ownership offers, and the web client's approval flow have shipped.
+
+### Member approval badges
+
+`GET /api/workspaces/{id}/members` and `GET /api/orgs/{orgId}/members` optionally include
+`passkeyApprovalNeeded: boolean` on each row. It is true only if that account is privileged in
+**this organization** and none of its own passkeys has coverage here or `BREAK_GLASS` assurance.
+The set reads reuse `privilegedInOrganizationAmong` and `coveredInOrganizationAmong`; coverage
+uses the same per-org attestation and break-glass facts as standing's sufficiency predicate.
+Privilege or coverage elsewhere never decides this value. This does not expose account-wide
+standing: split coverage can satisfy each local badge while no single passkey satisfies standing.
+Eligible non-privileged rows carry `false`.
+
+The field is omitted (`Boolean` null with `NON_NULL`) unless the caller has approval issuance
+authority for that row. The caller needs current authority in the active scope, no deletion
+reservation, and an owned passkey approved in this organization. Workspace issuance uses the
+shared role-authority predicate: `MEMBER_MANAGE` for built-in targets, `ROLE_MANAGE` for custom
+roles, the target's full permission set under the grant ceiling, and owner authority for owner
+targets. Organization issuance requires org ownership. Self, pending and deletion-reserved targets
+are ineligible. A caller without issuance authority sees no field on any row. These reads take no
+locks, append no audit and perform no writes. They do not require a fresh step-up; issuing the code
+still requires a fresh assertion from a passkey approved here and revalidates authority under locks.
+
+Badges are available before `attestation-enforced` is enabled, for draining approval gaps before
+switch-on. Each nonempty authorized list uses two set queries for privilege and coverage, plus a
+constant number of authority reads. Workspace custom-role roots and permissions are read with one
+join, including roles with no permissions; the query count does not grow with members or roles.
 
 ### Organization tenancy and safe exits
 
@@ -632,6 +668,24 @@ Both routes stay reachable while confined, whatever the standing. Both exits are
 (`workspace.member.leave`, `org.member.leave`): an exit that cannot be recorded does not happen.
 After either exit the client re-reads standing, since other memberships may still confer
 privilege.
+
+Departure refusals retain their HTTP status and existing `message`, and include a stable `code`
+for client localization:
+
+| Route | Refusal | HTTP | Code |
+|---|---|---|---|
+| Workspace leave | Last active owner | 400 | `WORKSPACE_LAST_OWNER` |
+| Workspace leave | Last owner able to restore authority | 400 | `WORKSPACE_RECOVERY_OWNER_REQUIRED` |
+| Workspace leave | Sole named document approver on an active policy or pending approval | 409 | `SOLE_NAMED_DOCUMENT_APPROVER` |
+| Organization leave | Not a member (including the preliminary route check) | 404 | `ORG_NOT_MEMBER` |
+| Organization leave | Sole organization owner | 400 | `ORG_LAST_OWNER` |
+
+The owner and document-approver domain exceptions are shared with existing removal, role-edit or
+account-erasure guards where those same conditions apply. Their codes describe the invariant,
+rather than claiming that every refusal came from a leave request. Their status, message, locking
+and success behavior are unchanged. Other standard boundary failures retain their existing codes
+(e.g. `RESOURCE_NOT_FOUND`, `FORBIDDEN`). A departure `409` never requests a confinement
+acknowledgement; clients match the acknowledgement code specifically.
 
 ### Acknowledging confinement in role edits
 

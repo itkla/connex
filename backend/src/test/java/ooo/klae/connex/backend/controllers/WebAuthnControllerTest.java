@@ -215,12 +215,17 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(true);
         when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
         when(privilegedAccountService.passkeyApprovalGaps(7)).thenReturn(gaps);
+        var memberships = List.of(new ooo.klae.connex.backend.dto.PrivilegedMembershipDto(
+            3, "Acme", "admin", List.of()));
+        when(privilegedAccountService.privilegedMemberships(7)).thenReturn(memberships);
 
         PasskeyRegistrationRequirementsDto requirements =
             controller.registrationRequirements(new MockHttpServletRequest());
 
         assertEquals(PrivilegedMfaStanding.ATTESTATION_REQUIRED, requirements.standing());
         assertEquals(gaps, requirements.approvalGaps());
+        assertEquals(memberships, requirements.privilegedMemberships());
+        verify(privilegedAccountService).privilegedMemberships(7);
     }
 
     @Test

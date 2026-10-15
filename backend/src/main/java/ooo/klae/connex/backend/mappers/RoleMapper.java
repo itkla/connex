@@ -15,6 +15,8 @@ import ooo.klae.connex.backend.beans.WorkspaceRole;
 public interface RoleMapper {
     int insertRole(WorkspaceRole role);
     List<WorkspaceRole> findRolesByWorkspace(int workspaceId);
+    /** Reads all role roots and permission sets in one workspace with one query, without locks. */
+    List<WorkspaceRole> findAuthorityRolesByWorkspace(int workspaceId);
     WorkspaceRole findRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /**

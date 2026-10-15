@@ -55,7 +55,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * Mapper interfaces whose statements read or write workspace-scoped data. The
      * canonical registry of tenant-scoped namespaces — also consumed by the
      * read-path architecture test that asserts every {@code <select>} here binds
-     * the workspace predicate.
+     * the workspace predicate, including {@code RoleMapper.findAuthorityRolesByWorkspace}.
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "AssignmentSweepMapper",
@@ -152,6 +152,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * must appear either here or in {@link #SCOPED_NAMESPACES} — the
      * registry-completeness architecture test enforces the partition so a new
      * mapper cannot silently bypass the fail-closed backstop.
+     * {@code UserMapper.privilegedMemberships} is a self-only control-plane read in this registry.
      */
     public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
         MAPPERS + "AllowedDomainMapper",

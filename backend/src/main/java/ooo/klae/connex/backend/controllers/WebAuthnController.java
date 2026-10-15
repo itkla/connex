@@ -119,7 +119,8 @@ public class WebAuthnController {
                 emailConfirmationRequired,
                 emailConfirmationSatisfied,
                 privilegedAccountService.enforcedStanding(user.getId()),
-                privilegedAccountService.passkeyApprovalGaps(user.getId()));
+                privilegedAccountService.passkeyApprovalGaps(user.getId()),
+                privilegedAccountService.privilegedMemberships(user.getId()));
     }
 
     /**

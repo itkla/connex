@@ -245,13 +245,15 @@
        privilegedOrgCondition is appended to every branch, so it may only refer to o.id and to
        columns of the enclosing query. -->
   <sql id="privilegedOrgBranches">
-    SELECT o.id AS org_id
+    SELECT o.id AS org_id, o.name AS org_name, om.org_role AS org_role,
+           NULL AS workspace_id, NULL AS workspace_name
     FROM org_member om
     JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
     WHERE om.user_id = ${privilegedUserId}
       ${privilegedOrgCondition}
     UNION ALL
-    SELECT o.id AS org_id
+    SELECT o.id AS org_id, o.name AS org_name, NULL AS org_role,
+           w.id AS workspace_id, w.name AS workspace_name
     FROM workspace_member wm
     JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
     JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
@@ -261,7 +263,8 @@
       AND wm.role IN ('admin', 'owner')
       ${privilegedOrgCondition}
     UNION ALL
-    SELECT o.id AS org_id
+    SELECT o.id AS org_id, o.name AS org_name, NULL AS org_role,
+           w.id AS workspace_id, w.name AS workspace_name
     FROM workspace_member wm
     JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
     JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
@@ -419,6 +422,18 @@
     WHERE e.user_id IN
       <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
       AND <include refid="coveredInOrganization"><property name="coverageOrgId" value="#{orgId}"/></include>
+  </select>
+
+  <select id="privilegedMemberships" resultType="ooo.klae.connex.backend.beans.PrivilegedMembershipRow">
+    SELECT DISTINCT org_id AS orgId, org_name AS orgName, org_role AS orgRole,
+           workspace_id AS workspaceId, workspace_name AS workspaceName
+    FROM (
+      <include refid="privilegedOrgBranches">
+        <property name="privilegedUserId" value="#{userId}"/>
+        <property name="privilegedOrgCondition" value=""/>
+      </include>
+    ) memberships
+    ORDER BY org_id, workspace_id
   </select>
 
   <select id="passkeyApprovalGaps" resultType="ooo.klae.connex.backend.beans.PasskeyApprovalGap">

@@ -118,6 +118,25 @@ class PrivilegedAccountServiceTest {
     }
 
     @Test
+    void approvalBadgesUseExactlyTwoOrgLocalSetQueriesEvenBeyondStandingChunkSize() {
+        List<Integer> ids = IntStream.rangeClosed(1, 1201).boxed().toList();
+        when(userMapper.privilegedInOrganizationAmong(ORG_ID, ids)).thenReturn(List.of(1, 2, 3));
+        when(userMapper.coveredInOrganizationAmong(ORG_ID, ids)).thenReturn(List.of(2, 3, 4));
+
+        assertEquals(Set.of(1), service("false").passkeyApprovalNeeded(ORG_ID, ids));
+
+        verify(userMapper).privilegedInOrganizationAmong(ORG_ID, ids);
+        verify(userMapper).coveredInOrganizationAmong(ORG_ID, ids);
+        verifyNoMoreInteractions(userMapper);
+    }
+
+    @Test
+    void emptyApprovalBadgeListNeedsNoRead() {
+        assertEquals(Set.of(), service("true").passkeyApprovalNeeded(ORG_ID, List.of()));
+        verifyNoInteractions(userMapper);
+    }
+
+    @Test
     void approvalGapsCarryTheBase64UrlCredentialIdThePasskeyListUses() {
         byte[] credentialId = "cred?>x".getBytes(StandardCharsets.UTF_8);
         when(userMapper.passkeyApprovalGaps(USER_ID)).thenReturn(List.of(
