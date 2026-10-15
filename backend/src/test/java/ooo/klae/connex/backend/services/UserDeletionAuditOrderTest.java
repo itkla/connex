@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -53,6 +54,7 @@ class UserDeletionAuditOrderTest {
         order.verify(fixture.userMapper).lockById(9);
         order.verify(fixture.userMapper).isAccountDeletionReservationOwner(9, OWNER);
         order.verifyNoMoreInteractions();
+        verifyNoInteractions(fixture.auditService, fixture.managedObjectService, fixture.lifecycleService);
     }
 
     @Test

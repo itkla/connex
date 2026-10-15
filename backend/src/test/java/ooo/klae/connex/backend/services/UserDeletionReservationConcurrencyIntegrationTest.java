@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.Map;
 import java.util.UUID;
@@ -27,7 +25,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
@@ -37,8 +34,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.UserMapper;
-import ooo.klae.connex.backend.publicapi.ApiCredentialLifecycleService;
-import ooo.klae.connex.backend.storage.ManagedObjectService;
 
 /** Pins final deletion's reservation fence across account-lock contention, snapshots, and caches. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -51,15 +46,11 @@ class UserDeletionReservationConcurrencyIntegrationTest {
     @Autowired private UserDeletionTransaction userDeletionTransaction;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
-    @MockitoBean private AuditService auditService;
-    @MockitoBean private ManagedObjectService managedObjectService;
-    @MockitoBean private ApiCredentialLifecycleService apiCredentialLifecycleService;
 
     private User user;
 
     @BeforeEach
     void createCommittedAccount() {
-        clearInvocations(auditService, managedObjectService, apiCredentialLifecycleService);
         String unique = UUID.randomUUID().toString().substring(0, 8);
         user = new User();
         user.setUsername("reservation-fence-" + unique);
@@ -128,7 +119,6 @@ class UserDeletionReservationConcurrencyIntegrationTest {
         assertTrue(jdbcTemplate.queryForObject(
             "SELECT account_deletion_reservation_until > UTC_TIMESTAMP(6) FROM app_user WHERE id = ?",
             Boolean.class, userId));
-        verifyNoInteractions(auditService, managedObjectService, apiCredentialLifecycleService);
     }
 
     @Test
@@ -144,7 +134,6 @@ class UserDeletionReservationConcurrencyIntegrationTest {
 
             assertFalse(userMapper.isAccountDeletionReservationOwner(userId, OLD_OWNER));
         });
-        verifyNoInteractions(auditService, managedObjectService, apiCredentialLifecycleService);
     }
 
     private TransactionTemplate repeatableReadTransaction() {
