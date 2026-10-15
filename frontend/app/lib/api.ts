@@ -458,6 +458,7 @@ const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
 let privilegedMfaConfinement: PrivilegedMfaConfinementReason | null = null;
 let privilegedMfaConfinementReleased = false;
 let privilegedMfaAttestationObserved = false;
+let privilegedMfaCeremonyEpoch: number | null = null;
 let privilegedMfaEventEpoch = 0;
 let privilegedMfaReadSequence = 0;
 let privilegedMfaAppliedSequence = 0;
@@ -567,6 +568,7 @@ function resetPrivilegedMfaState() {
     privilegedMfaConfinement = null;
     privilegedMfaConfinementReleased = false;
     privilegedMfaAttestationObserved = false;
+    privilegedMfaCeremonyEpoch = null;
     privilegedMfaEventEpoch += 1;
     privilegedMfaAppliedSequence = privilegedMfaReadSequence;
     privilegedMfaRequirements = null;
@@ -588,14 +590,11 @@ function isPasskeyRegistrationRequirements(value: unknown): value is Types.Passk
         && "orgName" in gap && typeof gap.orgName === "string");
 }
 
-function applyPrivilegedMfaStanding(
-    requirements: Types.PasskeyRegistrationRequirements,
-    settlement: PrivilegedMfaSettlement,
-    sequence: number,
-) {
+function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number) {
     privilegedMfaAppliedSequence = sequence;
     privilegedMfaRequirements = requirements;
     const standing = requirements.standing;
+    if (standing !== undefined) privilegedMfaCeremonyEpoch = null;
     if (standing === "SATISFIED" || standing === "UNPRIVILEGED") {
         releasePrivilegedMfaConfinement();
     } else if (standing === "ENROLLMENT_REQUIRED") {
@@ -603,9 +602,10 @@ function applyPrivilegedMfaStanding(
     } else if (standing === "ATTESTATION_REQUIRED") {
         confinePrivilegedMfa("attestation");
     } else if (standing === undefined
-            && settlement === "ceremony"
+            && privilegedMfaCeremonyEpoch === privilegedMfaEventEpoch
             && !privilegedMfaAttestationObserved
             && privilegedMfaDestinationReason() !== "attestation") {
+        privilegedMfaCeremonyEpoch = null;
         releasePrivilegedMfaConfinement();
     }
     notifyPrivilegedMfaListeners();
@@ -617,19 +617,22 @@ function applyPrivilegedMfaStanding(
  * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
- * nothing, and one that a server refusal or an identity change overtook is read again. A failed or
- * malformed read keeps any confinement, as does a standing this client does not know. A backend too
- * old to report standing releases only after a ceremony the server accepted — an enrollment or a
- * redemption — and never once passkey approval has been required in this page. The decisive
- * requirements are available from {@link currentPrivilegedMfaRequirements}.
+ * nothing, and one that a server refusal or an identity change overtook is read again, up to three
+ * attempts before it is reported as failed. A failed or malformed read keeps any confinement, as
+ * does a standing this client does not know. A backend too old to report standing releases only
+ * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
+ * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
+ * been required in this page. The decisive requirements are available from
+ * {@link currentPrivilegedMfaRequirements}.
  *
- * @param settlement what prompted the check
+ * @param settlement what prompted the check; a ceremony is one the server has just accepted
  * @returns whether this read decided the standing, a newer one had, or the read failed
  */
 export async function settlePrivilegedMfaStanding(
     settlement: PrivilegedMfaSettlement,
 ): Promise<PrivilegedMfaSettleOutcome> {
     if (typeof window === "undefined") return "failed";
+    if (settlement === "ceremony") privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
@@ -643,10 +646,10 @@ export async function settlePrivilegedMfaStanding(
         if (!isPasskeyRegistrationRequirements(response)) return "failed";
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
-        applyPrivilegedMfaStanding(response, settlement, sequence);
+        applyPrivilegedMfaStanding(response, sequence);
         return "applied";
     }
-    return "superseded";
+    return "failed";
 }
 
 function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {

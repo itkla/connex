@@ -149,6 +149,9 @@ describe("onboarding ownership offers", () => {
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
         expect(button("Onboarding.signOut")).toBeDefined();
+
+        await act(async () => button("Onboarding.confinedRecheck").click());
+        expect(standing.refresh).toHaveBeenCalledWith("check");
     });
 
     it("offers nothing that confinement could refuse until the standing is known", async () => {

@@ -14,7 +14,6 @@ const spies = vi.hoisted(() => ({
     showApiError: vi.fn(),
     toastSuccess: vi.fn(),
     refresh: vi.fn(),
-    submissions: [] as string[],
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
@@ -62,32 +61,24 @@ vi.mock("@/components/ui/dialog", async () => {
         DialogTitle: Passthrough,
     };
 });
-vi.mock("@/app/components/settings/RoleDialog", async () => {
-    const React = await import("react");
-    return {
-        default: ({ open, onSubmit }: { open: boolean; onSubmit: (name: string, permissions: string[]) => Promise<void> }) =>
-            open
-                ? React.createElement("button", {
-                    type: "button",
-                    "data-testid": "submit-role",
-                    onClick: () => {
-                        onSubmit("Ops", ["MEMBER_MANAGE", "ROLE_MANAGE"]).then(
-                            () => spies.submissions.push("saved"),
-                            (err: unknown) => spies.submissions.push(err instanceof Error ? err.name : "rejected"),
-                        );
-                    },
-                }, "Submit role")
-                : null,
-    };
-});
-
 let container: HTMLDivElement;
 let root: Root;
 
-function button(label: string): HTMLButtonElement {
-    const match = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+function button(label: string, scope: ParentNode = container): HTMLButtonElement {
+    const match = [...scope.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
     if (!match) throw new Error(`no button labelled ${label}`);
     return match;
+}
+
+function confinementQuestion(): Element {
+    const question = [...container.querySelectorAll("[role='dialog']")]
+        .find((dialog) => dialog.textContent?.includes(enSettings.ConfinementAcknowledgement.title));
+    if (!question) throw new Error("no confinement question");
+    return question;
+}
+
+function roleSaveButton(): HTMLButtonElement | undefined {
+    return [...container.querySelectorAll<HTMLButtonElement>("button[type='submit']")].at(0);
 }
 
 async function flush() {
@@ -102,15 +93,29 @@ async function openEditAndSubmit() {
     ));
     await flush();
     await act(async () => button(enWorkspace.WorkspaceRoles.edit).click());
-    await act(async () => container.querySelector<HTMLButtonElement>("[data-testid='submit-role']")?.click());
+    await act(async () => roleSaveButton()?.click());
     await flush();
 }
 
 beforeEach(() => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false,
+    }));
+    vi.stubGlobal("ResizeObserver", class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+    });
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    spies.submissions.length = 0;
     spies.updateWorkspaceRole.mockReset();
     spies.updateWorkspaceRole.mockImplementation(async (...args: unknown[]) => {
         if (args[4] !== true) {
@@ -126,18 +131,21 @@ afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
 });
 
 describe("editing a custom role that would confine its assignees", () => {
     it("names the role in the question and keeps the role dialog open, without an error, when declined", async () => {
         await openEditAndSubmit();
 
-        expect(container.textContent).toContain("Save changes to the Ops role");
-        await act(async () => button(enSettings.ConfinementAcknowledgement.cancel).click());
+        expect(roleSaveButton()?.disabled).toBe(true);
+        expect(confinementQuestion().textContent).toContain("Save changes to the Ops role");
+        await act(async () => button(enSettings.ConfinementAcknowledgement.cancel, confinementQuestion()).click());
         await flush();
 
-        expect(spies.submissions).toEqual(["ConfinementAcknowledgementDeclined"]);
-        expect(container.querySelector("[data-testid='submit-role']")).not.toBeNull();
+        expect(container.querySelector("#role-name")).not.toBeNull();
+        expect(roleSaveButton()?.disabled).toBe(false);
+        expect(roleSaveButton()?.textContent).toBe(enWorkspace.WorkspaceRoles.save);
         expect(spies.showApiError).not.toHaveBeenCalled();
         expect(spies.toastSuccess).not.toHaveBeenCalled();
         expect(spies.updateWorkspaceRole).toHaveBeenCalledTimes(1);
@@ -146,11 +154,10 @@ describe("editing a custom role that would confine its assignees", () => {
     it("saves the role acknowledged once the actor goes ahead", async () => {
         await openEditAndSubmit();
 
-        await act(async () => button(enSettings.ConfinementAcknowledgement.confirm).click());
+        await act(async () => button(enSettings.ConfinementAcknowledgement.confirm, confinementQuestion()).click());
         await flush();
 
-        expect(spies.updateWorkspaceRole).toHaveBeenLastCalledWith(5, 4, "Ops", ["MEMBER_MANAGE", "ROLE_MANAGE"], true);
-        expect(spies.submissions).toEqual(["saved"]);
+        expect(spies.updateWorkspaceRole).toHaveBeenLastCalledWith(5, 4, "Ops", ["MEMBER_MANAGE"], true);
         expect(spies.toastSuccess).toHaveBeenCalledWith(enWorkspace.WorkspaceRoles.updated);
         expect(spies.refresh).toHaveBeenCalled();
     });

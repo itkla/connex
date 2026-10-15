@@ -35,7 +35,8 @@
         "confinedBody": "This account has administrator access in an organization, and its passkey still needs to be set up or approved. Until then, you can't create or join a workspace here. You can still decline ownership offers or sign out.",
         "standingFailedTitle": "We couldn't check your account",
         "standingFailedBody": "Try again in a moment. You can still decline ownership offers or sign out.",
-        "standingRetry": "Try again"
+        "standingRetry": "Try again",
+        "confinedRecheck": "Check again"
     },
     "InviteAccept": {
         "metaTitle": "Accept your invitation",

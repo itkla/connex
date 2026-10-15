@@ -228,6 +228,25 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("SATISFIED");
     });
 
+    it("gives up and reports failure when identity changes keep overtaking the read", async () => {
+        const { listeners } = stubBrowser(SECURITY, "?mfa=approve");
+        const reads = standingReads();
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+        const api = await import("@/app/lib/api");
+
+        const settled = api.settlePrivilegedMfaStanding("check");
+        for (let index = 0; index < 3; index += 1) {
+            await flush();
+            listeners.get("storage")?.({ key: "connex:client-request-identity", newValue: `invalidate:${index}` });
+            reads.release(index, requirements("SATISFIED"));
+        }
+
+        await expect(settled).resolves.toBe("failed");
+        expect(reads.served()).toBe(3);
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+    });
+
     it("keeps confinement when the standing cannot be read", async () => {
         stubBrowser(SECURITY, "?mfa=approve");
         stubBackend((url) => (url.endsWith(REQUIREMENTS) ? json({ message: "Unavailable" }, 503) : null));
@@ -298,6 +317,45 @@ describe("privileged MFA confinement in the browser", () => {
             await api.settlePrivilegedMfaStanding("ceremony");
 
             expect(api.privilegedMfaConfinementReason()).toBeNull();
+        });
+
+        it("still releases when a later check decides before the enrollment's own slow read", async () => {
+            stubBrowser(SECURITY, "?mfa=enroll");
+            const reads = standingReads();
+            stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+            const api = await import("@/app/lib/api");
+
+            const ceremony = api.settlePrivilegedMfaStanding("ceremony");
+            await flush();
+            const check = api.settlePrivilegedMfaStanding("check");
+            await flush();
+            reads.release(1, requirements());
+            await expect(check).resolves.toBe("applied");
+            expect(api.privilegedMfaConfinementReason()).toBeNull();
+
+            reads.release(0, requirements());
+            await expect(ceremony).resolves.toBe("superseded");
+            expect(api.privilegedMfaConfinementReason()).toBeNull();
+        });
+
+        it("does not release for an enrollment once a refusal has intervened", async () => {
+            stubBrowser("/dashboard");
+            const reads = standingReads();
+            stubBackend((url) => {
+                if (url.endsWith(REQUIREMENTS)) return reads.next();
+                if (url.endsWith("/api/rules")) return refusal(ENROLLMENT);
+                return null;
+            });
+            const api = await import("@/app/lib/api");
+
+            const ceremony = api.settlePrivilegedMfaStanding("ceremony");
+            await flush();
+            await expect(api.getRules()).rejects.toMatchObject({ code: ENROLLMENT });
+            reads.release(0, requirements());
+            reads.release(1, requirements());
+
+            await expect(ceremony).resolves.toBe("applied");
+            expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
         });
 
         it("never releases after a safe exit or a plain check", async () => {
