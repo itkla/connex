@@ -79,6 +79,10 @@ public interface UserMapper {
     List<Integer> findAccountDeletionReservedIds(@Param("ids") List<Integer> ids);
     /** Returns current deletion-reservation state while retaining a shared user-row lock, or null if absent. */
     Boolean isAccountDeletionReservedForShare(int id);
+    /**
+     * Proves reservation ownership and database-clock expiry with a current locking read.
+     * The caller must already hold the account lock.
+     */
     boolean isAccountDeletionReservationOwner(
         @Param("id") int id, @Param("owner") String owner);
     int reserveAccountDeletion(

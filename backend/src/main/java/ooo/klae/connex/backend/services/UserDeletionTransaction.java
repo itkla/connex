@@ -75,9 +75,11 @@ public class UserDeletionTransaction {
     }
 
     /**
-     * Locks, revalidates, erases, audits, and deletes the reserved control user atomically. This is
-     * the only transaction in the branch that appends into more than one audit-integrity chain, so
-     * every append is emitted in one pass ordered by audit scope rather than in deletion order.
+     * Locks the account, then proves reservation ownership and database-clock expiry with a current
+     * locking read, refusing a reservation replaced while this deleter waited for the account lock.
+     * Revalidates, erases, audits, and deletes the reserved control user atomically. This is the only
+     * transaction in the branch that appends into more than one audit-integrity chain, so every
+     * append is emitted in one pass ordered by audit scope rather than in deletion order.
      */
     @Transactional
     public void delete(int id, String owner) {
