@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.OwnershipOfferDto;
 import ooo.klae.connex.backend.dto.OwnershipOfferAcceptanceDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.OrganizationMembershipRequiredException;
 import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -279,7 +280,7 @@ public class OwnershipOfferService {
     /** Routes self-only organization departure without introducing a step-up requirement. */
     public void leaveOrganization(int orgId, int actorId) {
         if (tenantWorkScope.unroutedRead(() -> orgMemberMapper.getRole(orgId, actorId)) == null) {
-            throw new ResourceNotFoundException("You are not a member of this organization");
+            throw new OrganizationMembershipRequiredException("You are not a member of this organization");
         }
         routed(organizationRoute(orgId), actorId, () -> { orgMemberService.leave(orgId, actorId); return true; });
     }

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.SoleDocumentApproverException;
 import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 
@@ -34,7 +35,8 @@ class DepartureApprovalGuardTest {
         step.setApprovers(List.of(named(9), named(9)));
         when(policyMapper.findActiveStepsForDeparture(7, 9)).thenReturn(List.of(step));
 
-        assertThrows(ConflictException.class, () -> guard.assertCanDepart(7, 9));
+        assertEquals("SOLE_NAMED_DOCUMENT_APPROVER", assertThrows(SoleDocumentApproverException.class,
+            () -> guard.assertCanDepart(7, 9)).getCode());
     }
 
     @Test

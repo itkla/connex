@@ -12,6 +12,22 @@
     <collection property="permissions" ofType="string" column="{workspaceId=workspace_id,roleId=id}" select="findPermissions"/>
   </resultMap>
 
+  <resultMap id="AuthorityRoleResult" type="WorkspaceRole">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <collection property="permissions" ofType="string" notNullColumn="permission">
+      <result column="permission"/>
+    </collection>
+  </resultMap>
+
+  <select id="findAuthorityRolesByWorkspace" resultMap="AuthorityRoleResult">
+    SELECT wr.id, wr.workspace_id, wrp.permission
+    FROM workspace_role wr
+    LEFT JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wr.id
+    WHERE wr.workspace_id = #{workspaceId}
+    ORDER BY wr.id, wrp.permission
+  </select>
+
   <insert id="insertRole" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workspace_role (workspace_id, name)
     VALUES (#{workspaceId}, #{name})

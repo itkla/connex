@@ -283,6 +283,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
     }
 
+    @ExceptionHandler(SoleDocumentApproverException.class)
+    public ResponseEntity<Map<String, String>> soleDocumentApprover(SoleDocumentApproverException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(OpenDataSubjectRequestException.class)
     public ResponseEntity<Map<String, String>> openDataSubjectRequest(
             OpenDataSubjectRequestException ex) {

@@ -48,6 +48,14 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void approvalMetadataStatementsRetainTheirControlAndWorkspaceClassifications() {
+        assertTrue(TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.contains(NS + "UserMapper"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.privilegedMemberships"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(NS + "RoleMapper"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "RoleMapper.findAuthorityRolesByWorkspace"));
+    }
+
+    @Test
     void unsubscribeDigestBatchRequiresTheSameScopeAsTheSingleLookup() {
         assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.getUnsubscribeTokenDeliveryId"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.findUnsubscribeTokenHashes"));

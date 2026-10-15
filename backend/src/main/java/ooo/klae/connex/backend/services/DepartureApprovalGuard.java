@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
-import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.SoleDocumentApproverException;
 import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 
@@ -48,7 +48,7 @@ public class DepartureApprovalGuard {
 
     private void requireReassignment(int userId, ApprovalStepRouting.Route route) {
         if (!route.anyApprover() && route.named().equals(Set.of(userId))) {
-            throw new ConflictException(
+            throw new SoleDocumentApproverException(
                 "Member is the sole named approver on an active policy or pending approval; reassign first");
         }
     }
