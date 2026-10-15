@@ -37,13 +37,17 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
 
     useEffect(() => {
         let cancelled = false;
-        getPasskeys().then((loaded) => {
-            if (cancelled) return;
-            setPasskeys(loaded);
-            setPasskeysState("ready");
-        }, () => {
-            if (!cancelled) setPasskeysState("failed");
-        });
+        (async () => {
+            setPasskeysState("loading");
+            try {
+                const loaded = await getPasskeys();
+                if (cancelled) return;
+                setPasskeys(loaded);
+                setPasskeysState("ready");
+            } catch {
+                if (!cancelled) setPasskeysState("failed");
+            }
+        })();
         return () => {
             cancelled = true;
         };
@@ -80,10 +84,7 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
                 type="button"
                 variant="outline"
                 size="inline"
-                onClick={() => {
-                    setPasskeysState("loading");
-                    setPasskeysReload((count) => count + 1);
-                }}
+                onClick={() => setPasskeysReload((count) => count + 1)}
             >
                 {t("retry")}
             </Button>

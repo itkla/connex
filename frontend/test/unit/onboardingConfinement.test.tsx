@@ -155,6 +155,19 @@ describe("confinement on onboarding, for an account with no workspace", () => {
         expect(button(enAccount.AccountSecurity.approvalEnter).disabled).toBe(false);
     });
 
+    it("withholds code entry again while a changed standing's passkeys are re-read", async () => {
+        await renderConfinement(standingFor("ENROLLMENT_REQUIRED"));
+        mocks.getPasskeys.mockImplementationOnce(() => new Promise(() => undefined));
+
+        await renderConfinement(standingFor("ATTESTATION_REQUIRED"));
+
+        const busy = container.querySelector<HTMLButtonElement>("button[aria-busy='true']");
+        expect(busy?.disabled).toBe(true);
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === enAccount.AccountSecurity.approvalEnter,
+        )).toBe(false);
+    });
+
     it("redeems an approval code and re-reads the standing as a ceremony", async () => {
         const standing = standingFor("ATTESTATION_REQUIRED");
         await renderConfinement(standing);
