@@ -171,6 +171,15 @@ make_target_commit() {
     git -C "$STAGING_DIR" rev-parse HEAD
 }
 
+run_sealed_launcher() {
+    local state="$1" launch_log="$2" fake_bin="$SANDBOX/launcher-bin"
+    mkdir -p "$fake_bin"
+    printf '#!/bin/bash\nprintf "%%s\\n" "$PWD" "$*" > "$CONNEX_LAUNCH_TEST_LOG"\n' > "$fake_bin/node"
+    chmod 0755 "$fake_bin/node"
+    PATH="$fake_bin:$PATH" CONNEX_STAGING_STATE_DIR="$state" CONNEX_LAUNCH_TEST_LOG="$launch_log" \
+        bash "$STAGING_DEPLOY_DIR/connex-frontend-start.sh"
+}
+
 setup_prune_fixture() {
     local root="$1" deployed="$2" rollback="$3" candidate="$4"
     local recent_one="$5" recent_two="$6" recent_three="$7"
@@ -1505,7 +1514,7 @@ case_failed_committed_transaction_restores_release_markers() (
     wait_for_backend_sha() { [ "$1" = "$previous" ]; }
     verify_backend_stability() { [ "$1" = "$previous" ]; }
     wait_for_frontend() { return 0; }
-    write_transaction() { return 1; }
+    write_transaction() { [ "$1" != committed ]; }
     deploy_failure_alert() { builtin printf 'alert\n' > "$alert_log"; }
     set_failure_context marker release "committed transaction write failed"
 
@@ -1819,6 +1828,7 @@ case_pair_rollback_restores_exact_artifacts() (
     printf '%s\n' "$target" > "$MARKER"
     printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
     printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
     DEPLOY_TARGET="$target"
     DEPLOY_RETAINED="$retained"
     served_git_sha() { jar_git_sha "$LIVE_JAR"; }
@@ -1910,7 +1920,9 @@ check_floor_rollback() (
         assert_file_exists recovery_transaction_preserved "$TRANSACTION_FILE" || return 1
         assert_equals forward_only_is_durable forward_only \
             "$(release_manifest_value "$TRANSACTION_FILE" phase)" || return 1
-        assert_file_missing no_service_or_launcher_mutations "$sudo_log" || return 1
+        assert_contains frontend_stopped_for_forward_recovery 'systemctl stop connex-staging-frontend' "$sudo_log" || return 1
+        assert_absent no_backend_restart_without_credentials 'systemctl restart connex-staging-backend' "$sudo_log" || return 1
+        assert_absent no_launcher_switch_without_credentials 'launcher ' "$sudo_log" || return 1
     else
         assert_contains original_failure_gate 'gate=smoke_authenticated_route component=frontend' "$alert_log" || return 1
         assert_contains completed_rollback 'rollback_state=complete' "$alert_log" || return 1
@@ -1984,11 +1996,17 @@ install_floor_recovery_stubs() {
                 phase="$(release_manifest_value "$TRANSACTION_FILE" phase)" || return 1
                 printf 'restart backend %s phase=%s\n' "$sha" "$phase" >> "$FLOOR_RECOVERY_ROOT/events.log"
                 printf '%s\n' "$sha" > "$FLOOR_RECOVERY_ROOT/backend-sha"
+                [ "$sha" != "$DEPLOY_PREVIOUS" ] || [ ! -f "$FLOOR_RECOVERY_ROOT/fail-prior-backend" ]
                 ;;
             'restart connex-staging-frontend')
                 sha="$(live_frontend_sha)" || return 1
                 [ "$sha" = "$(cat "$FLOOR_RECOVERY_ROOT/backend-sha")" ] || return 1
-                printf 'restart frontend %s\n' "$sha" >> "$FLOOR_RECOVERY_ROOT/events.log"
+                if [ "$sha" = "$DEPLOY_PREVIOUS" ] && [ -f "$FLOOR_RECOVERY_ROOT/fail-prior-frontend" ]; then
+                    return 1
+                fi
+                run_sealed_launcher "$STATE_DIR" "$FLOOR_RECOVERY_ROOT/launched.log" || return 1
+                phase="$(release_manifest_value "$TRANSACTION_FILE" phase)" || return 1
+                printf 'restart frontend %s phase=%s\n' "$sha" "$phase" >> "$FLOOR_RECOVERY_ROOT/events.log"
                 printf '%s\n' "$sha" > "$FLOOR_RECOVERY_ROOT/frontend-sha"
                 ;;
             *) return 1 ;;
@@ -2028,6 +2046,11 @@ install_floor_recovery_stubs() {
         if [ "$destination" = "$TRANSACTION_FILE" ] \
             && [ -f "$FLOOR_RECOVERY_ROOT/fail-frontend-stopped" ] \
             && grep -qF $'phase\tfrontend_stopped' "$source"; then
+            return 1
+        fi
+        if [ "$destination" = "$TRANSACTION_FILE" ] \
+            && [ -f "$FLOOR_RECOVERY_ROOT/fail-forward-record" ] \
+            && grep -qF $'phase\tforward_only' "$source"; then
             return 1
         fi
         command mv "$@"
@@ -2094,6 +2117,14 @@ case_floor_backend_health_failure_recovers_on_next_timer() (
     assert_contains health_failure_refusal_state 'rollback_state=refused_floor' "$root/initial.log" || return 1
     assert_equals unhealthy_target_jar_preserved "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
     assert_file_missing unhealthy_target_frontend_stays_stopped "$root/frontend-sha" || return 1
+    status=0
+    run_sealed_launcher "$STATE_DIR" "$root/reboot-prior.log" > "$root/reboot.log" 2>&1 || status=$?
+    assert_status reboot_refuses_previous_frontend 1 "$status" || return 1
+    assert_contains reboot_refusal_is_clear '[connex-staging-frontend] Refusing sealed startup' "$root/reboot.log" || return 1
+    assert_file_missing reboot_did_not_start_previous_runtime "$root/reboot-prior.log" || return 1
+    write_sha_marker "$FRONTEND_RELEASE_MARKER" "$target" || return 1
+    run_sealed_launcher "$STATE_DIR" "$root/reboot-target.log" || return 1
+    assert_equals reboot_allows_target_runtime "$RELEASES_DIR/$target/frontend" "$(sed -n '1p' "$root/reboot-target.log")" || return 1
     touch "$root/healthy"
     run_floor_recovery_timer "$root" > "$root/timer.log" 2>&1
     assert_status healthy_timer_success 0 "$?" || { cat "$root/timer.log"; return 1; }
@@ -2169,6 +2200,11 @@ case_floor_pre_backend_interruption_restores_previous_pair() (
         assert_equals prior_frontend_restored "$previous" "$(cat "$root/frontend-sha")" || return 1
         assert_equals retained_marker_preserved "$retained" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
         assert_file_missing pre_backend_transaction_consumed "$TRANSACTION_FILE" || return 1
+        assert_contains rollback_blocks_start_during_backend_restore "restart backend $previous phase=rollback_starting" "$root/events.log" || return 1
+        assert_contains rollback_opens_only_after_backend_is_live "restart frontend $previous phase=rollback_live" "$root/events.log" || return 1
+        run_sealed_launcher "$STATE_DIR" "$root/after-rollback.log" || return 1
+        assert_equals previous_runtime_allowed_after_rollback "$RELEASES_DIR/$previous/frontend" \
+            "$(sed -n '1p' "$root/after-rollback.log")" || return 1
     done
 )
 
@@ -2245,6 +2281,137 @@ case_forward_only_smoke_and_commit_failures_remain_recoverable() (
         run_floor_recovery_timer "$root" > "$root/timer.log" 2>&1
         assert_status forward_failure_next_timer_commits 0 "$?" || { cat "$root/timer.log"; return 1; }
         assert_forward_recovery_committed "$root" "$target" "$previous" || return 1
+    done
+)
+
+case_frontend_launcher_gates_transaction_phases() (
+    local root="$SANDBOX/launcher-phases" phase sha expected status
+    setup_floor_recovery_fixture "$root" || return 1
+    for phase in none prepared frontend_stopped backend_starting backend_live frontend_live forward_only committed rollback_starting rollback_live; do
+        if [ "$phase" = none ]; then
+            rm -f "$TRANSACTION_FILE"
+        else
+            write_transaction "$phase" || return 1
+            read_transaction >/dev/null || return 1
+        fi
+        for sha in "$DEPLOY_PREVIOUS" "$DEPLOY_TARGET"; do
+            write_sha_marker "$FRONTEND_RELEASE_MARKER" "$sha" || return 1
+            rm -f "$root/started.log" "$FRONTEND_RUNNING_MARKER"
+            expected=0
+            case "$phase" in
+                none|prepared|frontend_stopped) ;;
+                rollback_starting) expected=1 ;;
+                rollback_live) [ "$sha" = "$DEPLOY_PREVIOUS" ] || expected=1 ;;
+                *) [ "$sha" = "$DEPLOY_TARGET" ] || expected=1 ;;
+            esac
+            status=0
+            run_sealed_launcher "$STATE_DIR" "$root/started.log" > "$root/startup.log" 2>&1 || status=$?
+            assert_status "${phase}_launcher_status" "$expected" "$status" || return 1
+            if [ "$expected" = 0 ]; then
+                assert_equals allowed_runtime "$RELEASES_DIR/$sha/frontend" "$(sed -n '1p' "$root/started.log")" || return 1
+                assert_equals allowed_running_identity "$sha" "$(cut -f1 "$FRONTEND_RUNNING_MARKER")" || return 1
+            else
+                assert_contains denied_startup_is_clear '[connex-staging-frontend] Refusing sealed startup' "$root/startup.log" || return 1
+                assert_file_missing denied_runtime_not_started "$root/started.log" || return 1
+                assert_file_missing denied_runtime_not_attested "$FRONTEND_RUNNING_MARKER" || return 1
+            fi
+        done
+    done
+)
+
+case_frontend_launcher_and_deploy_reject_malformed_transactions() (
+    local root="$SANDBOX/launcher-malformed" variant reader_path status
+    setup_floor_recovery_fixture "$root" || return 1
+    mkdir -p "$root/failed-reader"
+    printf '#!/bin/bash\n/bin/cat "$UNREADABLE_TRANSACTION_FIXTURE"\nexit 1\n' > "$root/failed-reader/awk"
+    chmod 0755 "$root/failed-reader/awk"
+    for variant in empty duplicate missing schema sha phase extra column symlink dangling directory unreadable; do
+        rm -rf "$TRANSACTION_FILE"
+        write_transaction backend_live || return 1
+        reader_path="$PATH"
+        case "$variant" in
+            empty) : > "$TRANSACTION_FILE" ;;
+            duplicate) printf 'phase\tbackend_live\n' >> "$TRANSACTION_FILE" ;;
+            missing) sed -i '/^retained_sha/d' "$TRANSACTION_FILE" ;;
+            schema) sed -i 's/^schema_version.*/schema_version\t3/' "$TRANSACTION_FILE" ;;
+            sha) sed -i 's/^target_sha.*/target_sha\tinvalid/' "$TRANSACTION_FILE" ;;
+            phase) sed -i 's/backend_live/unknown/' "$TRANSACTION_FILE" ;;
+            extra) printf 'unexpected\tmalformed-secret\n' >> "$TRANSACTION_FILE" ;;
+            column) sed -i 's/^phase.*/phase\tbackend_live\textra/' "$TRANSACTION_FILE" ;;
+            symlink|dangling)
+                mv "$TRANSACTION_FILE" "$root/valid-transaction"
+                [ "$variant" != dangling ] || rm "$root/valid-transaction"
+                ln -s "$root/valid-transaction" "$TRANSACTION_FILE"
+                ;;
+            directory) rm "$TRANSACTION_FILE"; mkdir "$TRANSACTION_FILE" ;;
+            unreadable)
+                cp "$TRANSACTION_FILE" "$root/valid-transaction"
+                export UNREADABLE_TRANSACTION_FIXTURE="$root/valid-transaction"
+                reader_path="$root/failed-reader:$PATH"
+                ;;
+        esac
+        status=0
+        PATH="$reader_path" read_transaction > "$root/parse.log" 2>&1 || status=$?
+        assert_status "${variant}_deploy_parser_fails_closed" 1 "$status" || return 1
+        rm -f "$root/started.log"
+        status=0
+        PATH="$reader_path" run_sealed_launcher "$STATE_DIR" "$root/started.log" > "$root/startup.log" 2>&1 || status=$?
+        assert_status "${variant}_launcher_fails_closed" 1 "$status" || return 1
+        assert_contains malformed_refusal_logged 'deploy transaction is malformed or unreadable' "$root/startup.log" || return 1
+        assert_absent malformed_data_not_logged malformed-secret "$root/startup.log" || return 1
+        assert_file_missing malformed_runtime_not_started "$root/started.log" || return 1
+    done
+)
+
+case_recovery_stops_frontend_before_credential_or_record_refusal() (
+    local root mode phase target status
+    for phase in backend_starting backend_live forward_only; do
+        for mode in missing unsafe record; do
+            root="$SANDBOX/recovery-refusal-$phase-$mode"
+            setup_floor_recovery_fixture "$root" || return 1
+            target="$DEPLOY_TARGET"
+            cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+            printf '%s\n' "$target" > "$root/backend-sha"
+            write_transaction "$phase" || return 1
+            case "$mode" in
+                missing) rm "$SMOKE_LOGIN_FILE" ;;
+                unsafe) chmod 0666 "$SMOKE_LOGIN_FILE" ;;
+                record) touch "$root/fail-forward-record" ;;
+            esac
+            status=0
+            run_floor_recovery_timer "$root" > "$root/timer.log" 2>&1 || status=$?
+            assert_status recovery_refusal_fails 1 "$status" || return 1
+            assert_file_missing stale_frontend_stopped_before_refusal "$root/frontend-sha" || return 1
+            assert_contains recovery_refusal_alert 'gate=rollback_floor' "$root/timer.log" || return 1
+            assert_absent refusal_did_not_restart_backend 'restart backend' "$root/events.log" || return 1
+            assert_equals refusal_preserves_target_backend "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
+        done
+    done
+)
+
+case_authorized_rollback_recovers_before_frontend_start() (
+    local root failure expected previous status
+    for failure in backend frontend; do
+        root="$SANDBOX/rollback-resume-$failure"
+        setup_floor_recovery_fixture "$root" || return 1
+        previous="$DEPLOY_PREVIOUS"
+        quiesce_frontend_and_switch_checkout "$DEPLOY_TARGET" || return 1
+        touch "$root/fail-prior-$failure"
+        status=0
+        rollback_release "$previous" > "$root/rollback.log" 2>&1 || status=$?
+        assert_status authorized_rollback_interrupted 1 "$status" || return 1
+        expected=rollback_starting
+        [ "$failure" != frontend ] || expected=rollback_live
+        assert_equals rollback_authorization_preserved "$expected" "$(release_manifest_value "$TRANSACTION_FILE" phase)" || return 1
+        rm "$root/fail-prior-$failure"
+        status=0
+        run_floor_recovery_timer "$root" > "$root/timer.log" 2>&1 || status=$?
+        assert_status recovered_rollback_reports_retry 1 "$status" || { cat "$root/timer.log"; return 1; }
+        assert_file_missing authorized_rollback_transaction_closed "$TRANSACTION_FILE" || return 1
+        assert_equals authorized_rollback_restored_frontend "$previous" "$(cat "$root/frontend-sha")" || return 1
+        assert_absent authorized_rollback_did_not_switch_forward 'gate=rollback_floor' "$root/timer.log" || return 1
+        run_sealed_launcher "$STATE_DIR" "$root/reboot.log" || return 1
+        assert_equals rollback_reboot_starts_previous "$RELEASES_DIR/$previous/frontend" "$(sed -n '1p' "$root/reboot.log")" || return 1
     done
 )
 
@@ -2847,6 +3014,10 @@ run_case case_floor_pre_backend_interruption_restores_previous_pair
 run_case case_floor_timer_alerts_after_immediate_forward_recovery
 run_case case_forward_only_unhealthy_target_never_retries_previous
 run_case case_forward_only_smoke_and_commit_failures_remain_recoverable
+run_case case_frontend_launcher_gates_transaction_phases
+run_case case_frontend_launcher_and_deploy_reject_malformed_transactions
+run_case case_recovery_stops_frontend_before_credential_or_record_refusal
+run_case case_authorized_rollback_recovers_before_frontend_start
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
 run_case case_failed_logout_blocks_deploy

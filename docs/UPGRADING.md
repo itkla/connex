@@ -63,7 +63,12 @@ migration-discipline part of #87 §9 / #102).
   backend, then activate its frontend, run smoke, and commit. Until commit, failures retain
   `forward_only` and emit an `ALERT` with `gate=rollback_floor` and `rollback_state=refused_floor`.
   An unhealthy target leaves its frontend stopped for operator forward recovery; the previous
-  frontend is never started alongside it. Older target commits with no floor file retain the
+  frontend is never started alongside it. Recovery stops the frontend before credential checks,
+  and reboot startup validates the transaction: once the target backend may have run, only its
+  frontend can start, while malformed or unreadable transactions block sealed startup.
+  Authorized rollback records `rollback_starting` to block startup until the previous backend is
+  healthy, then `rollback_live` to allow its frontend, retaining the transaction until both are
+  restored. Older target commits with no floor file retain the
   previous rollback behavior. This guard does not reverse migrations or replace the coordinated
   restart requirements below.
 

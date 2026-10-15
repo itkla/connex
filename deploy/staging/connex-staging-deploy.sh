@@ -12,6 +12,9 @@
 # phase plus prior identities in the live JAR and serving backend proves the safe
 # exception. Otherwise a floor refusal persists forward_only and retries target
 # backend/frontend activation, smoke, and commit now and on subsequent timer runs.
+# The frontend launcher gates reboot startup on this transaction; recovery stops
+# the frontend before credential checks, and rollback retains its authorization
+# until the previous backend and frontend are restored as one pair.
 
 set -euo pipefail
 
@@ -621,7 +624,7 @@ build_target_release() {
 write_transaction() {
     local phase="$1" temporary
     case "$phase" in
-        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|committed) ;;
+        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|rollback_starting|rollback_live|committed) ;;
         *) return 1 ;;
     esac
     is_git_sha "$DEPLOY_PREVIOUS" && is_git_sha "$DEPLOY_TARGET" \
@@ -655,20 +658,21 @@ commit_release_markers() {
 }
 
 read_transaction() {
-    local manifest="$TRANSACTION_FILE" schema prior target retained phase
-    [ -f "$manifest" ] && [ ! -L "$manifest" ] || return 1
-    schema="$(release_manifest_value "$manifest" schema_version)" || return 1
-    prior="$(release_manifest_value "$manifest" prior_sha)" || return 1
-    target="$(release_manifest_value "$manifest" target_sha)" || return 1
-    retained="$(release_manifest_value "$manifest" retained_sha)" || return 1
-    phase="$(release_manifest_value "$manifest" phase)" || return 1
-    [ "$schema" = "2" ] && is_git_sha "$prior" && is_git_sha "$target" \
-        && is_git_sha "$retained" || return 1
-    case "$phase" in
-        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|committed) ;;
-        *) return 1 ;;
-    esac
-    printf '%s\t%s\t%s\t%s\n' "$prior" "$target" "$retained" "$phase"
+    local manifest="$TRANSACTION_FILE"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -r "$manifest" ] || return 1
+    awk -F '\t' '
+        function sha(value) { return length(value) == 40 && value ~ /^[0-9a-f]+$/ }
+        NF != 2 || $1 !~ /^(schema_version|prior_sha|target_sha|retained_sha|phase)$/ || seen[$1]++ {
+            invalid = 1; next
+        }
+        { value[$1] = $2 }
+        END {
+            if (invalid || NR != 5 || value["schema_version"] != "2" ||
+                !sha(value["prior_sha"]) || !sha(value["target_sha"]) || !sha(value["retained_sha"]) ||
+                value["phase"] !~ /^(prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|rollback_starting|rollback_live|committed)$/) exit 1
+            printf "%s\t%s\t%s\t%s\n", value["prior_sha"], value["target_sha"], value["retained_sha"], value["phase"]
+        }
+    ' "$manifest"
 }
 
 activate_backend() {
@@ -804,7 +808,10 @@ rollback_requires_forward_recovery() {
     local previous="$1" record prior target retained phase
     if record="$(read_transaction)"; then
         IFS=$'\t' read -r prior target retained phase <<< "$record"
-        [ "$phase" != forward_only ] || return 0
+        case "$phase" in
+            forward_only) return 0 ;;
+            rollback_starting|rollback_live) return 1 ;;
+        esac
     fi
     target_backend_never_started "$previous" && return 1
     ! rollback_floor_allows_release "$previous"
@@ -814,6 +821,7 @@ recover_forward_only() {
     ROLLBACK_IN_PROGRESS=1
     ROLLBACK_STATE=refused_floor
     set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; forward-only recovery must complete the target release"
+    sudo systemctl stop connex-staging-frontend || return 1
     write_transaction forward_only || return 1
     log "Rollback refused; recovering target ${DEPLOY_TARGET:0:8} forward only..."
     if ! recover_target_release; then
@@ -838,11 +846,13 @@ rollback_release() {
     fi
     log "Rolling back the complete application to ${sha:0:8}..."
     if ! sudo systemctl stop connex-staging-frontend \
+        || ! write_transaction rollback_starting \
         || ! ensure_frontend_launcher "$DEPLOY_TARGET" \
         || ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
         || ! sudo systemctl restart connex-staging-backend \
         || ! wait_for_backend_sha "$sha" "$ROLLBACK_HEALTH_TIMEOUT" \
         || ! verify_backend_stability "$sha" \
+        || ! write_transaction rollback_live \
         || ! activate_frontend "$sha"; then
         log "Rollback FAILED; component or release-marker state is uncertain"
         ROLLBACK_STATE=failed
@@ -1361,6 +1371,8 @@ guard_wrapper_contract() {
 
 recover_target_release() {
     local prior="$DEPLOY_PREVIOUS" target="$DEPLOY_TARGET"
+    set_failure_context frontend_quiesce frontend "Recovery could not stop the frontend before target activation"
+    sudo systemctl stop connex-staging-frontend || return 1
     if ! validate_smoke_login_file; then
         set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
         ROLLBACK_ARMED=1
@@ -1368,7 +1380,6 @@ recover_target_release() {
     fi
     ROLLBACK_ARMED=1
     set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
-    sudo systemctl stop connex-staging-frontend || return 1
     ensure_frontend_launcher "$target" || return 1
     activate_backend "$target" || return 1
     set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
