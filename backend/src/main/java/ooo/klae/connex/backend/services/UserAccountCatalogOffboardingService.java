@@ -208,6 +208,8 @@ public class UserAccountCatalogOffboardingService {
                         case TASK -> assignmentSweepMapper.unassignTask(reference);
                         case INTERVENTION -> assignmentSweepMapper.clearInterventionOwner(reference);
                         case CAMPAIGN -> assignmentSweepMapper.clearCampaignOwner(reference);
+                        case GOAL_OWNER -> assignmentSweepMapper.deleteOwnedGoal(reference);
+                        case GOAL_CREATOR -> assignmentSweepMapper.clearGoalCreator(reference);
                     }
                 });
                 return null;

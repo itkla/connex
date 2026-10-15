@@ -119,11 +119,12 @@ is the assignment barrier. `UserService` then runs a fresh sweep, including when
 confirms that an ambiguous deletion commit succeeded, before expiring sessions. Sweep failures
 leave recovery pending and do not replace the deletion result or prevent session revocation.
 
-Coverage is eight references: company, person and deal ownership; deal collaborator seats; task
-assignment; intervention and campaign ownership; and lifecycle-pass ownership. A successful sweep
-removes those references in every catalog returned by `PlacementRegistry.activeCatalogs()`, across
+Coverage is ten references: company, person and deal ownership; deal collaborator seats; task
+assignment; intervention and campaign ownership; lifecycle-pass ownership; and report-goal ownership
+and creator attribution. A successful sweep removes those references in every catalog returned by
+`PlacementRegistry.activeCatalogs()`, across
 all workspace and record lifecycle states. It does not promise cleanup for unavailable or unserved
-catalogs, report goals/approvers (#1953), or self-only asynchronous writers.
+catalogs, approvers (#1953), or self-only asynchronous writers.
 
 Discovery returns numeric keys without locks or an ambient snapshot. Bounded account-existence
 reads use `UserMapper.findExistingIds` through `unroutedRead` on the control plane; existing accounts,
@@ -137,6 +138,13 @@ passes in the same transaction. The sole lifecycle owner-snapshot writer,
 `PersonLifecycleService.recordPass`, follows `applyStage`'s `getOwnedPersonByIdForUpdate`, so a raced
 insertion, milestone or closure commits before that person lock or snapshots the cleared owner.
 Intervention ownership clearing increments `source_version` only when it changes the pointer.
+Account-scoped goal discovery can use V226's user-leading departure indexes, and the periodic pass
+ranges over the primary key as the other kinds do. Both kinds lock the
+exact `report_goal` row through `PRIMARY`, then conditionally delete the personal goal for an
+unchanged orphaned owner or clear an unchanged orphaned creator. Each catalog pass visits the owner
+kind before the creator kind, matching erasure's delete-before-detach ordering. Their bounded pages
+advance independently; neither path has child rows to delete or acquires another root after the
+goal row.
 
 These recovery units acquire no account, workspace, membership, role, workflow-gate, or audit-head
 roots and reuse no full-erasure transaction. Existing #1582 cycles remain unchanged. A failed unit
@@ -318,9 +326,12 @@ and clears the deadline and can still pass with enough surviving approvers. Only
 impossible after those rules does the bounded sweep terminate it as `unsatisfiable`, cancel other
 open steps, and return the document to `draft`.
 
-A concurrently created personal goal remains until account erasure removes it. For erased accounts
-this is exactly #1941's dangling-reference case. #1941 merged in #2063; a small follow-up adds
-`report_goal` owner and creator to its periodic orphan sweep to make erasure eventually complete.
+A concurrently created personal goal remains until account erasure removes it. After the account's
+control-plane deletion commits, immediate and periodic orphan recovery cover `report_goal` owner
+and creator references (#2069). Numeric discovery and control-plane absence checks precede each
+separate catalog-pinned transaction, which locks only the exact goal row through `PRIMARY` before
+conditionally deleting an orphan-owned personal goal or clearing an orphaned creator. Live owner
+and creator pointers, including those of reserved accounts, are preserved.
 [Governance deletion and retention](../GOVERNANCE_DELETION_AND_RETENTION.md) defines the product bound.
 
 ### Public API credentials

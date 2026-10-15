@@ -127,10 +127,13 @@ member follows the existing reconciliation rules in their existing order:
    `unsatisfiable`, cancel other open steps, and return the document to `draft`.
 
 A concurrently created personal goal remains until account erasure removes it. For an erased account
-it is a dangling reference of exactly [#1941](https://github.com/itkla/connex/issues/1941)'s kind. Once
-#1941 merges, `report_goal` owner and creator will join its periodic orphan sweep in a small follow-up,
-which makes erasure eventually complete. The pre-existing final-deletion reservation precheck is
-tracked separately in [#2059](https://github.com/itkla/connex/issues/2059).
+it would be a dangling reference of exactly [#1941](https://github.com/itkla/connex/issues/1941)'s
+kind, so the orphan sweep covers `report_goal` too ([#2069](https://github.com/itkla/connex/issues/2069)).
+After the account's control-plane deletion commits, immediate and periodic recovery delete a personal
+goal whose owner no longer exists and clear a creator that no longer exists, so erasure eventually
+completes. Goals of live accounts, including reserved ones, are never touched. Final deletion proves
+its reservation with a current locking read once it holds the account lock
+([#2059](https://github.com/itkla/connex/issues/2059)).
 
 ## Why a request ended
 
