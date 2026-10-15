@@ -168,10 +168,11 @@ jobs:
           #     when nothing else is open, recreate (gh issue comment does not reopen) so main-red
           #     stays visible, then LIST AGAIN so a concurrent recreate is deduplicated in this run.
           #   - unreadable: when nothing else is open, left to the next event, as a failed list is.
-          # Of the open alerts, keep the lowest-numbered and close the rest. The issue this run
-          # reported on is closed in favour of a lower one only after that keeper reads open and
-          # labeled directly AND the report has been re-posted on it; otherwise the touched issue,
-          # known to be live, stays the keeper, so a stale list can never close the last alert.
+          # The list also lags closes and label removals. Discard candidates until the lowest one
+          # reads open and labeled directly; if none verifies, use the touched-issue handling above.
+          # Close the rest only in favour of a verified keeper. The issue this run reported on is
+          # closed in favour of a lower one only after the report has been re-posted on it;
+          # otherwise keep the touched issue and verify it before closing any other duplicates.
           #
           # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
           # API error's empty result would mint a duplicate beside the issue just commented on. On
@@ -184,6 +185,16 @@ jobs:
             fi
             mapfile -t open_issues < <(printf '%s' "$issues_json" \
               | jq -r 'sort_by(.number) | .[].number')
+            while [ "${#open_issues[@]}" -gt 0 ]; do
+              keep="${open_issues[0]}"
+              keep_state="$(gh api "repos/$REPO/issues/$keep" --jq \
+                'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                 then "visible" else .state end' 2>/dev/null || true)"
+              if [ "$keep_state" = "visible" ]; then
+                break
+              fi
+              open_issues=("${open_issues[@]:1}")
+            done
             lagging=false
             if ! printf '%s\n' "${open_issues[@]}" | grep -qx "$target"; then
               state="$(gh api "repos/$REPO/issues/$target" --jq \
@@ -223,6 +234,13 @@ jobs:
               else
                 echo "Could not confirm #$keep as the keeper; keeping #$target, which this run reported on."
                 keep="$target"
+                keep_state="$(gh api "repos/$REPO/issues/$keep" --jq \
+                  'if .state == "open" and ([.labels[].name] | index("ci-main-red")) != null
+                   then "visible" else .state end' 2>/dev/null || true)"
+                if [ "$keep_state" != "visible" ]; then
+                  echo "Could not verify issue #$keep; leaving convergence to the next event."
+                  break
+                fi
               fi
             fi
             for number in "${open_issues[@]}"; do
