@@ -62,6 +62,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Real-transaction proofs for vocabulary materialization and lifecycle/configuration serialization. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -121,6 +122,9 @@ class DisqualificationReasonMaterializationConcurrencyTest {
 
         firstMember = newMember("first", unique);
         secondMember = newMember("second", unique);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, owner);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, firstMember);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, secondMember);
         authenticate(owner);
         var firstRole = roleService.createRole(
             workspace.getId(), owner.getId(), "First reason manager " + unique,
@@ -478,6 +482,8 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, user.getId());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, request.getSession(), credential);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         tenantContext.set(
             workspace.getId(), organization.getId(), user.getId(),

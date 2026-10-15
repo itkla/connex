@@ -959,6 +959,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             "owner");
         workspace = drillWorkspace;
         authenticateAs(currentUser, drillWorkspace.getId());
+        approveForStepUp(currentUser);
     }
 
     private Fixture seedRepresentativeTenant() {

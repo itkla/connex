@@ -143,6 +143,7 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
             "owner");
         workspace = lifecycleWorkspace;
         authenticateAs(currentUser, lifecycleWorkspace.getId());
+        approveForStepUp(currentUser);
     }
 
     private String seedManagedAttachment() {

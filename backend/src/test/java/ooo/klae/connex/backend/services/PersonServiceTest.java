@@ -457,8 +457,10 @@ class PersonServiceTest extends AbstractServiceTest {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         workspaceMapper.addMember(ownerWorkspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, ownerWorkspace.getId());
+        approveForStepUp(currentUser);
         Person shared = personService.create(personDraft(null));
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         shareMapper.sharePerson(
             shared.getId(),
             ownerWorkspace.getId(),

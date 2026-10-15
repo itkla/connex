@@ -302,9 +302,9 @@ class PublicApiChainSeparationIntegrationTest {
         Workspace workspace = fixtures.newWorkspace(label);
         User manager = fixtures.newMember(workspace, "member", label);
         grantApiManager(workspace, manager, label);
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, manager);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, manager);
         MockHttpSession session = login(manager.getUsername());
-        PublicApiTestSecuritySupport.stepUp(session, manager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, session, manager.getId());
         MvcResult result = mockMvc.perform(post("/api/api-credentials")
                 .session(session)
                 .header("X-Workspace-Id", workspace.getId())

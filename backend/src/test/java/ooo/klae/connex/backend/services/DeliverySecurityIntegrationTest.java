@@ -2908,6 +2908,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     private <T> T asActor(String name, Supplier<T> action) {
         operation.set(name);
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         try {
             return action.get();
         } finally {

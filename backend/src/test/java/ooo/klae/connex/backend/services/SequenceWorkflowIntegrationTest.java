@@ -94,6 +94,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Real-database sequence workflow, transaction, concurrency, preview, and lifecycle proofs. */
 @SpringBootTest(
@@ -157,6 +158,8 @@ class SequenceWorkflowIntegrationTest {
             otherWorkspace,
             "sequence_other_" + suffix,
             List.of("SEQUENCE_VIEW", "SEQUENCE_MANAGE"));
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, manager);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, otherManager);
         orgMemberMapper.addMember(organization.getId(), manager.getId(), "owner");
     }
 
@@ -747,6 +750,10 @@ class SequenceWorkflowIntegrationTest {
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(
             SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        if (user.getId() == manager.getId() || user.getId() == otherManager.getId()) {
+            int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+            OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, request.getSession(), credential);
+        }
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));

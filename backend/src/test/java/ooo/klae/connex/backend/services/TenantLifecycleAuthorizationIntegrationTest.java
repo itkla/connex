@@ -432,6 +432,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
         currentSession().setAttribute(
             SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
             System.currentTimeMillis());
+        approveForStepUp(currentUser);
     }
 
     private HttpSession currentSession() {

@@ -48,7 +48,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
     private final List<Integer> accounts = new ArrayList<>();
     private final List<Integer> extraWorkspaces = new ArrayList<>();
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
-    @BeforeEach void freshOwner() { OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); }
+    @BeforeEach void freshOwner() { OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); }
     @AfterEach void clean() {
         reset(users, ledger, audit);
         extraWorkspaces.forEach(id -> jdbc.update("DELETE FROM workspace WHERE id = ?", id));
@@ -111,7 +111,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
     @Test void erasingAThirdOwnerExplicitlyNullsAttributionWithoutDeletingTheOtherPartiesOffer() {
         User target = newUser(); User third = newUser(); workspaceMapper.updateMemberRole(workspace.getId(), third.getId(), "owner");
         long id = create(target); delivery.deliver(ledger.findById(id));
-        authenticateAs(third, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, third);
+        authenticateAs(third, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, third);
         offers.revoke("WORKSPACE", workspace.getId(), id, third.getId());
         assertEquals(third.getId(), ledger.findById(id).getClosedByUserId());
         clearInvocations(ledger, audit, users);
@@ -130,7 +130,7 @@ class OwnershipOfferErasureIntegrationTest extends AbstractServiceTest {
         delivery.deliver(ledger.findById(id));
         workspaces.removeMember(workspace.getId(), currentUser.getId(), target.getId());
         assertEquals("OPEN", ledger.findById(id).getState()); assertNull(ledger.findById(id).getDeliveryWorkspaceId());
-        authenticateAs(target, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, target);
+        authenticateAs(target, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, target);
         assertEquals(1, offers.listForSelf(target.getId()).size());
         assertEquals("ACCEPTED", offers.accept(id, target.getId(), false).offer().state());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE dedupe_key = ?", Integer.class, "ownership.offer:" + id));

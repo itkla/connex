@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -82,8 +83,10 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         workspace = fresh;
         workspaceMapper.addMember(workspace.getId(), provisioningOwner.getId(), "owner");
         User lifecycleMember = standaloneUser("lifecycle-member");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, lifecycleMember);
         workspaceMapper.addMember(workspace.getId(), lifecycleMember.getId(), "member");
         authenticateAs(provisioningOwner, workspace.getId());
+        approveForStepUp(provisioningOwner);
         var lifecycleRole = roleService.createRole(
             workspace.getId(), provisioningOwner.getId(), "Lifecycle manager " + unique(),
             List.of("PERSON_UPDATE", "PERSON_DELETE", "WORKSPACE_SETTINGS"));
@@ -92,6 +95,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             lifecycleRole.getId());
         currentUser = lifecycleMember;
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -530,8 +534,10 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         Workspace sibling = siblingWorkspace();
         workspaceMapper.addMember(sibling.getId(), provisioningOwner.getId(), "owner");
         User siblingMember = standaloneUser("sibling-member");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, siblingMember);
         workspaceMapper.addMember(sibling.getId(), siblingMember.getId(), "member");
         authenticateAs(provisioningOwner, sibling.getId());
+        approveForStepUp(provisioningOwner);
         var role = roleService.createRole(
             sibling.getId(), provisioningOwner.getId(), "Sibling reason manager " + unique(),
             List.of("WORKSPACE_SETTINGS"));
@@ -540,6 +546,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         authenticateAs(siblingMember, sibling.getId());
         reason(code, label, requiresNote, position);
         authenticateAs(originalActor, originalWorkspaceId);
+        approveForStepUp(originalActor);
     }
 
     private User standaloneUser(String qualifier) {

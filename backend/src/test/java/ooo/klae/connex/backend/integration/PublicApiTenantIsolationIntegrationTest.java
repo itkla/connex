@@ -193,7 +193,7 @@ class PublicApiTenantIsolationIntegrationTest {
             .andExpect(status().isNoContent());
         workspaceService.ensureActiveMember(workspace.getId(), target.getId(), "member");
         grantApiManager(workspace, target, "reinvited-new-generation");
-        PublicApiTestSecuritySupport.stepUp(targetSession, target.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, targetSession, target.getId());
         String newToken = issue(targetSession, workspace, "crm.read");
 
         mockMvc.perform(get("/api/v1/me")
@@ -386,9 +386,9 @@ class PublicApiTenantIsolationIntegrationTest {
     }
 
     private MockHttpSession loginWithStepUp(User user) throws Exception {
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, user);
         MockHttpSession session = login(user.getUsername());
-        PublicApiTestSecuritySupport.stepUp(session, user.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, session, user.getId());
         return session;
     }
 

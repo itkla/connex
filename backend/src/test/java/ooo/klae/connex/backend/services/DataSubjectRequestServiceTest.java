@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -609,6 +610,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         setDisqualification(
             subjectWorkspace, customSubject, "NO_REGION", subjectFixture.actor().getId());
         authenticateAs(currentUser, subjectWorkspace.getId());
+        approveForStepUp(currentUser);
         DataSubjectRequestDto customRequest = dataSubjectRequestService.create(
             org.getId(), currentUser.getId(),
             linkedRequest(subjectWorkspace.getId(), customSubject.getId()));
@@ -656,14 +658,17 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         Workspace reasonWorkspace = newWorkspace(orgId);
         workspaceMapper.addMember(reasonWorkspace.getId(), currentUser.getId(), "owner");
         User actor = standaloneUser("subject-reason-member");
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, actor);
         workspaceMapper.addMember(reasonWorkspace.getId(), actor.getId(), "member");
         authenticateAs(currentUser, reasonWorkspace.getId());
+        approveForStepUp(currentUser);
         var role = roleService.createRole(
             reasonWorkspace.getId(), currentUser.getId(), "Subject reason manager " + unique(),
             List.of("WORKSPACE_SETTINGS", "PERSON_UPDATE"));
         workspaceService.assignCustomRole(
             reasonWorkspace.getId(), currentUser.getId(), actor.getId(), role.getId());
         authenticateAs(actor, reasonWorkspace.getId());
+        approveForStepUp(actor);
         DisqualificationReasonRequest request = new DisqualificationReasonRequest();
         request.setCode(code);
         request.setLabel(label);

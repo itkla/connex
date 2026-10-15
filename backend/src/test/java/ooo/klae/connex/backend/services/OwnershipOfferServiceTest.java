@@ -75,13 +75,20 @@ class OwnershipOfferServiceTest extends AbstractServiceTest {
         return user;
     }
 
+    private String configuredAttestationEnforced;
+    private String configuredChangeActor;
+
     @BeforeEach void enrolledOwner() {
+        configuredAttestationEnforced = mfa.getAttestationEnforced();
+        configuredChangeActor = mfa.getChangeActor();
+        mfa.setChangeActor("ownership-offer-dark-period-test");
         mfa.setAttestationEnforced("false");
         ownerCredential = OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser);
     }
 
     @AfterEach void resetPolicyAndAudit() {
-        mfa.setAttestationEnforced("false");
+        mfa.setAttestationEnforced(configuredAttestationEnforced);
+        mfa.setChangeActor(configuredChangeActor);
         reset(audit, reservationUsers);
         for (int userId : committedUsers) {
             jdbc.update("DELETE FROM app_user WHERE id = ?", userId);

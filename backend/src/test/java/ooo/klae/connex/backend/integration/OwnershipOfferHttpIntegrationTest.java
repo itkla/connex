@@ -71,7 +71,13 @@ class OwnershipOfferHttpIntegrationTest {
     private String ownerSession;
     private String targetSession;
 
+    private String configuredAttestationEnforced;
+    private String configuredChangeActor;
+
     @BeforeEach void fixtures() {
+        configuredAttestationEnforced = mfa.getAttestationEnforced();
+        configuredChangeActor = mfa.getChangeActor();
+        mfa.setChangeActor("ownership-offer-dark-period-test");
         mfa.setAttestationEnforced("false");
         String suffix = UUID.randomUUID().toString();
         org = new Organization(); org.setName("Ownership organization HTTP"); org.setSlug("ownership-http-" + suffix); organizations.insert(org);
@@ -84,7 +90,8 @@ class OwnershipOfferHttpIntegrationTest {
     }
 
     @AfterEach void cleanup() {
-        mfa.setAttestationEnforced("false");
+        mfa.setAttestationEnforced(configuredAttestationEnforced);
+        mfa.setChangeActor(configuredChangeActor);
         sessionIds.forEach(sessions::deleteById);
         jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         jdbc.update("DELETE FROM organization WHERE id = ?", org.getId());

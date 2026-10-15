@@ -167,8 +167,8 @@ chain. Firewall method rejections use `method_not_allowed`; other public firewal
 `not_found`, `method_not_allowed`, `rate_limit_exceeded`,
 `privileged_mfa_enrollment_required`, `privileged_mfa_attestation_required`, `public_api_unavailable`,
 and `internal_error`.
-Invalid credentials, privileged accounts that require passkey enrollment and, once attestation is
-enforced, privileged accounts whose passkeys still await approval receive `401`;
+Invalid credentials, privileged accounts that require passkey enrollment and, under the default
+attestation enforcement, privileged accounts whose passkeys still await approval receive `401`;
 authenticated credentials without the required scope, including credentials whose entire stored
 scope set is no longer live under current RBAC, receive `403`.
 Replacing a partial, uncommitted response with an error envelope preserves the correlation id,
