@@ -1,14 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import type { OwnershipOffer } from "@/app/lib/types";
-import { acceptOwnershipOffer, ApiError, declineOwnershipOffer, getMyOwnershipOffers } from "@/app/lib/api";
+import {
+    acceptOwnershipOffer,
+    ApiError,
+    declineOwnershipOffer,
+    getMyOwnershipOffers,
+    privilegedMfaConfinementDestination,
+} from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+
+const ONBOARDING_ROUTE = "/onboarding";
 
 /** The caller's own pending ownership offers and the consent actions on them. */
 export type SelfOwnershipOffers = {
@@ -32,13 +40,16 @@ export type SelfOwnershipOffers = {
  * Loads and acts on the signed-in account's ownership offers. It works on any authenticated
  * surface, including onboarding, so an organization offer stays reachable for an account that
  * has no workspace. Acceptance retries with the confinement acknowledgement only after the
- * offeree confirms it, and the page refreshes so new ownership shows at once.
+ * offeree confirms it, and the page refreshes so new ownership shows at once. An acceptance that
+ * leaves the account confined goes to the Security step instead, except on onboarding, which
+ * shows the confinement itself.
  * @returns the open offers and their consent actions
  */
 export function useSelfOwnershipOffers(): SelfOwnershipOffers {
     const t = useTranslations("AccountInvites");
     const showApiError = useApiErrorToast("AccountInvites");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const pathname = usePathname();
     const router = useRouter();
     const [offers, setOffers] = useState<OwnershipOffer[]>([]);
     const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
@@ -68,7 +79,12 @@ export function useSelfOwnershipOffers(): SelfOwnershipOffers {
             setOffers((prev) => prev.filter((existing) => existing.id !== offer.id));
             setConfinementOffer(null);
             toastSuccess(t("ownershipAccepted", { scope: scopeLabel(offer) }));
-            router.refresh();
+            const destination = privilegedMfaConfinementDestination();
+            if (destination !== null && pathname !== ONBOARDING_ROUTE) {
+                router.replace(destination);
+            } else {
+                router.refresh();
+            }
         } catch (err) {
             if (err instanceof ApiError && err.code === "PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED") {
                 setConfinementOffer(offer);
@@ -78,7 +94,7 @@ export function useSelfOwnershipOffers(): SelfOwnershipOffers {
         } finally {
             setBusyOfferId(null);
         }
-    }, [handlePasskeyStepUpError, router, scopeLabel, showApiError, t]);
+    }, [handlePasskeyStepUpError, pathname, router, scopeLabel, showApiError, t]);
 
     const decline = useCallback(async (offer: OwnershipOffer) => {
         setBusyOfferId(offer.id);

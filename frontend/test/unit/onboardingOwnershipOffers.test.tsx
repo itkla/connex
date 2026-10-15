@@ -9,6 +9,12 @@ import type { OwnershipOffer } from "@/app/lib/types";
 const offers = vi.hoisted(() => ({
     state: null as SelfOwnershipOffers | null,
 }));
+const standing = vi.hoisted(() => ({
+    confined: false,
+    fresh: true,
+    status: "ready" as "loading" | "ready" | "failed",
+    refresh: vi.fn(async () => "applied" as const),
+}));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -35,6 +41,16 @@ vi.mock("@/app/hooks/useSelfOwnershipOffers", () => ({
         if (offers.state === null) throw new Error("self offers state not configured");
         return offers.state;
     },
+}));
+vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
+    usePrivilegedMfaStanding: () => ({
+        requirements: null,
+        status: standing.status,
+        fresh: standing.fresh,
+        confined: standing.confined,
+        reason: standing.confined ? "attestation" : null,
+        refresh: standing.refresh,
+    }),
 }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => vi.fn() }));
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({ default: () => null }));
@@ -98,6 +114,10 @@ afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     offers.state = null;
+    standing.confined = false;
+    standing.status = "ready";
+    standing.fresh = true;
+    standing.refresh.mockClear();
 });
 
 describe("onboarding ownership offers", () => {
@@ -114,6 +134,72 @@ describe("onboarding ownership offers", () => {
 
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
+    });
+
+    it("offers a confined account only what it may still do", async () => {
+        const state = selfOffers([offer]);
+        offers.state = state;
+        standing.confined = true;
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        expect(container.textContent).not.toContain("Onboarding.createButton");
+        expect(container.textContent).not.toContain("Onboarding.joinButton");
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
+
+        await act(async () => button("AccountInvites.decline").click());
+        expect(state.decline).toHaveBeenCalledWith(offer);
+        expect(button("Onboarding.signOut")).toBeDefined();
+
+        await act(async () => button("Onboarding.confinedRecheck").click());
+        expect(standing.refresh).toHaveBeenCalledWith("check");
+    });
+
+    it("offers nothing that confinement could refuse until the standing is known", async () => {
+        offers.state = selfOffers([offer]);
+        standing.status = "loading";
+        await renderOnboarding();
+
+        expect(container.querySelector("form")).toBeNull();
+        expect(container.querySelector("[aria-busy='true']")).not.toBeNull();
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
+        expect(button("AccountInvites.decline")).toBeDefined();
+    });
+
+    it("offers a retry, and still no confinable action, when the standing cannot be read", async () => {
+        offers.state = selfOffers([offer]);
+        standing.status = "failed";
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.standingFailedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        await act(async () => button("Onboarding.standingRetry").click());
+        expect(standing.refresh).toHaveBeenCalledWith("check");
+    });
+
+    it("treats a cached standing as unconfirmed once a newer read of it has failed", async () => {
+        offers.state = selfOffers([offer]);
+        standing.fresh = false;
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.standingFailedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
+    });
+
+    it("keeps workspace creation and joining for an account that is not confined", async () => {
+        offers.state = selfOffers([]);
+        await renderOnboarding();
+
+        expect(container.textContent).not.toContain("Onboarding.confinedTitle");
+        expect(container.querySelectorAll("form")).toHaveLength(2);
     });
 
     it("renders no offers section when nothing is pending", async () => {

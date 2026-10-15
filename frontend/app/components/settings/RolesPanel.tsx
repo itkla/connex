@@ -24,6 +24,10 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import {
+    ConfinementAcknowledgementDeclined,
+    useConfinementAcknowledgement,
+} from "@/app/hooks/useConfinementAcknowledgement";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
 
@@ -116,6 +121,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
+    const confinement = useConfinementAcknowledgement();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
@@ -186,7 +192,11 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         if (!workspaceId) return;
         try {
             if (editing) {
-                const updated = await updateWorkspaceRole(workspaceId, editing.id, name, permissions);
+                const updated = await confinement.run(
+                    t("confinementSubjectRoleEdit", { name }),
+                    (acknowledge) => updateWorkspaceRole(workspaceId, editing.id, name, permissions, acknowledge),
+                );
+                if (updated === null) throw new ConfinementAcknowledgementDeclined();
                 setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
                 toastSuccess(t("updated"));
             } else {
@@ -196,7 +206,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
             }
             router.refresh();
         } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
+            if (!(err instanceof ConfinementAcknowledgementDeclined) && !handlePasskeyStepUpError(err)) {
                 showApiError(err, "saveFailed");
             }
             throw err;
@@ -346,6 +356,8 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
                 editing={editing}
                 onSubmit={submitRole}
             />
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
 
             <DeleteRecordDialog
                 open={removeTarget !== null}

@@ -155,5 +155,12 @@
         "copyFailedDescription": "Select the code and copy it yourself.",
         "expires": "Expires {date}.",
         "done": "Done"
+    },
+    "ConfinementAcknowledgement": {
+        "title": "Go ahead with this change?",
+        "body": "{count, plural, one {# member} other {# members}} will have administrator access in this organization without a passkey approved here. Until an administrator gives them a passkey approval code, they can only set up a passkey, enter a code, or leave.",
+        "bodyUnknownCount": "Some members will have administrator access in this organization without a passkey approved here. Until an administrator gives them a passkey approval code, they can only set up a passkey, enter a code, or leave.",
+        "confirm": "Change anyway",
+        "cancel": "Cancel"
     }
 }

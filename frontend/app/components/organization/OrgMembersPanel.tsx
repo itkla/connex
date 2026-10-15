@@ -23,6 +23,7 @@ import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
+import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,7 @@ import {
     type SettingsPanelPresentation,
 } from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
 import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 
 function initial(name: string) {
@@ -138,6 +140,7 @@ export default function OrgMembersPanel({
         (err) => showApiError(err, "ownershipOffersLoadFailed"),
     );
     const { openOffers, openOfferByOfferee } = ownershipOffers;
+    const confinement = useConfinementAcknowledgement();
     const offersForNonMembers = openOffers.filter(
         (offer) => !members.some((member) => member.id === offer.offereeUserId),
     );
@@ -162,10 +165,14 @@ export default function OrgMembersPanel({
         if (!orgId) return;
         setBusy(userId);
         try {
-            const result = await setOrgMemberRole(orgId, userId, next);
+            const name = members.find((member) => member.id === userId)?.displayName ?? "";
+            const result = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => setOrgMemberRole(orgId, userId, next, acknowledge),
+            );
+            if (result === null) return;
             if (isOwnershipOfferCreated<OrgMember>(result)) {
                 ownershipOffers.remember(result.offer);
-                const name = members.find((member) => member.id === userId)?.displayName ?? "";
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
@@ -203,7 +210,11 @@ export default function OrgMembersPanel({
         if (!orgId || email.trim().length === 0) return;
         setAdding(true);
         try {
-            const result = await addOrgMemberByEmail(orgId, email.trim(), addRole);
+            const result = await confinement.run(
+                t("confinementSubjectAdd", { email: email.trim(), role: roleLabel(addRole) }),
+                (acknowledge) => addOrgMemberByEmail(orgId, email.trim(), addRole, acknowledge),
+            );
+            if (result === null) return;
             if (isOwnershipOfferCreated<OrgMember>(result)) {
                 ownershipOffers.remember(result.offer);
                 toastSuccess(t("ownershipOffered", { name: email.trim() }));
@@ -467,6 +478,8 @@ export default function OrgMembersPanel({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
 
             {orgId !== null && (
                 <PasskeyApprovalCodeDialog

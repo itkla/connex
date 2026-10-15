@@ -8,6 +8,8 @@ import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocum
 
 const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
+    replace: vi.fn(),
+    destination: vi.fn<() => string | null>(() => null),
     getMyOwnershipOffers: vi.fn<() => Promise<OwnershipOffer[]>>(),
     acceptOwnershipOffer: vi.fn<(offerId: string, acknowledgeConfinement?: boolean) => Promise<unknown>>(),
     declineOwnershipOffer: vi.fn<(offerId: string) => Promise<void>>(),
@@ -17,7 +19,10 @@ const mocks = vi.hoisted(() => ({
     showApiError: vi.fn(),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
+vi.mock('next/navigation', () => ({
+    useRouter: () => ({ refresh: mocks.refresh, replace: mocks.replace }),
+    usePathname: () => '/settings/personal/workspaces',
+}));
 vi.mock('next-intl', async () => {
     const { createTranslator } = await vi.importActual<typeof import('next-intl')>('next-intl');
     const translators = {
@@ -33,6 +38,7 @@ vi.mock('@/app/lib/api', async (importOriginal) => ({
     getMyOwnershipOffers: mocks.getMyOwnershipOffers,
     acceptOwnershipOffer: mocks.acceptOwnershipOffer,
     declineOwnershipOffer: mocks.declineOwnershipOffer,
+    privilegedMfaConfinementDestination: mocks.destination,
 }));
 vi.mock('@/app/lib/toast', () => ({
     toastSuccess: mocks.toastSuccess,
@@ -134,6 +140,18 @@ describe('self ownership offers', () => {
         expect(mocks.acceptOwnershipOffer).toHaveBeenLastCalledWith('41', true);
         expect(mounted.current().confinementOffer).toBeNull();
         expect(mounted.current().offers).toEqual([]);
+    });
+
+    it('sends an owner the acceptance confined to the Security step instead of refreshing', async () => {
+        mocks.getMyOwnershipOffers.mockResolvedValueOnce([offer('41')]);
+        mocks.acceptOwnershipOffer.mockResolvedValueOnce({});
+        mocks.destination.mockReturnValue('/settings/personal/security?mfa=approve');
+        const mounted = await mountOffers();
+
+        await act(async () => mounted.current().accept(mounted.current().offers[0]));
+
+        expect(mocks.replace).toHaveBeenCalledWith('/settings/personal/security?mfa=approve');
+        expect(mocks.refresh).not.toHaveBeenCalled();
     });
 
     it('declines an offer without refreshing', async () => {

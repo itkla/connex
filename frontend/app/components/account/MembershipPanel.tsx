@@ -11,6 +11,7 @@ import {
     declineWorkspace,
     getPendingWorkspaces,
     leaveWorkspace,
+    privilegedMfaConfinementDestination,
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
@@ -104,7 +105,9 @@ export default function MembershipPanel() {
                 const selection = await leaveWorkspace(activeWorkspaceId);
                 publishActiveWorkspace(selection.activeWorkspaceId);
                 toastSuccess(t("left"));
-                router.replace(selection.activeWorkspaceId !== null ? "/dashboard" : "/onboarding");
+                router.replace(selection.activeWorkspaceId === null
+                    ? "/onboarding"
+                    : privilegedMfaConfinementDestination() ?? "/dashboard");
                 router.refresh();
             });
         } catch (err) {

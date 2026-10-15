@@ -30,7 +30,13 @@
         "joinTitle": "招待リンクをお持ちですか？",
         "joinPlaceholder": "招待リンクを貼り付け",
         "joinButton": "続行",
-        "joinInvalid": "有効な招待リンクではないようです。"
+        "joinInvalid": "有効な招待リンクではないようです。",
+        "confinedTitle": "管理者アクセスが一時停止されています",
+        "confinedBody": "このアカウントには組織の管理者アクセスがありますが、パスキーの設定または承認がまだ完了していません。完了するまで、ここでワークスペースを作成したり参加したりすることはできません。オーナー提案の辞退やログアウトは引き続き行えます。",
+        "standingFailedTitle": "アカウントを確認できませんでした",
+        "standingFailedBody": "しばらくしてからもう一度お試しください。オーナー提案の辞退やログアウトは引き続き行えます。",
+        "standingRetry": "再試行",
+        "confinedRecheck": "もう一度確認"
     },
     "InviteAccept": {
         "metaTitle": "招待を承認",
@@ -275,7 +281,8 @@
         "withdrawOwnershipOffer": "オーナー提案を取り消す",
         "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
         "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
-        "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした"
+        "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした",
+        "confinementSubjectRole": "{name} を {role} に変更"
     },
     "WorkspaceRoles": {
         "title": "ロール",
@@ -319,7 +326,8 @@
                 "group": "チーム",
                 "action": "管理"
             }
-        }
+        },
+        "confinementSubjectRoleEdit": "ロール「{name}」の変更を保存"
     },
     "WorkflowAuthoring": {
         "noAccess": "このワークスペースでワークフローを管理する権限がありません。必要な場合はワークスペース管理者にご相談ください。",

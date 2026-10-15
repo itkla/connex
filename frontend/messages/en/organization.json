@@ -204,7 +204,9 @@
     "ownershipOfferWithdrawn": "Ownership offer withdrawn",
     "ownershipOffersLoadFailed": "Couldn't load pending ownership offers",
     "pendingOffersTitle": "Pending ownership offers",
-    "offereeUnknown": "Invited account"
+    "offereeUnknown": "Invited account",
+    "confinementSubjectRole": "Change {name} to {role}",
+    "confinementSubjectAdd": "Add {email} as {role}"
   },
   "OrgDomains": {
     "title": "Allowed domains",

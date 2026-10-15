@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
+import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -28,6 +29,8 @@ export default function OnboardingForm() {
     const format = useFormatter();
     const showApiError = useApiErrorToast("Onboarding");
     const ownershipOffers = useSelfOwnershipOffers();
+    const standing = usePrivilegedMfaStanding();
+    const actionsAvailable = standing.status === "ready" && standing.fresh && !standing.confined;
     const router = useRouter();
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
@@ -105,51 +108,93 @@ export default function OnboardingForm() {
                             {t("subtitle")}
                         </p>
 
-                        <form onSubmit={onSubmit} className="mt-8 space-y-3" noValidate>
-                            <label className="block">
-                                <span className="mb-1.5 block text-sm font-medium text-neutral-700">
-                                    {t("nameLabel")}
-                                </span>
-                                <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder={t("namePlaceholder")}
-                                    autoFocus
-                                    maxLength={128}
-                                    className="h-12 w-full rounded-xl bg-neutral-100 px-4 text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
-                                />
-                            </label>
-                            <button
-                                type="submit"
-                                disabled={submitting}
-                                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
+                        {standing.confined ? (
+                            <div
+                                role="status"
+                                className="mt-8 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3"
                             >
-                                {submitting ? t("creating") : t("createButton")}
-                                {!submitting && <ArrowRightIcon className="size-4" />}
-                            </button>
-                        </form>
+                                <p className="text-sm font-medium text-neutral-900">{t("confinedTitle")}</p>
+                                <p className="mt-1 text-sm text-neutral-600 text-pretty">{t("confinedBody")}</p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="toolbar"
+                                    className="mt-3"
+                                    onClick={() => void standing.refresh("check")}
+                                >
+                                    {t("confinedRecheck")}
+                                </Button>
+                            </div>
+                        ) : standing.status === "failed" || (standing.status === "ready" && !standing.fresh) ? (
+                            <div role="alert" className="mt-8 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5">
+                                <p className="text-sm font-medium text-neutral-900">{t("standingFailedTitle")}</p>
+                                <p className="mt-1 text-sm text-neutral-600 text-pretty">{t("standingFailedBody")}</p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="toolbar"
+                                    className="mt-3"
+                                    onClick={() => void standing.refresh("check")}
+                                >
+                                    {t("standingRetry")}
+                                </Button>
+                            </div>
+                        ) : standing.status === "loading" ? (
+                            <div aria-busy="true" className="mt-8 space-y-3">
+                                <div className="h-12 w-full rounded-xl bg-neutral-100 motion-safe:animate-pulse" />
+                                <div className="h-12 w-full rounded-xl bg-neutral-100 motion-safe:animate-pulse" />
+                            </div>
+                        ) : null}
 
-                        <div className="mt-8 border-t border-neutral-200 pt-6">
-                            <span className="block text-sm font-medium text-neutral-700">
-                                {t("joinTitle")}
-                            </span>
-                            <form onSubmit={handleJoin} className="mt-2 flex gap-2">
-                                <input
-                                    type="text"
-                                    value={joinValue}
-                                    onChange={(e) => setJoinValue(e.target.value)}
-                                    placeholder={t("joinPlaceholder")}
-                                    className="h-11 flex-1 rounded-xl bg-neutral-100 px-4 text-sm text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
-                                />
+                        {actionsAvailable && (
+                            <form onSubmit={onSubmit} className="mt-8 space-y-3" noValidate>
+                                <label className="block">
+                                    <span className="mb-1.5 block text-sm font-medium text-neutral-700">
+                                        {t("nameLabel")}
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        placeholder={t("namePlaceholder")}
+                                        autoFocus
+                                        maxLength={128}
+                                        className="h-12 w-full rounded-xl bg-neutral-100 px-4 text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+                                    />
+                                </label>
                                 <button
                                     type="submit"
-                                    className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-neutral-700 ring-1 ring-neutral-200 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    disabled={submitting}
+                                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground transition hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-60"
                                 >
-                                    {t("joinButton")}
+                                    {submitting ? t("creating") : t("createButton")}
+                                    {!submitting && <ArrowRightIcon className="size-4" />}
                                 </button>
                             </form>
-                        </div>
+                        )}
+
+                        {actionsAvailable && (
+                            <div className="mt-8 border-t border-neutral-200 pt-6">
+                                <span className="block text-sm font-medium text-neutral-700">
+                                    {t("joinTitle")}
+                                </span>
+                                <form onSubmit={handleJoin} className="mt-2 flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={joinValue}
+                                        onChange={(e) => setJoinValue(e.target.value)}
+                                        placeholder={t("joinPlaceholder")}
+                                        className="h-11 flex-1 rounded-xl bg-neutral-100 px-4 text-sm text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-neutral-700 ring-1 ring-neutral-200 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                    >
+                                        {t("joinButton")}
+                                    </button>
+                                </form>
+                            </div>
+                        )}
 
                         {ownershipOffers.offers.length > 0 && (
                             <section aria-labelledby="onboarding-ownership-offers" className="mt-8 border-t border-neutral-200 pt-6">
@@ -185,14 +230,16 @@ export default function OnboardingForm() {
                                                 >
                                                     {tOffers("decline")}
                                                 </Button>
-                                                <Button
-                                                    size="toolbar"
-                                                    variant="brand"
-                                                    disabled={busy}
-                                                    onClick={() => ownershipOffers.accept(offer)}
-                                                >
-                                                    {busy ? <Loader2Icon className="size-4 animate-spin" /> : tOffers("accept")}
-                                                </Button>
+                                                {actionsAvailable && (
+                                                    <Button
+                                                        size="toolbar"
+                                                        variant="brand"
+                                                        disabled={busy}
+                                                        onClick={() => ownershipOffers.accept(offer)}
+                                                    >
+                                                        {busy ? <Loader2Icon className="size-4 animate-spin" /> : tOffers("accept")}
+                                                    </Button>
+                                                )}
                                             </li>
                                         );
                                     })}

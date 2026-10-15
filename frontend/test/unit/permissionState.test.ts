@@ -227,17 +227,17 @@ describe("a role change re-seeds the shell it was made from", () => {
     const deleteRole = handler(roles, "const confirmRemove = async", "if (accessDenied)");
 
     it("refreshes after a member's built-in role changes", () => {
-        expect(changeRole).toContain("await updateMemberRole(");
+        expect(changeRole).toMatch(/await confinement\.run\([\s\S]*?\(acknowledge\) => updateMemberRole\(/);
         expect(changeRole).toContain("router.refresh()");
     });
 
     it("refreshes after a member is assigned a custom role", () => {
-        expect(assignCustom).toContain("await assignMemberCustomRole(");
+        expect(assignCustom).toMatch(/await confinement\.run\([\s\S]*?\(acknowledge\) => assignMemberCustomRole\(/);
         expect(assignCustom).toContain("router.refresh()");
     });
 
     it("refreshes after a custom role is created or its permission set is edited", () => {
-        expect(submitRole).toContain("await updateWorkspaceRole(");
+        expect(submitRole).toMatch(/await confinement\.run\([\s\S]*?\(acknowledge\) => updateWorkspaceRole\(/);
         expect(submitRole).toContain("await createWorkspaceRole(");
         expect(submitRole.match(/router\.refresh\(\)/g) ?? []).toHaveLength(1);
         expect(submitRole.indexOf("router.refresh()")).toBeGreaterThan(

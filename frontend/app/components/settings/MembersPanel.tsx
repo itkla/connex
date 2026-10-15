@@ -49,6 +49,7 @@ import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError"
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
+import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,7 @@ import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
 import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
+import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
 import PasskeyApprovalCodeDialog from "@/app/components/settings/PasskeyApprovalCodeDialog";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
@@ -311,19 +313,24 @@ function MembersWorkspacePanel({
         (err) => showApiError(err, "ownershipOffersLoadFailed"),
     );
     const { openOfferByOfferee } = ownershipOffers;
+    const confinement = useConfinementAcknowledgement();
 
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await updateMemberRole(workspaceId, userId, next);
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => updateMemberRole(workspaceId, userId, next, acknowledge),
+            );
+            if (updated === null) return;
             if (isOwnershipOfferCreated<WorkspaceMember>(updated)) {
                 const { offer, currentMember } = updated;
                 if (currentMember) {
                     setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
                 }
                 ownershipOffers.remember(offer);
-                const name = members.find((m) => m.id === userId)?.displayName ?? "";
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
@@ -360,7 +367,13 @@ function MembersWorkspacePanel({
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const role = customRoles.find((candidate) => candidate.id === roleId)?.name ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role }),
+                (acknowledge) => assignMemberCustomRole(workspaceId, userId, roleId, acknowledge),
+            );
+            if (updated === null) return;
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             ownershipOffers.refresh();
             router.refresh();
@@ -1121,6 +1134,8 @@ function MembersWorkspacePanel({
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />
+
+            <ConfinementAcknowledgementDialog acknowledgement={confinement} />
 
             <PasskeyApprovalCodeDialog
                 target={approvalTarget}
