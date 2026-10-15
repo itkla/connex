@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
  * @param standing the account's privileged-MFA standing under the current attestation policy
  *     (#1534); this route stays reachable while the account is confined, so a client re-reads it
  *     after each ceremony and releases confinement only on {@code SATISFIED} or {@code UNPRIVILEGED}
+ * @param privilegedMemberships the account's own active privileged memberships, regardless of enforcement
  * @param approvalGaps for each of the account's own passkeys without break-glass assurance, every
  *     organization where the account is privileged and that passkey is not yet approved
  */
@@ -22,4 +23,5 @@ public record PasskeyRegistrationRequirementsDto(
         boolean emailConfirmationRequired,
         boolean emailConfirmationSatisfied,
         PrivilegedMfaStanding standing,
-        List<PasskeyApprovalGapDto> approvalGaps) {}
+        List<PasskeyApprovalGapDto> approvalGaps,
+        List<PrivilegedMembershipDto> privilegedMemberships) {}

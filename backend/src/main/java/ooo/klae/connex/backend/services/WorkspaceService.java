@@ -37,6 +37,8 @@ import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.WorkspaceOwnerRequiredException;
+import ooo.klae.connex.backend.exceptions.WorkspaceRecoveryOwnerRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -1419,7 +1421,58 @@ public class WorkspaceService {
     /** Lists the workspace's members with their roles. Visible to any member. */
     public List<MemberDto> getMembersWithRoles(int workspaceId, int actorId) {
         requireMember(workspaceId, actorId);
-        return workspaceMapper.getMembersWithRoles(workspaceId);
+        List<MemberDto> members = workspaceMapper.getMembersWithRoles(workspaceId);
+        addPasskeyApprovalNeeds(workspaceId, actorId, members);
+        return members;
+    }
+
+    /**
+     * Reads approval authority without locks or step-up side effects. Issuance still requires a
+     * fresh assertion from a passkey covered here. Each target uses the issuance grant ceiling;
+     * self, inactive and reserved targets are ineligible. Query count does not depend on row count.
+     */
+    private void addPasskeyApprovalNeeds(int workspaceId, int actorId, List<MemberDto> members) {
+        WorkspaceMember actor = workspaceMapper.getAuthorizationMembership(workspaceId, actorId);
+        if (actor == null || !"active".equals(actor.getStatus()) || members.isEmpty()) {
+            return;
+        }
+        int orgId = getOrgId(workspaceId);
+        List<Integer> ids = members.stream().map(MemberDto::getId).toList();
+        Set<Integer> reserved = Set.copyOf(userMapper.findAccountDeletionReservedIds(ids));
+        if (reserved.contains(actorId)
+                || !privilegedAccountService.hasPasskeyCoveredInOrganization(actorId, orgId)) {
+            return;
+        }
+        Map<Integer, Set<Permission>> roles = new LinkedHashMap<>();
+        for (var role : roleMapper.findAuthorityRolesByWorkspace(workspaceId)) {
+            roles.put(role.getId(), parsePermissions(role.getPermissions()));
+        }
+        Role actorRole = Role.of(actor.getRole());
+        Set<Permission> held = actor.getRoleId() == null
+                ? actorRole == null ? Set.of() : builtInPermissions(actorRole)
+                : roles.getOrDefault(actor.getRoleId(), Set.of());
+        Set<Integer> needed = privilegedAccountService.passkeyApprovalNeeded(orgId, ids);
+        for (MemberDto member : members) {
+            if (member.getId() == actorId || reserved.contains(member.getId())
+                    || !"active".equals(member.getStatus())
+                    || member.getRoleId() != null && !roles.containsKey(member.getRoleId())) {
+                continue;
+            }
+            Role targetRole = Role.of(member.getBuiltInRole());
+            Set<Permission> requested = member.getRoleId() == null
+                    ? targetRole == null ? null : builtInPermissions(targetRole)
+                    : roles.get(member.getRoleId());
+            if (requested == null) {
+                continue;
+            }
+            try {
+                requireAttestationRoleAuthority(actorRole, held, member.getBuiltInRole(),
+                        member.getRoleId(), requested);
+                member.setPasskeyApprovalNeeded(needed.contains(member.getId()));
+            } catch (ForbiddenException insufficientAuthority) {
+                member.setPasskeyApprovalNeeded(null);
+            }
+        }
     }
 
     /**
@@ -1545,17 +1598,27 @@ public class WorkspaceService {
         if (!Objects.equals(target.getRoleId(), granteeRoleId)) {
             throw new ConflictException("The member's role changed; refresh and try again");
         }
-        if ("owner".equals(target.getRole())) {
-            requireLockedRole(locks.actorMembership(), Role.OWNER);
-        }
         Role builtInRole = Role.of(target.getRole());
         if (granteeRoleId == null && builtInRole == null) {
             throw roleMutationTargetNotFound();
         }
-        requireGrantable(
-            locks.actorPermissions(),
+        requireAttestationRoleAuthority(Role.of(locks.actorMembership().getRole()),
+            locks.actorPermissions(), target.getRole(), granteeRoleId,
             granteeRoleId == null ? builtInPermissions(builtInRole) : locks.permissionsForRole(granteeRoleId));
         return workspace.getOrgId();
+    }
+
+    /** The shared issuance and read-only badge predicate for role authority and the grant ceiling. */
+    private static void requireAttestationRoleAuthority(Role actorRole, Set<Permission> held,
+            String targetRole, Integer targetRoleId, Set<Permission> requested) {
+        Permission required = targetRoleId == null ? Permission.MEMBER_MANAGE : Permission.ROLE_MANAGE;
+        if (!held.contains(required)) {
+            throw permissionRequired(required);
+        }
+        if ("owner".equals(targetRole) && actorRole != Role.OWNER) {
+            throw new ForbiddenException("Requires OWNER role in this workspace");
+        }
+        requireGrantable(held, requested);
     }
 
     /** Locks current authorization and the exact custom-role root before deletion. */
@@ -1622,7 +1685,7 @@ public class WorkspaceService {
         if (after.hasRestorer(null, reserved) || !after.narrowsAnyOwnerAgainst(before)) {
             return;
         }
-        throw new BadRequestException(RECOVERY_OWNER_REQUIRED);
+        throw new WorkspaceRecoveryOwnerRequiredException(RECOVERY_OWNER_REQUIRED);
     }
 
     /**
@@ -1644,11 +1707,11 @@ public class WorkspaceService {
             Set<Integer> reservedUserIds,
             String noOwnerMessage) {
         if (recovery.ownerIdsExcept(departingUserId).isEmpty()) {
-            throw new BadRequestException(noOwnerMessage);
+            throw new WorkspaceOwnerRequiredException(noOwnerMessage);
         }
         if (recovery.isActiveOwner(departingUserId)
                 && !recovery.hasRestorer(departingUserId, reservedUserIds)) {
-            throw new BadRequestException(RECOVERY_OWNER_REQUIRED);
+            throw new WorkspaceRecoveryOwnerRequiredException(RECOVERY_OWNER_REQUIRED);
         }
     }
 

@@ -18,6 +18,8 @@ import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.OrganizationOwnerRequiredException;
+import ooo.klae.connex.backend.exceptions.OrganizationMembershipRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -132,9 +134,14 @@ public class OrgMemberService {
 
     /** Requires the user to hold org {@code owner} in the organization. */
     public void requireOrgOwner(int orgId, int userId) {
-        if (OrgRole.of(orgMemberMapper.getRole(orgId, userId)) != OrgRole.OWNER) {
+        if (!isOrgOwner(orgId, userId)) {
             throw new ForbiddenException("Requires the organization owner role");
         }
+    }
+
+    /** Shared owner authority for issuance and read-only badge visibility. */
+    private boolean isOrgOwner(int orgId, int userId) {
+        return OrgRole.of(orgMemberMapper.getRole(orgId, userId)) == OrgRole.OWNER;
     }
 
     /** The organizations the user administers, with their org role. */
@@ -150,7 +157,24 @@ public class OrgMemberService {
     /** The members of an organization. Requires the actor to be an org administrator. */
     public List<OrgMemberDto> listMembers(int orgId, int actorId) {
         requireOrgAdmin(orgId, actorId);
-        return orgMemberMapper.getMembers(orgId);
+        List<OrgMemberDto> members = orgMemberMapper.getMembers(orgId);
+        if (!isOrgOwner(orgId, actorId)
+                || organizationMapper.getActiveById(orgId) == null || members.isEmpty()) {
+            return members;
+        }
+        List<Integer> ids = members.stream().map(OrgMemberDto::getId).toList();
+        Set<Integer> reserved = Set.copyOf(userMapper.findAccountDeletionReservedIds(ids));
+        if (reserved.contains(actorId)
+                || !privilegedAccountService.hasPasskeyCoveredInOrganization(actorId, orgId)) {
+            return members;
+        }
+        Set<Integer> needed = privilegedAccountService.passkeyApprovalNeeded(orgId, ids);
+        for (OrgMemberDto member : members) {
+            if (member.getId() != actorId && !reserved.contains(member.getId())) {
+                member.setPasskeyApprovalNeeded(needed.contains(member.getId()));
+            }
+        }
+        return members;
     }
 
     /**
@@ -309,7 +333,7 @@ public class OrgMemberService {
             }
         }
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
-            throw new BadRequestException("An organization must keep at least one owner");
+            throw new OrganizationOwnerRequiredException("An organization must keep at least one owner");
         }
         if (role == OrgRole.OWNER && !"owner".equals(currentRole)) {
             return new MemberRoleChange<>(currentMember(orgId, targetUserId),
@@ -344,7 +368,7 @@ public class OrgMemberService {
         }
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
         if (isSoleOwner(ownerIds, targetUserId)) {
-            throw new BadRequestException("An organization must keep at least one owner");
+            throw new OrganizationOwnerRequiredException("An organization must keep at least one owner");
         }
         if (orgMemberMapper.removeMember(orgId, targetUserId) == 0) {
             throw new ResourceNotFoundException("User is not an organization member");
@@ -375,7 +399,7 @@ public class OrgMemberService {
             throw notAnOrganizationMember();
         }
         if (isSoleOwner(ownerIds, userId)) {
-            throw new BadRequestException("An organization must keep at least one owner");
+            throw new OrganizationOwnerRequiredException("An organization must keep at least one owner");
         }
         orgMemberMapper.removeMember(orgId, userId);
         ownershipOfferWriter.invalidatePartyLocked(orgId, null, userId);
@@ -473,7 +497,7 @@ public class OrgMemberService {
     }
 
     private static ResourceNotFoundException notAnOrganizationMember() {
-        return new ResourceNotFoundException("You are not a member of this organization");
+        return new OrganizationMembershipRequiredException("You are not a member of this organization");
     }
 
     private boolean isSoleOwner(List<Integer> ownerIds, int userId) {

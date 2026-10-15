@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
 import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
+import ooo.klae.connex.backend.beans.PrivilegedMembershipRow;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
@@ -116,6 +117,8 @@ public interface UserMapper {
      * @return one row per passkey and missing organization, ordered by passkey then organization
      */
     List<PasskeyApprovalGap> passkeyApprovalGaps(@Param("userId") int userId);
+    /** Reads the account's active privileged membership sources, deduplicated and ordered by scope. */
+    List<PrivilegedMembershipRow> privilegedMemberships(@Param("userId") int userId);
     /**
      * Whether the account holds a sufficient passkey other than the given one (#1534).
      *

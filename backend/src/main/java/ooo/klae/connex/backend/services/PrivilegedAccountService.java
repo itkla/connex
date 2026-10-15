@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.IntSupplier;
 
@@ -14,10 +16,12 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PasskeyApprovalGap;
 import ooo.klae.connex.backend.beans.PrivilegedMfaStandingRow;
+import ooo.klae.connex.backend.beans.PrivilegedMembershipRow;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyApprovalGapDto;
+import ooo.klae.connex.backend.dto.PrivilegedMembershipDto;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaConfinementAcknowledgementRequiredException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -266,6 +270,49 @@ public class PrivilegedAccountService {
             throw new IllegalStateException("Unenrolled privileged account inventory is unavailable");
         }
         return counts;
+    }
+
+    /**
+     * The account's own active privilege sources (#1534), one entry per organization with its org
+     * role and every workspace that makes it privileged there, so a confined account can see what
+     * to leave. It reads only the account's own memberships.
+     *
+     * @param userId the account to describe
+     * @return the organizations where the account is privileged, each with its exits
+     */
+    public List<PrivilegedMembershipDto> privilegedMemberships(int userId) {
+        var groups = new LinkedHashMap<Integer, List<PrivilegedMembershipRow>>();
+        for (var row : userMapper.privilegedMemberships(userId)) {
+            groups.computeIfAbsent(row.orgId(), ignored -> new ArrayList<>()).add(row);
+        }
+        return groups.values().stream().map(rows -> {
+            var first = rows.getFirst();
+            String orgRole = rows.stream().map(PrivilegedMembershipRow::orgRole)
+                    .filter(Objects::nonNull).findFirst().orElse(null);
+            var workspaces = rows.stream().filter(row -> row.workspaceId() != null)
+                    .map(row -> new PrivilegedMembershipDto.Workspace(row.workspaceId(), row.workspaceName()))
+                    .distinct().toList();
+            return new PrivilegedMembershipDto(first.orgId(), first.orgName(), orgRole, workspaces);
+        }).toList();
+    }
+
+    /**
+     * Org-local approval gaps for a member list, independent of enforcement (#1534): the members
+     * privileged in this organization with no passkey approved here. Exactly two set reads for a
+     * nonempty list of any size, never one per member; break-glass uses the same coverage fragment as
+     * passkey sufficiency.
+     *
+     * @param orgId the organization whose approvals decide
+     * @param userIds the listed members
+     * @return the listed members who still need a passkey approved in this organization
+     */
+    public Set<Integer> passkeyApprovalNeeded(int orgId, Collection<Integer> userIds) {
+        if (userIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<Integer> needed = new HashSet<>(userMapper.privilegedInOrganizationAmong(orgId, userIds));
+        needed.removeAll(userMapper.coveredInOrganizationAmong(orgId, userIds));
+        return needed;
     }
 
     private static PasskeyApprovalGapDto toDto(PasskeyApprovalGap gap) {
