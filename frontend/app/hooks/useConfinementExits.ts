@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { ApiError, leaveOrganization } from "@/app/lib/api";
 
@@ -49,8 +50,9 @@ export function confinementExitKey(target: ConfinementExitTarget): string {
 /**
  * Takes the exits a confined account may always send (#1534): leaving an organization or a
  * workspace. Leaving an organization goes straight to the API, which re-reads the standing once
- * the server accepts. Leaving a workspace changes the browser's workspace selection, so the
- * surface supplies how; without it, only organizations can be left. A refusal is kept by its
+ * the server accepts, and then refreshes the page so roles derived from the membership, such as
+ * organization navigation, drop at once. Leaving a workspace changes the browser's workspace
+ * selection, so the surface supplies how; without it, only organizations can be left. A refusal is kept by its
  * stable code for the surface to explain, and the confinement stays as the server left it.
  * @param leaveWorkspace how this surface leaves a workspace, when it can
  * @returns the exit state and the action
@@ -58,6 +60,7 @@ export function confinementExitKey(target: ConfinementExitTarget): string {
 export function useConfinementExits(
     leaveWorkspace?: (workspaceId: number) => Promise<void>,
 ): ConfinementExits {
+    const router = useRouter();
     const [leavingKey, setLeavingKey] = useState<string | null>(null);
     const [refusals, setRefusals] = useState<Readonly<Record<string, ConfinementExitRefusal>>>({});
 
@@ -67,6 +70,7 @@ export function useConfinementExits(
         try {
             if (target.kind === "organization") {
                 await leaveOrganization(target.orgId);
+                router.refresh();
             } else if (leaveWorkspace) {
                 await leaveWorkspace(target.workspaceId);
             } else {
@@ -87,7 +91,7 @@ export function useConfinementExits(
         } finally {
             setLeavingKey(null);
         }
-    }, [leaveWorkspace]);
+    }, [leaveWorkspace, router]);
 
     return { leavingKey, refusals, leave };
 }

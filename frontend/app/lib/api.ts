@@ -595,7 +595,7 @@ function isPasskeyRegistrationRequirements(value: unknown): value is Types.Passk
             && value.approvalGaps.every((gap: unknown) =>
                 typeof gap === "object" && gap !== null
                 && "credentialId" in gap && typeof gap.credentialId === "string"
-                && "orgId" in gap && typeof gap.orgId === "number"
+                && "orgId" in gap && isPositiveId(gap.orgId)
                 && "orgName" in gap && typeof gap.orgName === "string"))) {
         return false;
     }
@@ -604,16 +604,21 @@ function isPasskeyRegistrationRequirements(value: unknown): value is Types.Passk
         && value.privilegedMemberships.every(isPrivilegedMembership);
 }
 
+/** Whether a value is a database id: a positive safe integer. */
+function isPositiveId(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /** Whether one exit entry has the shape this client reads. */
 function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMembership {
     return typeof value === "object" && value !== null
-        && "orgId" in value && typeof value.orgId === "number"
+        && "orgId" in value && isPositiveId(value.orgId)
         && "orgName" in value && typeof value.orgName === "string"
         && "orgRole" in value && (value.orgRole === null || value.orgRole === "owner" || value.orgRole === "admin")
         && "workspaces" in value && Array.isArray(value.workspaces)
         && value.workspaces.every((workspace: unknown) =>
             typeof workspace === "object" && workspace !== null
-            && "workspaceId" in workspace && typeof workspace.workspaceId === "number"
+            && "workspaceId" in workspace && isPositiveId(workspace.workspaceId)
             && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
 }
 

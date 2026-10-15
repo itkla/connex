@@ -33,6 +33,7 @@ vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
     startRegistration: mocks.startRegistration,
 }));
 vi.mock("@/app/hooks/usePasskeySupport", () => ({ usePasskeySupport: () => true }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn() }));
 vi.mock("@/app/components/account/PasskeyApprovalDialog", () => ({
@@ -128,6 +129,16 @@ describe("confinement on onboarding, for an account with no workspace", () => {
 
         expect(mocks.finishRegistration).toHaveBeenCalledOnce();
         expect(standing.refresh).toHaveBeenCalledWith("ceremony");
+    });
+
+    it("asks a password-backed account for its current password before the first passkey", async () => {
+        await renderConfinement(standingFor("ENROLLMENT_REQUIRED", { currentPasswordRequired: true }));
+
+        await act(async () => button(enAccount.AccountSecurity.add).click());
+
+        const dialog = container.querySelector("[role='dialog']");
+        expect(dialog?.textContent).toContain(enAccount.AccountSecurity.passwordTitle);
+        expect(mocks.beginRegistration).not.toHaveBeenCalled();
     });
 
     it("redeems an approval code and re-reads the standing as a ceremony", async () => {

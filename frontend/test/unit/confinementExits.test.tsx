@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/app/lib/api";
 import type { ConfinementExits } from "@/app/hooks/useConfinementExits";
 
-const api = vi.hoisted(() => ({ leaveOrganization: vi.fn<(orgId: number) => Promise<void>>() }));
+const api = vi.hoisted(() => ({
+    leaveOrganization: vi.fn<(orgId: number) => Promise<void>>(),
+    refresh: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: api.refresh }) }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
@@ -40,6 +45,7 @@ beforeEach(() => {
     root = createRoot(container);
     latest = null;
     api.leaveOrganization.mockReset();
+    api.refresh.mockReset();
 });
 
 afterEach(async () => {
@@ -61,12 +67,14 @@ describe("leaving what confines a privileged account", () => {
         });
         expect(left).toBe(false);
         expect(current().refusals["organization:3"]).toBe("ORG_LAST_OWNER");
+        expect(api.refresh).not.toHaveBeenCalled();
 
         await act(async () => {
             left = await current().leave(target);
         });
         expect(left).toBe(true);
         expect(api.leaveOrganization).toHaveBeenLastCalledWith(3);
+        expect(api.refresh).toHaveBeenCalledOnce();
         expect(current().refusals["organization:3"]).toBeUndefined();
         expect(current().leavingKey).toBeNull();
     });

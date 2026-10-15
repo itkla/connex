@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SecurityPanel from "@/app/components/account/SecurityPanel";
+import { ApiError } from "@/app/lib/api";
 import type { Passkey, PasskeyRegistrationRequirements } from "@/app/lib/types";
 import enAccount from "@/messages/en/account.json";
 
@@ -19,6 +20,10 @@ const backend = vi.hoisted(() => ({
     approve: null as ((orgId: number) => void) | null,
     reason: null as "enrollment" | "attestation" | null,
     failed: false,
+    leaveWorkspace: vi.fn<(id: number) => Promise<{ activeWorkspaceId: number | null }>>(),
+    publish: vi.fn(),
+    replace: vi.fn(),
+    routerRefresh: vi.fn(),
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
@@ -26,6 +31,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => ({
     getPasskeys: backend.getPasskeys,
     beginPasskeyRegistration: backend.beginPasskeyRegistration,
     finishPasskeyRegistration: backend.finishPasskeyRegistration,
+    leaveWorkspace: backend.leaveWorkspace,
 }));
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
     ...await importOriginal<typeof import("@simplewebauthn/browser")>(),
@@ -49,10 +55,10 @@ vi.mock("@/app/hooks/useWorkspace", () => ({
     useWorkspace: () => ({
         workspaces: [],
         runSelectionChange: async (change: (publish: (id: number | null) => void) => Promise<unknown>) =>
-            change(() => undefined),
+            change(backend.publish),
     }),
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: backend.replace, refresh: backend.routerRefresh }) }));
 vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-14T00:00:00Z") }));
 vi.mock("@/app/components/motion/Rise", () => ({
     default: ({ children, className }: { children?: ReactNode; className?: string }) =>
@@ -251,6 +257,65 @@ describe("the Security page while a privileged account is confined", () => {
         expect(backend.finishPasskeyRegistration).toHaveBeenCalledOnce();
         expect(backend.refresh).toHaveBeenCalledWith("ceremony");
         expect(container.textContent).toContain("Laptop");
+    });
+
+    describe("leaving a workspace that makes the account privileged", () => {
+        function withWorkspaceExit() {
+            backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+            backend.requirements = {
+                ...requirementsFor("ATTESTATION_REQUIRED", [{ credentialId: "cred-laptop", orgId: 3, orgName: "Acme" }]),
+                privilegedMemberships: [
+                    { orgId: 3, orgName: "Acme", orgRole: null, workspaces: [{ workspaceId: 7, workspaceName: "Sales" }] },
+                ],
+            };
+        }
+
+        function button(label: string): HTMLButtonElement {
+            const match = [...container.querySelectorAll("button")].find((candidate) => candidate.textContent === label);
+            if (!match) throw new Error(`no button labelled ${label}`);
+            return match;
+        }
+
+        async function leaveSales() {
+            await act(async () => button("Leave Sales").click());
+            await act(async () => button(enAccount.AccountSecurity.exitConfirm).click());
+        }
+
+        it("leaves through the workspace selection and publishes the server's selection", async () => {
+            withWorkspaceExit();
+            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: 9 });
+            await renderPanel();
+
+            await leaveSales();
+
+            expect(backend.leaveWorkspace).toHaveBeenCalledWith(7);
+            expect(backend.publish).toHaveBeenCalledWith(9);
+            expect(backend.routerRefresh).toHaveBeenCalled();
+            expect(backend.replace).not.toHaveBeenCalled();
+        });
+
+        it("goes to onboarding when no workspace remains, where any remaining confinement is handled", async () => {
+            withWorkspaceExit();
+            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: null });
+            await renderPanel();
+
+            await leaveSales();
+
+            expect(backend.publish).toHaveBeenCalledWith(null);
+            expect(backend.replace).toHaveBeenCalledWith("/onboarding");
+        });
+
+        it("explains a refused exit and keeps the panel usable", async () => {
+            withWorkspaceExit();
+            backend.leaveWorkspace.mockRejectedValueOnce(new ApiError("Last owner", 400, "WORKSPACE_LAST_OWNER"));
+            await renderPanel();
+
+            await leaveSales();
+
+            expect(container.textContent).toContain(enAccount.AccountSecurity.exitRefusedWorkspaceLastOwner);
+            expect(button("Leave Sales").disabled).toBe(false);
+            expect(backend.publish).not.toHaveBeenCalled();
+        });
     });
 
     it("shows the ordinary approval-code card to an account in good standing", async () => {
