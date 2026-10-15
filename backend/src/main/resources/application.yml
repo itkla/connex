@@ -159,7 +159,7 @@ connex:
             # account is confined unless one of its passkeys is approved in every organization where
             # it is privileged, and privileged step-ups must be signed by such a passkey. Off until
             # the switch-on release; its value is recorded in the strict startup policy audit.
-            attestation-enforced: ${CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED:false}
+            attestation-enforced: ${CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED:true}
             # Out-of-band confirmation for a FIRST passkey on a privileged account (#1506).
             # Fail-closed: enrollment is refused until the emailed link is redeemed, so a stolen
             # password alone cannot install an attacker-controlled second factor. Independent of

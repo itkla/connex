@@ -30,7 +30,7 @@ public class PrivilegedMfaProperties {
     private static final Duration MAX_RECOVERY_WINDOW = Duration.ofHours(1);
 
     private String enforced = "true";
-    private String attestationEnforced = "false";
+    private String attestationEnforced = "true";
     private String changeActor = DEFAULT_ACTOR;
     private String recoveryTokenSha256 = "";
     private String recoveryExpiresAt = "";
