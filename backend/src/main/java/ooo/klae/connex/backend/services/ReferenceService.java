@@ -703,7 +703,7 @@ public class ReferenceService {
         var candidates = new java.util.LinkedHashSet<String>();
         labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
         labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
-        return List.copyOf(candidates);
+        return candidates.stream().filter(label -> !label.isBlank()).toList();
     }
 
     /**

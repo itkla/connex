@@ -1051,6 +1051,83 @@ class AiChatTurnPersistenceServiceTest {
         attachment.setId(id);
         return attachment;
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void queuedReferenceLabelsMaskTheirMentionWithoutChangingSiblingWords(boolean nativeProtocol) throws Exception {
+        String text = "Open client and [Li](user:42)";
+        var message = queueWithAuthorizedMemberReferences(text);
+        var metadata = JsonMapper.builder().build().readTree(message.getStructuredJson());
+        assertEquals("mention", metadata.path("memberIdentifiers").get(0).path("matching").asString());
+        assertQueuedReferencePayloads(message, nativeProtocol, "Li");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void blankMemberReferencesQueueAndDispatchNormally(boolean nativeProtocol) throws Exception {
+        var message = queueWithAuthorizedMemberReferences("Open client and [](user:42) [ ](user:42) [\t](user:42)");
+        var metadata = JsonMapper.builder().build().readTree(message.getStructuredJson());
+        assertEquals(0, metadata.path("memberIdentifiers").size());
+        assertQueuedReferencePayloads(message, nativeProtocol, null);
+    }
+
+    private ooo.klae.connex.backend.beans.AiChatMessage queueWithAuthorizedMemberReferences(String content) {
+        var references = mock(ooo.klae.connex.backend.services.ReferenceService.class);
+        when(references.redactInvisibleTargets(eq(TURN.workspaceId()), org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(call -> call.getArgument(1));
+        var scope = mock(ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess.class);
+        when(scope.getForWorkspace(TURN.workspaceId())).thenReturn(
+                new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                        1, List.of(TURN.workspaceId()), "[" + TURN.workspaceId() + "]"));
+        var member = new User();
+        member.setId(42);
+        member.setDisplayName("Later Member Name");
+        var actor = new User();
+        actor.setId(TURN.userId());
+        actor.setDisplayName("Current Actor");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor, member));
+        var resolver = new AiAssistantIdentifierResolver(
+                mock(ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper.class), workspaceService, scope, references);
+        when(identifierResolver.resolve(content)).thenAnswer(call -> resolver.resolve(content));
+        when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+        service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(content, List.of()), TURN.restrictionEpoch());
+        var message = ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.AiChatMessage.class);
+        verify(chatMapper).insertMessage(message.capture());
+        return message.getValue();
+    }
+
+    private void assertQueuedReferencePayloads(ooo.klae.connex.backend.beans.AiChatMessage message,
+            boolean nativeProtocol, String member) throws Exception {
+        var mapper = JsonMapper.builder().build();
+        var assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        var support = new AiAssistantMaskingTestSupport(TURN.workspaceId(), TURN.userId());
+        try {
+            for (int replay = 0; replay < 2; replay++) {
+                var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+                context.registerMemberCandidate(replay == 0 ? "Later Member Name" : "Renamed Again");
+                var resources = new AiChatResourceRegistry(context);
+                var empty = new AiAssistantToolResult(Map.of(), List.of());
+                var prompt = nativeProtocol
+                        ? assembler.assembleNative(List.of(message), empty, List.of(), context, resources, List.of(),
+                                new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                        : assembler.assemble(List.of(message), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+                var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+                String payload = mapper.writeValueAsString(capture.request().messages());
+                assertTrue(payload.contains("Open client and"));
+                assertFalse(payload.contains("[Li]"));
+                if (member != null) {
+                    String token = context.tokenBindings().stream().filter(entry -> member.equals(entry.getValue()))
+                            .map(Map.Entry::getKey).findFirst().orElseThrow();
+                    assertTrue(payload.contains(token));
+                    assertEquals(member, ooo.klae.connex.backend.ai.masking.Demasker.demask(token, context).text());
+                }
+                assertEquals(0, capture.warnings());
+            }
+        } finally {
+            support.releaseFixtureMocks();
+        }
+    }
+
     @Test
     void queuedUserMemberProvenanceUsesTheRollbackCompatibleField() {
         when(identifierResolver.resolve("Ask Former Member about Old Company")).thenReturn(
@@ -1068,6 +1145,7 @@ class AiChatTurnPersistenceServiceTest {
         assertEquals(1, metadata.path("memberIdentifiers").size());
         assertEquals("member", metadata.path("memberIdentifiers").get(0).path("kind").asString());
         assertEquals("Former Member", metadata.path("memberIdentifiers").get(0).path("value").asString());
+        assertEquals("mention", metadata.path("memberIdentifiers").get(0).path("matching").asString());
         assertFalse(metadata.toString().contains("{{M"));
     }
 
@@ -1093,6 +1171,7 @@ class AiChatTurnPersistenceServiceTest {
         assertEquals(suggestion.equals(content) ? 1 : 0, metadata.path("memberIdentifiers").size());
         if (suggestion.equals(content)) {
             assertEquals("Former Member", metadata.path("memberIdentifiers").get(0).path("value").asString());
+            assertFalse(metadata.path("memberIdentifiers").get(0).has("matching"));
         }
         assertFalse(metadata.toString().contains("{{M"));
         verify(identifierResolver).resolve(content);
@@ -1124,7 +1203,9 @@ class AiChatTurnPersistenceServiceTest {
         service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(text, List.of()), TURN.restrictionEpoch());
         var message = ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.AiChatMessage.class);
         verify(chatMapper).insertMessage(message.capture());
-        assertEquals(1, JsonMapper.builder().build().readTree(message.getValue().getStructuredJson()).path("memberIdentifiers").size());
+        var members = JsonMapper.builder().build().readTree(message.getValue().getStructuredJson()).path("memberIdentifiers");
+        assertEquals(1, members.size());
+        assertFalse(members.get(0).has("matching"));
     }
 
 }

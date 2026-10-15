@@ -96,7 +96,15 @@ class AiConversationPreprocessingArchTest {
         assertCalls(assembler, "replayMemberValues", Set.of(
                 "message.getStructuredJson", "List.of", "objectMapper.readTree", "metadata.get",
                 "identifiers.isArray", "storedSummaryIdentifier", "stored.kind", "stored.value", "members.add",
-                "List.copyOf", "IllegalStateException", "identifier.get", "path.asString", "startsWith"));
+                "List.copyOf", "IllegalStateException", "identifier.get", "path.asString", "startsWith",
+                "replayMemberRequiresContainment"));
+        assertCalls(assembler, "replayMemberRequiresContainment", Set.of(
+                "identifier.get", "matching.isString", "equals", "matching.asString", "IllegalStateException"));
+        assertReturns(assembler, "replayMemberRequiresContainment", List.of("true", "false"));
+        assertTrue(compact(methodBody(assembler, "replayMemberValues"))
+                .contains("&& replayMemberRequiresContainment(identifier)"));
+        assertTrue(source("assistant/AiAssistantPromptAssembler")
+                .contains("!matching.isString() || !\"mention\".equals(matching.asString())"));
         assertTrue(source("assistant/AiAssistantPromptAssembler")
                 .contains("path == null || !path.asString().startsWith(\"/suggestions/\")"));
         assertCalls(assembler, "crmDataMasked", Set.of("Map.of", "serialize"));

@@ -212,7 +212,13 @@ precise member provenance, including through echoed write arguments, independent
 rules. At queue time, user references pass the existing reader-visibility boundary before the
 shared member-reference collector registers both authored and decoded labels. These labels are
 persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
-combined 20-identifier cap, without adding member resource handles. Recorded provenance protects its
+combined 20-identifier cap, without adding member resource handles. Blank and whitespace-only
+reference labels are excluded before candidate construction. Ordinary queued member provenance
+carries `matching:"mention"` and replays with the boundary-aware matcher, so `[Li](user:42)` does
+not enable containment inside an unrelated word such as `client`. Exact suggestion-click provenance
+retains containment; when the same label is also resolved as a mention, the exact demask provenance
+takes precedence. The optional matching field is ignored by older metadata readers.
+Recorded provenance protects its
 originating field after a rename and fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
 raw MEMBER provenance of each persisted follow-up suggestion separately at `/suggestions/N` in
 `memberIdentifiers` (answer text uses `/text`), using the original parsed paths even

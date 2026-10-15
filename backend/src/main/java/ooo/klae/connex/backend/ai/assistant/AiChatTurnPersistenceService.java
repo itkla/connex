@@ -172,12 +172,14 @@ public class AiChatTurnPersistenceService {
         identifierResolution.resources().forEach(resource ->
                 messageResources.register(resource.kind(), resource.id()));
         var identifiers = new ArrayList<>(identifierResolution.identifiers());
+        var exactSuggestionMembers = new java.util.LinkedHashSet<String>();
         AiChatMessage latestAnswer = chatMapper.getLatestAnswer(workspaceId, sessionId);
         if (latestAnswer != null && latestAnswer.getStructuredJson() != null) {
             try {
                 AiAssistantMemberIdentifiers.suggestionIdentifiers(
                         objectMapper.readTree(latestAnswer.getStructuredJson()), request.content())
                         .forEach(identifier -> {
+                            exactSuggestionMembers.add(identifier.value());
                             var member = new AiAssistantIdentifierResolver.Identifier(
                                     ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, identifier.value());
                             if (!identifiers.contains(member)) {
@@ -192,7 +194,7 @@ public class AiChatTurnPersistenceService {
             throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
         }
         message.setStructuredJson(userMessageMetadata(
-                messageResources.snapshot(), List.copyOf(identifiers)));
+                messageResources.snapshot(), List.copyOf(identifiers), exactSuggestionMembers));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();
@@ -632,7 +634,8 @@ public class AiChatTurnPersistenceService {
 
     private String userMessageMetadata(
             java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
-            List<AiAssistantIdentifierResolver.Identifier> identifiers) {
+            List<AiAssistantIdentifierResolver.Identifier> identifiers,
+            java.util.Set<String> exactSuggestionMembers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -652,7 +655,10 @@ public class AiChatTurnPersistenceService {
                     "identifiers", storedIdentifiers,
                     "memberIdentifiers", identifiers.stream()
                             .filter(identifier -> identifier.kind() == ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER)
-                            .map(identifier -> java.util.Map.of("kind", "member", "value", identifier.value())).toList()));
+                            .map(identifier -> exactSuggestionMembers.contains(identifier.value())
+                                    ? java.util.Map.of("kind", "member", "value", identifier.value())
+                                    : java.util.Map.of("kind", "member", "value", identifier.value(), "matching", "mention"))
+                            .toList()));
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Assistant user message metadata could not be serialized", exception);

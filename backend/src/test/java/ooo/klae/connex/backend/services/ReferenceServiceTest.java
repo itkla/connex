@@ -293,6 +293,16 @@ class ReferenceServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void memberReferenceCandidatesExcludeBlankLabelsBeforeIdentifierConstruction() {
+        for (String label : List.of("", " ", "\t", "\n", "\u2003")) {
+            assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42)"));
+            assertEquals(List.of("Li"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42) and [Li](user:42)"));
+        }
+    }
+
+    @Test
     void readerVisibleMemberLabelsIncludeRepeatedTargetsAndReferenceStyleLabels() {
         assertEquals(List.of("Old Alice", "Other Old Label", "Pending Invitee", "Shortcut"),
                 ReferenceService.memberLabelsFromReaderVisibleContent(

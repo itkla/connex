@@ -1986,7 +1986,8 @@ public class AiAssistantPromptAssembler {
                         StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
                         JsonNode path = identifier.get("path");
                         if (stored.kind() == EntityKind.MEMBER
-                                && (path == null || !path.asString().startsWith("/suggestions/"))) {
+                                && (path == null || !path.asString().startsWith("/suggestions/"))
+                                && replayMemberRequiresContainment(identifier)) {
                             members.add(stored.value());
                         }
                     }
@@ -1996,6 +1997,18 @@ public class AiAssistantPromptAssembler {
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant member identifier metadata could not be read", exception);
         }
+    }
+
+    /** Queue-time mentions keep word boundaries; exact demask provenance retains its replay coverage. */
+    private static boolean replayMemberRequiresContainment(JsonNode identifier) {
+        JsonNode matching = identifier.get("matching");
+        if (matching == null) {
+            return true;
+        }
+        if (!matching.isString() || !"mention".equals(matching.asString())) {
+            throw new IllegalStateException("Assistant member matching metadata is invalid");
+        }
+        return false;
     }
 
     private void seedMemberIdentifiers(JsonNode metadata, MaskingContext context, int limit) {
