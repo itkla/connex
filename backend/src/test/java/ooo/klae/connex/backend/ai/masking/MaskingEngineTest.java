@@ -39,6 +39,37 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import tools.jackson.databind.ObjectMapper;
 
 class MaskingEngineTest {
+
+    @Test
+    void insertionOffsetsDistinguishSourceMarkersAndPreservedTokensFromNewReplacements() {
+        var context = new MaskingContext();
+        String person = context.tokenFor(EntityKind.PERSON, "Alice Former");
+        context.registerMemberCandidate("Bob");
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "😀 \"[redacted]\" " + person + " Bob alice@example.test", context);
+        assertEquals("😀 \"[redacted]\" {{P1}} {{M1}} [redacted]", field.text());
+        assertEquals(List.of("{{M1}}", "[redacted]"), field.insertedSpans().stream()
+                .map(span -> field.text().substring(span.start(), span.end())).toList());
+        assertEquals(field.text().indexOf("{{M1}}"), field.insertedSpans().getFirst().start());
+        assertEquals(field.text().lastIndexOf("[redacted]"), field.insertedSpans().getLast().start());
+    }
+
+    @Test
+    void jsonEscapingAndMessageAssemblyPreserveExactMaskerInsertionPositions() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "{\"unexpected\":\"😀 \\\"quoted\\\" Bob alice@example.test\"}", context);
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var segment = OutboundSegment.jsonString(field, OutboundSegment.Origin.PROVIDER_AUTHORED, mapper);
+        assertEquals(mapper.writeValueAsString(field.text()), segment.text());
+        assertEquals(List.of("{{M1}}", "[redacted]"), segment.insertedSpans().stream()
+                .map(span -> segment.text().substring(span.start(), span.end())).toList());
+        var message = PromptAssembly.builder(context).segmentedUserTurn(List.of(segment)).build().getMessages().getFirst();
+        assertEquals(segment.text(), message.getContent());
+        assertEquals(List.of(segment), message.getSegments());
+        assertEquals(field.text(), mapper.readValue(message.getContent(), String.class));
+    }
     private static final String REDACTION = Matcher.quoteReplacement(MaskingEngine.REDACTED);
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern LEGACY_EMAIL =

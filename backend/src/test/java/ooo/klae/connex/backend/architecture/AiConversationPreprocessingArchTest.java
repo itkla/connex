@@ -160,7 +160,9 @@ class AiConversationPreprocessingArchTest {
         assertFalse(masking.contains("ConversationText.preprocess("));
         assertFalse(context.contains("ConversationText.preprocess("));
         assertFalse(outbound.contains("ConversationText.preprocess("));
-        assertTrue(masking.contains("return ConversationText.finishMasked(replaced.toString());"));
+        assertTrue(masking.contains("return replaceSpansWithInsertions(text, spans, linkSyntax).text();"));
+        assertTrue(masking.contains("return new MaskedText(ConversationText.finishMasked(replaced.toString()), inserted);"));
+        assertTrue(masking.contains("return new MaskedText(ConversationText.finishMasked(masked.toString()), inserted);"));
         assertTrue(masking.contains("masked = maskFreeTextPreservingIssuedPlaceholders(masked, ctx, preserveTrustedCollisions);"));
         assertTrue(masking.contains("return CanonicalText.prepare(value);"));
         assertTrue(masking.contains("prepared = text;"));

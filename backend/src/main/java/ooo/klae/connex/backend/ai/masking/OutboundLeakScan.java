@@ -125,7 +125,8 @@ public final class OutboundLeakScan {
     /**
      * Checks the complete serialized envelope for existing kinds and its classified text for MEMBER.
      * Static text carries no member identity. Provider text receives neither static nor sentinel
-     * exemptions; tenant text has already passed replacement before server sentinels were inserted.
+     * exemptions. Exact masker-inserted spans retain server origin even within provider text;
+     * tenant text has already passed replacement before server sentinels were inserted.
      */
     public static void assertNoLeakInClassifiedEnvelope(
             String payload, List<OutboundSegment> segments, MaskingContext ctx, ObjectMapper objectMapper) {
@@ -135,9 +136,10 @@ public final class OutboundLeakScan {
                 continue;
             }
             boolean provider = segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED;
-            assertNoLeak(List.of(new ScannedField(segment.text(), true, false)), ctx, provider, true, false, true);
+            String scanned = provider ? segment.memberScanText() : segment.text();
+            assertNoLeak(List.of(new ScannedField(scanned, true, false)), ctx, provider, true, false, true);
             if (provider) {
-                assertNoLeak(decodedJsonFields(segment.text(), objectMapper), ctx, true, true, false, true);
+                assertNoLeak(decodedJsonFields(scanned, objectMapper), ctx, true, true, false, true);
             }
         }
     }

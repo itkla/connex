@@ -41,6 +41,62 @@ class AiAssistantMemberExposureTest {
         support.releaseFixtureMocks();
     }
 
+    static Stream<Arguments> repairInsertedMarkers() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                Arguments.of(nativeProtocol, "Redacted", "{\"unexpected\":\"alice@example.test\"}", "[redacted]"),
+                Arguments.of(nativeProtocol, "Redacted", "{\"unexpected\":\"Ask Redacted\"}", "{{M1}}"),
+                Arguments.of(nativeProtocol, "Omitted by policy", "{\"unexpected\":\"The patient has a diagnosis.\"}",
+                        "[omitted by policy]")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("repairInsertedMarkers")
+    void schemaRepairRetainsMaskerInsertionsWithoutTrustingProviderText(
+            boolean nativeProtocol, String member, String malformed, String expected) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        var resources = new AiChatResourceRegistry(context);
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var repair = ooo.klae.connex.backend.ai.AiStructuredRepair.from("final_schema", malformed);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, List.of(), context, resources, List.of(), budget,
+                        AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, List.of(), context, resources, List.of(), budget, repair,
+                        AiAssistantToolCatalog.ALL);
+        var replay = assembler.nativeReplay(List.of(), Map.of(), context, budget, repair);
+        var nativeRequest = new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
+                assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), replay.exchanges(), replay.repairMessage(),
+                false, 1, replay.repairSegments());
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null, nativeRequest);
+        String text = nativeProtocol ? capture.request().nativeTools().repairMessage()
+                : capture.request().messages().getLast().content();
+        String output = mapper.readTree(text.substring(text.indexOf("MODEL_OUTPUT_BEGIN\n")
+                + "MODEL_OUTPUT_BEGIN\n".length(), text.lastIndexOf("\nMODEL_OUTPUT_END"))).path("output").asString();
+        assertTrue(output.contains(expected));
+        assertFalse(output.contains("alice@example.test"));
+        assertFalse(output.contains("Ask Redacted"));
+        assertEquals(0, capture.warnings());
+        if (!expected.equals("{{M1}}")) {
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void providerAuthoredLiteralMarkersRemainStrictlyScannedWithoutInsertionProvenance(boolean nativeProtocol) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Redacted");
+        var prompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(context)
+                .system("Use concise analysis").segmentedUserTurn(List.of(
+                        new ooo.klae.connex.backend.ai.masking.OutboundSegment("{\"query\":\"[redacted]\"}",
+                                ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.PROVIDER_AUTHORED))).build();
+        org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null));
+    }
+
     static Stream<Arguments> staticRepairCollisions() {
         return Stream.of("Return", "Output", "JSON").flatMap(label -> Stream.of(
                 Arguments.of(false, false, label), Arguments.of(true, false, label), Arguments.of(true, true, label)));
@@ -890,7 +946,8 @@ class AiAssistantMemberExposureTest {
         org.mockito.Mockito.when(scope.getForWorkspace(7)).thenReturn(
                 new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(1, List.of(7), "[7]"));
         var resolver = new AiAssistantIdentifierResolver(
-                org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper.class), directory, scope);
+                org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper.class), directory, scope,
+                org.mockito.Mockito.mock(ooo.klae.connex.backend.services.ReferenceService.class));
         for (String text : List.of("show the client pipeline", "Ask Li to follow up", "Ask 😀 to follow up.")) {
             var resolution = resolver.resolve(text);
             assertEquals(text.startsWith("Ask") ? 1 : 0, resolution.identifiers().size());

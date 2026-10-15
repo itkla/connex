@@ -124,7 +124,8 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     void setUpWorkspace(org.junit.jupiter.api.TestInfo info) {
         committedMemberFixture = info.getTestMethod().map(method -> Set.of(
                 "realMemberDirectoryAndAuthoredReferenceLabelsStayMaskedAcrossRenameAndFreshReplay",
-                "storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay")
+                "storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay",
+                "queuedUserReferenceSpellingsRemainMaskedOnFirstDispatchAndFreshReplay")
                 .contains(method.getName())).orElse(false);
         Organization organization = new Organization();
         organization.setName("Masking " + unique());
@@ -942,7 +943,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
         when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
                 workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
-        return new AiAssistantIdentifierResolver(identifierMapper, workspaceService, scope);
+        return new AiAssistantIdentifierResolver(identifierMapper, workspaceService, scope, referenceService);
     }
 
     private Company newCompany(String name) {
@@ -988,6 +989,67 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     private static String unique() {
         return UUID.randomUUID().toString().substring(0, 8);
     }
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void queuedUserReferenceSpellingsRemainMaskedOnFirstDispatchAndFreshReplay(boolean nativeProtocol) throws Exception {
+        var fixture = memberReferenceFixture();
+        jdbc.update("UPDATE app_user SET display_name = 'Alice & Bob' WHERE id = ?", fixture.actor().getId());
+        var pending = userMapper.getUserByUsername("pending-" + fixture.suffix());
+        var foreign = userMapper.getUserByUsername("foreign-" + fixture.suffix());
+        var directory = support.fixtureMock(WorkspaceService.class);
+        var scope = support.fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
+        when(directory.getCurrentWorkspaceId()).thenReturn(workspace.getId());
+        when(directory.getMembers(workspace.getId())).thenReturn(workspaceMapper.getMembers(workspace.getId()));
+        when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
+                workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
+        var resolver = new AiAssistantIdentifierResolver(identifierMapper, directory, scope, referenceService);
+        String text = "Ask [Prior Member Label](user:" + fixture.actor().getId() + ") and "
+                + "[Alice &amp; Bob](user:" + fixture.actor().getId() + ") with "
+                + "[Pending Alias](user:" + pending.getId() + ") and "
+                + "[Foreign Alias](user:" + foreign.getId() + ")";
+        var resolution = resolver.resolve(text);
+        assertTrue(resolution.resources().isEmpty());
+        assertEquals(Set.of("Prior Member Label", "Alice & Bob", "Alice &amp; Bob", "Pending Alias"),
+                resolution.identifiers().stream().map(AiAssistantIdentifierResolver.Identifier::value)
+                        .collect(Collectors.toSet()));
+        var mapper = JsonMapper.builder().build();
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent(text);
+        user.setStructuredJson(mapper.writeValueAsString(Map.of("kind", "user_message", "resources", List.of(),
+                "identifiers", List.of(), "memberIdentifiers", resolution.identifiers().stream()
+                        .map(identifier -> Map.of("kind", "member", "value", identifier.value())).toList())));
+        jdbc.update("UPDATE app_user SET display_name = 'Later Member Label' WHERE id = ?", fixture.actor().getId());
+        var assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        for (int replay = 0; replay < 2; replay++) {
+            var context = new MaskingContext();
+            if (replay == 0) {
+                resolver.seed(resolution, context);
+            }
+            var resources = new AiChatResourceRegistry(context);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(),
+                            new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(user), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages());
+            for (String label : List.of("Prior Member Label", "Alice &amp; Bob", "Alice & Bob", "Pending Alias")) {
+                assertFalse(payload.contains(label), label);
+            }
+            for (String label : List.of("Prior Member Label", "Alice &amp; Bob", "Pending Alias")) {
+                String token = context.tokenBindings().stream().filter(entry -> label.equals(entry.getValue()))
+                        .map(Map.Entry::getKey).findFirst().orElseThrow();
+                assertTrue(payload.contains(token));
+                assertEquals(label, Demasker.demask(token, context).text());
+            }
+            assertEquals(0, capture.warnings());
+            assertFalse(context.identifierDictionary().contains("Foreign Alias"));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)

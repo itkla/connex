@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.ReferenceService;
 
 /** Resolves one bounded, locally authorized identifier set for an Ask Connex user turn. */
 @Service
@@ -27,6 +29,7 @@ public class AiAssistantIdentifierResolver {
     private final AiAssistantIdentifierMapper identifierMapper;
     private final WorkspaceService workspaceService;
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+    private final ReferenceService referenceService;
 
     /**
      * Resolves visible mentions in bounded pages for the supplied turn text.
@@ -92,10 +95,15 @@ public class AiAssistantIdentifierResolver {
                 .map(mention -> new Identifier(
                         entityKind(mention.getKind()), identifierValue(mention)))
                 .toList());
-        for (String label : AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId))) {
-            if (!MaskingEngine.containsMemberMention(scanText, label)) {
-                continue;
-            }
+        var memberLabels = new LinkedHashSet<String>();
+        AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
+                .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
+        if (!ReferenceService.memberLabelsFromReaderVisibleContent(message).isEmpty()) {
+            String visible = referenceService.redactInvisibleTargets(workspaceId, List.of(
+                    new ReferenceService.ReaderVisibleContent(message, List.of()))).getFirst().content();
+            memberLabels.addAll(ReferenceService.memberLabelsFromReaderVisibleContent(visible));
+        }
+        for (String label : memberLabels) {
             identifiers.add(new Identifier(EntityKind.MEMBER, label));
             if (identifiers.size() > MAX_IDENTIFIERS) {
                 throw AiAssistantLoopException.malformed("identifier_limit_exceeded");

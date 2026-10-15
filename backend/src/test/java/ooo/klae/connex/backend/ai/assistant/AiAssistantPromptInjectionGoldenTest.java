@@ -199,7 +199,7 @@ class AiAssistantPromptInjectionGoldenTest {
                 .thenReturn(List.of(mentioned));
         MaskingContext context = new MaskingContext();
         AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(
-                identifierMapper, workspaceService, workspaceScopeControlAccess);
+                identifierMapper, workspaceService, workspaceScopeControlAccess, mock(ooo.klae.connex.backend.services.ReferenceService.class));
         resolver.seed(
                 resolver.resolve("What is happening with " + spelling + "?"), context);
         AiChatMessage userRequest = new AiChatMessage();

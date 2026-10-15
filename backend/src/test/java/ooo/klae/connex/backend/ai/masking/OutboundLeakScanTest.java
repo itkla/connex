@@ -23,6 +23,33 @@ class OutboundLeakScanTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void insertedMarkerExemptionDoesNotHideIdenticalProviderSourceInTheSameField() {
+        var context = new MaskingContext();
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "Literal [redacted] then alice@example.test", context);
+        assertEquals("Literal [redacted] then [redacted]", field.text());
+        assertEquals(1, field.insertedSpans().size());
+        context.registerMemberCandidate("Redacted");
+        var segment = OutboundSegment.jsonString(field, OutboundSegment.Origin.PROVIDER_AUTHORED, objectMapper);
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("messages", List.of(segment.text()))),
+                List.of(segment), context, objectMapper));
+    }
+
+    @Test
+    void insertedMarkerExemptionPreservesJsonDecodingOfEscapedProviderLiterals() {
+        var context = new MaskingContext();
+        var field = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                "{\"email\":\"alice@example.test\",\"query\":\"\\u005bredacted\\u005d\"}", context);
+        assertEquals(1, field.insertedSpans().size());
+        context.registerMemberCandidate("Redacted");
+        var segment = new OutboundSegment(field.text(), OutboundSegment.Origin.PROVIDER_AUTHORED, field.insertedSpans());
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("messages", List.of(segment.text()))),
+                List.of(segment), context, objectMapper));
+    }
+
+    @Test
     void recordedMemberProvenanceRequiresContainmentOnlyWithinItsMessageForReplacementAndScanning() {
         var context = new MaskingContext();
         context.registerMemberCandidate("Bob");

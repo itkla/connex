@@ -26,6 +26,35 @@ public final class MaskingEngine {
     public static final String OMITTED_BY_POLICY = "[omitted by policy]";
     public static final String REDACTED = "[redacted]";
 
+    /** Half-open UTF-16 offsets of a marker or placeholder actually emitted by the masker. */
+    public record InsertedSpan(int start, int end) {
+        public InsertedSpan {
+            if (start < 0 || end <= start) {
+                throw new IllegalArgumentException("Masker insertion bounds are invalid");
+            }
+        }
+    }
+
+    /** Masked field plus request-local insertion provenance; no source spelling grants trust. */
+    public record MaskedText(String text, List<InsertedSpan> insertedSpans) {
+        public MaskedText {
+            Objects.requireNonNull(text, "text");
+            insertedSpans = List.copyOf(insertedSpans);
+            int end = 0;
+            for (InsertedSpan span : insertedSpans) {
+                if (span.start() < end || span.end() > text.length()) {
+                    throw new IllegalArgumentException("Masker insertion spans must be ordered within their field");
+                }
+                end = span.end();
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "MaskedText[text=<redacted>, insertions=" + insertedSpans.size() + "]";
+        }
+    }
+
     /**
      * Detector for HTTP(S) URLs and bare {@code www.} host references. Its literal prefix rejects
      * a start position in constant time and its single greedy run has nothing following it to
@@ -272,18 +301,28 @@ public final class MaskingEngine {
      * @return safely masked text with issued placeholders preserved in canonical form
      */
     public static String maskFreeTextPreservingIssuedPlaceholders(String text, MaskingContext ctx) {
+        return maskFreeTextPreservingIssuedPlaceholdersWithInsertions(text, ctx).text();
+    }
+
+    /** Masks a provider field while retaining only the exact replacement spans this engine wrote. */
+    public static MaskedText maskFreeTextPreservingIssuedPlaceholdersWithInsertions(String text, MaskingContext ctx) {
         Objects.requireNonNull(ctx, "ctx");
         if (text != null && ctx.containsUnexposedMemberToken(text)) {
             throw new MaskingLeakException(java.util.Set.of(EntityKind.MEMBER), 1);
         }
-        return maskFreeTextPreservingIssuedPlaceholders(text, ctx, false);
+        return maskPreservingIssuedPlaceholders(text, ctx, false);
     }
 
     private static String maskFreeTextPreservingIssuedPlaceholders(
             String text, MaskingContext ctx, boolean preserveTrustedCollisions) {
+        return maskPreservingIssuedPlaceholders(text, ctx, preserveTrustedCollisions).text();
+    }
+
+    private static MaskedText maskPreservingIssuedPlaceholders(
+            String text, MaskingContext ctx, boolean preserveTrustedCollisions) {
         Objects.requireNonNull(ctx, "ctx");
         if (text == null || text.isBlank()) {
-            return "";
+            return new MaskedText("", List.of());
         }
         String normalizedText = text;
         Matcher screeningMatcher = PLACEHOLDER.matcher(normalizedText);
@@ -305,15 +344,17 @@ public final class MaskingEngine {
         String screened = screeningText.toString();
         String specialCareScreeningText = CanonicalText.projectLabels(screened).value();
         if (SpecialCareTextScreen.screen(specialCareScreeningText).excluded()) {
-            return OMITTED_BY_POLICY;
+            return insertedValue(OMITTED_BY_POLICY);
         }
         if (sensitiveValueCrossesIssuedPlaceholder(screened, issuedPlaceholderOffsets, ctx)) {
-            return REDACTED;
+            return insertedValue(REDACTED);
         }
 
         boolean[] linkSyntax = linkSyntax(normalizedText, CanonicalText.project(normalizedText));
         Matcher placeholderMatcher = PLACEHOLDER.matcher(normalizedText);
         StringBuilder masked = new StringBuilder(normalizedText.length());
+        List<InsertedSpan> inserted = new ArrayList<>();
+        int displayedLength = 0;
         int maskedEnd = 0;
         while (placeholderMatcher.find()) {
             String token = canonicalToken(placeholderMatcher.group(1));
@@ -321,19 +362,20 @@ public final class MaskingEngine {
                 continue;
             }
             String segment = normalizedText.substring(maskedEnd, placeholderMatcher.start());
-            masked.append(protectIssuedTokens(replaceSpans(segment,
+            displayedLength = appendMaskedText(masked, inserted, replaceSpansWithInsertions(segment,
                     sensitiveSpans(segment, ctx, preserveTrustedCollisions, true),
-                    Arrays.copyOfRange(linkSyntax, maskedEnd, placeholderMatcher.start()))));
+                    Arrays.copyOfRange(linkSyntax, maskedEnd, placeholderMatcher.start())), displayedLength);
             if (hasVisibleSource(linkSyntax, placeholderMatcher.start(), placeholderMatcher.end())) {
                 masked.append(protectIssuedTokens(token));
+                displayedLength += token.length();
             }
             maskedEnd = placeholderMatcher.end();
         }
         String segment = normalizedText.substring(maskedEnd);
-        masked.append(protectIssuedTokens(replaceSpans(segment,
+        appendMaskedText(masked, inserted, replaceSpansWithInsertions(segment,
                 sensitiveSpans(segment, ctx, preserveTrustedCollisions, true),
-                Arrays.copyOfRange(linkSyntax, maskedEnd, normalizedText.length()))));
-        return ConversationText.finishMasked(masked.toString());
+                Arrays.copyOfRange(linkSyntax, maskedEnd, normalizedText.length())), displayedLength);
+        return new MaskedText(ConversationText.finishMasked(masked.toString()), inserted);
     }
 
     /**
@@ -503,17 +545,42 @@ public final class MaskingEngine {
     }
 
     private static String replaceSpans(String text, List<ReplacementSpan> spans, boolean[] linkSyntax) {
+        return replaceSpansWithInsertions(text, spans, linkSyntax).text();
+    }
+
+    private static MaskedText replaceSpansWithInsertions(String text, List<ReplacementSpan> spans, boolean[] linkSyntax) {
         StringBuilder replaced = new StringBuilder(text.length());
+        List<InsertedSpan> inserted = new ArrayList<>();
+        int expansion = 0;
         int copiedEnd = 0;
         for (ReplacementSpan span : spans) {
             appendUnmaskedSource(replaced, text, linkSyntax, copiedEnd, span.start());
             if (hasVisibleSource(linkSyntax, span.start(), span.end())) {
-                replaced.append(protectIssuedTokens(span.replacement()));
+                String encoded = protectIssuedTokens(span.replacement());
+                String displayed = ConversationText.finishMasked(encoded);
+                int start = replaced.length() + expansion;
+                replaced.append(encoded);
+                expansion += displayed.length() - encoded.length();
+                if (displayed.equals(REDACTED) || displayed.equals(OMITTED_BY_POLICY)
+                        || PLACEHOLDER.matcher(displayed).matches()) {
+                    inserted.add(new InsertedSpan(start, start + displayed.length()));
+                }
             }
             copiedEnd = span.end();
         }
         appendUnmaskedSource(replaced, text, linkSyntax, copiedEnd, text.length());
-        return ConversationText.finishMasked(replaced.toString());
+        return new MaskedText(ConversationText.finishMasked(replaced.toString()), inserted);
+    }
+
+    private static MaskedText insertedValue(String text) {
+        return new MaskedText(text, List.of(new InsertedSpan(0, text.length())));
+    }
+
+    private static int appendMaskedText(
+            StringBuilder target, List<InsertedSpan> inserted, MaskedText field, int offset) {
+        target.append(protectIssuedTokens(field.text()));
+        field.insertedSpans().forEach(span -> inserted.add(new InsertedSpan(offset + span.start(), offset + span.end())));
+        return offset + field.text().length();
     }
 
     private static boolean hasVisibleSource(boolean[] linkSyntax, int start, int end) {

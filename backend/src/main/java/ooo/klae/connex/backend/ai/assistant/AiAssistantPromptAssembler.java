@@ -1781,12 +1781,12 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             String instruction) {
         context.addTrustedStaticText(instruction);
-        String output = serialize(MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
-                repair.offendingOutput(), context));
+        MaskingEngine.MaskedText output = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                repair.offendingOutput(), context);
         return List.of(
                 new OutboundSegment(instruction + MODEL_OUTPUT_BEGIN + "\n{\"schemaRule\":"
                         + serialize(repair.schemaRule()) + ",\"output\":", OutboundSegment.Origin.SERVER_STATIC),
-                new OutboundSegment(output, OutboundSegment.Origin.PROVIDER_AUTHORED),
+                OutboundSegment.jsonString(output, OutboundSegment.Origin.PROVIDER_AUTHORED, objectMapper),
                 new OutboundSegment(",\"truncated\":" + repair.truncated() + "}\n" + MODEL_OUTPUT_END,
                         OutboundSegment.Origin.SERVER_STATIC));
     }

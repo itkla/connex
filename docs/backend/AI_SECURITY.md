@@ -190,8 +190,13 @@ scanning keeps its existing checks. Outbound text retains its origin independent
 server-static system directives, repair instructions, schema keys and validated catalog tool names
 never participate in MEMBER raw-name scanning. Tenant messages, stored content and masked tool results
 are scanned as tenant data. Replayed native ids, thought signatures, arguments and repair model output
-remain provider-authored, with a strict MEMBER scan of raw and JSON-decoded text and no sentinel
-exemption. Only tenant-data segments may grant dispatch exposure; provider text and static vocabulary
+remain provider-authored, with a strict MEMBER scan of raw and JSON-decoded text. The masker
+records exact UTF-16 spans only when it writes a replacement marker or placeholder; schema-repair
+segments carry those offsets through JSON escaping and message assembly. MEMBER scanning neutralizes
+only these recorded insertions while preserving JSON decoding. Provider-authored text that merely
+looks like `[redacted]` or `[omitted by policy]` receives no exemption, including when the same field
+also contains genuine masker insertions. This insertion provenance is request-local and never
+persisted. Only tenant-data segments may grant dispatch exposure; provider text and static vocabulary
 cannot authorize a hidden binding. Server-created markers in tool results retain their positional
 exemption. Unclassified repair text defaults to tenant data. Field projections are built once per scanned segment and reused
 across the complete candidate dictionary. Tool-result provenance retains the JSON pointer of each originating textual field; containment
@@ -204,7 +209,11 @@ Han, Hiragana, Katakana, Hangul and Thai need no boundaries. Thus raw `Bob_team`
 while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
 and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
 precise member provenance, including through echoed write arguments, independently of these raw-text
-rules. Recorded provenance protects its originating field after a rename and fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
+rules. At queue time, user references pass the existing reader-visibility boundary before the
+shared member-reference collector registers both authored and decoded labels. These labels are
+persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
+combined 20-identifier cap, without adding member resource handles. Recorded provenance protects its
+originating field after a rename and fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
 raw MEMBER provenance of each persisted follow-up suggestion separately at `/suggestions/N` in
 `memberIdentifiers` (answer text uses `/text`), using the original parsed paths even
 when filtering trims, removes or deduplicates suggestions. When the next user text exactly equals a
