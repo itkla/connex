@@ -255,6 +255,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AssignmentSweepMapper.clearInterventionOwner",
         MAPPERS + "AssignmentSweepMapper.clearCampaignOwner",
         MAPPERS + "AssignmentSweepMapper.clearPersonPassOwners",
+        MAPPERS + "AssignmentSweepMapper.deleteOwnedGoal",
+        MAPPERS + "AssignmentSweepMapper.clearGoalCreator",
 
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",

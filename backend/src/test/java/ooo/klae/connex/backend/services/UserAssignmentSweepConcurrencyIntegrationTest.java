@@ -68,10 +68,11 @@ class UserAssignmentSweepConcurrencyIntegrationTest extends CampaignRealDbTestSu
         jdbc.update("DELETE FROM stage WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM pipeline WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM person_lifecycle_pass WHERE workspace_id = ?", workspace.getId());
+        jdbc.update("DELETE FROM report_goal WHERE workspace_id = ?", workspace.getId());
     }
 
     @Test
-    void writesAfterInitialErasureCommitSurviveUntilTheCascadeAndThenAllEightKindsAreSwept() throws Exception {
+    void writesAfterInitialErasureCommitSurviveUntilTheCascadeAndThenEveryKindIsSwept() throws Exception {
         User target = newUser();
         int userId = target.getId();
         int ws = workspace.getId();
@@ -98,6 +99,11 @@ class UserAssignmentSweepConcurrencyIntegrationTest extends CampaignRealDbTestSu
                 jdbc.update("INSERT INTO person_lifecycle_pass (workspace_id, person_id, entered_at, owner_id) VALUES (?, ?, CURRENT_TIMESTAMP, ?)",
                     ws, person.getId(), userId);
                 AssignmentSweepFixtures.intervention(jdbc, ws, person.getId(), userId);
+                jdbc.update("""
+                    INSERT INTO report_goal
+                        (workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by)
+                    VALUES (?, ?, 'revenue', 'month', '2026-01-01', 100, 'JPY', ?)
+                    """, ws, userId, userId);
                 deleting[0] = executor.submit(() -> {
                     try (var statement = deletion.prepareStatement("DELETE FROM app_user WHERE id = ?")) {
                         statement.setInt(1, userId);

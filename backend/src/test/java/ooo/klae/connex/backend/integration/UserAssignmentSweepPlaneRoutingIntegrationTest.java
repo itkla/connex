@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -25,6 +26,8 @@ import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +37,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.AssignmentSweepMapper;
+import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.DepartureApprovalGuard;
@@ -51,7 +55,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 /** Real catalog fan-out, control-only absence reads, collision safety, and bounded recovery. */
 class UserAssignmentSweepPlaneRoutingIntegrationTest {
     private static final List<String> TABLES = List.of("company", "person", "deal", "deal_collaborator", "task",
-        "workflow_intervention", "campaign", "person_lifecycle_pass");
+        "workflow_intervention", "campaign", "person_lifecycle_pass", "report_goal");
     private final String suffix = UUID.randomUUID().toString().replace("-", "");
     private final String first = "cnx_sweep_a_" + suffix;
     private final String second = "cnx_sweep_b_" + suffix;
@@ -60,10 +64,14 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
     private JdbcTemplate control;
     private AssignmentSweepMapper mapper;
     private AssignmentSweepMapper realMapper;
+    private GoalMapper goals;
+    private TenantWorkScope scope;
     private UserAccountCatalogOffboardingService service;
     private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
     private String defaultCatalog;
     private int survivor;
+    private int otherSurvivor;
+    private int departing;
     private int absent;
 
     @BeforeEach
@@ -87,6 +95,7 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
         control.update("INSERT INTO app_user (username, display_name, email, password_hash) VALUES (?, 'Sweep fixture', ?, 'hash')",
             username, username + "@example.test");
         survivor = control.queryForObject("SELECT id FROM app_user WHERE username = ?", Integer.class, username);
+        otherSurvivor = createUser("sweep_other_" + suffix);
         absent = survivor + 1000000;
         TenantContext context = new TenantContext();
         TenantRoutingProperties properties = new TenantRoutingProperties();
@@ -98,7 +107,7 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         configuration.addInterceptor(new ControlCatalogRoutingInterceptor(context, true));
         configuration.addInterceptor(new TenantScopeInterceptor(context, true, true));
-        for (String resource : List.of("mappers/AssignmentSweepMapper.xml", "mappers/UserMapper.xml")) {
+        for (String resource : List.of("mappers/AssignmentSweepMapper.xml", "mappers/UserMapper.xml", "mappers/GoalMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
@@ -107,10 +116,11 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
         var session = new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(configuration));
         session.getMapper(UserMapper.class).reserveAccountDeletion(survivor, UUID.randomUUID().toString());
         realMapper = session.getMapper(AssignmentSweepMapper.class);
+        goals = session.getMapper(GoalMapper.class);
         mapper = spy(realMapper);
         PlacementRegistry placements = mock(PlacementRegistry.class);
         when(placements.activeCatalogs()).thenReturn(Arrays.asList(null, first, second, recovery));
-        TenantWorkScope scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
+        scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         service = new UserAccountCatalogOffboardingService(mock(DepartureApprovalGuard.class), placements,
             mock(UserOffboardingService.class),
             mock(ProviderCapturePurgeService.class), scope, new DataSourceTransactionManager(routing), mapper,
@@ -127,6 +137,12 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
             if (survivor > 0) {
                 control.update("DELETE FROM app_user WHERE id = ?", survivor);
             }
+            if (otherSurvivor > 0) {
+                control.update("DELETE FROM app_user WHERE id = ?", otherSurvivor);
+            }
+            if (departing > 0) {
+                control.update("DELETE FROM app_user WHERE id = ?", departing);
+            }
         }
         if (pool != null) {
             pool.close();
@@ -138,6 +154,73 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
         for (String table : TABLES) {
             control.execute("CREATE TABLE " + catalog + "." + table + " LIKE " + defaultCatalog + "." + table);
         }
+    }
+
+    private int createUser(String username) {
+        control.update("INSERT INTO app_user (username, display_name, email, password_hash) VALUES (?, 'Sweep fixture', ?, 'hash')",
+            username, username + "@example.test");
+        return control.queryForObject("SELECT id FROM app_user WHERE username = ?", Integer.class, username);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void goalsWrittenAfterErasureDiscoveryAreRecoveredAndLiveGoalsRemainUntouched(boolean periodic) {
+        createCatalog(recovery);
+        departing = createUser("sweep_departing_" + suffix);
+        for (String catalog : List.of(first, second)) {
+            assertTrue(scope.withCatalog(catalog, () -> goals.findDepartureReferencesAnywhere(departing)).isEmpty());
+            control.update("""
+                INSERT INTO %s.report_goal
+                    (id, workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by)
+                VALUES (501, 7, ?, 'revenue', 'month', '2026-01-01', 100, 'JPY', ?),
+                       (502, 7, ?, 'revenue', 'month', '2026-02-01', 200, 'JPY', ?),
+                       (503, 7, ?, 'revenue', 'month', '2026-03-01', 300, 'JPY', ?),
+                       (504, 7, ?, 'revenue', 'month', '2026-04-01', 400, 'JPY', ?),
+                       (505, 7, NULL, 'revenue', 'month', '2026-05-01', 500, 'JPY', ?)
+                """.formatted(catalog), departing, survivor, survivor, departing, departing, departing,
+                survivor, otherSurvivor, otherSurvivor);
+        }
+        var firstLive = goalRows(first, "id >= 504");
+        var secondLive = goalRows(second, "id >= 504");
+        var firstDetached = goalRows(first, "id = 502").getFirst();
+        var secondDetached = goalRows(second, "id = 502").getFirst();
+        control.execute("CREATE TABLE " + first + ".app_user (id INT PRIMARY KEY)");
+        control.update("INSERT INTO " + first + ".app_user VALUES (?)", departing);
+
+        service.sweepAssignmentsAfterDeletion(departing);
+        assertEquals(5, goalRows(first, "TRUE").size());
+        assertEquals(5, goalRows(second, "TRUE").size());
+        control.update("DELETE FROM app_user WHERE id = ?", departing);
+        if (periodic) {
+            for (int run = 0; run < 4; run++) {
+                service.sweepOrphanAssignments();
+            }
+        } else {
+            service.sweepAssignmentsAfterDeletion(departing);
+        }
+
+        for (String catalog : List.of(first, second)) {
+            assertEquals(List.of(502, 504, 505), goalRows(catalog, "TRUE").stream().map(row -> row.get("id")).toList());
+            assertEquals(0, referenceCount(catalog, "report_goal", "owner_id", departing));
+            assertEquals(0, referenceCount(catalog, "report_goal", "created_by", departing));
+        }
+        firstDetached.put("created_by", null);
+        secondDetached.put("created_by", null);
+        firstDetached.remove("updated_at");
+        secondDetached.remove("updated_at");
+        var actualFirst = goalRows(first, "id = 502").getFirst();
+        var actualSecond = goalRows(second, "id = 502").getFirst();
+        actualFirst.remove("updated_at");
+        actualSecond.remove("updated_at");
+        assertEquals(firstDetached, actualFirst);
+        assertEquals(secondDetached, actualSecond);
+        assertEquals(firstLive, goalRows(first, "id >= 504"));
+        assertEquals(secondLive, goalRows(second, "id >= 504"));
+        assertEquals(0, metrics.getMeters().size());
+    }
+
+    private List<Map<String, Object>> goalRows(String catalog, String predicate) {
+        return control.queryForList("SELECT * FROM " + catalog + ".report_goal WHERE " + predicate + " ORDER BY id");
     }
 
     @Test

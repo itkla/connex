@@ -8,7 +8,8 @@ import org.apache.ibatis.annotations.Param;
 public interface AssignmentSweepMapper {
     /** Fixed SQL branches for the references covered by post-deletion recovery. */
     enum Kind {
-        COMPANY, PERSON, DEAL, COLLABORATOR, TASK, INTERVENTION, CAMPAIGN, LIFECYCLE_PASS
+        COMPANY, PERSON, DEAL, COLLABORATOR, TASK, INTERVENTION, CAMPAIGN, LIFECYCLE_PASS,
+        GOAL_OWNER, GOAL_CREATOR
     }
 
     /** Scalar traversal id, or the complete collaborator primary-key tuple. */
@@ -18,7 +19,7 @@ public interface AssignmentSweepMapper {
         }
     }
 
-    /** Numeric discovery only; parentId is the person or deal whose root precedes child mutation. */
+    /** Numeric discovery only; parentId is the exact root whose lock precedes mutation. */
     record Reference(long id, int workspaceId, long parentId, int userId) {
         public Cursor cursor() {
             return new Cursor(id, workspaceId, parentId, userId);
@@ -43,4 +44,10 @@ public interface AssignmentSweepMapper {
     int clearInterventionOwner(@Param("ref") Reference reference);
     int clearCampaignOwner(@Param("ref") Reference reference);
     int clearPersonPassOwners(@Param("ref") Reference reference);
+
+    /** Deletes only the discovered personal goal if its owner still matches. */
+    int deleteOwnedGoal(@Param("ref") Reference reference);
+
+    /** Clears only the discovered goal's unchanged creator reference. */
+    int clearGoalCreator(@Param("ref") Reference reference);
 }

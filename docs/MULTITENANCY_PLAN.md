@@ -146,15 +146,17 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   the 2026-07-03 record on #313 had dropped; #100 tracks it.
 - **Post-delete assignment recovery (#1941).** After the control-plane account delete commits and
   cascades memberships, catalog offboarding sweeps company/person/deal owners, collaborator seats,
-  task assignees, intervention/campaign owners, and lifecycle-pass owners. Membership-locking writers
-  finish before that cascade; campaign owner writes use the same membership barrier with NOWAIT.
+  task assignees, intervention/campaign owners, lifecycle-pass owners, and report-goal owner/creator
+  references. Orphan-owned personal goals are deleted; orphaned creators are cleared (#2069).
+  Membership-locking writers finish before that cascade; campaign owner writes use the same
+  membership barrier with NOWAIT.
   Numeric discovery and each separate `REQUIRES_NEW` / `READ_COMMITTED` unit are pinned to one catalog;
   batched account-existence reads are control-only `unroutedRead` calls, with no tenant/control joins.
   Every lifecycle state in `activeCatalogs()` is covered; catalogs this deployment cannot serve are
   outside that coverage. Failed cleanup leaves erasure completeness pending and retries through a
   bounded periodic traversal with a fixed watermark, including complete collaborator key tuples.
-  Existing reserved accounts are preserved. Restarting resets disposable cursors safely. Goals and
-  approvers (#1953), self-only asynchronous writers, and old writers during rolling deployment remain
+  Existing reserved accounts are preserved. Restarting resets disposable cursors safely. Approvers
+  (#1953), self-only asynchronous writers, and old writers during rolling deployment remain
   outside the assignment guarantee; see `docs/backend/LOCKING.md` and `docs/DEPLOYMENT.md`.
 - **Phase 3 shipped (2026-07-12, #440 — registry #441, routing #446, control-plane split #463/#479).**
   `org_placement` resolves every org's placement directly from the control plane for each tenant-scope

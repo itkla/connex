@@ -54,6 +54,10 @@
         SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
         FROM person_lifecycle_pass HAVING MAX(id) IS NOT NULL
       </when>
+      <when test="kind.name() == 'GOAL_OWNER' or kind.name() == 'GOAL_CREATOR'">
+        SELECT MAX(id) AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id
+        FROM report_goal HAVING MAX(id) IS NOT NULL
+      </when>
       <otherwise>SELECT 0 AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id WHERE FALSE</otherwise>
     </choose>
   </select>
@@ -117,6 +121,20 @@
         <if test="userId != null">AND owner_id = #{userId}</if>
         ORDER BY id
       </when>
+      <when test="kind.name() == 'GOAL_OWNER'">
+        SELECT id, workspace_id, id AS parent_id, owner_id AS user_id
+        FROM report_goal
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
+        <if test="userId != null">AND owner_id = #{userId}</if>
+        ORDER BY id
+      </when>
+      <when test="kind.name() == 'GOAL_CREATOR'">
+        SELECT id, workspace_id, id AS parent_id, created_by AS user_id
+        FROM report_goal
+        WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND created_by IS NOT NULL
+        <if test="userId != null">AND created_by = #{userId}</if>
+        ORDER BY id
+      </when>
       <otherwise>SELECT 0 AS id, 0 AS workspace_id, 0 AS parent_id, 0 AS user_id WHERE FALSE</otherwise>
     </choose>
     LIMIT #{limit}
@@ -164,6 +182,11 @@
         WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
         FOR UPDATE
       </when>
+      <when test="kind.name() == 'GOAL_OWNER' or kind.name() == 'GOAL_CREATOR'">
+        SELECT id FROM report_goal FORCE INDEX (PRIMARY)
+        WHERE id = #{ref.parentId} AND workspace_id = #{ref.workspaceId}
+        FOR UPDATE
+      </when>
       <otherwise>SELECT NULL WHERE FALSE</otherwise>
     </choose>
   </select>
@@ -203,5 +226,15 @@
   <update id="clearPersonPassOwners">
     UPDATE person_lifecycle_pass SET owner_id = NULL
     WHERE workspace_id = #{ref.workspaceId} AND person_id = #{ref.parentId} AND owner_id = #{ref.userId}
+  </update>
+
+  <delete id="deleteOwnedGoal">
+    DELETE FROM report_goal
+    WHERE workspace_id = #{ref.workspaceId} AND id = #{ref.id} AND owner_id = #{ref.userId}
+  </delete>
+
+  <update id="clearGoalCreator">
+    UPDATE report_goal SET created_by = NULL
+    WHERE workspace_id = #{ref.workspaceId} AND id = #{ref.id} AND created_by = #{ref.userId}
   </update>
 </mapper>

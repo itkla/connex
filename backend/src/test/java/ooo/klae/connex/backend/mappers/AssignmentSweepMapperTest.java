@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -23,7 +25,7 @@ class AssignmentSweepMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    void allEightKindsRemainDiscoverableWhenArchivedOrClosedAndClearIdempotently() {
+    void allTenKindsRemainDiscoverableWhenArchivedOrClosedAndClearIdempotently() {
         User owner = newUser();
         var company = newCompany();
         var person = newPerson(company);
@@ -47,6 +49,12 @@ class AssignmentSweepMapperTest extends AbstractMapperTest {
             VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
             """, ws, person.getId(), owner.getId());
         long intervention = AssignmentSweepFixtures.intervention(jdbc, ws, person.getId(), owner.getId());
+        jdbc.update("""
+            INSERT INTO report_goal
+                (workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by)
+            VALUES (?, ?, 'revenue', 'month', '2026-01-01', 100, 'JPY', NULL),
+                   (?, NULL, 'revenue', 'month', '2026-02-01', 200, 'JPY', ?)
+            """, ws, owner.getId(), ws, owner.getId());
         for (Kind kind : Kind.values()) {
             var page = mapper.findReferencesAnywhere(kind, owner.getId(), Cursor.beginning(), mapper.findWatermark(kind), 200);
             if (kind == Kind.LIFECYCLE_PASS) {
@@ -109,6 +117,29 @@ class AssignmentSweepMapperTest extends AbstractMapperTest {
         assertEquals(survivor.getId(), jdbc.queryForObject("SELECT owner_id FROM company WHERE id = ?", Integer.class, company.getId()));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = Kind.class, names = {"GOAL_OWNER", "GOAL_CREATOR"})
+    void changedGoalPointersAreNeverClearedByStaleCandidates(Kind kind) {
+        User erased = newUser();
+        User survivor = newUser();
+        jdbc.update("""
+            INSERT INTO report_goal
+                (workspace_id, owner_id, metric, period_type, period_start, target_value, currency, created_by)
+            VALUES (?, ?, 'revenue', 'month', '2026-01-01', 100, 'JPY', ?)
+            """, workspace.getId(), erased.getId(), erased.getId());
+        Reference stale = mapper.findReferencesAnywhere(kind, erased.getId(), Cursor.beginning(),
+            mapper.findWatermark(kind), 2).getFirst();
+        jdbc.update("UPDATE report_goal SET owner_id = ?, created_by = ? WHERE id = ?",
+            survivor.getId(), survivor.getId(), stale.id());
+
+        assertNotNull(mapper.lockParent(kind, stale));
+        assertEquals(0, clear(kind, stale));
+        assertEquals(survivor.getId(), jdbc.queryForObject("SELECT owner_id FROM report_goal WHERE id = ?",
+            Integer.class, stale.id()));
+        assertEquals(survivor.getId(), jdbc.queryForObject("SELECT created_by FROM report_goal WHERE id = ?",
+            Integer.class, stale.id()));
+    }
+
     private int clear(Kind kind, Reference ref) {
         return switch (kind) {
             case COMPANY, PERSON, DEAL -> {
@@ -123,6 +154,8 @@ class AssignmentSweepMapperTest extends AbstractMapperTest {
             case INTERVENTION -> mapper.clearInterventionOwner(ref);
             case CAMPAIGN -> mapper.clearCampaignOwner(ref);
             case LIFECYCLE_PASS -> mapper.clearPersonPassOwners(ref);
+            case GOAL_OWNER -> mapper.deleteOwnedGoal(ref);
+            case GOAL_CREATOR -> mapper.clearGoalCreator(ref);
         };
     }
 }

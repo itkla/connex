@@ -176,9 +176,13 @@ export default function OrgMembersPanel({
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
-            await reload(orgId);
+            const reloaded = await reload(orgId).then(
+                () => ({ ok: true as const }),
+                (error: unknown) => ({ ok: false as const, error }),
+            );
             ownershipOffers.refresh();
             toastSuccess(t("roleUpdatedToast"));
+            if (!reloaded.ok) showApiError(reloaded.error, "membersRefreshFailed", "membersRefreshFailedDescription");
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err);
@@ -285,6 +289,15 @@ export default function OrgMembersPanel({
                                             {openOffer && (
                                                 <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                     {t("ownershipPending")}
+                                                </Badge>
+                                            )}
+                                            {member.passkeyApprovalNeeded === true && (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="border-warning/40 bg-warning/10 text-warning-foreground"
+                                                    title={t("passkeyNotApprovedHint")}
+                                                >
+                                                    {t("passkeyNotApproved")}
                                                 </Badge>
                                             )}
                                         </div>

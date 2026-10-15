@@ -31,8 +31,6 @@
         "joinPlaceholder": "招待リンクを貼り付け",
         "joinButton": "続行",
         "joinInvalid": "有効な招待リンクではないようです。",
-        "confinedTitle": "管理者アクセスが一時停止されています",
-        "confinedBody": "このアカウントには組織の管理者アクセスがありますが、パスキーの設定または承認がまだ完了していません。完了するまで、ここでワークスペースを作成したり参加したりすることはできません。オーナー提案の辞退やログアウトは引き続き行えます。",
         "standingFailedTitle": "アカウントを確認できませんでした",
         "standingFailedBody": "しばらくしてからもう一度お試しください。オーナー提案の辞退やログアウトは引き続き行えます。",
         "standingRetry": "再試行",
@@ -282,7 +280,11 @@
         "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
         "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
         "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした",
-        "confinementSubjectRole": "{name} を {role} に変更"
+        "confinementSubjectRole": "{name} を {role} に変更",
+        "passkeyNotApproved": "パスキー未承認",
+        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。",
+        "membersRefreshFailed": "メンバー一覧を更新できませんでした",
+        "membersRefreshFailedDescription": "変更は保存されました。最新の承認状況を表示するには、ページを再読み込みしてください。"
     },
     "WorkspaceRoles": {
         "title": "ロール",

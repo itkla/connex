@@ -274,6 +274,28 @@ function MembersWorkspacePanel({
         };
     }, [workspaceId, canManageMembers, canManageRoles, t]);
 
+    const membersRefresh = useRef(0);
+    const refreshMembers = useCallback(async () => {
+        if (!workspaceId) return;
+        membersRefresh.current += 1;
+        const refreshId = membersRefresh.current;
+        try {
+            const loaded = await getWorkspaceMembers(workspaceId);
+            if (refreshId === membersRefresh.current) setMembers(loaded);
+        } catch (err) {
+            if (refreshId === membersRefresh.current) {
+                showApiError(err, "membersRefreshFailed", "membersRefreshFailedDescription");
+            }
+        }
+    }, [showApiError, workspaceId]);
+
+    useEffect(() => {
+        const generation = membersRefresh;
+        return () => {
+            generation.current += 1;
+        };
+    }, [workspaceId]);
+
     useEffect(() => {
         if (!workspaceId || (!canManageMembers && !canManageRoles)) return;
         let cancelled = false;
@@ -330,11 +352,13 @@ function MembersWorkspacePanel({
                 if (currentMember) {
                     setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
                 }
+                void refreshMembers();
                 ownershipOffers.remember(offer);
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
             ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
@@ -375,6 +399,7 @@ function MembersWorkspacePanel({
             );
             if (updated === null) return;
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
             ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
@@ -392,6 +417,7 @@ function MembersWorkspacePanel({
         setIsRemoving(true);
         try {
             await removeWorkspaceMember(workspaceId, removeTarget.id);
+            membersRefresh.current += 1;
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
             ownershipOffers.refresh();
             toastSuccess(t("removed"));
@@ -427,6 +453,7 @@ function MembersWorkspacePanel({
             setInviteEmail("");
             if (result.member) {
                 const member = result.member;
+                membersRefresh.current += 1;
                 setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
                 ownershipOffers.refresh();
                 toastSuccess(t("memberInvited"));
@@ -655,6 +682,15 @@ function MembersWorkspacePanel({
                                                 {openOffer && (
                                                     <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                         {t("ownershipPending")}
+                                                    </Badge>
+                                                )}
+                                                {member.passkeyApprovalNeeded === true && (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="border-warning/40 bg-warning/10 text-warning-foreground"
+                                                        title={t("passkeyNotApprovedHint")}
+                                                    >
+                                                        {t("passkeyNotApproved")}
                                                     </Badge>
                                                 )}
                                             </div>
