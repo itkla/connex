@@ -82,6 +82,19 @@ Browser sessions never authenticate `/api/v1`, and public credentials never auth
 `/api/**` routes. Public requests are stateless, do not create sessions, and do not require CSRF
 tokens. Browser CORS requests may send `Authorization`, but credentialed browser CORS mode is off.
 
+Privileged accounts awaiting passkey enrollment or approval are refused with
+`401 privileged_mfa_enrollment_required` or `401 privileged_mfa_attestation_required` in the usual
+public error envelope. Both refusals record `auth.mfa.policy.denied`, with reason
+`enrollment_required` or `attestation_required` and a summary beginning `Public API`. The append
+runs after the authentication read transaction ends and the tenant binding is cleared: it is an
+independent, account-scoped audit in the control catalog, with no workspace or organization scope.
+The denied account is both the actor and the user entity. The shared `DenialAuditRateLimiter`
+admits one row per user, action, reason and resolved client address per window (one hour by default),
+subject to its address and replica-local capacity bounds. The address uses the same trusted-proxy
+resolver as browser denials. Browser and public denials share admission windows. An append failure
+is logged and releases the admission so the next refusal can retry; every request keeps its 401
+response. See [Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for the bounds.
+
 Revoking browser sessions (the session-epoch control) does not revoke personal access tokens. Containment for a compromised account is credential revocation, a role change below the credential's mapped permissions, or an account-deletion reservation — each of which blocks the credential on its next request.
 
 ## Credential management

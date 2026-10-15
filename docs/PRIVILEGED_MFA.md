@@ -100,6 +100,18 @@ Anyone reading or alerting on this trail should expect:
 
 The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
 
+The public API's `ApiCredentialAuthenticationFilter` also records `auth.mfa.policy.denied` for
+`enrollment_required` and `attestation_required`, with a summary beginning `Public API`. It shares
+the browser filter's limiter and trusted-proxy client-address resolver, including admission keys,
+window and capacity bounds; the channel does not open another window. After its authentication
+read transaction ends, the filter clears the credential's tenant binding and appends independently
+at account scope in the control catalog (null workspace and organization), attributing the row to
+the denied account as actor and user entity. No denial evidence is written to the tenant catalog.
+An append failure is logged and releases its admission for the next refusal, exactly as in the
+browser filter. The public response remains `401 privileged_mfa_enrollment_required` or
+`401 privileged_mfa_attestation_required` in the existing public error envelope, whether the audit
+is written, suppressed or fails.
+
 Refusals at service boundaries (reason `service_boundary`) are not admitted through this bound. They
 sit behind state-changing routes that CSRF protection shields from cross-site triggering, or behind
 export paths this filter refuses first.
