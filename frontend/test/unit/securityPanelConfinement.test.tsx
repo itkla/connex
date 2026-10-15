@@ -199,6 +199,15 @@ describe("the Security page while a privileged account is confined", () => {
         expect(container.querySelector("section[aria-labelledby='passkey-approval-needed-title']")).not.toBeNull();
     });
 
+    it("offers no Add passkey while the standing cannot be read, whatever it turns out to be", async () => {
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.failed = true;
+        await renderPanel();
+
+        expect(container.textContent).toContain(enAccount.AccountSecurity.loadFailed);
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
+    });
+
     it("re-reads the standing as a ceremony once a code is redeemed", async () => {
         backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
         backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [

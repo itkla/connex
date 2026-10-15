@@ -359,7 +359,7 @@ export default function SecurityPanel() {
                 <div>
                     <SectionHeader
                         title={t("title")}
-                        action={!loading && supported && !approvalPending ? addButton : undefined}
+                        action={!loading && !error && supported && !approvalPending ? addButton : undefined}
                     />
                     <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
                 </div>
