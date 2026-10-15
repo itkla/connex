@@ -117,7 +117,12 @@ export default function SecurityPanel() {
     const [passkeysFailed, setPasskeysFailed] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
     const supported = usePasskeySupport();
-    const { requirements, status: standingStatus, refresh: refreshStanding } = usePrivilegedMfaStanding();
+    const {
+        requirements,
+        status: standingStatus,
+        reason: confinementReason,
+        refresh: refreshStanding,
+    } = usePrivilegedMfaStanding();
     const [adding, setAdding] = useState(false);
     const [passwordOpen, setPasswordOpen] = useState(false);
     const [currentPassword, setCurrentPassword] = useState("");
@@ -137,7 +142,7 @@ export default function SecurityPanel() {
     const emailConfirmationSatisfied = requirements?.emailConfirmationSatisfied ?? false;
     const standing = requirements?.standing ?? null;
     const approvalGaps = requirements?.approvalGaps ?? [];
-    const approvalPending = standing === "ATTESTATION_REQUIRED";
+    const approvalPending = standing === "ATTESTATION_REQUIRED" || confinementReason === "attestation";
     const loading = loadingPasskeys || standingStatus === "loading";
     const error = passkeysFailed || standingStatus === "failed";
     const gapsNameUnknownPasskey = approvalGaps.some(

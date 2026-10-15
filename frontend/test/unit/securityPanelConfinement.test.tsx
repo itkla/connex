@@ -17,6 +17,8 @@ const backend = vi.hoisted(() => ({
     finishPasskeyRegistration: vi.fn(async () => undefined),
     startRegistration: vi.fn(async () => ({ id: "credential" })),
     approve: null as ((orgId: number) => void) | null,
+    reason: null as "enrollment" | "attestation" | null,
+    failed: false,
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
@@ -32,9 +34,11 @@ vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
 vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
     usePrivilegedMfaStanding: () => ({
         requirements: backend.requirements,
-        status: backend.requirements ? "ready" : "loading",
-        confined: backend.requirements?.standing === "ATTESTATION_REQUIRED"
+        status: backend.requirements ? "ready" : backend.failed ? "failed" : "loading",
+        confined: backend.reason !== null
+            || backend.requirements?.standing === "ATTESTATION_REQUIRED"
             || backend.requirements?.standing === "ENROLLMENT_REQUIRED",
+        reason: backend.reason,
         refresh: backend.refresh,
     }),
 }));
@@ -126,6 +130,8 @@ afterEach(async () => {
     backend.passkeys = [];
     backend.requirements = null;
     backend.approve = null;
+    backend.reason = null;
+    backend.failed = false;
     vi.clearAllMocks();
 });
 
@@ -179,6 +185,17 @@ describe("the Security page while a privileged account is confined", () => {
         expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
         expect(container.querySelector(`[aria-label="${enAccount.AccountSecurity.passkeyActions.replace("{label}", "Laptop")}"]`))
             .toBeNull();
+    });
+
+    it("keeps passkey management withdrawn on the approval step even when the standing cannot be read", async () => {
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.reason = "attestation";
+        backend.failed = true;
+        await renderPanel();
+
+        expect(container.textContent).toContain(enAccount.AccountSecurity.loadFailed);
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
+        expect(container.querySelector("section[aria-labelledby='passkey-approval-needed-title']")).not.toBeNull();
     });
 
     it("re-reads the standing as a ceremony once a code is redeemed", async () => {

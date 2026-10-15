@@ -9,6 +9,7 @@ import {
     settlePrivilegedMfaStanding,
     subscribeClientRequestIdentityInvalidation,
     subscribePrivilegedMfaConfinement,
+    type PrivilegedMfaConfinementReason,
     type PrivilegedMfaSettlement,
     type PrivilegedMfaSettleOutcome,
 } from "@/app/lib/api";
@@ -21,6 +22,8 @@ export type PrivilegedMfaStandingState = {
     status: "loading" | "ready" | "failed";
     /** Whether the browser is confined, from the server's refusal, a step URL or the newest read. */
     confined: boolean;
+    /** Why the browser is confined, even when no read has decided yet, or null when it is not. */
+    reason: PrivilegedMfaConfinementReason | null;
     /** Reads the standing again and settles confinement on it. */
     refresh: (settlement?: PrivilegedMfaSettlement) => Promise<PrivilegedMfaSettleOutcome>;
 };
@@ -38,10 +41,10 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         currentPrivilegedMfaRequirements,
         () => null,
     );
-    const confinedHere = useSyncExternalStore(
+    const reason = useSyncExternalStore(
         subscribePrivilegedMfaConfinement,
-        () => privilegedMfaConfinementReason() !== null,
-        () => false,
+        privilegedMfaConfinementReason,
+        () => null,
     );
     const [readFailed, setReadFailed] = useState(false);
 
@@ -69,7 +72,8 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
     return {
         requirements,
         status: requirements !== null ? "ready" : readFailed ? "failed" : "loading",
-        confined: confinedHere || standing === "ENROLLMENT_REQUIRED" || standing === "ATTESTATION_REQUIRED",
+        confined: reason !== null || standing === "ENROLLMENT_REQUIRED" || standing === "ATTESTATION_REQUIRED",
+        reason,
         refresh,
     };
 }

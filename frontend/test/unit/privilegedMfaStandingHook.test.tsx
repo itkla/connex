@@ -93,6 +93,7 @@ describe("the privileged-MFA standing a surface sees", () => {
         expect(store.settle).toHaveBeenCalledWith("check");
         expect(current().status).toBe("ready");
         expect(current().confined).toBe(true);
+        expect(current().reason).toBe("attestation");
         expect(current().requirements?.standing).toBe("ATTESTATION_REQUIRED");
     });
 
@@ -108,6 +109,16 @@ describe("the privileged-MFA standing a surface sees", () => {
 
         expect(current().status).toBe("ready");
         expect(current().confined).toBe(false);
+    });
+
+    it("reports the confinement reason before any read has decided", async () => {
+        store.reason = "attestation";
+        store.settle.mockImplementation(() => new Promise(() => undefined));
+        await mountHook();
+
+        expect(current().status).toBe("loading");
+        expect(current().reason).toBe("attestation");
+        expect(current().confined).toBe(true);
     });
 
     it("stays loading, and so not cleared, before any read has decided", async () => {

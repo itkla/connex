@@ -46,6 +46,7 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
         requirements: null,
         status: standing.status,
         confined: standing.confined,
+        reason: standing.confined ? "attestation" : null,
         refresh: standing.refresh,
     }),
 }));
