@@ -708,7 +708,7 @@ class AttachmentUploadSecurityIntegrationTest {
         roles.insertRole(sharingRole);
         roles.insertPermissions(sourceWorkspace.getId(), sharingRole.getId(), List.of(Permission.SHARE_MANAGE.name()));
         workspaces.setMemberCustomRole(sourceWorkspace.getId(), target.getId(), sharingRole.getId());
-        PublicApiTestSecuritySupport.enrollPasskey(jdbc, target);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbc, target);
         if ("company".equals(type)) {
             Company shared = new Company();
             shared.setWorkspaceId(sourceWorkspace.getId());

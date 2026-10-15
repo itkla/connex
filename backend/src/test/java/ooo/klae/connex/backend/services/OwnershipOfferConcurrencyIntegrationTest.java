@@ -58,7 +58,7 @@ class OwnershipOfferConcurrencyIntegrationTest extends AbstractServiceTest {
     @BeforeEach void fixtureAndProbes() {
         OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
         target = newUser(); coOwner = newUser(); workspaceMapper.updateMemberRole(workspace.getId(), coOwner.getId(), "owner");
-        for (User user : List.of(currentUser, target, coOwner)) { credentials.put(user.getId(), OwnershipOfferTestFixtures.passkey(jdbc, user)); }
+        for (User user : List.of(currentUser, target, coOwner)) { credentials.put(user.getId(), OwnershipOfferTestFixtures.approvedPasskey(jdbc, user)); }
         as(currentUser);
         offerId = Long.parseLong(workspaces.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id());
         UserMapper real = sql.getMapper(UserMapper.class);

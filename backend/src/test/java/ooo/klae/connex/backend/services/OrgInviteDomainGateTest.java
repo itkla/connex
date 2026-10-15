@@ -38,6 +38,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         workspaceId = ws.getId();
         orgId = workspaceService.getOrgId(workspaceId);
         authenticateAs(currentUser, workspaceId);
+        approveForStepUp(currentUser);
     }
 
     private User register(String email) {

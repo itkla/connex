@@ -42,7 +42,7 @@ class MemberManagementTest extends AbstractServiceTest {
         User member = newUser();
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
 
-        MemberDto updated = workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), member.getId(), "admin").currentMember();
+        MemberDto updated = workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), member.getId(), "admin", true).currentMember();
 
         assertEquals("admin", updated.getRole());
     }

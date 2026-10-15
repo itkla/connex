@@ -167,6 +167,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             long deletingConnection = assignmentConnectionId(deletion);
             JdbcTemplate observation = new JdbcTemplate(new SingleConnectionDataSource(observer, true));
             authenticateAs(actor, workspace.getId());
+            approveForStepUp(actor);
             transaction().executeWithoutResult(status -> {
                 CampaignDto written = create ? campaignService.create(request) : campaignService.update(existing.id(), request);
                 assertEquals(owner.getId(), written.ownerUserId());
@@ -219,6 +220,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             JdbcTemplate observation = new JdbcTemplate(new SingleConnectionDataSource(observer, true));
             Future<CampaignDto> creation = executor.submit(() -> {
                 authenticateAs(actor, workspace.getId());
+                approveForStepUp(actor);
                 try {
                     return campaignService.create(request);
                 } finally {
@@ -228,6 +230,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             assertTrue(membershipAcquired.await(30, TimeUnit.SECONDS));
             Future<?> roleChange = executor.submit(() -> {
                 authenticateAs(roleActor, workspace.getId());
+                approveForStepUp(roleActor);
                 try {
                     TransactionTemplate transaction = transaction();
                     transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -295,6 +298,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             JdbcTemplate observation = new JdbcTemplate(new SingleConnectionDataSource(observer, true));
             Future<?> campaignWrite = executor.submit(() -> {
                 authenticateAs(actorA, workspace.getId());
+                approveForStepUp(actorA);
                 try {
                     return create ? campaignService.create(request) : campaignService.update(campaign.id(), request);
                 } finally {
@@ -772,6 +776,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
         assertThrows(ForbiddenException.class, () -> campaignService.update(
                 campaign.id(), campaignRequest("Post-revocation mutation")));
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         mutation.assertApplied(campaignService, campaignSendService, campaign.id());
     }
 
@@ -1016,6 +1021,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             CampaignPairBarrier barrier,
             String timeoutMessage) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         try {
             try {
                 outcomeTransaction().executeWithoutResult(status -> {
@@ -1066,6 +1072,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             String timeoutMessage,
             Supplier<T> action) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         try {
             try {
                 T result = outcomeTransaction().execute(status -> {
@@ -1111,6 +1118,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             String timeoutMessage,
             Supplier<T> action) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         try {
             return transaction().execute(status -> {
                 T result = action.get();
@@ -1125,6 +1133,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
     private <T> TimedResult<T> timedOutcomeCall(
             User actor, int campaignId, OutcomeBarrier barrier, Supplier<T> action) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         mutexRequestProbe.arm(campaignId, barrier);
         try {
             long startNanos = System.nanoTime();
@@ -1139,6 +1148,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
     private <T> T observedCampaignPairCall(
             User actor, int campaignId, CampaignPairBarrier barrier, Supplier<T> action) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         mutexRequestProbe.arm(campaignId, barrier);
         try {
             return action.get();
@@ -1430,6 +1440,7 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
 
     private <T> T asActor(User actor, Supplier<T> action) {
         authenticateAs(actor, workspace.getId());
+        approveForStepUp(actor);
         try {
             return action.get();
         } finally {

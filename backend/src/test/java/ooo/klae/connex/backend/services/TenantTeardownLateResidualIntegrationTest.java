@@ -68,6 +68,7 @@ class TenantTeardownLateResidualIntegrationTest extends AbstractServiceTest {
         workspaceMapper.addMember(lifecycleWorkspace.getId(), currentUser.getId(), "owner");
         workspace = lifecycleWorkspace;
         authenticateAs(currentUser, lifecycleWorkspace.getId());
+        approveForStepUp(currentUser);
     }
 
     @AfterEach

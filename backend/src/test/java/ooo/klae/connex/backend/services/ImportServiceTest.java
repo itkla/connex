@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -114,9 +115,21 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     private User memberWithPermissions(String... permissions) {
+        return memberWithPermissions(newUser(), permissions);
+    }
+
+    /** Creates an approved importer whose approval is incidental to the permission test. */
+    private User approvedMemberWithPermissions(String... permissions) {
+        User member = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, member);
+        memberWithPermissions(member, permissions);
+        approveForStepUp(member);
+        return member;
+    }
+
+    private User memberWithPermissions(User member, String... permissions) {
         WorkspaceRole role = roleService.createRole(
             workspace.getId(), currentUser.getId(), "Import Preview " + unique(), List.of(permissions));
-        User member = newUser();
         workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), member.getId(), role.getId());
         authenticateAs(member, workspace.getId());
         return member;
@@ -688,9 +701,11 @@ class ImportServiceTest extends AbstractServiceTest {
         User secondActor = memberWithPermissions(
             "COMPANY_CREATE", "COMPANY_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         User thirdActor = memberWithPermissions(
             "COMPANY_CREATE", "COMPANY_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         String website = "https://company-coalesced-" + unique() + ".test";
         ImportRequest request = req(
             List.of(
@@ -1054,9 +1069,11 @@ class ImportServiceTest extends AbstractServiceTest {
         User secondActor = memberWithPermissions(
             "PERSON_CREATE", "PERSON_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         User thirdActor = memberWithPermissions(
             "PERSON_CREATE", "PERSON_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         String email = "stable-replay-" + unique() + "@example.test";
         ImportRequest request = req(
             List.of(
@@ -1267,6 +1284,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "COMPANY_CREATE",
             "COMPANY_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         Person personDraft = new Person();
         personDraft.setName("Identity repair person " + unique());
         personDraft.setEmail(
@@ -2068,6 +2086,7 @@ class ImportServiceTest extends AbstractServiceTest {
         User replayActor = memberWithPermissions(
             "DEAL_CREATE", "DEAL_UPDATE");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         String dealName = "Rounded replay " + unique();
         ImportRequest request = req(
             List.of(
@@ -2469,6 +2488,7 @@ class ImportServiceTest extends AbstractServiceTest {
         duplicate.setDuplicateReviewProof(preview.getDuplicateReviewProof());
 
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         roleService.updateRole(
             workspace.getId(), currentUser.getId(), role.getId(), role.getName(),
             List.of("PERSON_CREATE"));
@@ -2508,6 +2528,7 @@ class ImportServiceTest extends AbstractServiceTest {
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
 
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         roleService.updateRole(
             workspace.getId(),
             currentUser.getId(),
@@ -2645,7 +2666,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 "Tags", tagName,
                 "Custom", "value")),
             "fill_empty");
-        memberWithPermissions("PERSON_CREATE", "COMPANY_CREATE", "TAG_MANAGE", "CUSTOM_FIELD_MANAGE");
+        approvedMemberWithPermissions("PERSON_CREATE", "COMPANY_CREATE", "TAG_MANAGE", "CUSTOM_FIELD_MANAGE");
 
         ImportPreviewResult preview = importService.previewPersons(request);
         ImportResult result = commitReviewedPersons(request, preview);

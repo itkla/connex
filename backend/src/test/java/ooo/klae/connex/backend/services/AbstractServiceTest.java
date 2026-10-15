@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -107,6 +109,7 @@ public abstract class AbstractServiceTest {
     @Autowired protected NotificationMapper notificationMapper;
     @Autowired protected TenantContext tenantContext;
     @Autowired private PlatformTransactionManager fixtureTransactionManager;
+    @Autowired private JdbcTemplate approvalFixtureJdbc;
 
     protected Workspace workspace;
     protected User currentUser;
@@ -117,6 +120,7 @@ public abstract class AbstractServiceTest {
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
     /**
@@ -160,6 +164,25 @@ public abstract class AbstractServiceTest {
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         tenantContext.set(workspaceId, orgId, user.getId(), role == null ? "member" : role, null);
+    }
+
+    /**
+     * Models an approved administrator whose approval is incidental to the test, wherever the
+     * test makes them privileged. Authentication alone leaves subjects' approval state untouched.
+     * The credential joins the caller's transaction, as the step-up mapper reads do; nontransactional
+     * fixtures commit it with their account and delete the account in their existing teardown.
+     *
+     * @param user the incidental actor authenticated in the current request
+     * @return the approved credential row id
+     */
+    protected int approveForStepUp(User user) {
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(approvalFixtureJdbc, user);
+        var attributes = (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+        var session = attributes.getRequest().getSession();
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR,
+            user.getId() + ":" + session.getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR)
+                + ":" + credential);
+        return credential;
     }
 
     @AfterEach

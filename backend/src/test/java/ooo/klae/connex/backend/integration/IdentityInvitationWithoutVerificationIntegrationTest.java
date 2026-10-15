@@ -90,7 +90,7 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
         target = newWorkspace();
         manager = memberManager(target);
         managerSession = login(manager);
-        PublicApiTestSecuritySupport.stepUp(managerSession, manager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, managerSession, manager.getId());
     }
 
     @Test
@@ -129,7 +129,7 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
         mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), legacy.getId())
                 .session(managerSession).with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("orgRole", "admin"))))
+                .content(objectMapper.writeValueAsString(Map.of("orgRole", "admin", "acknowledgeConfinement", true))))
             .andExpect(status().isNoContent());
         assertEquals("admin", orgMemberMapper.getRole(target.getOrgId(), legacy.getId()));
     }
@@ -166,7 +166,7 @@ class IdentityInvitationWithoutVerificationIntegrationTest {
         } finally {
             tenantContext.clear();
         }
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, user);
         return user;
     }
 

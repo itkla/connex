@@ -51,7 +51,7 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
     @Override protected User newUser() { User user = super.newUser(); accounts.add(user.getId()); return user; }
     @BeforeEach void freshOwner() {
         OwnershipOfferTestFixtures.restartExpiryTraversal(offers);
-        OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); clearInvocations(realtime);
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); clearInvocations(realtime);
     }
     @AfterEach void clean() { reset(inboxMapper); accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id)); accounts.clear(); }
 
@@ -64,7 +64,7 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
 
     @Test
     void deletedOfferAndNoticeAfterDiscoveryDoNotAbortOrdinaryMarkAllRead() {
-        OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser);
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
         User target = newUser();
         long offerId = Long.parseLong(workspaces.changeMemberRole(
             workspace.getId(), currentUser.getId(), target.getId(), "owner").offer().id());
@@ -137,13 +137,13 @@ class OwnershipOfferNotificationTest extends AbstractServiceTest {
 
     @Test void acceptRevokeExpiryAndInvalidationEachResolveTheDeliveredNotice() {
         for (String action : List.of("accept", "revoke", "expiry", "invalidate")) {
-            authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser);
+            authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
             User target = newUser(); long id = create(target); var candidate = ledger.findById(id); Notification notice = delivered(id, target);
             switch (action) {
-                case "accept" -> { OwnershipOfferTestFixtures.stepUpCurrent(jdbc, target); offers.accept(id, target.getId(), false); }
-                case "revoke" -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); offers.revoke("WORKSPACE", workspace.getId(), id, currentUser.getId()); }
+                case "accept" -> { OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, target); offers.accept(id, target.getId(), false); }
+                case "revoke" -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); offers.revoke("WORKSPACE", workspace.getId(), id, currentUser.getId()); }
                 case "expiry" -> { jdbc.update("UPDATE ownership_offer SET created_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 8 DAY), expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 DAY) WHERE id = ?", id); offers.expire(); }
-                default -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser); workspaces.removeMember(workspace.getId(), currentUser.getId(), target.getId()); }
+                default -> { authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser); workspaces.removeMember(workspace.getId(), currentUser.getId(), target.getId()); }
             }
             delivery.deliver(candidate); authenticateAs(target, workspace.getId());
             assertEquals(0, notificationMapper.getUnreadCounts(target.getId()).getUnread());

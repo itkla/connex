@@ -58,6 +58,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.webauthn.EnrollmentEvidence;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /**
  * Pins owner decisions 1 and 3 of #1534 against real locks and commits. A new organization
@@ -392,7 +393,8 @@ class OrganizationTenancyAndExitIntegrationTest {
     }
 
     private <T> T steppedUpAs(User user, Supplier<T> action) {
-        return steppedUpAs(user, 0, action);
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+        return steppedUpAs(user, credential, action);
     }
 
     private <T> T steppedUpAs(User user, int credentialRowId, Supplier<T> action) {

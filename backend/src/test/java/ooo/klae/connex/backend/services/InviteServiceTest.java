@@ -24,10 +24,13 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class InviteServiceTest extends AbstractServiceTest {
+    @Autowired private JdbcTemplate approvalJdbc;
 
     @Autowired InviteService inviteService;
     @Autowired WorkspaceService workspaceService;
@@ -61,6 +64,7 @@ class InviteServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Stored Invite Grant WS", currentUser.getId());
         authenticateAs(currentUser, ws.getId());
+        approveForStepUp(currentUser);
         User recoveryOwner = newUser();
         workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
         String email = "stored-invite-" + unique() + "@example.com";
@@ -171,6 +175,7 @@ class InviteServiceTest extends AbstractServiceTest {
             "Invite Ceiling WS", currentUser.getId());
         User delegate = memberManagingDelegate(ws);
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         InviteResultDto memberInvite = inviteService.createInvite(
             ws.getId(), delegate, "member-" + unique() + "@example.com", "member");
@@ -189,6 +194,7 @@ class InviteServiceTest extends AbstractServiceTest {
         User delegate = memberManagingDelegate(ws);
         User existing = newUser();
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(
             ForbiddenException.class,
@@ -233,6 +239,7 @@ class InviteServiceTest extends AbstractServiceTest {
 
     private User memberManagingDelegate(WorkspaceMembershipDto workspace) {
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(approvalJdbc, delegate);
         workspaceMapper.addMember(workspace.getId(), delegate.getId(), "member");
         WorkspaceRole memberRole = workspaceService.builtInRoles().stream()
             .filter(role -> "member".equals(role.getName()))

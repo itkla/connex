@@ -91,6 +91,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /** Exercises mailbox ownership across tenant-created identities and both invitation endpoints. */
 @SpringBootTest(properties = {
@@ -140,7 +141,7 @@ class IdentityInvitationTrustIntegrationTest {
         target = newWorkspace();
         manager = memberManager(target);
         managerSession = login(manager);
-        PublicApiTestSecuritySupport.stepUp(managerSession, manager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, managerSession, manager.getId());
         orgAllowedDomainMapper.add(target.getOrgId(), "victim.example");
     }
 
@@ -149,7 +150,7 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace source = newWorkspace();
         User sourceManager = memberManager(source);
         MockHttpSession sourceSession = login(sourceManager);
-        PublicApiTestSecuritySupport.stepUp(sourceSession, sourceManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, sourceSession, sourceManager.getId());
         String username = "forged_" + unique();
         String address = unique() + "@victim.example";
 
@@ -206,7 +207,7 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace source = newWorkspace();
         User sourceManager = memberManager(source);
         MockHttpSession sourceSession = login(sourceManager);
-        PublicApiTestSecuritySupport.stepUp(sourceSession, sourceManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, sourceSession, sourceManager.getId());
         String username = "forged_" + unique();
         String address = unique() + "@victim.example";
 
@@ -310,7 +311,7 @@ class IdentityInvitationTrustIntegrationTest {
         Workspace second = newWorkspace();
         User secondManager = memberManager(second);
         MockHttpSession secondSession = login(secondManager);
-        PublicApiTestSecuritySupport.stepUp(secondSession, secondManager.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, secondSession, secondManager.getId());
         mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
                 .session(secondSession).header("X-Workspace-Id", second.getId())
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
@@ -718,7 +719,7 @@ class IdentityInvitationTrustIntegrationTest {
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
         workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
         String body = objectMapper.writeValueAsString(Map.of(
-            "email", account.user().getEmail(), "orgRole", "admin"));
+            "email", account.user().getEmail(), "orgRole", "admin", "acknowledgeConfinement", true));
 
         mockMvc.perform(post("/api/orgs/{id}/members", target.getOrgId())
                 .session(managerSession).with(csrf().asHeader())
@@ -741,7 +742,7 @@ class IdentityInvitationTrustIntegrationTest {
         Account account = preregister();
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
         workspaceMapper.addMember(target.getId(), account.user().getId(), "member");
-        String body = objectMapper.writeValueAsString(Map.of("orgRole", "admin"));
+        String body = objectMapper.writeValueAsString(Map.of("orgRole", "admin", "acknowledgeConfinement", true));
 
         mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
                 .session(managerSession).with(csrf().asHeader())
@@ -765,16 +766,16 @@ class IdentityInvitationTrustIntegrationTest {
         orgMemberMapper.addMember(target.getOrgId(), manager.getId(), "owner");
         orgMemberMapper.addMember(target.getOrgId(), account.user().getId(), "admin");
 
-        int managerCredential = ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.passkey(jdbcTemplate, manager);
-        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUp(jdbcTemplate, manager, managerSession, managerCredential);
+        int managerCredential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, manager);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, manager, managerSession, managerCredential);
         MvcResult offered = mockMvc.perform(put("/api/orgs/{id}/members/{userId}", target.getOrgId(), account.user().getId())
                 .session(managerSession).with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("orgRole", "owner"))))
             .andExpect(status().isAccepted()).andExpect(jsonPath("$.outcome").value("ownership_offer")).andReturn();
         assertEquals("admin", orgMemberMapper.getRole(target.getOrgId(), account.user().getId()));
-        int offereeCredential = ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.passkey(jdbcTemplate, account.user());
-        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUp(jdbcTemplate, account.user(), account.session(), offereeCredential);
+        int offereeCredential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, account.user());
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, account.user(), account.session(), offereeCredential);
         String offerId = objectMapper.readTree(offered.getResponse().getContentAsString()).path("offer").path("id").asString();
         mockMvc.perform(post("/api/ownership-offers/{id}/accept", offerId).session(account.session())
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -980,7 +981,7 @@ class IdentityInvitationTrustIntegrationTest {
         } finally {
             tenantContext.clear();
         }
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, user);
         return user;
     }
 

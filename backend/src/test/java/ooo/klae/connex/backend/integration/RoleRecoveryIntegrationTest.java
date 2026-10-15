@@ -871,7 +871,7 @@ class RoleRecoveryIntegrationTest {
         userMapper.insert(member);
         members.add(member);
         workspaceMapper.addMember(workspace.getId(), member.getId(), builtInRole);
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, member);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, member);
         return member;
     }
 }

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -109,6 +110,7 @@ class RbacTest extends AbstractServiceTest {
         tenantContext.clear();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Effective Admin WS", currentUser.getId());
         authenticateAs(currentUser, ws.getId());
+        approveForStepUp(currentUser);
         User member = newUser();
         User admin = newUser();
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
@@ -178,6 +180,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Legacy Pending Grant WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Pending Role Manager",
@@ -193,6 +196,7 @@ class RbacTest extends AbstractServiceTest {
                 + "WHERE workspace_id = ? AND user_id = ?",
             ws.getId(), pending.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         workspaceService.assignCustomRole(
             ws.getId(), delegate.getId(), pending.getId(), emptyRole.getId());
@@ -277,11 +281,13 @@ class RbacTest extends AbstractServiceTest {
     void roleManageCannotMintRoleGrantingPermissionsActorLacks() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE", "PERSON_CREATE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), delegate.getId(), "SuperRole", List.of("MEMBER_MANAGE")));
@@ -294,6 +300,7 @@ class RbacTest extends AbstractServiceTest {
     void roleManageCannotSelfAssignRoleBroaderThanActor() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Assign Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE"));
@@ -301,6 +308,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole superRole = roleService.createRole(ws.getId(), currentUser.getId(), "Super",
             List.of("MEMBER_MANAGE", "WORKSPACE_SETTINGS"));
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
@@ -311,11 +319,13 @@ class RbacTest extends AbstractServiceTest {
     void memberManageDelegateCannotPromoteToBuiltInAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Promote Ceiling WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole hrRole = roleService.createRole(ws.getId(), currentUser.getId(), "HR",
             List.of("MEMBER_MANAGE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), hrRole.getId());
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertEquals(3, roleService.builtInRoles(ws.getId(), delegate.getId()).size());
         assertThrows(ForbiddenException.class,
@@ -331,7 +341,9 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Custom Owner Guard WS", currentUser.getId());
         authenticateAs(currentUser, ws.getId());
+        approveForStepUp(currentUser);
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole memberManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Member Manager",
@@ -354,6 +366,7 @@ class RbacTest extends AbstractServiceTest {
         assertEquals("owner", owner.getBuiltInRole());
 
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
         assertThrows(
             ForbiddenException.class,
             () -> workspaceService.removeMember(ws.getId(), delegate.getId(), currentUser.getId()));
@@ -366,6 +379,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Owner Overlay Assignment WS", currentUser.getId());
         User delegate = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, delegate);
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole roleManager = roleService.createRole(
             ws.getId(), currentUser.getId(), "Role Manager",
@@ -376,6 +390,7 @@ class RbacTest extends AbstractServiceTest {
             ws.getId(), currentUser.getId(), "Contact Creator",
             List.of(Permission.PERSON_CREATE.name()));
         authenticateAs(delegate, ws.getId());
+        approveForStepUp(delegate);
 
         assertThrows(
             ForbiddenException.class,

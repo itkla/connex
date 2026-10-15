@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,7 +57,9 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         workspace = fresh;
         workspaceMapper.addMember(workspace.getId(), settingsOwner.getId(), "owner");
         User settingsMember = newUser();
+        OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, settingsMember);
         authenticateAs(settingsOwner, workspace.getId());
+        approveForStepUp(settingsOwner);
         var settingsRole = roleService.createRole(
             workspace.getId(), settingsOwner.getId(), "Reason manager " + unique(),
             List.of("WORKSPACE_SETTINGS"));
@@ -64,6 +67,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
             workspace.getId(), settingsOwner.getId(), settingsMember.getId(), settingsRole.getId());
         currentUser = settingsMember;
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -150,6 +154,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         reasonService.archive(archived.id());
         User member = newUser();
         authenticateAs(settingsOwner, workspace.getId());
+        approveForStepUp(settingsOwner);
         var role = roleService.createRole(
             workspace.getId(), settingsOwner.getId(), "Reason reader " + unique(), List.of("PERSON_UPDATE"));
         workspaceService.assignCustomRole(
@@ -201,6 +206,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         User otherOwner = newUser();
         workspaceMapper.addMember(other.getId(), otherOwner.getId(), "owner");
         authenticateAs(otherOwner, other.getId());
+        approveForStepUp(otherOwner);
 
         assertThrows(ResourceNotFoundException.class, () -> reasonService.update(
             local.id(), request(local.code(), "Changed", false, 20)));

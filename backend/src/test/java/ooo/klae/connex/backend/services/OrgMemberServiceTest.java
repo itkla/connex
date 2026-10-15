@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 
 /**
  * Org-level authorization and membership management (#316): admin/owner gates,
@@ -91,7 +92,7 @@ class OrgMemberServiceTest extends AbstractServiceTest {
         int orgId = newOrgOwnedBy(currentUser.getId());
         User target = newTenantOf(orgId);
 
-        orgMemberService.setMember(orgId, currentUser.getId(), target.getId(), "admin");
+        orgMemberService.setMember(orgId, currentUser.getId(), target.getId(), "admin", true);
         assertEquals("admin", orgMemberMapper.getRole(orgId, target.getId()));
 
         User anotherAdmin = newUser();
@@ -115,7 +116,7 @@ class OrgMemberServiceTest extends AbstractServiceTest {
         int orgId = newOrgOwnedBy(currentUser.getId());
         User target = newTenantOf(orgId);
 
-        orgMemberService.setMemberByEmail(orgId, currentUser.getId(), target.getEmail().toUpperCase(), "admin");
+        orgMemberService.setMemberByEmail(orgId, currentUser.getId(), target.getEmail().toUpperCase(), "admin", true);
         assertEquals("admin", orgMemberMapper.getRole(orgId, target.getId()),
             "an existing account is matched by email case-insensitively and granted the role");
 
@@ -160,7 +161,7 @@ class OrgMemberServiceTest extends AbstractServiceTest {
 
         User tenant = newUser();
         workspaceMapper.addMember(tenantWorkspace.getId(), tenant.getId(), "member");
-        orgMemberService.setMember(orgId, currentUser.getId(), tenant.getId(), "admin");
+        orgMemberService.setMember(orgId, currentUser.getId(), tenant.getId(), "admin", true);
         assertEquals("admin", orgMemberMapper.getRole(orgId, tenant.getId()));
     }
 
@@ -171,11 +172,11 @@ class OrgMemberServiceTest extends AbstractServiceTest {
         User admin = newUser();
         orgMemberMapper.addMember(orgId, admin.getId(), "admin");
 
-        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUpCurrent(jdbcTemplate, currentUser);
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbcTemplate, currentUser);
         var offer = orgMemberService.setMember(orgId, currentUser.getId(), admin.getId(), "owner");
         assertEquals("admin", orgMemberMapper.getRole(orgId, admin.getId()));
         authenticateAs(admin, workspace.getId());
-        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUpCurrent(jdbcTemplate, admin);
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbcTemplate, admin);
         ownershipOfferService.accept(Long.parseLong(offer.offer().id()), admin.getId(), false);
         assertEquals("owner", orgMemberMapper.getRole(orgId, admin.getId()));
     }

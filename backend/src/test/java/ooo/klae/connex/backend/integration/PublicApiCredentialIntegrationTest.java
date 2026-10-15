@@ -391,7 +391,7 @@ class PublicApiCredentialIntegrationTest {
         Workspace workspace = newWorkspace("stale-step-up");
         User manager = newMember(workspace, "member", "stale-step-up");
         grantApiManager(workspace, manager, "stale-step-up");
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, manager);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, manager);
         MockHttpSession session = login(manager.getUsername());
 
         mockMvc.perform(post("/api/api-credentials")
@@ -1057,9 +1057,9 @@ class PublicApiCredentialIntegrationTest {
     }
 
     private MockHttpSession loginWithStepUp(User user) throws Exception {
-        PublicApiTestSecuritySupport.enrollPasskey(jdbcTemplate, user);
+        PublicApiTestSecuritySupport.enrollApprovedPasskey(jdbcTemplate, user);
         MockHttpSession session = login(user.getUsername());
-        PublicApiTestSecuritySupport.stepUp(session, user.getId());
+        PublicApiTestSecuritySupport.stepUpApproved(jdbcTemplate, session, user.getId());
         return session;
     }
 

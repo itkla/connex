@@ -44,7 +44,7 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
         Workspace created = new Workspace(); created.setOrgId(org.getId()); created.setName("Ownership lifecycle"); created.setSlug("ownership-lifecycle-" + unique()); workspaceMapper.insert(created);
         workspace = created; workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
         orgMembers.addMember(org.getId(), currentUser.getId(), "owner");
-        authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, currentUser);
+        authenticateAs(currentUser, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, currentUser);
         target = newUser();
     }
     @AfterEach void clean() {
@@ -94,7 +94,7 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
             .filter(offer -> offer.getOrgId() == org.getId()).count());
         OwnershipOffer remaining = pending.getFirst();
         User offeree = userMapper.getUserById(remaining.getOffereeUserId());
-        authenticateAs(offeree, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, offeree);
+        authenticateAs(offeree, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, offeree);
         assertTrue(offers.listForSelf(offeree.getId()).isEmpty());
         assertThrows(ConflictException.class, () -> offers.accept(remaining.getId(), offeree.getId(), false));
         assertEquals("OPEN", ledger.findById(remaining.getId()).getState());
@@ -138,7 +138,7 @@ class OwnershipOfferLifecycleIntegrationTest extends AbstractServiceTest {
         lifecycle.acquireWorkspaceTeardown(org.getId(), workspace.getId(), currentUser.getId());
         assertEquals("INVALIDATED", ledger.findById(workspaceId).getState());
         assertEquals("OPEN", ledger.findById(organizationId).getState()); assertNull(ledger.findById(organizationId).getDeliveryWorkspaceId());
-        authenticateAs(target, workspace.getId()); OwnershipOfferTestFixtures.stepUpCurrent(jdbc, target);
+        authenticateAs(target, workspace.getId()); OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, target);
         assertEquals("ACCEPTED", offers.accept(organizationId, target.getId(), false).offer().state());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification WHERE workspace_id = ? AND type = 'ownership.offer'", Integer.class, workspace.getId()));
     }

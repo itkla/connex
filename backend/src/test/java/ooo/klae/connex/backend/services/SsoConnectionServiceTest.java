@@ -128,6 +128,7 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
         orgMemberMapper.addMember(workspaceMapper.getOrgId(workspace.getId()), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
     }
 
     private SsoConnectionRequest oidcRequest() {

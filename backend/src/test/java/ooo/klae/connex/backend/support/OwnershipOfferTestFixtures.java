@@ -36,6 +36,23 @@ public final class OwnershipOfferTestFixtures {
         return Objects.requireNonNull(jdbc.queryForObject("SELECT id FROM webauthn_credential WHERE credential_id = ?", Integer.class, credential));
     }
 
+    /**
+     * Models an approved administrator wherever the test makes them privileged; approval is
+     * incidental to the test. Coverage subjects must use {@link #passkey} and organization rows.
+     */
+    public static int approvedPasskey(JdbcTemplate jdbc, User user) {
+        List<Integer> approved = jdbc.queryForList("SELECT c.id FROM webauthn_credential c"
+            + " JOIN webauthn_user_entity e ON e.id = c.user_entity_user_id WHERE e.user_id = ?"
+            + " AND c.privileged_assurance = 'BREAK_GLASS' ORDER BY c.id", Integer.class, user.getId());
+        if (!approved.isEmpty()) {
+            return approved.getFirst();
+        }
+        int credential = passkey(jdbc, user);
+        jdbc.update("UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS',"
+            + " privileged_assured_at = UTC_TIMESTAMP(6) WHERE id = ?", credential);
+        return credential;
+    }
+
     /** Stamps an actual owned credential and current epoch into a test session. */
     public static void stepUp(JdbcTemplate jdbc, User user, HttpSession session, int credentialId) {
         long now = System.currentTimeMillis();
@@ -46,6 +63,17 @@ public final class OwnershipOfferTestFixtures {
         session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR, user.getId() + ":" + now + ":" + credentialId);
         session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR,
             jdbc.queryForObject("SELECT session_epoch FROM app_user WHERE id = ?", Integer.class, user.getId()));
+    }
+
+    /** Enrolls and stamps an incidental approved administrator for the current service request. */
+    public static int stepUpApprovedCurrent(JdbcTemplate jdbc, User user) {
+        var attributes = RequestContextHolder.currentRequestAttributes();
+        if (!(attributes instanceof ServletRequestAttributes servlet)) {
+            throw new IllegalStateException("Ownership test needs an HTTP request");
+        }
+        int credential = approvedPasskey(jdbc, user);
+        stepUp(jdbc, user, servlet.getRequest().getSession(), credential);
+        return credential;
     }
 
     /** Enrolls and stamps the account used by a service test's current request. */

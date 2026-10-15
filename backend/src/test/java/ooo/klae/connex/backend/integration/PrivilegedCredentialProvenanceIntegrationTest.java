@@ -54,6 +54,7 @@ import ooo.klae.connex.backend.webauthn.VerifiedPasskey;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import ooo.klae.connex.backend.webauthn.WebauthnCredentialRow;
 import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 
 /**
  * Proves privileged passkey provenance against the real schema and real WebAuthn ceremonies
@@ -76,6 +77,7 @@ class PrivilegedCredentialProvenanceIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PrivilegedMfaProperties mfa;
     @Autowired private PlatformTransactionManager transactionManager;
 
     private final List<Integer> organizationIds = new ArrayList<>();
@@ -116,6 +118,7 @@ class PrivilegedCredentialProvenanceIntegrationTest {
         assertNotNull(assuredAt(second.rowId()));
     }
 
+    /** The attributed legacy enrollment exception still copies no coverage without a signer. */
     @Test
     void aPasskeyRegisteredWithoutAStepUpInheritsNothing() {
         User user = newUser();
@@ -126,10 +129,19 @@ class PrivilegedCredentialProvenanceIntegrationTest {
                 + " VALUES (?, ?, 'GRANTOR')",
             first.rowId(), organization.getId());
 
-        SoftwarePasskey second = register(user, NO_EVIDENCE);
+        String configuredAttestation = mfa.getAttestationEnforced();
+        String configuredActor = mfa.getChangeActor();
+        mfa.setChangeActor("provenance-legacy-enrollment-test");
+        mfa.setAttestationEnforced("false");
+        try {
+            SoftwarePasskey second = register(user, NO_EVIDENCE);
 
-        assertEquals(List.of(), coverage(second.rowId()));
-        assertNull(assurance(second.rowId()));
+            assertEquals(List.of(), coverage(second.rowId()));
+            assertNull(assurance(second.rowId()));
+        } finally {
+            mfa.setAttestationEnforced(configuredAttestation);
+            mfa.setChangeActor(configuredActor);
+        }
     }
 
     @Test
