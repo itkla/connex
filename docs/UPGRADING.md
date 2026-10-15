@@ -47,6 +47,18 @@ migration-discipline part of #87 §9 / #102).
   upgrade-drill measurements.
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
+- **Declare the staging rollback floor.** Raise
+  [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
+  migration that earlier binaries cannot survive. Keep the highest such migration as one path
+  relative to `backend/src/main/resources/db/migration/`, such as
+  `tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql`; blank lines and `#` comment lines
+  are allowed. Before stopping services or restoring artifacts, staging's rollback path reads the
+  pinned target commit's floor and requires that migration in both the target and previous backend
+  JARs. If the declaration cannot be read or validated, or either JAR lacks the migration, rollback
+  is refused: the target stays active, the recovery transaction is retained, and an
+  `ALERT gate=rollback_floor` with `rollback_state=refused_floor` calls for operator forward recovery.
+  Older target commits with no floor file retain the previous rollback behavior. This guard does
+  not reverse migrations or replace the coordinated-restart requirements below.
 
 ### Malware-scanning cutover — start the sidecar before the backend
 
@@ -160,13 +172,11 @@ and previously generated export ZIPs are outside this remediation.
    suppression, consent, or recovery evidence during migration.
 
 **No previous-binary rollback is supported after V228.** Recovery must move forward with the new
-binary. **Staging's automatic deploy currently rolls back to the previous release if a failure
-occurs after activation during this cutover deploy.** That previous backend cannot run against
-V228's schema: campaign materialization, dispatch, and unsubscribe lookups fail until the next
-deploy re-activates the new release. Operators must not keep a rolled-back pre-V228 backend serving;
-close ingress and stop it, then restore service with a release containing V228 using forward
-recovery. An enforced deployment rollback floor is tracked in
-[#2065](https://github.com/itkla/connex/issues/2065).
+binary. Staging enforces the declared rollback floor above: after an activation failure it keeps
+the target active and alerts instead of restoring a backend whose JAR lacks V228. Such a backend
+cannot run campaign materialization, dispatch, or unsubscribe lookups against V228's schema.
+Operators must not keep a pre-V228 backend serving; close ingress and stop it, then restore service
+with a release containing V228 using forward recovery.
 
 A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
 replay keeps its submission key but renders a fresh link. A body-comparing provider rejects it and

@@ -114,19 +114,23 @@ load_deploy() {
 # places it at the archive root as Spring Boot 4's bootJar does. Both must read identically, or
 # the deploy refuses every real release as an identity mismatch.
 make_jar() {
-    local path="$1" sha="$2" layout="${3:-root}" root dir
+    local path="$1" sha="$2" layout="${3:-root}" migration="${4:-}" root dir prefix=
     root="$path.root"
     rm -rf "$root"
     case "$layout" in
-        boot) dir="BOOT-INF/classes/META-INF" ;;
+        boot) dir="BOOT-INF/classes/META-INF"; prefix=BOOT-INF/classes/ ;;
         root) dir="META-INF" ;;
         *) echo "make_jar: unknown layout $layout" >&2; return 1 ;;
     esac
     mkdir -p "$root/$dir"
     printf 'build.gitSha=%s\n' "$sha" > "$root/$dir/build-info.properties"
+    if [ -n "$migration" ]; then
+        mkdir -p "$(dirname "$root/${prefix}db/migration/$migration")"
+        printf 'SELECT 1;\n' > "$root/${prefix}db/migration/$migration"
+    fi
     (
         cd "$root" || return 1
-        zip -q -r "$path" "${dir%%/*}"
+        zip -q -r "$path" .
     )
     rm -rf "$root"
 }
@@ -144,10 +148,27 @@ make_runtime() {
 make_bundle() {
     local root="$1" sha="$2" provenance="${3:-built-from-target}"
     local jar="$root/$sha.jar" runtime="$root/$sha-runtime"
-    make_jar "$jar" "$sha"
+    make_jar "$jar" "$sha" "${5:-root}" "${4:-}"
     make_runtime "$runtime" "$sha"
     seal_release_bundle "$sha" "$jar" "$runtime" "$provenance"
     rm -rf "$runtime" "$jar"
+}
+
+make_target_commit() {
+    git init --quiet "$STAGING_DIR" || return 1
+    if [ "$#" -gt 0 ]; then
+        mkdir -p "$STAGING_DIR/deploy/staging" || return 1
+        printf '%s\n' "$1" > "$STAGING_DIR/deploy/staging/rollback-floor" || return 1
+        if [ "${2:-}" = symlink ]; then
+            rm "$STAGING_DIR/deploy/staging/rollback-floor" || return 1
+            ln -s "$1" "$STAGING_DIR/deploy/staging/rollback-floor" || return 1
+        fi
+        git -C "$STAGING_DIR" add -- deploy/staging/rollback-floor || return 1
+    fi
+    git -C "$STAGING_DIR" -c user.name=Test -c user.email=test@example.invalid \
+        -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+        commit --quiet --allow-empty -m 'test fixture' || return 1
+    git -C "$STAGING_DIR" rev-parse HEAD
 }
 
 setup_prune_fixture() {
@@ -1455,10 +1476,10 @@ case_failed_committed_transaction_restores_release_markers() (
     local root="$SANDBOX/commit-transaction" retained previous target rollback_log alert_log status exit_status=0
     retained=6161616161616161616161616161616161616161
     previous=6262626262626262626262626262626262626262
-    target=6363636363636363636363636363636363636363
     rollback_log="$root/rollback.log"
     alert_log="$root/alert.log"
     load_deploy "$root"
+    target="$(make_target_commit)" || return 1
     make_bundle "$root" "$retained" rebuilt-from-marker-commit
     make_bundle "$root" "$previous" rebuilt-from-marker-commit
     make_bundle "$root" "$target"
@@ -1782,9 +1803,9 @@ case_pair_rollback_restores_exact_artifacts() (
     local root="$SANDBOX/rollback" retained previous target sudo_log
     retained=5454545454545454545454545454545454545454
     previous=5555555555555555555555555555555555555555
-    target=6666666666666666666666666666666666666666
     sudo_log="$root/sudo.log"
     load_deploy "$root"
+    target="$(make_target_commit)" || return 1
     make_bundle "$root" "$retained" rebuilt-from-marker-commit
     make_bundle "$root" "$previous" rebuilt-from-marker-commit
     make_bundle "$root" "$target"
@@ -1812,6 +1833,123 @@ case_pair_rollback_restores_exact_artifacts() (
     assert_contains sealed_launcher "launcher $target" "$sudo_log" || return 1
     assert_contains backend_restarted 'systemctl restart connex-staging-backend' "$sudo_log" || return 1
     assert_contains frontend_restarted 'systemctl restart connex-staging-frontend' "$sudo_log" || return 1
+)
+
+check_floor_rollback() (
+    local variant="$1" declaration="$2" previous_migration="$3" target_migration="$4"
+    local expected="$5" layout="${6:-root}" root="$SANDBOX/floor-$1"
+    local previous=5555555555555555555555555555555555555555
+    local retained=4444444444444444444444444444444444444444
+    local target sudo_log alert_log status=0
+    sudo_log="$root/sudo.log"
+    alert_log="$root/alert.log"
+    load_deploy "$root"
+    if [ "$variant" = no_file ]; then
+        target="$(make_target_commit)" || return 1
+    else
+        target="$(make_target_commit "$declaration" "$variant")" || return 1
+    fi
+    # The floor belongs to the pinned target, even when the checkout differs.
+    mkdir -p "$STAGING_DIR/deploy/staging"
+    rm -f "$STAGING_DIR/deploy/staging/rollback-floor"
+    printf 'invalid-checkout-floor\n' > "$STAGING_DIR/deploy/staging/rollback-floor"
+    make_bundle "$root" "$retained" rebuilt-from-marker-commit || return 1
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit "$previous_migration" "$layout" || return 1
+    make_bundle "$root" "$target" built-from-target "$target_migration" "$layout" || return 1
+    cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    printf '%s\n' "$previous" > "$MARKER"
+    printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
+    printf '%s\n' "$target" > "$FRONTEND_RELEASE_MARKER"
+    DEPLOY_PREVIOUS="$previous"
+    DEPLOY_TARGET="$target"
+    DEPLOY_RETAINED="$retained"
+    ROLLBACK_ARMED=1
+    write_transaction frontend_live || return 1
+    set_failure_context smoke_authenticated_route frontend "Deploy FAILED the authenticated route smoke"
+    git() {
+        if [ "$variant" = unreadable ] && [ "${3:-}" = show ]; then
+            printf '%s\n' "$declaration"
+            return 1
+        fi
+        command git "$@"
+    }
+    curl() {
+        case "${*: -1}" in
+            "$BACKEND_URL/api/version") printf '{"gitSha":"%s"}\n' "$(jar_git_sha "$LIVE_JAR")" ;;
+            *) return 1 ;;
+        esac
+    }
+    sudo() { printf '%s\n' "$*" >> "$sudo_log"; }
+    systemctl() { systemctl_active_stub "$@"; }
+    ensure_frontend_launcher() { printf 'launcher %s\n' "$1" >> "$sudo_log"; [ "$1" = "$target" ]; }
+    frontend_runtime_matches() { [ "$1" = "$(live_frontend_sha)" ]; }
+    wait_for_backend_sha() { [ "$1" = "$previous" ]; }
+    verify_backend_stability() { [ "$1" = "$previous" ]; }
+    wait_for_frontend() { return 0; }
+
+    # Exercise the real failure cleanup and ALERT path with errexit enabled.
+    ( set -e; deployment_exit 1 ) > "$alert_log" 2>&1 || status=$?
+    assert_status floor_failure_exit 1 "$status" || return 1
+    assert_contains failure_alert '[connex-staging-deploy] ALERT status=failure' "$alert_log" || return 1
+    assert_contains target_identity "target_sha=$target" "$alert_log" || return 1
+    assert_equals retained_marker_preserved "$retained" "$(read_sha_file "$ROLLBACK_MARKER")" || return 1
+    assert_equals failed_target_not_committed "$previous" "$(read_sha_file "$MARKER")" || return 1
+    if [ "$expected" = refused ]; then
+        assert_contains floor_gate 'gate=rollback_floor component=backend' "$alert_log" || return 1
+        assert_contains floor_state 'rollback_state=refused_floor' "$alert_log" || return 1
+        assert_contains target_backend_alert "backend_sha=$target" "$alert_log" || return 1
+        assert_contains target_frontend_alert "frontend_sha=$target" "$alert_log" || return 1
+        assert_equals target_backend_preserved "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
+        assert_equals target_frontend_preserved "$target" "$(live_frontend_sha)" || return 1
+        assert_file_exists recovery_transaction_preserved "$TRANSACTION_FILE" || return 1
+        assert_file_missing no_service_or_launcher_mutations "$sudo_log" || return 1
+    else
+        assert_contains original_failure_gate 'gate=smoke_authenticated_route component=frontend' "$alert_log" || return 1
+        assert_contains completed_rollback 'rollback_state=complete' "$alert_log" || return 1
+        assert_absent no_floor_refusal 'gate=rollback_floor' "$alert_log" || return 1
+        assert_equals previous_backend_restored "$previous" "$(jar_git_sha "$LIVE_JAR")" || return 1
+        assert_equals previous_frontend_restored "$previous" "$(live_frontend_sha)" || return 1
+        assert_file_missing recovery_transaction_removed "$TRANSACTION_FILE" || return 1
+        assert_contains frontend_stopped 'systemctl stop connex-staging-frontend' "$sudo_log" || return 1
+        assert_contains backend_restarted 'systemctl restart connex-staging-backend' "$sudo_log" || return 1
+        assert_contains frontend_restarted 'systemctl restart connex-staging-frontend' "$sudo_log" || return 1
+    fi
+)
+
+case_rollback_floor_refuses_incompatible_previous_jar() (
+    local floor=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql
+    check_floor_rollback incompatible "$floor" '' "$floor" refused
+)
+
+case_rollback_floor_allows_compatible_previous_jar() (
+    local floor=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql layout
+    for layout in root boot; do
+        check_floor_rollback "compatible-$layout" $'# Migration floor\n\n'"$floor" "$floor" "$floor" allowed "$layout" || return 1
+    done
+    floor=V61__ai_provider_config_multi_provider.sql
+    check_floor_rollback compatible_root_path "$floor" "$floor" "$floor" allowed
+)
+
+case_rollback_without_floor_preserves_legacy_behavior() (
+    check_floor_rollback no_file '' '' '' allowed
+)
+
+case_malformed_rollback_floor_fails_closed() (
+    local floor=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql
+    local variant declaration
+    for variant in empty comments absolute parent wrong_name multiple missing_in_target unreadable symlink; do
+        case "$variant" in
+            empty) declaration= ;;
+            comments) declaration='# Missing migration path' ;;
+            absolute) declaration="/$floor" ;;
+            parent) declaration="tenant/../$floor" ;;
+            wrong_name) declaration=tenant/not-a-versioned-migration.sql ;;
+            multiple) declaration="$floor"$'\n'"$floor" ;;
+            missing_in_target) declaration=tenant/V999__missing.sql ;;
+            unreadable|symlink) declaration="$floor" ;;
+        esac
+        check_floor_rollback "$variant" "$declaration" "$floor" "$floor" refused || return 1
+    done
 )
 
 install_smoke_fixture() {
@@ -2161,9 +2299,9 @@ case_recovery_commit_failure_rolls_back_and_restores_markers() (
     local root="$SANDBOX/recovery-commit-failure" retained previous target alert_log status exit_status=0
     retained=8686868686868686868686868686868686868686
     previous=8989898989898989898989898989898989898989
-    target=9090909090909090909090909090909090909090
     alert_log="$root/alert.log"
     load_deploy "$root"
+    target="$(make_target_commit)" || return 1
     make_bundle "$root" "$retained" rebuilt-from-marker-commit
     make_bundle "$root" "$previous" rebuilt-from-marker-commit
     make_bundle "$root" "$target"
@@ -2402,6 +2540,10 @@ case_jar_identity_reads_every_build_layout() {
 }
 
 run_case case_pair_rollback_restores_exact_artifacts
+run_case case_rollback_floor_refuses_incompatible_previous_jar
+run_case case_rollback_floor_allows_compatible_previous_jar
+run_case case_rollback_without_floor_preserves_legacy_behavior
+run_case case_malformed_rollback_floor_fails_closed
 run_case case_smoke_credentials_require_safe_exact_schema
 run_case case_post_deploy_smoke_covers_all_gates
 run_case case_failed_logout_blocks_deploy

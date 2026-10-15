@@ -7,6 +7,9 @@
 # is stopped before backend activation, so incompatible component versions are never
 # served together. An atomic transaction record plus the EXIT/signal handler covers
 # ordinary failures; the next timer run recovers SIGKILL, reboot, and power-loss windows.
+# The target commit's deploy/staging/rollback-floor declares a migration required in
+# both JARs before rollback; an invalid floor or incompatible prior JAR leaves the
+# target active and alerts the operator to recover forward.
 
 set -euo pipefail
 
@@ -85,7 +88,7 @@ safe_sha_state() {
 
 safe_alert_label() {
     case "$1" in
-        bootstrap|preflight|build|bundle|frontend_quiesce|backend_restart|backend_health|frontend_restart|frontend_health|smoke_frontend|smoke_readiness|smoke_version|smoke_capabilities|smoke_auth_entry|smoke_login|smoke_authenticated_route|smoke_logout|smoke_cleanup|marker|recovery)
+        bootstrap|preflight|build|bundle|frontend_quiesce|backend_restart|backend_health|frontend_restart|frontend_health|smoke_frontend|smoke_readiness|smoke_version|smoke_capabilities|smoke_auth_entry|smoke_login|smoke_authenticated_route|smoke_logout|smoke_cleanup|marker|recovery|rollback_floor)
             printf '%s\n' "$1"
             ;;
         backend|frontend|release|authentication)
@@ -99,7 +102,7 @@ safe_alert_label() {
 
 safe_rollback_state() {
     case "$ROLLBACK_STATE" in
-        not_attempted|in_progress|complete|failed) printf '%s\n' "$ROLLBACK_STATE" ;;
+        not_attempted|in_progress|complete|failed|refused_floor) printf '%s\n' "$ROLLBACK_STATE" ;;
         *) printf 'invalid\n' ;;
     esac
 }
@@ -207,6 +210,33 @@ jar_git_sha() {
         fi
     done
     return 1
+}
+
+jar_contains_migration() {
+    local jar="$1" migration="$2" prefix content
+    for prefix in '' BOOT-INF/classes/; do
+        content="$(read_archive_entry "$jar" "${prefix}db/migration/$migration")" || return 1
+        [ -z "$content" ] || return 0
+    done
+    return 1
+}
+
+rollback_floor_allows_release() {
+    local previous="$1" path=deploy/staging/rollback-floor entry declaration floor
+    # Read the pinned commit, not the checkout: interrupted activation can leave
+    # the checkout at another release. Only a proven absence opts into legacy rollback.
+    entry="$(git -C "$STAGING_DIR" ls-tree "$DEPLOY_TARGET" -- "$path" 2>/dev/null)" || return 1
+    [ -n "$entry" ] || return 0
+    [[ "$entry" = "100644 blob "* || "$entry" = "100755 blob "* ]] || return 1
+    declaration="$(git -C "$STAGING_DIR" show "$DEPLOY_TARGET:$path" 2>/dev/null)" || return 1
+    floor="$(printf '%s\n' "$declaration" | sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d')" || return 1
+    [[ "$floor" =~ ^([a-zA-Z0-9_.-]+/)*V[0-9]+__[a-zA-Z0-9_.-]+\.sql$ ]] || return 1
+    case "/$floor/" in
+        */../*|*/./*) return 1 ;;
+    esac
+    archive_reader_available || return 1
+    jar_contains_migration "$RELEASES_DIR/$DEPLOY_TARGET/backend.jar" "$floor" \
+        && jar_contains_migration "$RELEASES_DIR/$previous/backend.jar" "$floor"
 }
 
 set_failure_context() {
@@ -748,6 +778,11 @@ rollback_release() {
     local sha="$1" backend frontend
     ROLLBACK_IN_PROGRESS=1
     ROLLBACK_STATE=in_progress
+    if ! rollback_floor_allows_release "$sha"; then
+        ROLLBACK_STATE=refused_floor
+        set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; keeping the target release active for forward recovery"
+        return 1
+    fi
     if ! verify_release_bundle "$sha" || ! verify_release_bundle "$DEPLOY_RETAINED"; then
         log "Rollback FAILED: rollback or retained release bundle is invalid"
         ROLLBACK_STATE=failed
