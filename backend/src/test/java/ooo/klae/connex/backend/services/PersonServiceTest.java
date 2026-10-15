@@ -47,6 +47,8 @@ import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class PersonServiceTest extends AbstractServiceTest {
 
@@ -640,6 +642,7 @@ class PersonServiceTest extends AbstractServiceTest {
         aiOutputCacheMapper.upsert(row);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void updateProcessingRestrictionsRequiresPersonUpdatePermission() {
         Person person = newPerson(newCompany());

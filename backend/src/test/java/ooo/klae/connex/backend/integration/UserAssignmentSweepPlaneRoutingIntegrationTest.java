@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.mappers.AssignmentSweepMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.DepartureApprovalGuard;
+import ooo.klae.connex.backend.services.OwnershipOfferAccountCleanupService;
 import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.services.UserAccountCatalogOffboardingService;
 import ooo.klae.connex.backend.services.UserOffboardingService;
@@ -113,7 +114,7 @@ class UserAssignmentSweepPlaneRoutingIntegrationTest {
         service = new UserAccountCatalogOffboardingService(mock(DepartureApprovalGuard.class), placements,
             mock(UserOffboardingService.class),
             mock(ProviderCapturePurgeService.class), scope, new DataSourceTransactionManager(routing), mapper,
-            session.getMapper(UserMapper.class), metrics);
+            session.getMapper(UserMapper.class), metrics, mock(OwnershipOfferAccountCleanupService.class));
         ReflectionTestUtils.setField(service, "pageSize", 2);
     }
 

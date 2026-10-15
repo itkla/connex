@@ -45,7 +45,7 @@ public class WorkspaceMembershipRemovalTransaction {
                 actorId,
                 actorRole,
                 catalog,
-                () -> transactionTemplate.execute(
+                () -> OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(
                     status -> work.apply(workspaceId, orgId))));
         return Objects.requireNonNull(result, "workspace-membership removal transaction result");
     }

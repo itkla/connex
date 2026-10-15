@@ -133,7 +133,8 @@ class UserDeletionAuditOrderTest {
                 managedObjectService,
                 auditService,
                 lifecycleService,
-                tenantContext);
+                tenantContext,
+                mock(ooo.klae.connex.backend.mappers.OwnershipOfferMapper.class));
         }
 
         private void credentialAudits(PendingCredentialAudit... audits) {

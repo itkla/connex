@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.OwnershipOffer;
+import ooo.klae.connex.backend.mappers.OwnershipOfferMapper;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -42,6 +44,7 @@ public class UserDeletionTransaction {
     private final AuditService auditService;
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
     private final TenantContext tenantContext;
+    private final OwnershipOfferMapper ownershipOfferMapper;
 
     /** Guards the account and installs a durable reservation before provider fan-out. */
     @Transactional
@@ -78,11 +81,26 @@ public class UserDeletionTransaction {
      */
     @Transactional
     public void delete(int id, String owner) {
+        if (userMapper.lockById(id) == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
         if (!userMapper.isAccountDeletionReservationOwner(id, owner)) {
             throw new ConflictException("Account deletion was not reserved");
         }
         AccountDeletionGuard guarded = guard(id, true);
         User before = guarded.user();
+        for (OwnershipOffer candidate : guarded.offerReferences()) {
+            OwnershipOffer offer = ownershipOfferMapper.lockById(candidate.getId());
+            if (offer == null) {
+                continue;
+            }
+            if ("OPEN".equals(offer.getState())
+                    && (offer.getOfferorUserId() == id || offer.getOffereeUserId() == id)) {
+                throw new ConflictException("Ownership offer cleanup has not completed");
+            }
+            ownershipOfferMapper.clearClosureActor(offer.getId(), id);
+            ownershipOfferMapper.deletePartyReference(offer.getId(), id);
+        }
         List<PendingCredentialAudit> credentialAudits =
             apiCredentialLifecycleService.deleteForAccount(id, guarded.credentialReferenceRoots());
         managedObjectService.deleteUserImageAfterCommit(
@@ -146,11 +164,22 @@ public class UserDeletionTransaction {
         List<ApiCredentialReferenceRoot> credentialReferenceRoots = includeCredentialReferences
             ? apiCredentialLifecycleService.discoverAccountReferenceRoots(id)
             : List.of();
+        List<OwnershipOffer> offerReferences = includeCredentialReferences
+            ? ownershipOfferMapper.discoverAccount(id) : List.of();
         TreeSet<Integer> sharedWorkspaceIds = new TreeSet<>();
         TreeSet<Integer> sharedOrgIds = new TreeSet<>();
         for (ApiCredentialReferenceRoot root : credentialReferenceRoots) {
             sharedWorkspaceIds.add(root.workspaceId());
             sharedOrgIds.add(root.organizationId());
+        }
+        for (OwnershipOffer offer : offerReferences) {
+            if (offer.getWorkspaceId() != null) {
+                sharedWorkspaceIds.add(offer.getWorkspaceId());
+            }
+            if (offer.getDeliveryWorkspaceId() != null) {
+                sharedWorkspaceIds.add(offer.getDeliveryWorkspaceId());
+            }
+            sharedOrgIds.add(offer.getOrgId());
         }
         if (includeCredentialReferences) {
             Integer currentWorkspaceId = tenantContext.getWorkspaceId();
@@ -170,10 +199,10 @@ public class UserDeletionTransaction {
         if (before == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
-        return new AccountDeletionGuard(before, List.copyOf(credentialReferenceRoots));
+        return new AccountDeletionGuard(before, List.copyOf(credentialReferenceRoots), List.copyOf(offerReferences));
     }
 
     private record AccountDeletionGuard(
-            User user, List<ApiCredentialReferenceRoot> credentialReferenceRoots) {
+            User user, List<ApiCredentialReferenceRoot> credentialReferenceRoots, List<OwnershipOffer> offerReferences) {
     }
 }

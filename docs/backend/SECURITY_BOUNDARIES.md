@@ -78,3 +78,7 @@ contract. Automation provenance is separate from the member or system principal 
 - Idempotency/proof/lease/generation state is scoped to the correct workspace/organization and fails closed.
 - Feature/capability/operator/customer gates remain independent and default to the documented posture.
 - Relevant security, tenancy, failure, and cross-workspace tests pass.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

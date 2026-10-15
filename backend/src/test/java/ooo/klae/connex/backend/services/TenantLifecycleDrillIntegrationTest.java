@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -107,6 +108,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.AcquiredWorkspace;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ScannedUpload;
@@ -582,6 +584,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         Set<String> lifecycleTables = new HashSet<>(
             TenantLifecycleRegistry.declarations().keySet());
         lifecycleTables.addAll(ControlWorkspaceLifecycleRegistry.declarations().keySet());
+        lifecycleTables.add("ownership_offer");
         assertEquals(lifecycleTables, residual.tableRows().keySet());
         assertEquals(0, residual.totalRows());
         assertTrue(residual.tableRows().values().stream().allMatch(count -> count == 0));
@@ -741,29 +744,44 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         insertApiCredential(orgId, workspaceId, leaverId, "Leave versus teardown");
         NotificationMapper realNotificationMapper =
             sqlSessionTemplate.getMapper(NotificationMapper.class);
+        TenantLifecycleControlMapper realControlMapper =
+            sqlSessionTemplate.getMapper(TenantLifecycleControlMapper.class);
         CountDownLatch leaveInsideTransaction = new CountDownLatch(1);
-        CountDownLatch teardownMarkCommitted = new CountDownLatch(1);
+        CountDownLatch releaseLeave = new CountDownLatch(1);
+        CountDownLatch teardownRequestingWorkspace = new CountDownLatch(1);
+        AtomicLong teardownConnection = new AtomicLong();
         org.mockito.Mockito.doAnswer(invocation -> {
+            var memberships = realNotificationMapper.lockRecipientMemberships(leaverId);
             leaveInsideTransaction.countDown();
-            if (!teardownMarkCommitted.await(10, TimeUnit.SECONDS)) {
-                throw new AssertionError("Teardown lifecycle mark did not commit");
-            }
-            return realNotificationMapper.lockRecipientMemberships(leaverId);
+            assertTrue(releaseLeave.await(30, TimeUnit.SECONDS));
+            return memberships;
         }).when(notificationMapperSpy).lockRecipientMemberships(leaverId);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            teardownConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
+            teardownRequestingWorkspace.countDown();
+            return realControlMapper.lockWorkspaceInOrg(workspaceId);
+        }).when(controlMapper).lockWorkspaceInOrg(workspaceId);
 
         Throwable leaveFailure;
         AcquiredWorkspace acquired;
-        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<Throwable> leave = executor.submit(() -> captureFailure(() ->
                 workspaceService.leaveWorkspace(workspaceId, leaverId)));
-            assertTrue(leaveInsideTransaction.await(10, TimeUnit.SECONDS));
             try {
-                acquired = controlOperations.acquireWorkspaceTeardown(
-                    orgId, workspaceId, currentUser.getId());
+                assertTrue(leaveInsideTransaction.await(30, TimeUnit.SECONDS));
+                Future<AcquiredWorkspace> teardown = executor.submit(() ->
+                    controlOperations.acquireWorkspaceTeardown(orgId, workspaceId, currentUser.getId()));
+                assertTrue(teardownRequestingWorkspace.await(30, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbcTemplate, teardownConnection.get(),
+                    "workspace", Integer.toString(workspaceId));
+                releaseLeave.countDown();
+                leaveFailure = leave.get(20, TimeUnit.SECONDS);
+                acquired = teardown.get(20, TimeUnit.SECONDS);
             } finally {
-                teardownMarkCommitted.countDown();
+                releaseLeave.countDown();
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
             }
-            leaveFailure = leave.get(20, TimeUnit.SECONDS);
         }
 
         assertFalse(hasDeadlockCause(leaveFailure));

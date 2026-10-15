@@ -89,7 +89,7 @@ public class SsoLoginService {
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
-            SsoLoginResult result = transactionTemplate.execute(status ->
+            SsoLoginResult result = OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status ->
                 resolveReturningIdentity(identity, provider, issuer, subject, orgId, oidcClientId));
             return Objects.requireNonNull(result, "returning SSO login result");
         }

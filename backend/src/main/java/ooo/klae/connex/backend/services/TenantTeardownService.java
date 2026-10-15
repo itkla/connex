@@ -77,6 +77,7 @@ public class TenantTeardownService {
     private final SessionSecurityService sessionSecurityService;
     private final TenantWorkScope tenantWorkScope;
     private final TenantLifecycleControlMapper controlMapper;
+    private final ooo.klae.connex.backend.mappers.OwnershipOfferMapper ownershipOfferMapper;
     private final TenantLifecycleControlOperations controlOperations;
     private final TenantLifecycleAccess lifecycleAccess;
     private final TenantTeardownTenantTransaction tenantTransaction;
@@ -401,6 +402,11 @@ public class TenantTeardownService {
         for (Map.Entry<String, Long> entry : controlRows.entrySet()) {
             tableRows.put(entry.getKey(), entry.getValue());
             totalRows = Math.addExact(totalRows, entry.getValue());
+        }
+        if (!tenantWorkScope.unroutedRead(() -> ownershipOfferMapper.workspaceRootExists(workspaceId))) {
+            long offers = tenantWorkScope.unroutedRead(() -> ownershipOfferMapper.countWorkspaceReferences(workspaceId));
+            tableRows.put("ownership_offer", offers);
+            totalRows = Math.addExact(totalRows, offers);
         }
         return new TenantResidualReport(
             workspaceId,

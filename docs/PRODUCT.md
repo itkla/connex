@@ -197,3 +197,7 @@ The "Overview" section is dissolved; "Overview" survives nowhere as a page name.
 - Email and Delivery merge into one Workspace → Communications destination with clear sections — sending setup, sender identity, test delivery, deliverability and health — with instance-managed state visible rather than a disappearing tab.
 
 **One name per destination**, verbatim across sidebar, command palette, page title, browser tab, breadcrumb, and docs — and every cross-surface link (notification, calendar entry, stat tile, signal reference) lands on an existing route with the referenced item in view.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

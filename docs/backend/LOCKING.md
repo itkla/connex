@@ -286,8 +286,16 @@ creator equality reads, each served by a user-leading covering index. The union 
 that reference the account in both roles. These discovery reads remain non-locking and flush the
 MyBatis cache.
 
+Workspace departure captures personal-goal, policy-approver and frozen-document-approver row ids
+through the existing fresh non-locking reads before the sole named approver guard runs. Cleanup
+uses only that captured set at every isolation level, including READ COMMITTED; it never rediscovers
+references at the cleanup tail. References committed after discovery remain for deadline and
+unsatisfiability reconciliation instead of being deleted without a guard verdict. Removal,
+pending-invitation decline, leave and leave-and-select-next share this rule. Catalog account erasure
+retains its existing transaction isolation and identity-scoped discovery/cleanup protocol.
+
 Goal and policy/frozen approver cleanup uses conditional single-table statements keyed exactly by
-workspace, row id, and departing user. It runs last, after the workspace-cleanup and catalog-erasure
+workspace, captured row id, and departing user. It runs last, after the workspace-cleanup and catalog-erasure
 tails (workflow, version, rule, team, deal and existing audit locks); leave-and-select-next also
 finishes its selection update first. No earlier lock class is acquired after this cleanup within the
 transaction body. The only later acquisition is the commit-time tail every writer shares:
@@ -356,6 +364,15 @@ root-first path and must take both roots first.
 
 #### Membership cleanup
 
+Membership cleanup takes the workspace root FOR SHARE before the organization root FOR SHARE in
+both `detachMemberContent` and `prepareFreshMembershipInWorkspace`. The workspace read also supplies
+the organization id and is lifecycle-state independent. Fresh cleanup takes this workspace root
+before its exact membership read. These root locks remain held through offer invalidation, notice
+cleanup and the later credential cleanup, which may request them again. A teardown holding the
+workspace X can therefore acquire organization X and commit while departure waits for workspace S;
+no departure holds organization S while requesting that workspace. The real two-thread drill pins
+teardown just before organization acquisition and observes the departure's workspace-record wait.
+
 Membership credential cleanup preserves each path's existing user, workspace, and membership lock
 order. At the end of member removal, invitation decline, leave, and fresh-membership cleanup it
 acquires the workspace root `FOR SHARE` in any lifecycle state, then that workspace's organization
@@ -370,9 +387,9 @@ is already gone, because the workspace foreign key has then already cascaded the
 away. A `tearing_down` root still owns live credentials, which are deleted and audited normally, so
 the workspace lock used here carries no `lifecycle_state` predicate.
 
+`detachMemberContent` holds its workspace and organization roots before
 `notificationMapper.lockRecipientMemberships` X-locks the departing user's `workspace_member` rows
-in every workspace before `detachMemberContent` reaches credential cleanup, so the new organization
-root request sits behind cross-workspace member locks. That is safe today only because every caller
+in every workspace. Credential cleanup reuses those held roots after the member scan. Every caller
 of `detachMemberContent` first takes the target `app_user` row `FOR UPDATE`;
 `prepareFreshMembershipInWorkspace` is the one caller with no `app_user` lock, and it never reaches
 an audit for the reason given above.
@@ -1729,3 +1746,19 @@ row now needs quarantine authority. It does not delegate at that point, because 
 holds attachment rows would take membership roots after them. The assistant route already holds the
 caller's membership and session roots, so it re-reads the exact row the same way and checks
 quarantine authority in place.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+Offer closure must not rewrite an account FK's supporting index after scope roots. V229's only offeree-leading index is immutable `(offeree_user_id,id)`; pending lookups use a state-leading index. Nullable closure attribution has no FK and is explicitly cleared before erasure audit heads. Party cascades remain. This preserves deleting-account X → workspace roots → organization roots → guards → offer rows → audit heads without acquiring counterpart accounts after roots.
+
+
+Account deletion keeps its reservation throughout every guarded tenant-catalog erasure transaction.
+Only after all catalog transactions commit does `eraseAfterCatalogs` discover and erase control
+ownership offers and closure attribution in the existing account → workspace → organization → offer
+→ audit order. A catalog guard refusal skips control offer erasure and its routed notice resolution; earlier
+catalog commits retain their existing behavior. Routed offer closure
+accepts an already-deleted tenant notice, because catalog erasure may have removed it first; it
+never recreates that notice or releases the reservation. Per-catalog erasure keeps its existing
+isolation.

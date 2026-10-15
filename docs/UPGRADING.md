@@ -813,3 +813,7 @@ request and `main` push. `FlywayUpgradeIntegrationTest` migrates representative 
 quota, deletion-queue, and import state through the current lineage. A full
 **restore-a-previous-release image → migrate → smoke** gate remains a follow-up once stable released
 version baselines exist.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

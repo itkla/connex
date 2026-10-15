@@ -5,6 +5,7 @@ import {
     BellIcon,
     BriefcaseIcon,
     CheckCircleIcon,
+    KeyIcon,
     ShieldCheckIcon,
     UserGroupIcon,
 } from "@heroicons/react/24/outline";
@@ -93,6 +94,14 @@ export function notificationContent(notification: Notification, t: Translator, l
         return {
             title: t("workspaceJoinTitle"),
             body: t("workspaceJoinBody", { workspace: notification.workspaceName ?? "" }),
+        };
+    }
+    if (notification.type === "ownership.offer") {
+        return {
+            title: t("ownershipOfferTitle"),
+            body: data.scopeKind === "ORGANIZATION"
+                ? t("ownershipOfferOrganizationBody")
+                : t("ownershipOfferWorkspaceBody", { workspace: notification.workspaceName ?? "" }),
         };
     }
     if (notification.type === "note.mention") {
@@ -270,6 +279,7 @@ export function notificationIcon(notification: Notification) {
     if (notification.type === "introduction.mention") return AtSymbolIcon;
     if (notification.type === "deal.mention") return AtSymbolIcon;
     if (notification.type.startsWith("document.approval")) return ShieldCheckIcon;
+    if (notification.type === "ownership.offer") return KeyIcon;
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
     if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;

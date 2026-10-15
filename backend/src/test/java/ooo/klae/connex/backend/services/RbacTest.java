@@ -22,6 +22,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class RbacTest extends AbstractServiceTest {
 
@@ -81,6 +83,7 @@ class RbacTest extends AbstractServiceTest {
                 Permission.TEAM_MANAGE)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customRoleReplacesBuiltInPermissions() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Custom WS", currentUser.getId());
@@ -100,6 +103,7 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.COMPANY_CREATE));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customOverlayRemovesAdministratorAndOwnerExceptions() {
         tenantContext.clear();
@@ -125,6 +129,7 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.requireRole(ws.getId(), currentUser.getId(), WorkspaceService.Role.OWNER));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aiSessionAdminIsGrantableToACustomRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
@@ -143,6 +148,7 @@ class RbacTest extends AbstractServiceTest {
             workspaceService.permissionsFor(ws.getId(), member.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void deletingAnAssignedCustomRoleRequiresExplicitReassignment() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Revert WS", currentUser.getId());
@@ -166,6 +172,7 @@ class RbacTest extends AbstractServiceTest {
         assertTrue(perms.contains(Permission.DEAL_DELETE));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customRoleRoundTripDoesNotAuthorizeALegacyPendingAdminGrant() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
@@ -220,6 +227,7 @@ class RbacTest extends AbstractServiceTest {
                 List.of("SSO_MANAGE")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inertPermissionRowsDoNotReadBackOrAuthorize() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Stale Inert Permission WS", currentUser.getId());
@@ -248,6 +256,7 @@ class RbacTest extends AbstractServiceTest {
             () -> roleService.createRole(ws.getId(), currentUser.getId(), "No Step Up", List.of()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void adminCannotDemoteAnOwnerWithoutOwnerRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner Guard WS", currentUser.getId());
@@ -263,6 +272,7 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), coOwner.getId(), "member"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void roleManageCannotMintRoleGrantingPermissionsActorLacks() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ceiling WS", currentUser.getId());
@@ -279,6 +289,7 @@ class RbacTest extends AbstractServiceTest {
             () -> roleService.createRole(ws.getId(), delegate.getId(), "NarrowRole", List.of("PERSON_CREATE")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void roleManageCannotSelfAssignRoleBroaderThanActor() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Assign Ceiling WS", currentUser.getId());
@@ -295,6 +306,7 @@ class RbacTest extends AbstractServiceTest {
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberManageDelegateCannotPromoteToBuiltInAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Promote Ceiling WS", currentUser.getId());
@@ -312,6 +324,7 @@ class RbacTest extends AbstractServiceTest {
         assertFalse(workspaceService.permissionsFor(ws.getId(), delegate.getId()).contains(Permission.WORKSPACE_SETTINGS));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customOwnerOverlayKeepsRawOwnerVisibleAndProtected() {
         tenantContext.clear();
@@ -347,6 +360,7 @@ class RbacTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(ws.getId(), currentUser.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void nonOwnerRoleManagerCannotAssignCustomRoleToOwner() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(

@@ -48,7 +48,8 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/register/requirements",
             "/api/auth/webauthn/credentials",
             "/api/capabilities",
-            "/api/workspaces");
+            "/api/workspaces",
+            "/api/ownership-offers");
     private static final Set<String> ENROLLMENT_POST_PATHS = Set.of(
             "/api/auth/logout",
             "/api/auth/webauthn/register/options",
@@ -58,7 +59,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/recover",
             "/api/auth/webauthn/attestation/options",
             "/api/auth/webauthn/attestation");
-    private static final Pattern SAFE_EXIT_PATH = Pattern.compile("/api/(?:workspaces|orgs)/\\d+/leave");
+    private static final Pattern SAFE_EXIT_PATH = Pattern.compile("(?:/api/(?:workspaces|orgs)/\\d+/leave|/api/ownership-offers/\\d+/decline)");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
     private static final Set<String> LINK_FLOW_PATHS = Set.of(

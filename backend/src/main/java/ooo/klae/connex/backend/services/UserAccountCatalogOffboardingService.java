@@ -42,6 +42,7 @@ public class UserAccountCatalogOffboardingService {
     private final AssignmentSweepMapper assignmentSweepMapper;
     private final UserMapper userMapper;
     private final MeterRegistry meterRegistry;
+    private final OwnershipOfferAccountCleanupService ownershipOfferCleanupService;
     private final Map<TraversalKey, Traversal> traversals = new HashMap<>();
 
     @Value("${connex.account.assignment-sweep.page-size:200}")
@@ -63,7 +64,7 @@ public class UserAccountCatalogOffboardingService {
         }
     }
 
-    /** Erases user references once per distinct tenant catalog. */
+    /** Erases guarded tenant references before removing control-plane ownership offers. */
     public void eraseReferences(int userId) {
         for (String catalog : placementRegistry.activeCatalogs()) {
             tenantWorkScope.withCatalog(
@@ -84,6 +85,7 @@ public class UserAccountCatalogOffboardingService {
                     return null;
                 });
         }
+        ownershipOfferCleanupService.eraseAfterCatalogs(userId);
     }
 
     /**

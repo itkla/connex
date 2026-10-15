@@ -711,3 +711,7 @@ reconciliation in [UPGRADING.md](UPGRADING.md) before reopening approvals.
 **Switching on** is a later release that only changes the default. Before it, drain the accounts the
 startup event counts in `attestationRequiredCount`: privileged after the cutover, or enrolled since,
 without a passkey approved where they are privileged.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
