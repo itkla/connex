@@ -230,19 +230,18 @@ describe("privileged MFA confinement in the browser", () => {
 
     it("gives up and reports failure when identity changes keep overtaking the read", async () => {
         const { listeners } = stubBrowser(SECURITY, "?mfa=approve");
-        const reads = standingReads();
-        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+        let served = 0;
+        stubBackend((url) => {
+            if (!url.endsWith(REQUIREMENTS)) return null;
+            served += 1;
+            listeners.get("storage")?.({ key: "connex:client-request-identity", newValue: `invalidate:${served}` });
+            return requirements("SATISFIED");
+        });
         const api = await import("@/app/lib/api");
 
-        const settled = api.settlePrivilegedMfaStanding("check");
-        for (let index = 0; index < 3; index += 1) {
-            await flush();
-            listeners.get("storage")?.({ key: "connex:client-request-identity", newValue: `invalidate:${index}` });
-            reads.release(index, requirements("SATISFIED"));
-        }
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("failed");
 
-        await expect(settled).resolves.toBe("failed");
-        expect(reads.served()).toBe(3);
+        expect(served).toBe(3);
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
         expect(api.currentPrivilegedMfaRequirements()).toBeNull();
     });
