@@ -138,7 +138,8 @@ passes in the same transaction. The sole lifecycle owner-snapshot writer,
 `PersonLifecycleService.recordPass`, follows `applyStage`'s `getOwnedPersonByIdForUpdate`, so a raced
 insertion, milestone or closure commits before that person lock or snapshots the cleared owner.
 Intervention ownership clearing increments `source_version` only when it changes the pointer.
-Goal owner and creator discovery use V226's user-leading departure indexes. Both kinds lock the
+Account-scoped goal discovery can use V226's user-leading departure indexes, and the periodic pass
+ranges over the primary key as the other kinds do. Both kinds lock the
 exact `report_goal` row through `PRIMARY`, then conditionally delete the personal goal for an
 unchanged orphaned owner or clear an unchanged orphaned creator. Each catalog pass visits the owner
 kind before the creator kind, matching erasure's delete-before-detach ordering. Their bounded pages

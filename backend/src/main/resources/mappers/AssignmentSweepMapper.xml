@@ -123,14 +123,14 @@
       </when>
       <when test="kind.name() == 'GOAL_OWNER'">
         SELECT id, workspace_id, id AS parent_id, owner_id AS user_id
-        FROM report_goal FORCE INDEX (idx_report_goal_departure_owner)
+        FROM report_goal
         WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND owner_id IS NOT NULL
         <if test="userId != null">AND owner_id = #{userId}</if>
         ORDER BY id
       </when>
       <when test="kind.name() == 'GOAL_CREATOR'">
         SELECT id, workspace_id, id AS parent_id, created_by AS user_id
-        FROM report_goal FORCE INDEX (idx_report_goal_departure_creator)
+        FROM report_goal
         WHERE id &gt; #{cursor.id} AND id &lt;= #{watermark.id} AND created_by IS NOT NULL
         <if test="userId != null">AND created_by = #{userId}</if>
         ORDER BY id
