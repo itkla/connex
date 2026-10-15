@@ -884,8 +884,8 @@ class AiChatMemoryServiceTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void rawSummaryMentionsPreserveProvenanceButLetterAdjacentLatinContainmentIsNotAMention(boolean mention) {
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void rawSummaryMentionsPreserveProvenanceButLetterAdjacentLatinContainmentIsNotAMention(boolean mention, boolean unmasked) {
         String summaryText = mention ? "Bob_team" : "xBob client";
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
@@ -920,7 +920,8 @@ class AiChatMemoryServiceTest {
                     summary.setStructuredJson(call.getArgument(4));
                     return summary;
                 });
-        MaskingContext context = new MaskingContext();
+        MaskingContext context = new MaskingContext(unmasked
+                ? ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED : ooo.klae.connex.backend.ai.AiPrivacyMode.MASKED);
         context.registerMemberCandidate("Bob");
         context.registerMemberCandidate("Li");
         AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);

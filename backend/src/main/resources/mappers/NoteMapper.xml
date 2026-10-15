@@ -327,6 +327,24 @@
     LIMIT #{limit}
   </select>
 
+  <select id="getAiAssistantVisibleNotesByPersonId" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.person_id = #{personId}
+      AND (n.visibility = 'workspace' OR (#{includePrivateNotes} AND n.author_id = #{currentUserId}))
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getAiAssistantVisibleNotesByDealId" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.deal_id = #{dealId}
+      AND (n.visibility = 'workspace' OR (#{includePrivateNotes} AND n.author_id = #{currentUserId}))
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
   <select id="getAiAssistantVisibleNotesByCompanyId" resultMap="NoteResult">
     SELECT <include refid="qualifiedNoteColumns"/> FROM note n
     WHERE n.workspace_id = #{workspaceId}

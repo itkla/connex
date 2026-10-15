@@ -104,6 +104,16 @@ public interface NoteMapper {
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);
+    List<Note> getAiAssistantVisibleNotesByPersonId(
+            @Param("workspaceId") int workspaceId, @Param("personId") int personId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
+    List<Note> getAiAssistantVisibleNotesByDealId(
+            @Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
     default List<Note> getAiAssistantVisibleNotesByCompanyId(int workspaceId, int companyId,
             int currentUserId, List<Integer> organizationWorkspaceIds, int limit) {
         return getAiAssistantVisibleNotesByCompanyId(workspaceId, companyId, currentUserId,

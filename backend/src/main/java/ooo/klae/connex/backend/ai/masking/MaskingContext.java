@@ -96,11 +96,11 @@ public final class MaskingContext {
 
     /** Registers a member label for replacement and scanning without issuing a token. */
     public void registerMemberCandidate(String rawValue) {
-        if (rawValue != null && !rawValue.isBlank()
-                && (privacyMode != AiPrivacyMode.UNMASKED
-                    || !CanonicalText.storedIdentifier(rawValue).converged())) {
+        if (rawValue != null && !rawValue.isBlank()) {
             memberIdentifierValues.add(rawValue);
-            registerIdentifier(EntityKind.MEMBER, rawValue, originalValueToToken.get(rawValue));
+            if (privacyMode != AiPrivacyMode.UNMASKED || !CanonicalText.storedIdentifier(rawValue).converged()) {
+                registerIdentifier(EntityKind.MEMBER, rawValue, originalValueToToken.get(rawValue));
+            }
         }
     }
 
@@ -251,12 +251,12 @@ public final class MaskingContext {
             return List.of();
         }
         var input = MaskingEngine.mentionScanText(text);
-        return rawIdentifierEntries.values().stream()
-                .filter(entry -> isMemberIdentifier(entry.rawValue()))
-                .filter(entry -> MaskingEngine.containsMemberMention(input, entry.rawValue())
-                        || recorded.contains(entry.rawValue())
-                            && MaskingEngine.containsRecordedMemberValue(input, entry.rawValue()))
-                .map(IdentifierEntry::rawValue).toList();
+        var candidates = privacyMode == AiPrivacyMode.UNMASKED ? memberIdentifierValues.stream()
+                : rawIdentifierEntries.values().stream().map(IdentifierEntry::rawValue)
+                        .filter(this::isMemberIdentifier);
+        return candidates.filter(value -> MaskingEngine.containsMemberMention(input, value)
+                        || recorded.contains(value) && MaskingEngine.containsRecordedMemberValue(input, value))
+                .toList();
     }
 
     String demaskableValueForToken(String token) {

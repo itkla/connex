@@ -48,6 +48,13 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void assistantPersonAndDealNoteReadsRemainTenantScoped() {
+        for (String method : Set.of("getAiAssistantVisibleNotesByPersonId", "getAiAssistantVisibleNotesByDealId")) {
+            assertTrue(interceptor.requiresResolvedContext(NS + "NoteMapper." + method));
+        }
+    }
+
+    @Test
     void unsubscribeDigestBatchRequiresTheSameScopeAsTheSingleLookup() {
         assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.getUnsubscribeTokenDeliveryId"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CampaignDeliveryMapper.findUnsubscribeTokenHashes"));

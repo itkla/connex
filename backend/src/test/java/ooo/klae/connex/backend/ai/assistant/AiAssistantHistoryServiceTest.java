@@ -189,8 +189,8 @@ class AiAssistantHistoryServiceTest {
         service.notesForPerson(17, 10, includePrivate);
         service.notesForDeal(8, 10, includePrivate);
         service.notesForCompany(5, 10, includePrivate);
-        verify(noteMapper).getVisibleNotesByPersonId(7, 17, 11, 10, 0, null, includePrivate);
-        verify(noteMapper).getVisibleNotesByDealId(7, 8, 11, 10, 0, null, includePrivate);
+        verify(noteMapper).getAiAssistantVisibleNotesByPersonId(7, 17, 11, List.of(7, 9), 10, includePrivate);
+        verify(noteMapper).getAiAssistantVisibleNotesByDealId(7, 8, 11, List.of(7, 9), 10, includePrivate);
         verify(noteMapper).getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 10, includePrivate);
     }
 

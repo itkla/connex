@@ -139,6 +139,11 @@ class MaskingContextTest {
         context.registerMemberCandidate("Current Member");
         assertEquals("Current Member", MaskingEngine.maskFreeText("Current Member", context));
         assertEquals(0, context.tokenBindings().size());
+        assertTrue(context.identifierDictionary().isEmpty());
+        assertEquals(List.of("Current Member"), context.memberCandidatesIn("Ask Current Member to follow up"));
+        context.registerMemberCandidate("Li");
+        assertEquals(List.of(), context.memberCandidatesIn("Open client pipeline"));
+        assertEquals(List.of("Li"), context.memberCandidatesIn("Ask Li_team"));
     }
 
     @Test

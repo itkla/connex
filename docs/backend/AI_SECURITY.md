@@ -134,6 +134,9 @@ former members outside reference syntax remain outside #1822's guarantee. Full a
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company
 notes; private sessions retain the requester's own private notes. These reads retain the existing
 workspace/reader predicates and assistant history limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
+Person, deal and company assistant note queries also exclude restricted or inaccessible linked
+people in SQL before their limit, including inline person references. Ineligible recent notes
+cannot crowd older eligible notes out of the assistant's bounded page.
 
 `AiAssistantWriteTool.modelIdentifiers` is a pure stored-outcome projection. `assign_owner` declares
 the committed owner label as MEMBER provenance, excluding the removal sentinel. Fresh execution
@@ -168,7 +171,10 @@ they receive `[redacted]`, never reversible bindings. Their placeholder spelling
 if another identifier already holds that binding, so a literal member label cannot authorize it.
 
 Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
-MEMBER tokens before envelope/schema validation or repair retention. Noncanonical lowercase or
+MEMBER tokens before envelope/schema validation or repair retention. Malformed JSON receives a
+conservative, linear Unicode/backslash escape projection before any repair is allowed, including
+malformed native arguments. Encoded unexposed MEMBER tokens cannot earn a repair dispatch; the
+projection is used only for refusal and never changes retained text. Noncanonical lowercase or
 NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
 syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
 on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
@@ -244,6 +250,10 @@ mutation, outcome field or token kind.
 
 Answer, user-message and summary writers put raw MEMBER provenance only in the separate
 `memberIdentifiers` field, with the same `{kind:"member",value:...}` entry shape in all three forms.
+Unmasked turns retain directory labels only for boundary-aware raw-output provenance, without
+masking bindings or MEMBER leak-scan candidates. Their answer and summary metadata records matching
+raw labels without changing the output, so a later masked turn can protect replay after a rename
+or offboarding even when the directory no longer supplies the old label.
 The existing `identifiers` array never gains a `member` entry. New readers read both fields and
 retain old-shape conversation compatibility. Older releases ignore the additional field and replay
 without member masking, exactly their pre-#1822 behavior; automatic or manual rollback remains

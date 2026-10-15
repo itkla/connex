@@ -512,7 +512,8 @@ public class AiInvocationService {
                 : normalizeReasoning(captured.reasoning(), invocation);
         ObjectNode object = AiJson.extractObject(stripped, objectMapper);
         if (invocation.context().containsUnexposedMemberToken(stripped)
-                || object != null && invocation.context().containsUnexposedMemberToken(object.toString())) {
+                || object != null && invocation.context().containsUnexposedMemberToken(object.toString())
+                || object == null && containsUnexposedMemberInMalformedJson(stripped, invocation.context())) {
             return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
                     "invented_placeholder", "", object != null, false);
         }
@@ -556,6 +557,41 @@ public class AiInvocationService {
                         : Optional.empty());
     }
 
+    /**
+     * Checks a conservative escape projection before malformed provider text can earn repair.
+     * Suffix reductions decode nested Unicode escapes in amortized linear time: each reduction
+     * removes five characters. Remaining backslashes cannot hide placeholder braces. This scan
+     * never changes retained output and never accepts an otherwise refused placeholder.
+     */
+    private static boolean containsUnexposedMemberInMalformedJson(String text, MaskingContext context) {
+        StringBuilder decoded = new StringBuilder(text.length());
+        for (int index = 0; index < text.length(); index++) {
+            decoded.append(text.charAt(index));
+            while (decoded.length() >= 6) {
+                int start = decoded.length() - 6;
+                if (decoded.charAt(start) != '\\' || decoded.charAt(start + 1) != 'u') {
+                    break;
+                }
+                int value = 0;
+                boolean valid = true;
+                for (int digitIndex = start + 2; digitIndex < start + 6; digitIndex++) {
+                    int digit = Character.digit(decoded.charAt(digitIndex), 16);
+                    if (digit < 0) {
+                        valid = false;
+                        break;
+                    }
+                    value = value * 16 + digit;
+                }
+                if (!valid) {
+                    break;
+                }
+                decoded.setLength(start);
+                decoded.append((char) value);
+            }
+        }
+        return context.containsUnexposedMemberToken(decoded.toString().replace("\\", ""));
+    }
+
     private <T> AiNativeToolCompletion<T> parseNativeToolCall(
             RawInvocation raw,
             AiInvocation invocation,
@@ -580,7 +616,8 @@ public class AiInvocationService {
                     || call.thoughtSignature() != null
                             && invocation.context().containsUnexposedMemberToken(call.thoughtSignature())
                     || invocation.context().containsUnexposedMemberToken(call.arguments())
-                    || decoded != null && invocation.context().containsUnexposedMemberToken(decoded.toString())) {
+                    || decoded != null && invocation.context().containsUnexposedMemberToken(decoded.toString())
+                    || decoded == null && containsUnexposedMemberInMalformedJson(call.arguments(), invocation.context())) {
                 return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", 1);
             }
         }
