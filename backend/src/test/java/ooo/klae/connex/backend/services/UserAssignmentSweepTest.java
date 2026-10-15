@@ -104,6 +104,8 @@ class UserAssignmentSweepTest {
             case TASK -> order.verify(mapper).unassignTask(reference);
             case INTERVENTION -> order.verify(mapper).clearInterventionOwner(reference);
             case CAMPAIGN -> order.verify(mapper).clearCampaignOwner(reference);
+            case GOAL_OWNER -> order.verify(mapper).deleteOwnedGoal(reference);
+            case GOAL_CREATOR -> order.verify(mapper).clearGoalCreator(reference);
         }
         order.verify(transactions).commit(any());
     }
@@ -180,19 +182,37 @@ class UserAssignmentSweepTest {
         assertTrue(attempted.contains(11L));
     }
 
-    @Test
-    void existenceFailureLeavesRecoveryWorkDiscoverable() {
+    @ParameterizedTest
+    @EnumSource(value = Kind.class, names = {"COMPANY", "GOAL_OWNER", "GOAL_CREATOR"})
+    void existenceFailureLeavesRecoveryWorkDiscoverable(Kind kind) {
         Reference row = new Reference(1, 4, 1, 9);
-        when(mapper.findWatermark(Kind.COMPANY)).thenReturn(row.cursor());
-        when(mapper.findReferencesAnywhere(eq(Kind.COMPANY), isNull(), any(), any(), eq(2)))
+        when(mapper.findWatermark(kind)).thenReturn(row.cursor());
+        when(mapper.findReferencesAnywhere(eq(kind), isNull(), any(), any(), eq(2)))
             .thenReturn(List.of(row), List.of(), List.of(row));
         when(users.findExistingIds(anyList())).thenThrow(new IllegalStateException()).thenReturn(List.of());
         service.sweepOrphanAssignments();
-        verify(mapper, never()).clearOwner(any(), any());
+        verify(mapper, never()).lockParent(any(), any());
         service.sweepOrphanAssignments();
         service.sweepOrphanAssignments();
-        verify(mapper).clearOwner(Kind.COMPANY, row);
+        verify(mapper).lockParent(kind, row);
         assertEquals(1, metrics.get("connex.account.assignment.sweep.failures")
             .tags("mode", "periodic", "phase", "existence").counter().count());
+    }
+
+    @ParameterizedTest
+    @EnumSource(Kind.class)
+    void periodicCleanupNeverLocksLiveOrReservedAccounts(Kind kind) {
+        Reference orphan = new Reference(1, 4, 1, 9);
+        Reference live = new Reference(2, 4, 2, 10);
+        when(mapper.findWatermark(kind)).thenReturn(live.cursor());
+        when(mapper.findReferencesAnywhere(eq(kind), isNull(), any(), any(), eq(2)))
+            .thenReturn(List.of(orphan, live));
+        when(users.findExistingIds(List.of(9, 10))).thenReturn(List.of(10));
+
+        service.sweepOrphanAssignments();
+
+        verify(mapper).lockParent(kind, orphan);
+        verify(mapper, never()).lockParent(kind, live);
+        verify(transactions).commit(any());
     }
 }
