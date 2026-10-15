@@ -20,6 +20,8 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantIdentifierResolver;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
@@ -30,6 +32,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
     @Autowired NoteService noteService;
     @Autowired EntityReferenceMapper entityReferenceMapper;
     @Autowired AttachmentMapper attachmentMapper;
+    @Autowired AiAssistantIdentifierResolver identifierResolver;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -116,6 +119,36 @@ class ReferenceServiceTest extends AbstractServiceTest {
 
         assertTrue(added.isEmpty());
         assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void memberTargetVisibilityIncludesPendingMembersAndExcludesNonMembers() {
+        int active = newUser().getId();
+        int pending = newPendingMember().getId();
+        int outsider = newNonMember().getId();
+        assertEquals(java.util.Set.of(active, pending),
+                referenceService.visibleMemberIds(workspace.getId(), List.of(active, pending, outsider, active)));
+    }
+
+    @Test
+    void queuedMemberLabelsSurviveInvisibleTargetsWithRealMembershipChecks() {
+        User active = newUser();
+        User pending = newPendingMember();
+        User outsider = newNonMember();
+        Person visiblePerson = newPerson(newCompany());
+        String text = mention("Former Active Name", active) + " " + mention("Former Pending Name", pending)
+                + " " + mention("Foreign Alias", outsider) + " [Visible Contact](person:" + visiblePerson.getId()
+                + ") [Hidden Contact](person:2147483647 \"title\")";
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(text, List.of()))).getFirst().content());
+
+        var result = identifierResolver.resolve(text);
+
+        assertEquals(List.of(
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Active Name"),
+                new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Pending Name")),
+                result.identifiers());
+        assertTrue(result.resources().isEmpty());
     }
 
     /**

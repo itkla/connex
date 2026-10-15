@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -133,6 +135,13 @@ public class ReferenceService {
         public ReaderVisibleContent {
             references = references == null ? List.of() : List.copyOf(references);
         }
+    }
+
+    /**
+     * One authored or decoded member label and its possible user targets, without authorization.
+     * Reader-produced target sets are unmodifiable and shared across labels using the same target group.
+     */
+    public record MemberReference(String label, Set<Integer> memberIds) {
     }
 
     private record ReferenceTarget(String type, int id) {
@@ -466,6 +475,20 @@ public class ReferenceService {
         };
     }
 
+    /** Resolves distinct active or pending member ids in bounded, workspace-scoped batches. */
+    public Set<Integer> visibleMemberIds(int workspaceId, Collection<Integer> memberIds) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Integer> ids = memberIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        Set<Integer> visible = new HashSet<>();
+        for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
+            visible.addAll(workspaceMapper.getMemberIdsIncludingPending(
+                    workspaceId, ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()))));
+        }
+        return Set.copyOf(visible);
+    }
+
     /**
      * Requires a supported target to be visible to the current reader before a relational lookup.
      * @param workspaceId the active workspace
@@ -665,11 +688,44 @@ public class ReferenceService {
      * This pure parser grants no visibility and must receive only reader-authorized content.
      */
     public static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
-        if (readerVisibleContent == null || readerVisibleContent.isBlank()) {
+        List<MemberLabelSpan> labels = memberLabelSpans(readerVisibleContent);
+        var candidates = new java.util.LinkedHashSet<String>();
+        labels.forEach(span -> candidates.add(normalizeReferenceSyntax(
+                readerVisibleContent.substring(span.start(), span.end()))));
+        labels.forEach(span -> candidates.add(readerVisibleContent.substring(span.start(), span.end())));
+        return candidates.stream().filter(label -> !label.isBlank()).toList();
+    }
+
+    /**
+     * Extracts member labels and shared target sets from original prose using every member-label reading.
+     * Ambiguous definitions never expand into label/id pairs; target sets remain shared and unmodifiable.
+     * This pure parser grants no visibility; callers must authorize at least one target before using its label.
+     */
+    public static List<MemberReference> memberReferencesInContent(String content) {
+        List<MemberLabelSpan> labels = memberLabelSpans(content);
+        List<MemberReference> candidates = new ArrayList<>();
+        Map<MemberTargets, Set<String>> collected = new HashMap<>();
+        labels.forEach(span -> collectMemberReferences(candidates, collected, span.targets(),
+                normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
+        labels.forEach(span -> collectMemberReferences(candidates, collected, span.targets(),
+                content.substring(span.start(), span.end())));
+        return List.copyOf(candidates);
+    }
+
+    /** Retains each label/group once without copying or hashing its shared target set per label. */
+    private static void collectMemberReferences(
+            List<MemberReference> references, Map<MemberTargets, Set<String>> collected,
+            MemberTargets targets, String label) {
+        if (!label.isBlank() && collected.computeIfAbsent(targets, ignored -> new HashSet<>()).add(label)) {
+            references.add(new MemberReference(label, targets.readOnlyIds));
+        }
+    }
+
+    private static List<MemberLabelSpan> memberLabelSpans(String content) {
+        if (content == null || content.isBlank()) {
             return List.of();
         }
-        String content = readerVisibleContent;
-        Set<String> memberDefinitions = new HashSet<>();
+        Map<String, MemberTargets> memberDefinitions = new HashMap<>();
         ReferenceDelimiters delimiters = new ReferenceDelimiters(content, true);
         Set<Integer> definitionLineStarts = memberDefinitionLineStarts(content);
         Map<Integer, Integer> definitionEnds = new HashMap<>();
@@ -685,25 +741,24 @@ public class ReferenceService {
                     definitionEnds.put(definitions.start(), end);
                 }
             }
-            if (isMemberReferenceDestination(memberDefinitionDestination(content, definitions.end()), true)) {
-                memberDefinitions.addAll(memberReferenceKeys(definitions.group(1)));
-            }
+            memberReferenceId(memberDefinitionDestination(content, definitions.end()), true).ifPresent(id ->
+                    memberReferenceKeys(definitions.group(1)).forEach(key ->
+                            memberDefinitions.computeIfAbsent(key, ignored -> new MemberTargets()).ids.add(id)));
         }
+        Map<Integer, MemberTargets> singletonTargets = new HashMap<>();
+        memberDefinitions.replaceAll((key, targets) -> targets.ids.size() == 1
+                ? singletonTargets.computeIfAbsent(targets.ids.iterator().next(), MemberTargets::new) : targets);
         Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
         List<List<MemberLabelSpan>> readings = new ArrayList<>();
-        readings.add(canonicalMemberLabels(content, delimiters, false));
-        readings.add(canonicalMemberLabels(content, delimiters, true));
+        readings.add(canonicalMemberLabels(content, delimiters, false, singletonTargets));
+        readings.add(canonicalMemberLabels(content, delimiters, true, singletonTargets));
         for (int mode = 0; mode < 3; mode++) {
             List<MemberLabelSpan> spans = new ArrayList<>();
-            collectMemberLabels(content, memberDefinitions, validDefinitionStarts, spans,
+            collectMemberLabels(content, memberDefinitions, singletonTargets, validDefinitionStarts, spans,
                     matchingLabelEnds(content, mode != 0, mode == 2, true, delimiters));
             readings.add(spans);
         }
-        List<MemberLabelSpan> labels = mergeMemberLabelReadings(readings);
-        var candidates = new java.util.LinkedHashSet<String>();
-        labels.forEach(span -> candidates.add(normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
-        labels.forEach(span -> candidates.add(content.substring(span.start(), span.end())));
-        return candidates.stream().filter(label -> !label.isBlank()).toList();
+        return mergeMemberLabelReadings(readings);
     }
 
     /**
@@ -713,7 +768,8 @@ public class ReferenceService {
      * Destinations are cached and the 999-code-point bound precedes every source-label extraction.
      */
     private static List<MemberLabelSpan> canonicalMemberLabels(
-            String content, ReferenceDelimiters delimiters, boolean codeSpans) {
+            String content, ReferenceDelimiters delimiters, boolean codeSpans,
+            Map<Integer, MemberTargets> singletonTargets) {
         int[] nextClose = new int[content.length() + 1];
         nextClose[content.length()] = -1;
         for (int index = content.length() - 1; index >= 0; index--) {
@@ -721,7 +777,7 @@ public class ReferenceService {
             nextClose[index] = end > index + 1 ? nextClose[end]
                     : content.charAt(index) == ']' ? index : nextClose[index + 1];
         }
-        byte[] destinations = new byte[content.length()];
+        int[] destinations = new int[content.length()];
         Matcher destination = MEMBER_CANONICAL_DESTINATION.matcher(content);
         List<MemberLabelSpan> labels = new ArrayList<>();
         for (int index = 0; index < content.length(); index = delimiters.next(index, false, false)) {
@@ -734,13 +790,15 @@ public class ReferenceService {
                 continue;
             }
             if (destinations[end] == 0) {
-                boolean member = destination.region(end, content.length()).lookingAt()
+                destinations[end] = destination.region(end, content.length()).lookingAt()
                         && TYPE_USER.equals(destination.group(1))
-                        && parseReferenceTarget(TYPE_USER, destination.group(2)).isPresent();
-                destinations[end] = (byte) (member ? 2 : 1);
+                        ? parseReferenceTarget(TYPE_USER, destination.group(2)).map(ReferenceTarget::id).orElse(-1)
+                        : -1;
             }
-            if (destinations[end] == 2) {
-                labels.add(new MemberLabelSpan(start, end));
+            if (destinations[end] > 0) {
+                int id = destinations[end];
+                labels.add(new MemberLabelSpan(start, end,
+                        singletonTargets.computeIfAbsent(id, MemberTargets::new)));
             }
         }
         return labels;
@@ -757,7 +815,7 @@ public class ReferenceService {
                 && content.codePointCount(start, end) <= MAX_MEMBER_LABEL_CHARACTERS;
     }
 
-    /** Merges the fixed number of source-ordered readings in linear time without re-normalizing duplicates. */
+    /** Merges the fixed number of source-ordered readings in linear time. */
     private static List<MemberLabelSpan> mergeMemberLabelReadings(List<List<MemberLabelSpan>> readings) {
         int[] positions = new int[readings.size()];
         var merged = new java.util.LinkedHashSet<MemberLabelSpan>();
@@ -787,7 +845,8 @@ public class ReferenceService {
      * its following bracket an unambiguous key role; nested, opaque and block readings keep shortcuts.
      */
     private static void collectMemberLabels(
-            String content, Set<String> memberDefinitions, Set<Integer> validDefinitionStarts,
+            String content, Map<String, MemberTargets> memberDefinitions,
+            Map<Integer, MemberTargets> singletonTargets, Set<Integer> validDefinitionStarts,
             List<MemberLabelSpan> labels, int[] labelEnds) {
         Set<Integer> referenceKeys = new HashSet<>();
         for (int index = 0; index < content.length(); index++) {
@@ -805,24 +864,30 @@ public class ReferenceService {
                         && "()[]".indexOf(content.charAt(destinationEnd)) < 0) {
                     destinationEnd++;
                 }
-                if (isMemberReferenceDestination(content.substring(destinationStart, destinationEnd), false)) {
-                    labels.add(new MemberLabelSpan(index + 1, end));
-                }
+                int start = index + 1;
+                memberReferenceId(content.substring(destinationStart, destinationEnd), false)
+                        .ifPresent(id -> labels.add(new MemberLabelSpan(start, end,
+                                singletonTargets.computeIfAbsent(id, MemberTargets::new))));
             }
             if (next == end + 1 && next < content.length() && content.charAt(next) == ':'
                     && validDefinitionStarts.contains(index)) {
                 continue;
             }
-            if (!referenceKeys.contains(index) && memberDefinitionMatches(memberDefinitions, label)) {
-                labels.add(new MemberLabelSpan(index + 1, end));
+            if (!referenceKeys.contains(index)) {
+                for (MemberTargets targets : memberDefinitionTargets(memberDefinitions, label)) {
+                    labels.add(new MemberLabelSpan(index + 1, end, targets));
+                }
             }
             if (next == end + 1 && next < content.length()
                     && content.charAt(next) == '[' && labelEnds[next] >= 0
                     && memberLabelWithinLimit(content, next + 1, labelEnds[next])) {
                 String explicit = content.substring(next + 1, labelEnds[next]);
                 String key = explicit.isBlank() ? label : explicit;
-                if (memberDefinitionMatches(memberDefinitions, key)) {
-                    labels.add(new MemberLabelSpan(index + 1, end));
+                Set<MemberTargets> targets = memberDefinitionTargets(memberDefinitions, key);
+                if (!targets.isEmpty()) {
+                    for (MemberTargets target : targets) {
+                        labels.add(new MemberLabelSpan(index + 1, end, target));
+                    }
                     if (next == end + 1 && label.chars().noneMatch(value -> "[<`\r\n".indexOf(value) >= 0)) {
                         referenceKeys.add(next);
                     }
@@ -933,12 +998,13 @@ public class ReferenceService {
         return index;
     }
 
-    private static boolean isMemberReferenceDestination(String source, boolean complete) {
+    private static Optional<Integer> memberReferenceId(String source, boolean complete) {
         String value = complete ? normalizeReferenceSyntax(memberDefinitionDestination(source)).strip()
                 : normalizeReferenceSyntax(source).stripLeading();
         Matcher destination = (complete ? MEMBER_DEFINITION_DESTINATION : MEMBER_REFERENCE_DESTINATION).matcher(value);
         return (complete ? destination.matches() : destination.lookingAt())
-                && parseReferenceTarget(TYPE_USER, destination.group(1)).isPresent();
+                ? parseReferenceTarget(TYPE_USER, destination.group(1)).map(ReferenceTarget::id)
+                : Optional.empty();
     }
 
     /** Extracts the original destination so authored title content cannot suppress member detection. */
@@ -990,8 +1056,15 @@ public class ReferenceService {
         return source.substring(start, end);
     }
 
-    private static boolean memberDefinitionMatches(Set<String> definitions, String label) {
-        return memberReferenceKeys(label).stream().anyMatch(definitions::contains);
+    private static Set<MemberTargets> memberDefinitionTargets(Map<String, MemberTargets> definitions, String label) {
+        var targets = new java.util.LinkedHashSet<MemberTargets>();
+        memberReferenceKeys(label).forEach(key -> {
+            MemberTargets target = definitions.get(key);
+            if (target != null) {
+                targets.add(target);
+            }
+        });
+        return targets;
     }
 
     /** Container-stripped keys supplement literal readings rather than discarding authored text. */
@@ -1004,7 +1077,20 @@ public class ReferenceService {
         return keys;
     }
 
-    private record MemberLabelSpan(int start, int end) {
+    /** Shares targets by definition key without multiplying spans or comparing whole id sets. */
+    private static final class MemberTargets {
+        private final Set<Integer> ids = new java.util.LinkedHashSet<>();
+        private final Set<Integer> readOnlyIds = Collections.unmodifiableSet(ids);
+
+        private MemberTargets() {
+        }
+
+        private MemberTargets(int memberId) {
+            ids.add(memberId);
+        }
+    }
+
+    private record MemberLabelSpan(int start, int end, MemberTargets targets) {
     }
 
     private static String referenceLabelKey(String label) {
