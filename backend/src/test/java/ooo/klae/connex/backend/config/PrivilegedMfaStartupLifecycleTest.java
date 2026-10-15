@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
@@ -88,12 +90,73 @@ class PrivilegedMfaStartupLifecycleTest {
         assertFalse(Files.exists(readinessFile));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "configuration-default", " configuration-default "})
+    void anUnattributedAttestationOptOutRefusesStartup(String actor, @TempDir Path directory) {
+        Path readinessFile = directory.resolve("ready");
+
+        IllegalStateException refusal = assertThrows(IllegalStateException.class,
+                () -> firstBoot(readinessFile, null,
+                        "--connex.security.privileged-mfa.attestation-enforced=false",
+                        "--connex.security.privileged-mfa.change-actor=" + actor).close());
+
+        assertEquals("Disabling privileged MFA attestation enforcement requires an accountable change actor",
+                refusal.getMessage());
+        assertFalse(Files.exists(readinessFile));
+    }
+
+    @Test
+    void anAttestationOptOutWithoutAnActorRefusesStartup(@TempDir Path directory) {
+        Path readinessFile = directory.resolve("ready");
+
+        IllegalStateException refusal = assertThrows(IllegalStateException.class,
+                () -> firstBoot(readinessFile, null,
+                        "--connex.security.privileged-mfa.attestation-enforced=false").close());
+
+        assertEquals("Disabling privileged MFA attestation enforcement requires an accountable change actor",
+                refusal.getMessage());
+        assertFalse(Files.exists(readinessFile));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "yes", "malformed"})
+    void aBlankOrMalformedAttestationPolicyRefusesStartup(String configured, @TempDir Path directory) {
+        Path readinessFile = directory.resolve("ready");
+
+        IllegalStateException refusal = assertThrows(IllegalStateException.class,
+                () -> firstBoot(readinessFile, null,
+                        "--connex.security.privileged-mfa.attestation-enforced=" + configured,
+                        "--connex.security.privileged-mfa.change-actor=policy-test").close());
+
+        assertEquals("Privileged MFA attestation enforcement must be true or false", refusal.getMessage());
+        assertFalse(Files.exists(readinessFile));
+    }
+
+    @Test
+    void anAttributedAttestationOptOutStartsAndRecordsItsPosture(@TempDir Path directory) {
+        Path readinessFile = directory.resolve("ready");
+        try (ConfigurableApplicationContext context = firstBoot(readinessFile, null,
+                "--connex.security.privileged-mfa.attestation-enforced= FALSE ",
+                "--connex.security.privileged-mfa.change-actor= security-change-1534 ")) {
+            assertFalse(context.getBean(PrivilegedMfaProperties.class).isAttestationEnforced());
+            ArgumentCaptor<Object> posture = ArgumentCaptor.forClass(Object.class);
+            verify(context.getBean(AuditService.class)).recordStrictIndependentScoped(
+                    eq("auth.mfa.policy.configured"), eq("security_policy"),
+                    isNull(), isNull(), isNull(), eq("privileged-mfa"), any(), posture.capture());
+            Map<?, ?> recorded = assertInstanceOf(Map.class, posture.getValue());
+            assertEquals("FALSE", recorded.get("configuredAttestationEnforcedValue"));
+            assertEquals(false, recorded.get("attestationEnforced"));
+            assertEquals("security-change-1534", recorded.get("actor"));
+            assertTrue(Files.exists(readinessFile));
+        }
+    }
+
     private static ConfigurableApplicationContext firstBoot(Path readinessFile) {
         return firstBoot(readinessFile, null);
     }
 
     private static ConfigurableApplicationContext firstBoot(
-            Path readinessFile, RuntimeException auditFailure) {
+            Path readinessFile, RuntimeException auditFailure, String... policyArguments) {
         SpringApplication application = new SpringApplication(FirstBootConfiguration.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         application.setBannerMode(Banner.Mode.OFF);
@@ -101,12 +164,14 @@ class PrivilegedMfaStartupLifecycleTest {
         application.setRegisterShutdownHook(false);
         application.addInitializers(context -> context.getBeanFactory().registerSingleton(
                 "freshInstance", new FreshInstance(readinessFile, auditFailure)));
-        return application.run(
+        List<String> arguments = new java.util.ArrayList<>(List.of(
                 "--connex.bootstrap.enabled=true",
                 "--connex.bootstrap.username=founder",
                 "--connex.bootstrap.email=founder@example.com",
                 "--connex.bootstrap.password=Aa1!aaaa-founder",
-                "--connex.readiness-file=" + readinessFile);
+                "--connex.readiness-file=" + readinessFile));
+        arguments.addAll(List.of(policyArguments));
+        return application.run(arguments.toArray(String[]::new));
     }
 
     /** Collaborator state for one boot: whether the founding owner exists yet. */

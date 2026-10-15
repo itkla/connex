@@ -53,8 +53,8 @@ public class PrivilegedMfaProperties {
     }
 
     /**
-     * Whether per-organization attestation of privileged passkeys is enforced (#1534). Off unless
-     * configured {@code true}, ignoring case, until the switch-on release makes it the default;
+     * Whether per-organization attestation of privileged passkeys is enforced (#1534). Defaults on
+     * unless configured {@code false}, ignoring case; an opt-out requires an accountable actor.
      * {@link #validate(Clock)} refuses any value other than {@code true} or {@code false}, so a
      * mistyped value cannot silently leave it off.
      *
@@ -62,7 +62,7 @@ public class PrivilegedMfaProperties {
      *     be signed by an attested passkey
      */
     public boolean isAttestationEnforced() {
-        return "true".equalsIgnoreCase(normalize(attestationEnforced));
+        return !"false".equalsIgnoreCase(normalize(attestationEnforced));
     }
 
     /**
@@ -131,6 +131,10 @@ public class PrivilegedMfaProperties {
         if (!isEnforced() && DEFAULT_ACTOR.equals(getChangeActor())) {
             throw new IllegalStateException(
                     "Disabling privileged MFA requires an accountable change actor");
+        }
+        if (!isAttestationEnforced() && DEFAULT_ACTOR.equals(getChangeActor())) {
+            throw new IllegalStateException(
+                    "Disabling privileged MFA attestation enforcement requires an accountable change actor");
         }
         validateRecoveryStructure();
         if (normalize(recoveryTokenSha256).isEmpty()) {

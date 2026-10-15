@@ -48,6 +48,7 @@ class PrivilegedMfaStartupConfigurationTest {
             when(context.getBean(UserMapper.class).getUserById(42)).thenReturn(user);
             when(context.getBean(PrivilegedAccountService.class).isPrivileged(42)).thenReturn(true);
 
+            assertThat(context.getBean(PrivilegedMfaProperties.class).isAttestationEnforced()).isTrue();
             assertThat(policy.isConfirmationEnabled()).isTrue();
             assertThat(policy.requiresConfirmation(42)).isTrue();
             assertThat(context.getBean(PrivilegedMfaProperties.class).getChangeActor())
@@ -99,8 +100,8 @@ class PrivilegedMfaStartupConfigurationTest {
                             eq("Privileged MFA policy configured by security-change-123"),
                             eq(Map.of("actor", "security-change-123", "configuredValue", "true",
                                     "enforced", true, "bootstrapConfirmationEnabled", false,
-                                    "configuredAttestationEnforcedValue", "false",
-                                    "attestationEnforced", false,
+                                    "configuredAttestationEnforcedValue", "true",
+                                    "attestationEnforced", true,
                                     "unenrolledPrivilegedCount", 0L,
                                     "unenrolledWithoutSelfServiceCount", 0L,
                                     "attestationRequiredCount", 0L, "grandfatheredCoverageCount", 0L)));

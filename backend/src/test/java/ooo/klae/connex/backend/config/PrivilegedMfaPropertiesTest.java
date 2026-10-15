@@ -43,6 +43,33 @@ class PrivilegedMfaPropertiesTest {
     }
 
     @Test
+    void attestationEnforcementDefaultsOn() {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+
+        assertEquals("true", properties.getAttestationEnforced());
+        assertTrue(properties.isAttestationEnforced());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "true", " TRUE ", "yes", "malformed"})
+    void attestationReadsFailClosedOutsideSpring(String configured) {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setAttestationEnforced(configured);
+
+        assertTrue(properties.isAttestationEnforced());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"false", " FALSE ", "FaLsE"})
+    void onlyAnExplicitFalseDisablesTheAttestationRead(String configured) {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setAttestationEnforced(configured);
+
+        assertFalse(properties.isAttestationEnforced());
+    }
+
+    @Test
     void recoveryConfigurationMustBeCompleteAndShortLived() {
         PrivilegedMfaProperties properties = configured(ACCOUNT_A, "recovery-proof", NOW.plusSeconds(1800));
         assertDoesNotThrow(() -> properties.validate(CLOCK));

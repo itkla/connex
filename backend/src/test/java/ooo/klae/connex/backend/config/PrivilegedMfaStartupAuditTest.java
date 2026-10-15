@@ -94,7 +94,7 @@ class PrivilegedMfaStartupAuditTest {
                 eq("Privileged MFA policy configured by change-456"),
                 eq(Map.of("actor", "change-456", "configuredValue", "true",
                         "enforced", true, "bootstrapConfirmationEnabled", false,
-                        "configuredAttestationEnforcedValue", "false", "attestationEnforced", false,
+                        "configuredAttestationEnforcedValue", "true", "attestationEnforced", true,
                         "unenrolledPrivilegedCount", 0L, "unenrolledWithoutSelfServiceCount", 0L,
                         "attestationRequiredCount", 0L, "grandfatheredCoverageCount", 0L)));
     }
@@ -135,6 +135,7 @@ class PrivilegedMfaStartupAuditTest {
     void theAttestationSwitchAndCoverageInventoriesAreRecorded(String configured) {
         PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
         properties.setAttestationEnforced(configured);
+        properties.setChangeActor("attestation-policy-test");
         PrivilegedAccountService privilegedAccounts = inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
         when(privilegedAccounts.attestationRequiredAccountCount()).thenReturn(3L);
         when(privilegedAccounts.grandfatheredCoverageCount()).thenReturn(17L);
