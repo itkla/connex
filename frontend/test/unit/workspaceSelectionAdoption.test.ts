@@ -446,7 +446,7 @@ describe("authoritative workspace selection adoption", () => {
             throw new Error(`Unexpected request to ${url.pathname}`);
         }));
 
-        await expect(leaveWorkspace(7)).resolves.toEqual({ activeWorkspaceId: null });
+        await expect(leaveWorkspace(7)).resolves.toEqual({ activeWorkspaceId: null, standing: null });
         expect(document.cookie).not.toContain("connex_workspace");
     });
 

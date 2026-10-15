@@ -115,8 +115,13 @@
         "exitRefusedSoleApprover": "あなたはこのワークスペースの文書承認で唯一の承認者です。退出する前に担当を変更してください。",
         "exitRefusedOrgNotMember": "あなたはすでにこの組織のメンバーではありません。",
         "exitRefusedOrgLastOwner": "あなたはこの組織の最後のオーナーです。退出する前に、別のメンバーをオーナーにしてください。",
-        "approvalRefreshFailed": "パスキーは承認されましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。",
-        "confinementRecheck": "もう一度確認"
+        "approvalRefreshFailed": "画面を更新できませんでした",
+        "confinementRecheck": "もう一度確認",
+        "exitRefreshFailed": "画面を更新できませんでした",
+        "addedRefreshFailed": "画面を更新できませんでした",
+        "approvalRefreshFailedDescription": "パスキーは承認されましたが、画面にまだ反映されていない可能性があります。しばらくしてからもう一度確認してください。",
+        "exitRefreshFailedDescription": "退出は完了しましたが、画面に以前のアクセス状態が残っている可能性があります。しばらくしてからもう一度確認してください。",
+        "addedRefreshFailedDescription": "パスキーは追加されましたが、画面にまだ反映されていない可能性があります。しばらくしてからもう一度確認してください。"
     },
     "AccountConnections": {
         "title": "連携アカウント",

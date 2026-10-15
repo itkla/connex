@@ -188,7 +188,7 @@
       AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6)
   </select>
 
-  <select id="isAccountDeletionReservationOwner" resultType="boolean">
+  <select id="isAccountDeletionReservationOwner" resultType="boolean" flushCache="true" useCache="false">
     SELECT COALESCE(
       account_deletion_reservation_owner = #{owner}
         AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),
@@ -196,6 +196,7 @@
     )
     FROM app_user
     WHERE id = #{id}
+    FOR UPDATE
   </select>
 
   <update id="reserveAccountDeletion">

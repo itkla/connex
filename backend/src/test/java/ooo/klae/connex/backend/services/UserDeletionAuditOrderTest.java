@@ -1,12 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.publicapi.ApiCredentialLifecycleService;
 import ooo.klae.connex.backend.publicapi.ApiCredentialReferenceRoot;
@@ -36,6 +39,22 @@ class UserDeletionAuditOrderTest {
     @AfterEach
     void clearTenantContext() {
         new TenantContext().clear();
+    }
+
+    @Test
+    void accountLockPrecedesReservationOwnershipCheck() {
+        Fixture fixture = new Fixture();
+        when(fixture.userMapper.isAccountDeletionReservationOwner(9, OWNER)).thenReturn(false);
+
+        ConflictException failure = assertThrows(
+            ConflictException.class, () -> fixture.transaction.delete(9, OWNER));
+
+        assertEquals("Account deletion was not reserved", failure.getMessage());
+        InOrder order = inOrder(fixture.userMapper);
+        order.verify(fixture.userMapper).lockById(9);
+        order.verify(fixture.userMapper).isAccountDeletionReservationOwner(9, OWNER);
+        order.verifyNoMoreInteractions();
+        verifyNoInteractions(fixture.auditService, fixture.managedObjectService, fixture.lifecycleService);
     }
 
     @Test

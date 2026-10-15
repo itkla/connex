@@ -191,6 +191,12 @@ An owner is a *recovery owner* when they are active, carry no live account-delet
 
 Recovery candidates come from locked memberships, and their overlays' permission sets from the role roots locked in step 6. `AccountDeletionReservationRead` reads only their reservation flags in a fresh read-only `REQUIRES_NEW` / `READ_COMMITTED` transaction, without acquiring user locks after workspace locks; account deletion collects the candidates across every owned workspace and issues that read once. Reservation creation and renewal take the user and ascending owned-workspace roots before updating the lease, retaining those roots through commit. This prevents an uncommitted renewal from extending a lease after another transaction has counted its old expiry as available. `AccountDeletionReservationFenceArchTest` is the rot alarm on that coupling. Renewal rejects expired leases; expiry/release only restore availability. The fresh read avoids an old repeatable-read snapshot counting a reserved owner as available.
 
+Final account deletion takes the account root exclusively before proving reservation ownership and
+database-clock expiry. `isAccountDeletionReservationOwner` uses `FOR UPDATE` on that already-held
+row, flushes the MyBatis session cache, and bypasses the second-level cache, so an earlier
+REPEATABLE READ snapshot or cached answer cannot authorize deletion under a replaced reservation.
+It refuses before erasure or audit side effects when the reservation no longer holds (#2059).
+
 The built-in administrator exception (`WorkspaceService.requireBuiltInAdministrator`) is not a grantable permission, so any overlay denies it whatever that overlay contains. Transactions that act on the exception while holding record locks must take the exception's authorization snapshot — user root `FOR SHARE`, active workspace root `FOR SHARE`, exact membership `FOR UPDATE` — through `isLockedBuiltInAdministrator` **before** their first record lock, and assert it later with `requireLockedBuiltInAdministrator`. Report deletion, report-snapshot deletion, deal deletion, and deal-document deletion take it at the top of the transaction, ahead of `lockDefinitions`, the duplicate-decision mutex, and the deal/document row locks respectively; approval cancellation asserts it in place because `lockApprovalMutationRecipients` already holds those exact rows. The plain non-locking form remains correct for the read-only member-scope analytics gates, which take no lock afterwards.
 
 Custom-role creation uses `lockRoleCreationAuthorization`, which takes no role id and checks the grant ceiling after locking current role-management authority. Existing-role updates use `lockRoleMutationAuthorization` with a non-nullable role id and always enforce owner authority, retained recovery, and the grant ceiling after locking. Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
@@ -327,7 +333,6 @@ separate catalog-pinned transaction, which locks only the exact goal row through
 conditionally deleting an orphan-owned personal goal or clearing an orphaned creator. Live owner
 and creator pointers, including those of reserved accounts, are preserved.
 [Governance deletion and retention](../GOVERNANCE_DELETION_AND_RETENTION.md) defines the product bound.
-The existing final-deletion reservation precheck is #2059 and is unchanged here.
 
 ### Public API credentials
 

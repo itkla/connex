@@ -228,6 +228,24 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("SATISFIED");
     });
 
+    it("reports a failed read as superseded once a newer read has decided the standing", async () => {
+        stubBrowser(SECURITY, "?mfa=approve");
+        const reads = standingReads();
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+        const api = await import("@/app/lib/api");
+
+        const olderExit = api.settlePrivilegedMfaStanding("exit");
+        await flush();
+        const newerCheck = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        reads.release(1, requirements("SATISFIED"));
+        await expect(newerCheck).resolves.toBe("applied");
+
+        reads.release(0, json({ message: "Unavailable" }, 503));
+        await expect(olderExit).resolves.toBe("superseded");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
     it("gives up and reports failure when identity changes keep overtaking the read", async () => {
         const { listeners } = stubBrowser(SECURITY, "?mfa=approve");
         let served = 0;

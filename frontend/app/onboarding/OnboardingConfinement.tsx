@@ -63,8 +63,9 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
         },
         {
             onEnrolled: async () => {
-                const [loaded] = await Promise.all([getPasskeys(), refresh("ceremony")]);
+                const [loaded, standing] = await Promise.all([getPasskeys(), refresh("ceremony")]);
                 setPasskeys(loaded);
+                return standing;
             },
             onProofRejected: () => void refresh("check"),
         },
@@ -162,7 +163,9 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
                     void Promise.allSettled([getPasskeys(), refresh("ceremony")]).then(([loaded, settled]) => {
                         if (loaded.status === "fulfilled") setPasskeys(loaded.value);
                         if (loaded.status === "rejected" || settled.status === "rejected" || settled.value === "failed") {
-                            toastError(t("approvalRefreshFailed"));
+                            toastError(t("approvalRefreshFailed"), {
+                                description: t("approvalRefreshFailedDescription"),
+                            });
                         }
                     });
                 }}
