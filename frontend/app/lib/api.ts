@@ -650,7 +650,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
  * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
- * read again, up to three attempts before it is reported as failed. A failed or malformed read keeps any confinement, and a
+ * read again, up to three attempts before it is reported as failed. A read that fails after a newer
+ * one has already decided the standing ends superseded too, since the newer read is the fresher
+ * answer. A failed or malformed read keeps any confinement, and a
  * standing this client does not know counts as malformed. A backend too old to report standing releases only
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
@@ -668,23 +670,26 @@ export async function settlePrivilegedMfaStanding(
         privilegedMfaEventEpoch += 1;
         privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
     }
+    const failedUnlessOvertaken = (sequence: number): PrivilegedMfaSettleOutcome =>
+        sequence < privilegedMfaAppliedSequence ? "superseded" : "failed";
+    let sequence = privilegedMfaReadSequence;
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
-        const sequence = privilegedMfaReadSequence;
+        sequence = privilegedMfaReadSequence;
         let response: unknown;
         try {
             response = await getPasskeyRegistrationRequirements();
         } catch {
-            return "failed";
+            return failedUnlessOvertaken(sequence);
         }
-        if (!isPasskeyRegistrationRequirements(response)) return "failed";
+        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence);
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
         applyPrivilegedMfaStanding(response, sequence);
         return "applied";
     }
-    return "failed";
+    return failedUnlessOvertaken(sequence);
 }
 
 /**
@@ -704,10 +709,13 @@ export function forgetPrivilegedMfaStanding(): void {
     resetPrivilegedMfaState();
 }
 
-/** Reads the standing again after a safe exit, only when the browser was confined. */
-async function settleAfterSafeExit(): Promise<void> {
-    if (activePrivilegedMfaConfinement() === null) return;
-    await settlePrivilegedMfaStanding("exit");
+/**
+ * Reads the standing again after a safe exit, only when the browser was confined.
+ * @returns how the read settled, or null when the browser was not confined and nothing was read
+ */
+async function settleAfterSafeExit(): Promise<PrivilegedMfaSettleOutcome | null> {
+    if (activePrivilegedMfaConfinement() === null) return null;
+    return settlePrivilegedMfaStanding("exit");
 }
 
 function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
@@ -5127,10 +5135,11 @@ export function removeOrgMember(orgId: number, userId: number) {
 /**
  * Leaves an organization (#1534). A confined account may always send it; once it succeeds, the
  * account's standing is read again so a departure that ended the privilege also ends confinement.
+ * @returns how that read settled, or null when the browser was not confined
  */
-export async function leaveOrganization(orgId: number) {
+export async function leaveOrganization(orgId: number): Promise<PrivilegedMfaSettleOutcome | null> {
     await postJson<void>(`/api/orgs/${orgId}/leave`);
-    await settleAfterSafeExit();
+    return settleAfterSafeExit();
 }
 
 /** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
@@ -5358,12 +5367,18 @@ export function declineWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/decline`, {});
 }
 
+/** The workspace selection after leaving one, and how the standing read that followed settled. */
+export type LeftWorkspaceSelection = Types.WorkspaceSelection & {
+    /** How the standing read settled, or null when the browser was not confined. */
+    standing: PrivilegedMfaSettleOutcome | null;
+};
+
 /**
  * Leaves a workspace and returns the server's new selection. A confined account may always send it;
  * once it succeeds, the account's standing is read again so a departure that ended the privilege
  * also ends confinement before the caller navigates.
  */
-export async function leaveWorkspace(id: number) {
+export async function leaveWorkspace(id: number): Promise<LeftWorkspaceSelection> {
     const selection = await withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
             () => postWorkspaceSelectionJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
@@ -5376,8 +5391,8 @@ export async function leaveWorkspace(id: number) {
         ),
         "workspace",
     );
-    await settleAfterSafeExit();
-    return selection;
+    const standing = await settleAfterSafeExit();
+    return { ...selection, standing };
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {

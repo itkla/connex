@@ -282,9 +282,18 @@ function MembersWorkspacePanel({
         try {
             const loaded = await getWorkspaceMembers(workspaceId);
             if (refreshId === membersRefresh.current) setMembers(loaded);
-        } catch {
-            return;
+        } catch (err) {
+            if (refreshId === membersRefresh.current) {
+                showApiError(err, "membersRefreshFailed", "membersRefreshFailedDescription");
+            }
         }
+    }, [showApiError, workspaceId]);
+
+    useEffect(() => {
+        const generation = membersRefresh;
+        return () => {
+            generation.current += 1;
+        };
     }, [workspaceId]);
 
     useEffect(() => {

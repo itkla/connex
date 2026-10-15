@@ -115,8 +115,13 @@
         "exitRefusedSoleApprover": "You're the only approver on a document approval here. Reassign it before you leave.",
         "exitRefusedOrgNotMember": "You're no longer a member of this organization.",
         "exitRefusedOrgLastOwner": "You're this organization's last owner. Make someone else an owner before you leave.",
-        "approvalRefreshFailed": "Your passkey was approved, but this page couldn't update. Check again in a moment.",
-        "confinementRecheck": "Check again"
+        "approvalRefreshFailed": "Couldn't update the page",
+        "confinementRecheck": "Check again",
+        "exitRefreshFailed": "Couldn't update the page",
+        "addedRefreshFailed": "Couldn't update the page",
+        "approvalRefreshFailedDescription": "Your passkey was approved, but this page may not show it yet. Check again in a moment.",
+        "exitRefreshFailedDescription": "You've left, but this page may still show your earlier access. Check again in a moment.",
+        "addedRefreshFailedDescription": "Your passkey was added, but this page may not show it yet. Check again in a moment."
     },
     "AccountConnections": {
         "title": "Connected accounts",

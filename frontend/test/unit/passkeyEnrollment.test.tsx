@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError } from "@/app/lib/api";
+import { ApiError, type PrivilegedMfaSettleOutcome } from "@/app/lib/api";
 import type { PasskeyEnrollment, PasskeyEnrollmentRequirements } from "@/app/hooks/usePasskeyEnrollment";
 import enAccount from "@/messages/en/account.json";
 
@@ -44,11 +44,11 @@ const firstPasskey: PasskeyEnrollmentRequirements = {
     emailConfirmationSatisfied: false,
 };
 
-type EnrollmentCallbacks = { onEnrolled: () => Promise<void>; onProofRejected: () => void };
+type EnrollmentCallbacks = { onEnrolled: () => Promise<PrivilegedMfaSettleOutcome>; onProofRejected: () => void };
 
 async function mountEnrollment(
     requirements: PasskeyEnrollmentRequirements,
-    callbacks: EnrollmentCallbacks = { onEnrolled: vi.fn(async () => undefined), onProofRejected: vi.fn() },
+    callbacks: EnrollmentCallbacks = { onEnrolled: vi.fn(async () => "applied" as const), onProofRejected: vi.fn() },
 ): Promise<EnrollmentCallbacks> {
     const { usePasskeyEnrollment } = await import("@/app/hooks/usePasskeyEnrollment");
     function Probe() {
@@ -177,11 +177,38 @@ describe("enrolling a passkey", () => {
         expect(current().password.open).toBe(false);
     });
 
+    it("says the page could not update when only the standing read after enrollment failed", async () => {
+        const callbacks = {
+            onEnrolled: vi.fn(async () => "failed" as const),
+            onProofRejected: vi.fn(),
+        };
+        await mountEnrollment({ ...firstPasskey, hasPasskeys: true }, callbacks);
+
+        await act(async () => current().addPasskey());
+
+        expect(mocks.finish).toHaveBeenCalledOnce();
+        expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.added);
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.addedRefreshFailed, {
+            description: enAccount.AccountSecurity.addedRefreshFailedDescription,
+        });
+        expect(mocks.toastError).not.toHaveBeenCalledWith(enAccount.AccountSecurity.loadFailed);
+    });
+
+    it("adds nothing to the announcement when the standing read after enrollment settles", async () => {
+        await mountEnrollment({ ...firstPasskey, hasPasskeys: true });
+
+        await act(async () => current().addPasskey());
+
+        expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.added);
+        expect(mocks.toastError).not.toHaveBeenCalled();
+    });
+
     it("runs the caller's follow-up before announcing an accepted passkey", async () => {
         const order: string[] = [];
         const callbacks = {
             onEnrolled: vi.fn(async () => {
                 order.push("enrolled");
+                return "applied" as const;
             }),
             onProofRejected: vi.fn(),
         };
