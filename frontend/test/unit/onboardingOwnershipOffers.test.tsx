@@ -11,6 +11,7 @@ const offers = vi.hoisted(() => ({
 }));
 const standing = vi.hoisted(() => ({
     confined: false,
+    fresh: true,
     status: "ready" as "loading" | "ready" | "failed",
     refresh: vi.fn(async () => "applied" as const),
 }));
@@ -45,6 +46,7 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
     usePrivilegedMfaStanding: () => ({
         requirements: null,
         status: standing.status,
+        fresh: standing.fresh,
         confined: standing.confined,
         reason: standing.confined ? "attestation" : null,
         refresh: standing.refresh,
@@ -114,6 +116,7 @@ afterEach(async () => {
     offers.state = null;
     standing.confined = false;
     standing.status = "ready";
+    standing.fresh = true;
     standing.refresh.mockClear();
 });
 
@@ -177,6 +180,18 @@ describe("onboarding ownership offers", () => {
         expect(container.querySelector("form")).toBeNull();
         await act(async () => button("Onboarding.standingRetry").click());
         expect(standing.refresh).toHaveBeenCalledWith("check");
+    });
+
+    it("treats a cached standing as unconfirmed once a newer read of it has failed", async () => {
+        offers.state = selfOffers([offer]);
+        standing.fresh = false;
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.standingFailedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
     });
 
     it("keeps workspace creation and joining for an account that is not confined", async () => {

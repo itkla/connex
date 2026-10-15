@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import type { PasskeyRegistrationRequirements } from "@/app/lib/types";
 import {
@@ -23,6 +23,11 @@ export type PrivilegedMfaStandingState = {
      * one, or when the read right after a ceremony failed, so the ceremony's outcome can be retried.
      */
     status: "loading" | "ready" | "failed";
+    /**
+     * Whether this surface's latest read succeeded. A surface that must fail closed treats a cached
+     * standing as unconfirmed once a newer read of it has failed.
+     */
+    fresh: boolean;
     /** Whether the browser is confined, from the server's refusal, a step URL or the newest read. */
     confined: boolean;
     /** Why the browser is confined, even when no read has decided yet, or null when it is not. */
@@ -35,7 +40,8 @@ export type PrivilegedMfaStandingState = {
  * Keeps a surface's view of the account's own privileged-MFA standing current (#1534). The standing
  * is read when the surface mounts, when its tab becomes visible again and whenever the browser's
  * request identity changes, and every read settles browser-local confinement. Only the newest
- * decisive read reaches the view, so a slow, older read never replaces a newer answer.
+ * decisive read reaches the view, so a slow, older read never replaces a newer answer, and a
+ * failure from a read that a later successful one overtook is ignored.
  * @returns the decisive requirements, their status, whether the browser is confined, and a refresh
  */
 export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
@@ -50,13 +56,20 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         () => null,
     );
     const [lastFailure, setLastFailure] = useState<"none" | "read" | "ceremony">("none");
+    const refreshCount = useRef(0);
+    const lastSuccessfulRefresh = useRef(0);
 
     const refresh = useCallback(async (settlement: PrivilegedMfaSettlement = "check") => {
+        refreshCount.current += 1;
+        const refreshId = refreshCount.current;
         const outcome = await settlePrivilegedMfaStanding(settlement);
-        setLastFailure((previous) => {
-            if (outcome !== "failed") return "none";
-            return settlement === "ceremony" || previous === "ceremony" ? "ceremony" : "read";
-        });
+        if (outcome !== "failed") {
+            lastSuccessfulRefresh.current = Math.max(lastSuccessfulRefresh.current, refreshId);
+            setLastFailure("none");
+        } else if (refreshId > lastSuccessfulRefresh.current) {
+            setLastFailure((previous) =>
+                settlement === "ceremony" || previous === "ceremony" ? "ceremony" : "read");
+        }
         return outcome;
     }, []);
 
@@ -80,6 +93,7 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         status: requirements === null
             ? lastFailure === "none" ? "loading" : "failed"
             : lastFailure === "ceremony" ? "failed" : "ready",
+        fresh: lastFailure === "none",
         confined: reason !== null || standing === "ENROLLMENT_REQUIRED" || standing === "ATTESTATION_REQUIRED",
         reason,
         refresh,

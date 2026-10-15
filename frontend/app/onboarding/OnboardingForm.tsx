@@ -30,7 +30,7 @@ export default function OnboardingForm() {
     const showApiError = useApiErrorToast("Onboarding");
     const ownershipOffers = useSelfOwnershipOffers();
     const standing = usePrivilegedMfaStanding();
-    const actionsAvailable = standing.status === "ready" && !standing.confined;
+    const actionsAvailable = standing.status === "ready" && standing.fresh && !standing.confined;
     const router = useRouter();
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
@@ -125,7 +125,7 @@ export default function OnboardingForm() {
                                     {t("confinedRecheck")}
                                 </Button>
                             </div>
-                        ) : standing.status === "failed" ? (
+                        ) : standing.status === "failed" || (standing.status === "ready" && !standing.fresh) ? (
                             <div role="alert" className="mt-8 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5">
                                 <p className="text-sm font-medium text-neutral-900">{t("standingFailedTitle")}</p>
                                 <p className="mt-1 text-sm text-neutral-600 text-pretty">{t("standingFailedBody")}</p>

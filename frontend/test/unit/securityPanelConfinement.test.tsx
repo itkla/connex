@@ -35,6 +35,7 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
     usePrivilegedMfaStanding: () => ({
         requirements: backend.requirements,
         status: backend.requirements ? "ready" : backend.failed ? "failed" : "loading",
+        fresh: !backend.failed,
         confined: backend.reason !== null
             || backend.requirements?.standing === "ATTESTATION_REQUIRED"
             || backend.requirements?.standing === "ENROLLMENT_REQUIRED",
