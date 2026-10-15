@@ -1430,13 +1430,17 @@ public class WorkspaceService {
      * Reads approval authority without locks or step-up side effects. Issuance still requires a
      * fresh assertion from a passkey covered here. Each target uses the issuance grant ceiling;
      * self, inactive and reserved targets are ineligible. Query count does not depend on row count.
+     * A workspace torn down after the roster was read leaves the list without badges, not failed.
      */
     private void addPasskeyApprovalNeeds(int workspaceId, int actorId, List<MemberDto> members) {
         WorkspaceMember actor = workspaceMapper.getAuthorizationMembership(workspaceId, actorId);
         if (actor == null || !"active".equals(actor.getStatus()) || members.isEmpty()) {
             return;
         }
-        int orgId = getOrgId(workspaceId);
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null) {
+            return;
+        }
         List<Integer> ids = members.stream().map(MemberDto::getId).toList();
         Set<Integer> reserved = Set.copyOf(userMapper.findAccountDeletionReservedIds(ids));
         if (reserved.contains(actorId)

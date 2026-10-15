@@ -159,6 +159,16 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
         assertEquals(true, badge(workspaceService.getMembersWithRoles(scope.getId(), admin.getId()), target));
     }
 
+    @Test void zeroPermissionCustomRoleTargetIsAnApprovalCandidateThatNeedsNothing() {
+        Organization org = org();
+        Workspace scope = owned(org);
+        User admin = member(scope, "admin"), target = member(scope, "member");
+        cover(admin, org);
+        assign(scope, admin, "admin", "ROLE_MANAGE", "MEMBER_MANAGE");
+        assign(scope, target, "member");
+        assertEquals(false, badge(workspaceService.getMembersWithRoles(scope.getId(), admin.getId()), target));
+    }
+
     @Test void reservedAndPendingTargetsAreNotApprovalCandidates() {
         Organization org = org();
         Workspace scope = owned(org);
@@ -283,7 +293,10 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
 
     private WorkspaceRole assign(Workspace scope, User user, String builtInRole, String... permissions) {
         WorkspaceRole role = new WorkspaceRole(); role.setWorkspaceId(scope.getId()); role.setName("Role " + unique());
-        roles.insertRole(role); roles.insertPermissions(scope.getId(), role.getId(), List.of(permissions));
+        roles.insertRole(role);
+        if (permissions.length > 0) {
+            roles.insertPermissions(scope.getId(), role.getId(), List.of(permissions));
+        }
         jdbc.update("UPDATE workspace_member SET role = ?, role_id = ? WHERE workspace_id = ? AND user_id = ?",
             builtInRole, role.getId(), scope.getId(), user.getId()); return role;
     }

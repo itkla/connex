@@ -99,6 +99,20 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void memberListSurvivesWorkspaceTeardownBetweenTheRosterAndTheBadgeLookup() {
+        User admin = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "admin");
+        org.mockito.Mockito.doReturn(null).when(orderedMemberships).getOrgId(workspace.getId());
+        try {
+            var members = workspaceService.getMembersWithRoles(workspace.getId(), currentUser.getId());
+            assertTrue(members.stream().anyMatch(member -> member.getId() == admin.getId()));
+            assertTrue(members.stream().allMatch(member -> member.getPasskeyApprovalNeeded() == null));
+        } finally {
+            org.mockito.Mockito.reset(orderedMemberships);
+        }
+    }
+
+    @Test
     void roleAuthorizationSeparatesCreationFromNonNullableMutation() throws Exception {
         assertNotNull(WorkspaceService.class.getDeclaredMethod(
             "lockRoleCreationAuthorization", int.class, int.class, Set.class));
