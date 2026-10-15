@@ -37,6 +37,8 @@ import ooo.klae.connex.backend.publicapi.ApiRateLimiter;
 import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
 import ooo.klae.connex.backend.publicapi.PublicApiCorsProcessor;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -92,6 +94,8 @@ public class PublicApiSecurityConfig {
             ObjectMapper objectMapper,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
+            AuditService auditService,
+            DenialAuditRateLimiter denialAuditRateLimiter,
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
@@ -104,6 +108,8 @@ public class PublicApiSecurityConfig {
                 objectMapper,
                 privilegedMfaProperties,
                 privilegedAccountService,
+                auditService,
+                denialAuditRateLimiter,
                 clientIpResolver,
                 tenantCatalogResolver,
                 tenantContext,

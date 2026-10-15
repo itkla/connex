@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -21,6 +23,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.TransientDataAccessResourceException;
@@ -30,6 +35,7 @@ import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -47,6 +53,8 @@ import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
 import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.RouteTransactionMode;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.AuthenticatedCredential;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -79,6 +87,8 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             new PrivilegedMfaProperties(),
             mock(PrivilegedAccountService.class),
+            mock(AuditService.class),
+            mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
@@ -113,6 +123,8 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             new PrivilegedMfaProperties(),
             mock(PrivilegedAccountService.class),
+            mock(AuditService.class),
+            mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
@@ -283,6 +295,36 @@ class ApiCredentialAuthenticationFilterTest {
             "A passkey must be approved before this privileged account can continue");
     }
 
+    @ParameterizedTest
+    @EnumSource(RouteTransactionMode.class)
+    void denialAuditRunsAfterTheReadTransactionAndTenantBindingEnd(RouteTransactionMode mode)
+            throws Exception {
+        AuditService auditService = mock(AuditService.class);
+        StandingFixture fixture = standingFixture(
+            "true", PrivilegedMfaStanding.ENROLLMENT_REQUIRED, mode, auditService);
+        MockHttpServletRequest request = authenticatedRequest("GET");
+        doAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertFalse(fixture.tenantContext().isResolved());
+            assertNull(fixture.tenantContext().getCatalog());
+            assertEquals(fixture.binding().userId(),
+                ((User) SecurityContextHolder.getContext()
+                    .getAuthentication().getPrincipal()).getId());
+            return null;
+        }).when(auditService).recordStrictFailureIndependentScoped(
+            "auth.mfa.policy.denied", "user", fixture.binding().userId(), null, null, null,
+            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        fixture.filter().doFilter(request, response, new MockFilterChain());
+
+        assertEquals(401, response.getStatus());
+        verify(auditService).recordStrictFailureIndependentScoped(
+            "auth.mfa.policy.denied", "user", fixture.binding().userId(), null, null, null,
+            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request);
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+    }
+
     @Test
     void unprivilegedAndSatisfiedAccountsPassTheEnforcedGate() throws Exception {
         for (PrivilegedMfaStanding standing : List.of(
@@ -350,6 +392,8 @@ class ApiCredentialAuthenticationFilterTest {
             new ObjectMapper(),
             mfaProperties,
             mock(PrivilegedAccountService.class),
+            mock(AuditService.class),
+            mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
@@ -414,6 +458,8 @@ class ApiCredentialAuthenticationFilterTest {
             objectMapper,
             mfaProperties,
             privilegedAccountService,
+            mock(AuditService.class),
+            mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
@@ -589,6 +635,8 @@ class ApiCredentialAuthenticationFilterTest {
             new ObjectMapper(),
             mfaProperties,
             mock(PrivilegedAccountService.class),
+            mock(AuditService.class),
+            mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
@@ -617,6 +665,11 @@ class ApiCredentialAuthenticationFilterTest {
     }
 
     private static StandingFixture standingFixture(String enforced, PrivilegedMfaStanding standing) {
+        return standingFixture(enforced, standing, RouteTransactionMode.READ, mock(AuditService.class));
+    }
+
+    private static StandingFixture standingFixture(String enforced, PrivilegedMfaStanding standing,
+            RouteTransactionMode transactionMode, AuditService auditService) {
         String token = token();
         RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
         User user = new User();
@@ -649,18 +702,21 @@ class ApiCredentialAuthenticationFilterTest {
         when(privilegedAccountService.enforcedStanding(binding.userId())).thenReturn(standing);
         when(limiter.acquire(binding.credentialId()))
             .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
+        TenantContext tenantContext = new TenantContext();
         ApiCredentialAuthenticationFilter filter = new ApiCredentialAuthenticationFilter(
             service,
             limiter,
             new ObjectMapper(),
             mfaProperties,
             privilegedAccountService,
+            auditService,
+            new DenialAuditRateLimiter(3600, Clock.systemUTC(), new SimpleMeterRegistry()),
             clientIpResolver,
             tenantCatalogResolver,
-            new TenantContext(),
-            request -> RouteTransactionMode.READ,
+            tenantContext,
+            request -> transactionMode,
             new TestTransactionManager());
-        return new StandingFixture(filter, limiter, privilegedAccountService, binding);
+        return new StandingFixture(filter, limiter, privilegedAccountService, binding, tenantContext);
     }
 
     private static MockHttpServletRequest authenticatedRequest(String method) {
@@ -787,6 +843,7 @@ class ApiCredentialAuthenticationFilterTest {
             ApiCredentialAuthenticationFilter filter,
             ApiRateLimiter limiter,
             PrivilegedAccountService privilegedAccountService,
-            RoutingBinding binding) {
+            RoutingBinding binding,
+            TenantContext tenantContext) {
     }
 }
