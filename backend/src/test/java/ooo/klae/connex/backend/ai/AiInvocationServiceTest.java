@@ -2769,6 +2769,53 @@ class AiInvocationServiceTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void plainTextCompletionsCannotRetainEscapedUnexposedMembersForAttachmentReplay(boolean direct) {
+        AiInvocation invocation = invocation("Describe the attachment");
+        invocation.context().tokenFor(EntityKind.MEMBER, "Hidden Member");
+        providerReturns(new AiCompletionResult("Image mentions \\u007b\\u007bM1\\u007d\\u007d", 12, 7, "stop"));
+        AiCompletionOutcome outcome = direct ? service.complete(invocation, directAdmission) : service.complete(invocation);
+        assertEquals(1, outcome.demaskWarnings());
+        assertEquals("", outcome.text());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{} {\"owner\":\"\\u007b\\u007bM1\\u007d\\u007d\"",
+            "{} garbage \"\\\\u007b\\\\u007bM1\\\\u007d\\\\u007d\"",
+            "{\"query\":\"relationship\"} \"\\u007b\\u007bM1\\u007d\\u007d\""})
+    void nativeArgumentSuffixesCannotEarnRepairOrBeRetainedForReplay(String arguments) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn("Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var completion = completeMemberNative(invocation, List.of(), new AiToolCall("guess", "search_records", arguments));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "signature", "text"})
+    void everyReplayedNativeProviderFieldRejectsEscapedUnexposedMembers(String field) {
+        String token = "\\u007b\\u007bM1\\u007d\\u007d";
+        var call = new AiToolCall(field.equals("id") ? token : "guess",
+                "search_records", "{\"query\":\"relationship\"}",
+                field.equals("signature") ? token : null);
+        var completion = invokeNativeTools(1, field.equals("text") ? token : "", List.of(call));
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        assertEquals("invented_placeholder", refused.repairRule());
+        assertEquals(1, refused.demaskWarnings());
+        assertTrue(refused.reasoning().isEmpty());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({
             "unknown,{\"owner\":\"{{M1}}\"}",
             "assign_owner,{\"owner\":\"{{M1}}\"}",

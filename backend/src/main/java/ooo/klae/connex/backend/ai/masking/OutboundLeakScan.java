@@ -173,17 +173,17 @@ public final class OutboundLeakScan {
             List<MaskingEngine.ScreenText> matchingFields = member ? memberFields : allFields;
             String identifier = entry.canonicalValue();
             boolean containment = member && ctx.requiresMemberContainment(entry.rawValue());
-            boolean canonicalLeak = (containment || identifier.length() >= MIN_IDENTIFIER_LENGTH)
+            boolean canonicalLeak = !member && identifier.length() >= MIN_IDENTIFIER_LENGTH
                     && !identifier.isEmpty()
                     && matchingFields.stream().anyMatch(field -> field.literal().value().contains(identifier));
-            boolean labelLeak = entry.labelEligible()
-                    && (containment || entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH)
+            boolean labelLeak = !member && entry.labelEligible()
+                    && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
                     && matchingFields.stream().anyMatch(field -> field.labels().value().contains(entry.labelValue()));
             boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
                     && matchingFields.stream().anyMatch(field -> field.original().contains(entry.rawValue()));
-            boolean shortMemberLeak = member && matchingFields.stream().anyMatch(field ->
-                    MaskingEngine.containsShortMemberMatch(field, entry));
-            if ((canonicalLeak || labelLeak || exactRawLeak || shortMemberLeak)
+            boolean memberLeak = member && matchingFields.stream().anyMatch(field ->
+                    MaskingEngine.containsMemberMatch(field, entry, containment));
+            if ((canonicalLeak || labelLeak || exactRawLeak || memberLeak)
                     && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedIdentifiers.add(entry.rawValue());
                 leakedKinds.add(entry.kind());

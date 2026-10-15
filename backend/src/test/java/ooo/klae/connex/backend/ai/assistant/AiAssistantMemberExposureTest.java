@@ -588,6 +588,38 @@ class AiAssistantMemberExposureTest {
         assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
     }
 
+    static Stream<Arguments> completeProviderEscapeCases() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                "{{M1}}", "\\u007b\\u007bM1\\u007d\\u007d", "\\\\u007b\\\\u007bM1\\\\u007d\\\\u007d",
+                "\\{\\{M1\\}\\}").flatMap(token -> Stream.of(
+                        "{} {\"text\":\"" + token + "\"",
+                        "{} trailing garbage \"" + token + "\"",
+                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready") + " \"" + token + "\"",
+                        "{} {\"tool\":{\"name\":\"assign_owner\",\"args\":{\"owner\":\"" + token + "\"}}",
+                        "<think>" + token + "</think>" + AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"))
+                        .map(output -> Arguments.of(nativeProtocol, output))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("completeProviderEscapeCases")
+    void completeProviderTextCannotHideEscapedMembersBehindAValidPrefixOrReasoning(
+            boolean nativeProtocol, String output) throws Exception {
+        var context = new MaskingContext();
+        context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, MEMBER);
+        var resources = new AiChatResourceRegistry(context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                output, false, null);
+        assertEquals("invented_placeholder", capture.refusalReason());
+        assertFalse(capture.repairPresent());
+        assertEquals(1, capture.warnings());
+        assertEquals(1, Demasker.demask("{{M1}}", context).warnings());
+    }
+
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void memberCollisionWithRealStaticDirectiveMasksTheTenantMentionOnly(boolean nativeProtocol) throws Exception {
@@ -698,8 +730,12 @@ class AiAssistantMemberExposureTest {
         var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
                 AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
         String messages = mapper.writeValueAsString(capture.request().messages());
-        assertTrue(messages.contains("{{M1}}_team x{{M1}} Little xLi Li_team"));
-        assertTrue(messages.contains("Bob_team xBob Little xLi Li_team"));
+        String bob = context.tokenBindings().stream().filter(binding -> "Bob".equals(binding.getValue()))
+                .map(Map.Entry::getKey).findFirst().orElseThrow();
+        String li = context.tokenBindings().stream().filter(binding -> "Li".equals(binding.getValue()))
+                .map(Map.Entry::getKey).findFirst().orElseThrow();
+        assertTrue(messages.contains(bob + "_team x" + bob + " Little xLi " + li + "_team"));
+        assertTrue(messages.contains(bob + "_team xBob Little xLi " + li + "_team"));
         assertEquals(0, capture.warnings());
     }
 
@@ -732,7 +768,11 @@ class AiAssistantMemberExposureTest {
         var replayed = capture.request().messages().stream().filter(message -> "assistant".equals(message.role())).toList();
         assertEquals(1, replayed.size());
         String masked = mapper.readTree(replayed.getFirst().content()).path("content").asString();
-        assertEquals(expected + " xBob Bob_team", masked);
+        String li = context.tokenBindings().stream().filter(binding -> "Li".equals(binding.getValue()))
+                .map(Map.Entry::getKey).findFirst().orElseThrow();
+        String bob = context.tokenBindings().stream().filter(binding -> "Bob".equals(binding.getValue()))
+                .map(Map.Entry::getKey).findFirst().orElseThrow();
+        assertEquals(expected.replace("{{M1}}", li) + " xBob " + bob + "_team", masked);
         assertFalse(mapper.writeValueAsString(capture.request().messages()).contains("Li"));
         assertEquals(expected.replace("{{M1}}", "Li") + " xBob Bob_team", Demasker.demask(masked, context).text());
         assertEquals(0, capture.warnings());
@@ -1123,6 +1163,44 @@ class AiAssistantMemberExposureTest {
         assertFalse(payload.contains("execut{{M"));
         assertFalse(payload.contains("create_{{M"));
         assertEquals(0, capture.warnings());
+    }
+
+    static Stream<Arguments> memberScriptBoundaryPayloads() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                new String[]{"Иван", "Иван пришёл; Иванов вернулся.", "{{M1}} пришёл; Иванов вернулся."},
+                new String[]{"Μαρία", "Μαρία ήρθε; Μαρίανος έφυγε.", "{{M1}} ήρθε; Μαρίανος έφυγε."},
+                new String[]{"Élodie", "Élodie arrived; Élodienne left.", "{{M1}} arrived; Élodienne left."},
+                new String[]{"Alice", "Alice arrived; Malice remains.", "{{M1}} arrived; Malice remains."},
+                new String[]{"a a", "xa a a", "xa {{M1}}"},
+                new String[]{"李", "联系李处理", "联系{{M1}}处理"},
+                new String[]{"山田", "请山田处理", "请{{M1}}处理"})
+                .map(values -> Arguments.of(nativeProtocol, values[0], values[1], values[2])));
+    }
+
+    @ParameterizedTest
+    @MethodSource("memberScriptBoundaryPayloads")
+    void memberScriptBoundariesPreserveUnrelatedWordsInUserAndToolPayloads(
+            boolean nativeProtocol, String member, String text, String expected) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent(text);
+        var result = new AiAssistantToolResult(Map.of("description", text), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertTrue(payload.contains(expected));
+        assertTrue(payload.indexOf(expected) != payload.lastIndexOf(expected));
+        assertFalse(payload.contains(text));
+        assertEquals(0, capture.warnings());
+        assertEquals(List.of(Map.entry("{{M1}}", member)), context.tokenBindings());
+        assertEquals(text, Demasker.demask(expected, context).text());
     }
 
     static Stream<Arguments> memberReferenceReadings() {

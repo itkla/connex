@@ -55,24 +55,26 @@ class OutboundLeakScanTest {
         context.registerMemberCandidate("Bob");
         context.registerMemberCandidate("Li");
         String text = "Bob_team xBob BobBob Little xLi Li_team";
-        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(text, context, objectMapper));
+        String ordinary = "{{M1}}_team xBob BobBob Little xLi {{M2}}_team";
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(text, context, objectMapper));
         context.withReplayMemberValues(List.of("Bob"), () -> {
             assertThrows(MaskingLeakException.class,
                     () -> OutboundLeakScan.assertNoLeakInReplay(text, context));
-            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("Little xLi Li_team", context));
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("Little xLi {{M2}}_team", context));
             return null;
         });
         String masked = MaskingEngine.maskConversationalFreeText(text, context, Map.of(), List.of("Bob"));
-        assertEquals("{{M1}}_team x{{M1}} {{M1}}{{M1}} Little xLi Li_team", masked);
+        assertEquals("{{M1}}_team x{{M1}} {{M1}}{{M1}} Little xLi {{M2}}_team", masked);
         context.exposeDispatchedPayload(masked);
         assertEquals(text, Demasker.demask(masked, context).text());
-        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(text, context));
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay(ordinary, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInReplay("xBob BobBob Little xLi", context));
         assertThrows(IllegalStateException.class, () -> context.withReplayMemberValues(List.of("Bob"), () -> {
             throw new IllegalStateException("scope failed");
         }));
-        assertEquals(text, MaskingEngine.maskConversationalFreeText(text, context));
+        assertEquals(ordinary, MaskingEngine.maskConversationalFreeText(text, context));
     }
 
     @Test

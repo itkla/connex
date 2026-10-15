@@ -101,6 +101,37 @@ class MaskingEngineTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+            "Иван,Иван пришёл,{{M1}} пришёл", "Иван,Иванов,Иванов", "Иван,Иван_команда,{{M1}}_команда",
+            "Иван,ЖИван,ЖИван", "Иван,Иван٢,Иван٢", "Μαρία,Μαρία ήρθε,{{M1}} ήρθε",
+            "Μαρία,Μαρίανος,Μαρίανος", "Élodie,Élodie arrived,{{M1}} arrived", "Élodie,Élodienne,Élodienne",
+            "Alice,Malice,Malice", "a a,xa a a,xa {{M1}}", "Bob,Bob_team,{{M1}}_team", "李,联系李处理,联系{{M1}}处理",
+            "山田,请山田处理,请{{M1}}处理", "あき,連絡あき確認,連絡{{M1}}確認",
+            "アキ,連絡アキ確認,連絡{{M1}}確認", "김,지금김에게,지금{{M1}}에게", "ไทย,คนไทยครับ,คน{{M1}}ครับ"})
+    void memberReplacementAndLeakScanShareScriptAwareMentionBoundaries(String member, String text, String expected) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        boolean mentioned = !text.equals(expected);
+        assertEquals(mentioned, MaskingEngine.containsMemberMention(MaskingEngine.mentionScanText(text), member));
+        if (mentioned) {
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        } else {
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        }
+        String masked = MaskingEngine.maskFreeText(text, context);
+        assertEquals(expected, masked);
+        assertEquals(expected, MaskingEngine.maskConversationalFreeText(text, context));
+        assertEquals(expected.replace("{{M1}}", MaskingEngine.REDACTED),
+                MaskingEngine.screenFreeTextBeforeTruncation(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(masked, context, objectMapper));
+        context.exposeDispatchedPayload(masked);
+        assertEquals(text, Demasker.demask(masked, context).text());
+        if (!mentioned) {
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"abcdxxxx, {{M1}}, 0", "12345678, [redacted], 1"})
     void memberOutcomeContactRedactionIsIndependentOfCandidateRegistrationOrder(
             String suffix, String expected, int warnings) {
@@ -167,7 +198,7 @@ class MaskingEngineTest {
         assertEquals("{{M1}} x{{M1}} {{M1}}_team {{M1}}{{M1}}", masked);
         context.exposeDispatchedPayload(masked);
         assertEquals(text, Demasker.demask(masked, context).text());
-        assertEquals("{{M1}} xfli Little xLi Li_team",
+        assertEquals("{{M1}} xfli Little xLi {{M1}}_team",
                 MaskingEngine.maskConversationalFreeText("Li x\uFB02i Little xLi Li_team", context));
     }
 

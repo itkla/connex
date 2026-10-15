@@ -925,7 +925,8 @@ class AiChatMemoryServiceTest {
         context.registerMemberCandidate("Bob");
         context.registerMemberCandidate("Li");
         AiChatMemory memory = fixture.service().prepare(turn, context, now.plusSeconds(70), NO_STOP);
-        assertEquals(List.of(), context.tokenBindings());
+        assertEquals(mention && !unmasked ? List.of(Map.entry("{{M1}}", "Bob")) : List.of(), context.tokenBindings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
         AiChatMessage summary = memory.history().getFirst();
         var metadata = tools.jackson.databind.json.JsonMapper.builder().build().readTree(summary.getStructuredJson());
         assertEquals(0, metadata.path("identifiers").size());

@@ -868,22 +868,31 @@ public final class MaskingEngine {
 
     private static boolean containsIdentifierMention(
             String prepared, CanonicalText.Projection projection, String value, boolean member) {
-        boolean leftBoundary = member ? requiresMemberBoundary(value.codePointAt(0)) : usesAsciiWordBoundary(value);
-        boolean rightBoundary = member ? requiresMemberBoundary(value.codePointBefore(value.length())) : leftBoundary;
         String canonical = projection.value();
+        boolean bounded = usesAsciiWordBoundary(value);
         for (int start = canonical.indexOf(value); start >= 0;
                 start = canonical.indexOf(value, start + 1)) {
             int sourceStart = projection.sourceStart(start);
             int sourceEnd = projection.sourceEnd(start + value.length());
-            boolean left = sourceStart == 0 || !(member
-                    ? Character.isLetterOrDigit(prepared.codePointBefore(sourceStart)) : isIdentifierWord(prepared.codePointBefore(sourceStart)));
-            boolean right = sourceEnd == prepared.length() || !(member
-                    ? Character.isLetterOrDigit(prepared.codePointAt(sourceEnd)) : isIdentifierWord(prepared.codePointAt(sourceEnd)));
-            if ((!leftBoundary || left) && (!rightBoundary || right)) {
+            boolean matches = member ? memberMatchWithinBoundaries(prepared, projection, value, start)
+                    : !bounded || (sourceStart == 0 || !isIdentifierWord(prepared.codePointBefore(sourceStart)))
+                            && (sourceEnd == prepared.length() || !isIdentifierWord(prepared.codePointAt(sourceEnd)));
+            if (matches) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Shares one source-code-point boundary gate across MEMBER provenance, replacement and scanning. */
+    private static boolean memberMatchWithinBoundaries(
+            String text, CanonicalText.Projection projection, String value, int start) {
+        int sourceStart = projection.sourceStart(start);
+        int sourceEnd = projection.sourceEnd(start + value.length());
+        return (!requiresMemberBoundary(value.codePointAt(0))
+                        || sourceStart == 0 || !Character.isLetterOrDigit(text.codePointBefore(sourceStart)))
+                && (!requiresMemberBoundary(value.codePointBefore(value.length()))
+                        || sourceEnd == text.length() || !Character.isLetterOrDigit(text.codePointAt(sourceEnd)));
     }
 
     /** Only space-delimited candidate endpoints require Unicode letter/digit boundaries. */
@@ -1042,18 +1051,14 @@ public final class MaskingEngine {
      * always redact. Resolving their union before substitution prevents any match from destroying
      * the evidence needed to remove another identifier before truncation or provider egress.
      */
-    /** Shares short-member primary matching with the final outbound leak scan. */
-    static boolean containsShortMemberMatch(ScreenText input, MaskingContext.IdentifierEntry entry) {
-        boolean literal = entry.replacementEligible()
-                && entry.canonicalValue().length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH;
-        boolean label = entry.labelEligible()
-                && entry.labelValue().length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH;
-        if (!literal && !label) {
-            return false;
-        }
-        String text = input.original();
-        return literal && !identifierSpans(text, input.literal(), entry.canonicalValue()).isEmpty()
-                || label && !identifierSpans(text, input.labels(), entry.labelValue()).isEmpty();
+    /** Shares MEMBER mention boundaries and message-scoped containment with the outbound leak scan. */
+    static boolean containsMemberMatch(ScreenText input, MaskingContext.IdentifierEntry entry, boolean containment) {
+        return entry.replacementEligible() && (containment
+                        ? input.literal().value().contains(entry.canonicalValue())
+                        : containsIdentifierMention(input.original(), input.literal(), entry.canonicalValue(), true))
+                || entry.labelEligible() && (containment
+                        ? input.labels().value().contains(entry.labelValue())
+                        : containsIdentifierMention(input.original(), input.labels(), entry.labelValue(), true));
     }
 
     private static List<ReplacementSpan> sensitiveSpans(
@@ -1073,10 +1078,13 @@ public final class MaskingEngine {
                     || preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
                 continue;
             }
-            if (ctx.requiresMemberContainment(entry.rawValue())) {
-                spans.addAll(identifierContainmentSpans(projection, entry.canonicalValue(), entry, ctx, tokenize, 4));
+            if (ctx.isMemberIdentifier(entry.rawValue())) {
+                boolean containment = ctx.requiresMemberContainment(entry.rawValue());
+                spans.addAll(memberReplacementSpans(text, projection, entry.canonicalValue(), entry, ctx,
+                        tokenize, containment ? 4 : 2, containment));
                 if (entry.labelEligible()) {
-                    spans.addAll(identifierContainmentSpans(labels, entry.labelValue(), entry, ctx, tokenize, 3));
+                    spans.addAll(memberReplacementSpans(text, labels, entry.labelValue(), entry, ctx,
+                            tokenize, containment ? 3 : 1, containment));
                 }
                 continue;
             }
@@ -1192,16 +1200,20 @@ public final class MaskingEngine {
     }
 
     /**
-     * Retains exact source spans for recorded labels. A match that splits a compatibility expansion
-     * irreversibly redacts the complete source span, so demasking cannot replace unmatched characters.
+     * Retains exact MEMBER source spans, using mention boundaries unless this message has precise
+     * recorded provenance. A partial compatibility expansion irreversibly redacts its source span.
      */
-    private static List<ReplacementSpan> identifierContainmentSpans(CanonicalText.Projection projection, String value,
-            MaskingContext.IdentifierEntry entry, MaskingContext ctx, boolean tokenize, int priority) {
+    private static List<ReplacementSpan> memberReplacementSpans(
+            String text, CanonicalText.Projection projection, String value,
+            MaskingContext.IdentifierEntry entry, MaskingContext ctx, boolean tokenize, int priority, boolean containment) {
         List<ReplacementSpan> spans = new ArrayList<>();
         String canonical = projection.value();
         for (int start = canonical.indexOf(value); start >= 0;
-                start = canonical.indexOf(value, start + value.length())) {
+                start = canonical.indexOf(value, start + (containment ? value.length() : 1))) {
             int end = start + value.length();
+            if (!containment && !memberMatchWithinBoundaries(text, projection, value, start)) {
+                continue;
+            }
             boolean aligned = projection.isSourceBoundary(start) && projection.isSourceBoundary(end);
             String replacement = aligned && tokenize && !entry.unsafe()
                     ? ctx.tokenFor(entry.kind(), entry.rawValue()) : REDACTED;

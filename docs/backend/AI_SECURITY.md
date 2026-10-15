@@ -171,10 +171,13 @@ they receive `[redacted]`, never reversible bindings. Their placeholder spelling
 if another identifier already holds that binding, so a literal member label cannot authorize it.
 
 Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
-MEMBER tokens before envelope/schema validation or repair retention. Malformed JSON receives a
-conservative, linear Unicode/backslash escape projection before any repair is allowed, including
-malformed native arguments. Encoded unexposed MEMBER tokens cannot earn a repair dispatch; the
-projection is used only for refusal and never changes retained text. Noncanonical lowercase or
+MEMBER tokens before envelope/schema validation or repair retention. Complete provider text and
+native argument strings receive a conservative, linear Unicode/backslash escape projection before
+parsing, repair or replay admission, even when a valid object prefix precedes an offending suffix.
+Native call ids, names and thought signatures use the same complete-text check. Encoded unexposed
+MEMBER tokens cannot earn a repair dispatch; the projection is used only for refusal and never changes
+retained text. Plain-text completions used for attachment descriptions also refuse escaped unexposed
+MEMBER tokens with a warning and empty output, before the description can be replayed. Noncanonical lowercase or
 NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
 syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
 on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
@@ -211,7 +214,10 @@ boundary-aware matching. For persisted provider-authored text, provenance
 includes exact demask replacements independently of adjacency, supplemented by raw candidates
 matched with the same boundary-aware member matcher as user provenance. In space-delimited scripts,
 Unicode letters and digits are word characters; underscores and punctuation are separators.
-Han, Hiragana, Katakana, Hangul and Thai need no boundaries. Thus raw `Bob_team` records `Bob`,
+Han, Hiragana, Katakana, Hangul and Thai need no boundaries. MEMBER replacement and outbound leak
+scanning use this same boundary rule for labels of every length, so `Иван` matches `Иван пришёл`
+but leaves the distinct surname `Иванов` intact. Other identifier kinds retain their existing rules.
+Thus raw `Bob_team` records `Bob`,
 while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
 and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
 precise member provenance, including through echoed write arguments, independently of these raw-text
