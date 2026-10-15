@@ -9,7 +9,11 @@ import type { OwnershipOffer } from "@/app/lib/types";
 const offers = vi.hoisted(() => ({
     state: null as SelfOwnershipOffers | null,
 }));
-const standing = vi.hoisted(() => ({ confined: false }));
+const standing = vi.hoisted(() => ({
+    confined: false,
+    status: "ready" as "loading" | "ready" | "failed",
+    refresh: vi.fn(async () => "applied" as const),
+}));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -38,7 +42,12 @@ vi.mock("@/app/hooks/useSelfOwnershipOffers", () => ({
     },
 }));
 vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
-    usePrivilegedMfaStanding: () => ({ requirements: null, confined: standing.confined, refresh: vi.fn() }),
+    usePrivilegedMfaStanding: () => ({
+        requirements: null,
+        status: standing.status,
+        confined: standing.confined,
+        refresh: standing.refresh,
+    }),
 }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => vi.fn() }));
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({ default: () => null }));
@@ -103,6 +112,8 @@ afterEach(async () => {
     container.remove();
     offers.state = null;
     standing.confined = false;
+    standing.status = "ready";
+    standing.refresh.mockClear();
 });
 
 describe("onboarding ownership offers", () => {
@@ -138,6 +149,30 @@ describe("onboarding ownership offers", () => {
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
         expect(button("Onboarding.signOut")).toBeDefined();
+    });
+
+    it("offers nothing that confinement could refuse until the standing is known", async () => {
+        offers.state = selfOffers([offer]);
+        standing.status = "loading";
+        await renderOnboarding();
+
+        expect(container.querySelector("form")).toBeNull();
+        expect(container.querySelector("[aria-busy='true']")).not.toBeNull();
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
+        expect(button("AccountInvites.decline")).toBeDefined();
+    });
+
+    it("offers a retry, and still no confinable action, when the standing cannot be read", async () => {
+        offers.state = selfOffers([offer]);
+        standing.status = "failed";
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.standingFailedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        await act(async () => button("Onboarding.standingRetry").click());
+        expect(standing.refresh).toHaveBeenCalledWith("check");
     });
 
     it("keeps workspace creation and joining for an account that is not confined", async () => {

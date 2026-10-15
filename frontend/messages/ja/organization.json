@@ -204,7 +204,9 @@
     "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
     "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
     "pendingOffersTitle": "保留中のオーナー提案",
-    "offereeUnknown": "招待したアカウント"
+    "offereeUnknown": "招待したアカウント",
+    "confinementSubjectRole": "{name} を {role} に変更",
+    "confinementSubjectAdd": "{email} を {role} として追加"
   },
   "OrgDomains": {
     "title": "許可ドメイン",

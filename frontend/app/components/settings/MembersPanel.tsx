@@ -319,8 +319,11 @@ function MembersWorkspacePanel({
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await confinement.run((acknowledge) =>
-                updateMemberRole(workspaceId, userId, next, acknowledge));
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => updateMemberRole(workspaceId, userId, next, acknowledge),
+            );
             if (updated === null) return;
             if (isOwnershipOfferCreated<WorkspaceMember>(updated)) {
                 const { offer, currentMember } = updated;
@@ -328,7 +331,6 @@ function MembersWorkspacePanel({
                     setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
                 }
                 ownershipOffers.remember(offer);
-                const name = members.find((m) => m.id === userId)?.displayName ?? "";
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
@@ -365,8 +367,12 @@ function MembersWorkspacePanel({
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
-            const updated = await confinement.run((acknowledge) =>
-                assignMemberCustomRole(workspaceId, userId, roleId, acknowledge));
+            const name = members.find((m) => m.id === userId)?.displayName ?? "";
+            const role = customRoles.find((candidate) => candidate.id === roleId)?.name ?? "";
+            const updated = await confinement.run(
+                t("confinementSubjectRole", { name, role }),
+                (acknowledge) => assignMemberCustomRole(workspaceId, userId, roleId, acknowledge),
+            );
             if (updated === null) return;
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             ownershipOffers.refresh();

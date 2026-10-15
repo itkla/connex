@@ -11,13 +11,32 @@ import enAccount from "@/messages/en/account.json";
 const backend = vi.hoisted(() => ({
     passkeys: [] as Passkey[],
     requirements: null as PasskeyRegistrationRequirements | null,
+    refresh: vi.fn(async () => "applied" as const),
+    getPasskeys: vi.fn(),
+    beginPasskeyRegistration: vi.fn(async () => ({ challenge: "challenge" })),
+    finishPasskeyRegistration: vi.fn(async () => undefined),
+    startRegistration: vi.fn(async () => ({ id: "credential" })),
+    approve: null as ((orgId: number) => void) | null,
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
-    getPasskeys: vi.fn(async () => backend.passkeys),
-    settlePrivilegedMfaStanding: vi.fn(async () => backend.requirements),
-    subscribeClientRequestIdentityInvalidation: vi.fn(() => () => undefined),
+    getPasskeys: backend.getPasskeys,
+    beginPasskeyRegistration: backend.beginPasskeyRegistration,
+    finishPasskeyRegistration: backend.finishPasskeyRegistration,
+}));
+vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
+    ...await importOriginal<typeof import("@simplewebauthn/browser")>(),
+    startRegistration: backend.startRegistration,
+}));
+vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
+    usePrivilegedMfaStanding: () => ({
+        requirements: backend.requirements,
+        status: backend.requirements ? "ready" : "loading",
+        confined: backend.requirements?.standing === "ATTESTATION_REQUIRED"
+            || backend.requirements?.standing === "ENROLLMENT_REQUIRED",
+        refresh: backend.refresh,
+    }),
 }));
 vi.mock("@/app/hooks/usePasskeySupport", () => ({ usePasskeySupport: () => true }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
@@ -31,7 +50,12 @@ vi.mock("@/app/components/dashboard/SectionHeader", () => ({
     default: ({ title, action }: { title: ReactNode; action?: ReactNode }) =>
         createElement("div", null, createElement("h2", null, title), action),
 }));
-vi.mock("@/app/components/account/PasskeyApprovalDialog", () => ({ default: () => null }));
+vi.mock("@/app/components/account/PasskeyApprovalDialog", () => ({
+    default: ({ onApproved }: { onApproved: (orgId: number) => void }) => {
+        backend.approve = onApproved;
+        return null;
+    },
+}));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
 vi.mock("@/components/ui/dialog", async () => {
     const React = await import("react");
@@ -92,11 +116,17 @@ beforeEach(() => {
     root = createRoot(container);
 });
 
+beforeEach(() => {
+    backend.getPasskeys.mockImplementation(async () => backend.passkeys);
+});
+
 afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     backend.passkeys = [];
     backend.requirements = null;
+    backend.approve = null;
+    vi.clearAllMocks();
 });
 
 describe("the Security page while a privileged account is confined", () => {
@@ -137,6 +167,47 @@ describe("the Security page while a privileged account is confined", () => {
 
         expect(container.textContent).toContain(enAccount.AccountSecurity.enrollmentNeededTitle);
         expect(container.querySelector("section[aria-labelledby='passkey-approval-needed-title']")).toBeNull();
+    });
+
+    it("withdraws passkey management while approval is pending, since only redemption can succeed", async () => {
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [
+            { credentialId: "cred-laptop", orgId: 1, orgName: "Acme" },
+        ]);
+        await renderPanel();
+
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
+        expect(container.querySelector(`[aria-label="${enAccount.AccountSecurity.passkeyActions.replace("{label}", "Laptop")}"]`))
+            .toBeNull();
+    });
+
+    it("re-reads the standing as a ceremony once a code is redeemed", async () => {
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [
+            { credentialId: "cred-laptop", orgId: 1, orgName: "Acme" },
+        ]);
+        await renderPanel();
+        backend.getPasskeys.mockClear();
+
+        await act(async () => backend.approve?.(1));
+
+        expect(backend.refresh).toHaveBeenCalledWith("ceremony");
+        expect(backend.getPasskeys).toHaveBeenCalledOnce();
+    });
+
+    it("re-reads the standing as a ceremony once a first passkey is enrolled", async () => {
+        backend.requirements = requirementsFor("ENROLLMENT_REQUIRED");
+        await renderPanel();
+        backend.passkeys = [passkey("cred-new", "Laptop", null)];
+        const add = [...container.querySelectorAll("button")]
+            .find((candidate) => candidate.textContent === enAccount.AccountSecurity.add);
+        if (!add) throw new Error("no add button");
+
+        await act(async () => add.click());
+
+        expect(backend.finishPasskeyRegistration).toHaveBeenCalledOnce();
+        expect(backend.refresh).toHaveBeenCalledWith("ceremony");
+        expect(container.textContent).toContain("Laptop");
     });
 
     it("shows the ordinary approval-code card to an account in good standing", async () => {

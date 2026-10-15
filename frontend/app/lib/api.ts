@@ -102,6 +102,7 @@ if (typeof window !== "undefined") {
         if (action === "logout") resetBrowserAccount();
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
+        if (action === "logout" || action === "account") resetPrivilegedMfaState();
         invalidateClientRequestIdentity();
         if (action === "logout") {
             clearAllDrafts();
@@ -160,7 +161,7 @@ export async function csrfHeader(forceRefresh = false): Promise<Record<string, s
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
     clientRequestIdentityEpoch += 1;
-    privilegedMfaConfinementGeneration += 1;
+    privilegedMfaEventEpoch += 1;
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -231,6 +232,7 @@ function broadcastClientRequestIdentityTransition(action: ClientIdentityTransiti
 function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
+    if (action === "account" || action === "logout") resetPrivilegedMfaState();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
 }
@@ -243,6 +245,7 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
 export function synchronizeBrowserAccount(userId: number): void {
     if (adoptBrowserAccount(userId) !== "replaced") return;
     clearAllDrafts();
+    resetPrivilegedMfaState();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition("refresh");
 }
@@ -448,11 +451,18 @@ const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason
     enrollment: "A passkey must be enrolled before this privileged account can continue",
     attestation: "A passkey must be approved before this privileged account can continue",
 };
+/** How a standing check ended: it decided confinement, a newer read already had, or it failed. */
+export type PrivilegedMfaSettleOutcome = "applied" | "superseded" | "failed";
+
+const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
 let privilegedMfaConfinement: PrivilegedMfaConfinementReason | null = null;
 let privilegedMfaConfinementReleased = false;
 let privilegedMfaAttestationObserved = false;
-let privilegedMfaConfinementGeneration = 0;
-const privilegedMfaConfinementListeners = new Set<(active: boolean) => void>();
+let privilegedMfaEventEpoch = 0;
+let privilegedMfaReadSequence = 0;
+let privilegedMfaAppliedSequence = 0;
+let privilegedMfaRequirements: Types.PasskeyRegistrationRequirements | null = null;
+const privilegedMfaListeners = new Set<() => void>();
 
 function privilegedMfaReasonForStep(mfaParam: string | null): PrivilegedMfaConfinementReason | null {
     if (mfaParam === PRIVILEGED_MFA_STEP_PARAMS.enrollment) return "enrollment";
@@ -503,14 +513,23 @@ export function privilegedMfaConfinementFor(pathname: string, mfaParam: string |
             && privilegedMfaReasonForStep(mfaParam) !== null);
 }
 
-/** Subscribes to browser-local privileged MFA confinement state changes. */
-export function subscribePrivilegedMfaConfinement(listener: (active: boolean) => void): () => void {
-    privilegedMfaConfinementListeners.add(listener);
-    return () => privilegedMfaConfinementListeners.delete(listener);
+/**
+ * The account's own standing as the newest decisive check read it (#1534), shared by every surface
+ * in the page, or null before any check has decided. A check that a newer one overtook never
+ * replaces it, and signing out or changing account clears it.
+ */
+export function currentPrivilegedMfaRequirements(): Types.PasskeyRegistrationRequirements | null {
+    return privilegedMfaRequirements;
 }
 
-function notifyPrivilegedMfaConfinement(active: boolean) {
-    for (const listener of [...privilegedMfaConfinementListeners]) listener(active);
+/** Subscribes to browser-local privileged MFA confinement and standing changes. */
+export function subscribePrivilegedMfaConfinement(listener: () => void): () => void {
+    privilegedMfaListeners.add(listener);
+    return () => privilegedMfaListeners.delete(listener);
+}
+
+function notifyPrivilegedMfaListeners() {
+    for (const listener of [...privilegedMfaListeners]) listener();
 }
 
 /** Moves the Security step parameter to the reason in force, without navigating. */
@@ -525,8 +544,7 @@ function confinePrivilegedMfa(reason: PrivilegedMfaConfinementReason) {
     privilegedMfaConfinement = reason;
     privilegedMfaConfinementReleased = false;
     if (reason === "attestation") privilegedMfaAttestationObserved = true;
-    privilegedMfaConfinementGeneration += 1;
-    notifyPrivilegedMfaConfinement(true);
+    showPrivilegedMfaStep(reason);
 }
 
 function releasePrivilegedMfaConfinement() {
@@ -535,7 +553,62 @@ function releasePrivilegedMfaConfinement() {
     }
     privilegedMfaConfinement = null;
     privilegedMfaConfinementReleased = true;
-    notifyPrivilegedMfaConfinement(false);
+}
+
+/** Records the server refusing a request for a confinement reason, which overtakes reads in flight. */
+function notePrivilegedMfaRefusal(reason: PrivilegedMfaConfinementReason) {
+    privilegedMfaEventEpoch += 1;
+    confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
+/** Forgets the previous account's standing when the browser signs out or changes account. */
+function resetPrivilegedMfaState() {
+    privilegedMfaConfinement = null;
+    privilegedMfaConfinementReleased = false;
+    privilegedMfaAttestationObserved = false;
+    privilegedMfaEventEpoch += 1;
+    privilegedMfaAppliedSequence = privilegedMfaReadSequence;
+    privilegedMfaRequirements = null;
+    notifyPrivilegedMfaListeners();
+}
+
+/** Whether a requirements body has the shape this client reads, so a malformed one counts as failed. */
+function isPasskeyRegistrationRequirements(value: unknown): value is Types.PasskeyRegistrationRequirements {
+    if (typeof value !== "object" || value === null) return false;
+    if (!("currentPasswordRequired" in value) || typeof value.currentPasswordRequired !== "boolean") return false;
+    if (!("emailConfirmationRequired" in value) || typeof value.emailConfirmationRequired !== "boolean") return false;
+    if (!("emailConfirmationSatisfied" in value) || typeof value.emailConfirmationSatisfied !== "boolean") return false;
+    if ("standing" in value && value.standing !== undefined && typeof value.standing !== "string") return false;
+    if (!("approvalGaps" in value) || value.approvalGaps === undefined) return true;
+    return Array.isArray(value.approvalGaps) && value.approvalGaps.every((gap: unknown) =>
+        typeof gap === "object" && gap !== null
+        && "credentialId" in gap && typeof gap.credentialId === "string"
+        && "orgId" in gap && typeof gap.orgId === "number"
+        && "orgName" in gap && typeof gap.orgName === "string");
+}
+
+function applyPrivilegedMfaStanding(
+    requirements: Types.PasskeyRegistrationRequirements,
+    settlement: PrivilegedMfaSettlement,
+    sequence: number,
+) {
+    privilegedMfaAppliedSequence = sequence;
+    privilegedMfaRequirements = requirements;
+    const standing = requirements.standing;
+    if (standing === "SATISFIED" || standing === "UNPRIVILEGED") {
+        releasePrivilegedMfaConfinement();
+    } else if (standing === "ENROLLMENT_REQUIRED") {
+        confinePrivilegedMfa("enrollment");
+    } else if (standing === "ATTESTATION_REQUIRED") {
+        confinePrivilegedMfa("attestation");
+    } else if (standing === undefined
+            && settlement === "ceremony"
+            && !privilegedMfaAttestationObserved
+            && privilegedMfaDestinationReason() !== "attestation") {
+        releasePrivilegedMfaConfinement();
+    }
+    notifyPrivilegedMfaListeners();
 }
 
 /**
@@ -543,47 +616,37 @@ function releasePrivilegedMfaConfinement() {
  * browser-local confinement on it (#1534). SATISFIED and UNPRIVILEGED release it; ENROLLMENT_REQUIRED
  * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
  *
- * A failed read settles nothing and keeps any confinement, as does a read that a newer refusal or
- * identity change overtook while it was in flight, or one reporting a standing this client does not
- * know. A backend too old to report standing releases only after a ceremony the server accepted —
- * an enrollment or a redemption — and never once passkey approval has been required in this page.
+ * Reads are ordered: one that started before the newest decisive read ends superseded and changes
+ * nothing, and one that a server refusal or an identity change overtook is read again. A failed or
+ * malformed read keeps any confinement, as does a standing this client does not know. A backend too
+ * old to report standing releases only after a ceremony the server accepted — an enrollment or a
+ * redemption — and never once passkey approval has been required in this page. The decisive
+ * requirements are available from {@link currentPrivilegedMfaRequirements}.
  *
  * @param settlement what prompted the check
- * @returns the requirements read, whether or not they settled anything, or null when the read failed
+ * @returns whether this read decided the standing, a newer one had, or the read failed
  */
 export async function settlePrivilegedMfaStanding(
     settlement: PrivilegedMfaSettlement,
-): Promise<Types.PasskeyRegistrationRequirements | null> {
-    const generation = privilegedMfaConfinementGeneration;
-    let requirements: Types.PasskeyRegistrationRequirements;
-    try {
-        requirements = await getPasskeyRegistrationRequirements();
-    } catch {
-        return null;
+): Promise<PrivilegedMfaSettleOutcome> {
+    if (typeof window === "undefined") return "failed";
+    for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
+        const epoch = privilegedMfaEventEpoch;
+        privilegedMfaReadSequence += 1;
+        const sequence = privilegedMfaReadSequence;
+        let response: unknown;
+        try {
+            response = await getPasskeyRegistrationRequirements();
+        } catch {
+            return "failed";
+        }
+        if (!isPasskeyRegistrationRequirements(response)) return "failed";
+        if (sequence < privilegedMfaAppliedSequence) return "superseded";
+        if (epoch !== privilegedMfaEventEpoch) continue;
+        applyPrivilegedMfaStanding(response, settlement, sequence);
+        return "applied";
     }
-    if (generation !== privilegedMfaConfinementGeneration || typeof window === "undefined") return requirements;
-    switch (requirements.standing) {
-        case "SATISFIED":
-        case "UNPRIVILEGED":
-            releasePrivilegedMfaConfinement();
-            break;
-        case "ENROLLMENT_REQUIRED":
-            confinePrivilegedMfa("enrollment");
-            showPrivilegedMfaStep("enrollment");
-            break;
-        case "ATTESTATION_REQUIRED":
-            confinePrivilegedMfa("attestation");
-            showPrivilegedMfaStep("attestation");
-            break;
-        case undefined:
-            if (settlement === "ceremony"
-                    && !privilegedMfaAttestationObserved
-                    && privilegedMfaDestinationReason() !== "attestation") {
-                releasePrivilegedMfaConfinement();
-            }
-            break;
-    }
-    return requirements;
+    return "superseded";
 }
 
 function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
@@ -1462,11 +1525,9 @@ async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
         const shouldNavigate = privilegedMfaConfinement === null
             && !isPrivilegedMfaConfinementDestination()
             && window.location.pathname !== ONBOARDING_ROUTE;
-        confinePrivilegedMfa(reason);
+        notePrivilegedMfaRefusal(reason);
         if (shouldNavigate) {
             window.location.replace(`${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`);
-        } else {
-            showPrivilegedMfaStep(reason);
         }
     }
     return error;

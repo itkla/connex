@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import {
     DevicePhoneMobileIcon,
@@ -14,12 +14,7 @@ import {
 import { Loader2Icon } from "lucide-react";
 import { startRegistration } from "@simplewebauthn/browser";
 
-import type {
-    Passkey,
-    PasskeyApprovalGap,
-    PasskeyRegistrationRequirements,
-    PrivilegedMfaStanding,
-} from "@/app/lib/types";
+import type { Passkey } from "@/app/lib/types";
 import {
     ApiError,
     beginPasskeyRegistration,
@@ -29,11 +24,10 @@ import {
     MAIL_TRANSPORT_UNAVAILABLE_CODE,
     renamePasskey,
     requestPasskeyBootstrapConfirmation,
-    settlePrivilegedMfaStanding,
-    subscribeClientRequestIdentityInvalidation,
 } from "@/app/lib/api";
 import { passkeyApprovalProgress } from "@/app/lib/passkeyApprovalProgress";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { isWebAuthnCancellation } from "@/app/lib/webauthnCancellation";
@@ -119,18 +113,16 @@ export default function SecurityPanel() {
     const { workspaces } = useWorkspace();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(false);
+    const [loadingPasskeys, setLoadingPasskeys] = useState(true);
+    const [passkeysFailed, setPasskeysFailed] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
     const supported = usePasskeySupport();
+    const { requirements, status: standingStatus, refresh: refreshStanding } = usePrivilegedMfaStanding();
     const [adding, setAdding] = useState(false);
-    const [currentPasswordRequired, setCurrentPasswordRequired] = useState(false);
     const [passwordOpen, setPasswordOpen] = useState(false);
     const [currentPassword, setCurrentPassword] = useState("");
     const [passwordError, setPasswordError] = useState<string | null>(null);
     const [confirmingPassword, setConfirmingPassword] = useState(false);
-    const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
-    const [emailConfirmationSatisfied, setEmailConfirmationSatisfied] = useState(false);
     const [sendingConfirmation, setSendingConfirmation] = useState(false);
 
     const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
@@ -139,80 +131,62 @@ export default function SecurityPanel() {
     const [removeTarget, setRemoveTarget] = useState<Passkey | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
     const [approvalOpen, setApprovalOpen] = useState(false);
-    const [standing, setStanding] = useState<PrivilegedMfaStanding | null>(null);
-    const [approvalGaps, setApprovalGaps] = useState<PasskeyApprovalGap[]>([]);
 
-    const applyRequirements = useCallback((requirements: PasskeyRegistrationRequirements) => {
-        setCurrentPasswordRequired(requirements.currentPasswordRequired);
-        setEmailConfirmationRequired(requirements.emailConfirmationRequired);
-        setEmailConfirmationSatisfied(requirements.emailConfirmationSatisfied);
-        setStanding(requirements.standing ?? null);
-        setApprovalGaps(requirements.approvalGaps ?? []);
-    }, []);
+    const currentPasswordRequired = requirements?.currentPasswordRequired ?? false;
+    const emailConfirmationRequired = requirements?.emailConfirmationRequired ?? false;
+    const emailConfirmationSatisfied = requirements?.emailConfirmationSatisfied ?? false;
+    const standing = requirements?.standing ?? null;
+    const approvalGaps = requirements?.approvalGaps ?? [];
+    const approvalPending = standing === "ATTESTATION_REQUIRED";
+    const loading = loadingPasskeys || standingStatus === "loading";
+    const error = passkeysFailed || standingStatus === "failed";
+    const gapsNameUnknownPasskey = approvalGaps.some(
+        (gap) => !passkeys.some((passkey) => passkey.credentialId === gap.credentialId),
+    );
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
-            setLoading(true);
-            setError(false);
+            setLoadingPasskeys(true);
+            setPasskeysFailed(false);
             try {
-                const [loaded, requirements] = await Promise.all([
-                    getPasskeys(),
-                    settlePrivilegedMfaStanding("check"),
-                ]);
-                if (!requirements) throw new Error("Passkey requirements are unavailable");
-                if (!cancelled) {
-                    setPasskeys(loaded);
-                    applyRequirements(requirements);
-                }
+                const loaded = await getPasskeys();
+                if (!cancelled) setPasskeys(loaded);
             } catch {
                 if (!cancelled) {
-                    setError(true);
+                    setPasskeysFailed(true);
                     toastError(t("loadFailed"));
                 }
             } finally {
-                if (!cancelled) setLoading(false);
+                if (!cancelled) setLoadingPasskeys(false);
             }
         })();
         return () => {
             cancelled = true;
         };
-    }, [t, reloadKey, applyRequirements]);
+    }, [t, reloadKey]);
 
     useEffect(() => {
+        if (!gapsNameUnknownPasskey || loadingPasskeys) return;
         let cancelled = false;
-        const recheck = () => {
-            if (document.visibilityState !== "visible") return;
-            void Promise.all([getPasskeys(), settlePrivilegedMfaStanding("check")]).then(([loaded, requirements]) => {
-                if (cancelled || !requirements) return;
-                setPasskeys(loaded);
-                applyRequirements(requirements);
-            }, () => {});
-        };
-        document.addEventListener("visibilitychange", recheck);
-        const unsubscribe = subscribeClientRequestIdentityInvalidation(recheck);
+        getPasskeys().then((loaded) => {
+            if (!cancelled) setPasskeys(loaded);
+        }, () => undefined);
         return () => {
             cancelled = true;
-            document.removeEventListener("visibilitychange", recheck);
-            unsubscribe();
         };
-    }, [applyRequirements]);
+    }, [gapsNameUnknownPasskey, loadingPasskeys, requirements]);
+
+    const retryLoad = () => {
+        setReloadKey((key) => key + 1);
+        void refreshStanding("check");
+    };
 
     const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
         const credential = await startRegistration({ optionsJSON });
         await finishPasskeyRegistration(deviceLabel(), credential);
-        const [loaded, requirements] = await Promise.all([
-            getPasskeys(),
-            settlePrivilegedMfaStanding("ceremony"),
-        ]);
+        const [loaded] = await Promise.all([getPasskeys(), refreshStanding("ceremony")]);
         setPasskeys(loaded);
-        if (requirements) {
-            applyRequirements(requirements);
-        } else {
-            setCurrentPasswordRequired(false);
-            setEmailConfirmationRequired(false);
-            setEmailConfirmationSatisfied(false);
-        }
         toastSuccess(t("added"));
     };
 
@@ -256,11 +230,11 @@ export default function SecurityPanel() {
                 return;
             } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
                 toastError(emailConfirmationRequired ? t("confirmationRequired") : t("freshSignInRequired"));
-                setReloadKey((key) => key + 1);
+                retryLoad();
             } else {
                 toastError(t("addFailed"));
                 if (passkeys.length === 0) {
-                    setReloadKey((key) => key + 1);
+                    retryLoad();
                 }
             }
         } finally {
@@ -353,15 +327,12 @@ export default function SecurityPanel() {
                 ? t("approvalDoneDescription", { organization })
                 : t("approvalDoneDescriptionGeneric"),
         });
-        void Promise.all([getPasskeys(), settlePrivilegedMfaStanding("ceremony")]).then(([loaded, requirements]) => {
+        void Promise.all([getPasskeys(), refreshStanding("ceremony")]).then(([loaded]) => {
             setPasskeys(loaded);
-            if (requirements) applyRequirements(requirements);
-        }, () => {});
+        }, () => undefined);
     };
 
-    const approvalProgress = standing === "ATTESTATION_REQUIRED"
-        ? passkeyApprovalProgress(passkeys, approvalGaps)
-        : [];
+    const approvalProgress = approvalPending ? passkeyApprovalProgress(passkeys, approvalGaps) : [];
     const recommended = approvalProgress[0];
     const passkeyName = (label: string | null) => label ?? t("approvalUnnamedPasskey");
 
@@ -381,7 +352,10 @@ export default function SecurityPanel() {
         <div className="space-y-10">
             <Rise className="space-y-3">
                 <div>
-                    <SectionHeader title={t("title")} action={!loading && supported ? addButton : undefined} />
+                    <SectionHeader
+                        title={t("title")}
+                        action={!loading && supported && !approvalPending ? addButton : undefined}
+                    />
                     <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
                 </div>
 
@@ -394,7 +368,7 @@ export default function SecurityPanel() {
                     </div>
                 )}
 
-                {standing === "ATTESTATION_REQUIRED" && (
+                {approvalPending && (
                     <section
                         aria-labelledby="passkey-approval-needed-title"
                         className="rounded-2xl border border-warning/40 bg-warning/5 px-5 py-4"
@@ -498,7 +472,7 @@ export default function SecurityPanel() {
                     ) : error ? (
                         <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">
                             <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
-                            <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
+                            <Button variant="outline" size="sm" onClick={retryLoad}>
                                 {t("retry")}
                             </Button>
                         </div>
@@ -537,36 +511,38 @@ export default function SecurityPanel() {
                                                 : t("neverUsed")}
                                         </span>
                                     </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <button
-                                                type="button"
-                                                aria-label={t("passkeyActions", { label: passkey.label })}
-                                                className={rowActionTrigger}
-                                            >
-                                                <EllipsisHorizontalIcon className="size-5" />
-                                            </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-40">
-                                            <DropdownMenuItem onSelect={() => openRename(passkey)}>
-                                                <PencilSquareIcon className="size-4" />
-                                                {t("rename")}
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                variant="destructive"
-                                                onSelect={() => setRemoveTarget(passkey)}
-                                            >
-                                                <TrashIcon className="size-4" />
-                                                {t("remove")}
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
+                                    {!approvalPending && (
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    aria-label={t("passkeyActions", { label: passkey.label })}
+                                                    className={rowActionTrigger}
+                                                >
+                                                    <EllipsisHorizontalIcon className="size-5" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-40">
+                                                <DropdownMenuItem onSelect={() => openRename(passkey)}>
+                                                    <PencilSquareIcon className="size-4" />
+                                                    {t("rename")}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    variant="destructive"
+                                                    onSelect={() => setRemoveTarget(passkey)}
+                                                >
+                                                    <TrashIcon className="size-4" />
+                                                    {t("remove")}
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    )}
                                 </li>
                             ))}
                         </ul>
                     ))}
 
-                {supported && !loading && !error && passkeys.length > 0 && standing !== "ATTESTATION_REQUIRED" && (
+                {supported && !loading && !error && passkeys.length > 0 && !approvalPending && (
                     <div className="rounded-2xl border border-border bg-card px-5 py-4">
                         <h3 className="text-sm font-medium text-foreground">{t("approvalTitle")}</h3>
                         <p className="mt-1 max-w-prose text-sm text-muted-foreground">

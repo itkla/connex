@@ -32,7 +32,10 @@
         "joinButton": "Continue",
         "joinInvalid": "That doesn't look like a valid invite link.",
         "confinedTitle": "Your administrator access is paused",
-        "confinedBody": "This account has administrator access in an organization, and its passkey still needs to be set up or approved. Until then, you can't create or join a workspace here. You can still decline ownership offers or sign out."
+        "confinedBody": "This account has administrator access in an organization, and its passkey still needs to be set up or approved. Until then, you can't create or join a workspace here. You can still decline ownership offers or sign out.",
+        "standingFailedTitle": "We couldn't check your account",
+        "standingFailedBody": "Try again in a moment. You can still decline ownership offers or sign out.",
+        "standingRetry": "Try again"
     },
     "InviteAccept": {
         "metaTitle": "Accept your invitation",
@@ -277,7 +280,8 @@
         "withdrawOwnershipOffer": "Withdraw ownership offer",
         "ownershipOfferWithdrawn": "Ownership offer withdrawn",
         "ownershipOffersLoadFailed": "Couldn't load pending ownership offers",
-        "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer"
+        "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer",
+        "confinementSubjectRole": "Change {name} to {role}"
     },
     "WorkspaceRoles": {
         "title": "Roles",
@@ -321,7 +325,8 @@
                 "group": "Teams",
                 "action": "Manage"
             }
-        }
+        },
+        "confinementSubjectRoleEdit": "Save changes to the {name} role"
     },
     "WorkflowAuthoring": {
         "noAccess": "You can't manage workflows in this workspace. Ask a workspace admin if you need access.",

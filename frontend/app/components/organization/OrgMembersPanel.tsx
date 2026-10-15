@@ -165,12 +165,14 @@ export default function OrgMembersPanel({
         if (!orgId) return;
         setBusy(userId);
         try {
-            const result = await confinement.run((acknowledge) =>
-                setOrgMemberRole(orgId, userId, next, acknowledge));
+            const name = members.find((member) => member.id === userId)?.displayName ?? "";
+            const result = await confinement.run(
+                t("confinementSubjectRole", { name, role: roleLabel(next) }),
+                (acknowledge) => setOrgMemberRole(orgId, userId, next, acknowledge),
+            );
             if (result === null) return;
             if (isOwnershipOfferCreated<OrgMember>(result)) {
                 ownershipOffers.remember(result.offer);
-                const name = members.find((member) => member.id === userId)?.displayName ?? "";
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
@@ -208,8 +210,10 @@ export default function OrgMembersPanel({
         if (!orgId || email.trim().length === 0) return;
         setAdding(true);
         try {
-            const result = await confinement.run((acknowledge) =>
-                addOrgMemberByEmail(orgId, email.trim(), addRole, acknowledge));
+            const result = await confinement.run(
+                t("confinementSubjectAdd", { email: email.trim(), role: roleLabel(addRole) }),
+                (acknowledge) => addOrgMemberByEmail(orgId, email.trim(), addRole, acknowledge),
+            );
             if (result === null) return;
             if (isOwnershipOfferCreated<OrgMember>(result)) {
                 ownershipOffers.remember(result.offer);

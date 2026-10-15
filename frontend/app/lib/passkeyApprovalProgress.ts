@@ -21,11 +21,12 @@ export type PasskeyApprovalProgress = {
  * @returns one entry per passkey with a gap, the recommended passkey first
  */
 export function passkeyApprovalProgress(passkeys: Passkey[], gaps: PasskeyApprovalGap[]): PasskeyApprovalProgress[] {
+    const passkeysById = new Map(passkeys.map((passkey) => [passkey.credentialId, passkey]));
     const byCredential = new Map<string, PasskeyApprovalProgress>();
     for (const gap of gaps) {
         const progress = byCredential.get(gap.credentialId) ?? {
             credentialId: gap.credentialId,
-            label: passkeys.find((passkey) => passkey.credentialId === gap.credentialId)?.label ?? null,
+            label: passkeysById.get(gap.credentialId)?.label ?? null,
             missingOrganizations: [],
         };
         if (!progress.missingOrganizations.some((organization) => organization.orgId === gap.orgId)) {
@@ -34,7 +35,7 @@ export function passkeyApprovalProgress(passkeys: Passkey[], gaps: PasskeyApprov
         byCredential.set(gap.credentialId, progress);
     }
     const recency = (credentialId: string) => {
-        const passkey = passkeys.find((candidate) => candidate.credentialId === credentialId);
+        const passkey = passkeysById.get(credentialId);
         return {
             lastUsed: passkey?.lastUsedAt ? Date.parse(passkey.lastUsedAt) : Number.NEGATIVE_INFINITY,
             created: passkey ? Date.parse(passkey.createdAt) : Number.NEGATIVE_INFINITY,

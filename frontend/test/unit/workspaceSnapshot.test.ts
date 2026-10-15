@@ -406,8 +406,8 @@ describe("members administration follows effective workspace authority", () => {
     });
 
     it("asks the server for a new snapshot after a role changes", () => {
-        expect(panel).toMatch(/await confinement\.run\(\(acknowledge\) =>\s+updateMemberRole\(/);
-        expect(panel).toMatch(/await confinement\.run\(\(acknowledge\) =>\s+assignMemberCustomRole\(/);
+        expect(panel).toMatch(/await confinement\.run\([\s\S]*?\(acknowledge\) => updateMemberRole\(/);
+        expect(panel).toMatch(/await confinement\.run\([\s\S]*?\(acknowledge\) => assignMemberCustomRole\(/);
         expect(panel).toContain("router.refresh()");
     });
 

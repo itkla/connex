@@ -5,6 +5,7 @@ import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 const SECURITY = settingsDestination("personal.security").href;
 const ATTESTATION = "PRIVILEGED_MFA_ATTESTATION_REQUIRED";
 const ENROLLMENT = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+const REQUIREMENTS = "/api/auth/webauthn/register/requirements";
 
 type Recorded = { url: string; method: string };
 type Route = (url: string, method: string) => Response | Promise<Response> | null;
@@ -31,6 +32,7 @@ function stubBrowser(pathname: string, search = "") {
             location.pathname = url.pathname;
             location.search = url.search;
         }),
+        reload: vi.fn(),
     };
     const history = {
         replaceState: vi.fn((_state: unknown, _title: string, target: string) => {
@@ -43,7 +45,8 @@ function stubBrowser(pathname: string, search = "") {
     vi.stubGlobal("window", {
         addEventListener: vi.fn((type: string, listener: (event: unknown) => void) => listeners.set(type, listener)),
         crypto: { randomUUID: () => "event-id" },
-        localStorage: { setItem: vi.fn() },
+        localStorage: { setItem: vi.fn(), getItem: vi.fn(() => null), removeItem: vi.fn(), key: vi.fn(() => null), length: 0 },
+        sessionStorage: { setItem: vi.fn(), getItem: vi.fn(() => null), removeItem: vi.fn(), key: vi.fn(() => null), length: 0 },
         location,
         history,
     });
@@ -65,16 +68,33 @@ function stubBackend(route: Route): Recorded[] {
     return requests;
 }
 
+/** Answers successive standing reads in order; each answer is released when the test says so. */
+function standingReads() {
+    const answers: Array<{ promise: Promise<Response>; resolve: (response: Response) => void }> = [];
+    let served = 0;
+    const answer = (index: number) => {
+        while (answers.length <= index) {
+            let resolve: (response: Response) => void = () => undefined;
+            const promise = new Promise<Response>((settle) => {
+                resolve = settle;
+            });
+            answers.push({ promise, resolve });
+        }
+        return answers[index];
+    };
+    return {
+        next: () => answer(served++).promise,
+        release: (index: number, response: Response) => answer(index).resolve(response),
+        served: () => served,
+    };
+}
+
 function refusal(code: string) {
     return json({ code, message: "Confined" }, 403);
 }
 
-function deferred<T>() {
-    let resolve: (value: T) => void = () => {};
-    const promise = new Promise<T>((settle) => {
-        resolve = settle;
-    });
-    return { promise, resolve };
+async function flush() {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
 describe("privileged MFA confinement in the browser", () => {
@@ -88,7 +108,7 @@ describe("privileged MFA confinement in the browser", () => {
         const { location } = stubBrowser("/dashboard");
         const requests = stubBackend((url) => {
             if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
-            if (url.endsWith("/api/auth/webauthn/register/requirements")) return requirements("ATTESTATION_REQUIRED");
+            if (url.endsWith(REQUIREMENTS)) return requirements("ATTESTATION_REQUIRED");
             return null;
         });
         const api = await import("@/app/lib/api");
@@ -115,28 +135,29 @@ describe("privileged MFA confinement in the browser", () => {
 
     it("moves an enrollment step to the approval step when the first passkey still needs approval", async () => {
         const { history, location } = stubBrowser(SECURITY, "?mfa=enroll");
-        stubBackend((url) => (url.endsWith("/register/requirements") ? requirements("ATTESTATION_REQUIRED") : null));
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements("ATTESTATION_REQUIRED") : null));
         const api = await import("@/app/lib/api");
         expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
 
-        await api.settlePrivilegedMfaStanding("ceremony");
+        await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBe("applied");
 
         expect(history.replaceState).toHaveBeenCalledWith(null, "", `${SECURITY}?mfa=approve`);
         expect(location.search).toBe("?mfa=approve");
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("ATTESTATION_REQUIRED");
         await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
     });
 
     it.each(["SATISFIED", "UNPRIVILEGED"])("releases on %s and drops the step from the address", async (standing) => {
         const { location } = stubBrowser(SECURITY, "?mfa=approve");
         const requests = stubBackend((url) => {
-            if (url.endsWith("/register/requirements")) return requirements(standing);
+            if (url.endsWith(REQUIREMENTS)) return requirements(standing);
             if (url.endsWith("/api/rules")) return json([]);
             return null;
         });
         const api = await import("@/app/lib/api");
 
-        await api.settlePrivilegedMfaStanding("check");
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("applied");
 
         expect(api.privilegedMfaConfinementReason()).toBeNull();
         expect(location.search).toBe("");
@@ -144,51 +165,103 @@ describe("privileged MFA confinement in the browser", () => {
         expect(requests.some(({ url }) => url.endsWith("/api/rules"))).toBe(true);
     });
 
-    it("ignores a release that a newer refusal overtook", async () => {
+    it("reads again when a refusal overtakes a read, and lets only the fresh read decide", async () => {
         stubBrowser("/dashboard");
-        const pending = deferred<Response>();
+        const reads = standingReads();
         stubBackend((url) => {
-            if (url.endsWith("/register/requirements")) return pending.promise;
+            if (url.endsWith(REQUIREMENTS)) return reads.next();
             if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
             return null;
         });
         const api = await import("@/app/lib/api");
 
         const settled = api.settlePrivilegedMfaStanding("check");
+        await flush();
         await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
-        pending.resolve(requirements("SATISFIED"));
-
-        await expect(settled).resolves.toMatchObject({ standing: "SATISFIED" });
+        reads.release(0, requirements("SATISFIED"));
+        await flush();
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+
+        reads.release(1, requirements("ATTESTATION_REQUIRED"));
+        await expect(settled).resolves.toBe("applied");
+        expect(reads.served()).toBe(2);
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("ATTESTATION_REQUIRED");
     });
 
-    it("ignores a release that an identity change overtook", async () => {
+    it("reads again when an identity change overtakes a read", async () => {
         const { listeners } = stubBrowser(SECURITY, "?mfa=approve");
-        const pending = deferred<Response>();
-        stubBackend((url) => (url.endsWith("/register/requirements") ? pending.promise : null));
+        const reads = standingReads();
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
         const api = await import("@/app/lib/api");
 
         const settled = api.settlePrivilegedMfaStanding("check");
+        await flush();
         listeners.get("storage")?.({ key: "connex:client-request-identity", newValue: "invalidate:event" });
-        pending.resolve(requirements("SATISFIED"));
-        await settled;
-
+        reads.release(0, requirements("SATISFIED"));
+        await flush();
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+
+        reads.release(1, requirements("ATTESTATION_REQUIRED"));
+        await expect(settled).resolves.toBe("applied");
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+    });
+
+    it("never lets an older check undo the release a newer ceremony decided", async () => {
+        stubBrowser(SECURITY, "?mfa=approve");
+        const reads = standingReads();
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+        const api = await import("@/app/lib/api");
+
+        const olderCheck = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        const ceremony = api.settlePrivilegedMfaStanding("ceremony");
+        await flush();
+        reads.release(1, requirements("SATISFIED"));
+        await expect(ceremony).resolves.toBe("applied");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+
+        reads.release(0, requirements("ATTESTATION_REQUIRED"));
+        await expect(olderCheck).resolves.toBe("superseded");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("SATISFIED");
     });
 
     it("keeps confinement when the standing cannot be read", async () => {
         stubBrowser(SECURITY, "?mfa=approve");
-        stubBackend((url) => (url.endsWith("/register/requirements") ? json({ message: "Unavailable" }, 503) : null));
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? json({ message: "Unavailable" }, 503) : null));
         const api = await import("@/app/lib/api");
 
-        await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBeNull();
+        await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBe("failed");
 
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
     });
 
+    it.each([
+        { label: "an empty body", body: {} },
+        { label: "a text flag", body: { currentPasswordRequired: "no", emailConfirmationRequired: false, emailConfirmationSatisfied: false } },
+        { label: "a malformed gap", body: {
+            currentPasswordRequired: false,
+            emailConfirmationRequired: false,
+            emailConfirmationSatisfied: false,
+            standing: "SATISFIED",
+            approvalGaps: [{ credentialId: 7 }],
+        } },
+    ])("treats $label as a failed read rather than an old backend", async ({ body }) => {
+        stubBrowser(SECURITY, "?mfa=enroll");
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? json(body) : null));
+        const api = await import("@/app/lib/api");
+
+        await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBe("failed");
+
+        expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+    });
+
     it("keeps confinement on a standing this client does not know", async () => {
         stubBrowser(SECURITY, "?mfa=enroll");
-        stubBackend((url) => (url.endsWith("/register/requirements") ? requirements("SOMETHING_NEW") : null));
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements("SOMETHING_NEW") : null));
         const api = await import("@/app/lib/api");
 
         await api.settlePrivilegedMfaStanding("ceremony");
@@ -196,10 +269,30 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
     });
 
+    it("forgets the confinement when the account signs out, so signing in again is not refused locally", async () => {
+        stubBrowser("/onboarding");
+        const requests = stubBackend((url) => {
+            if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
+            if (url.endsWith("/api/auth/logout")) return new Response(null, { status: 204 });
+            if (url.endsWith("/api/auth/login")) return json({ message: "Signed in" });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+
+        await api.logout();
+
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+        await api.login({ username: "dana", password: "correct horse" });
+        expect(requests.some(({ url }) => url.endsWith("/api/auth/login"))).toBe(true);
+    });
+
     describe("against a backend that reports no standing", () => {
         it("releases after an accepted enrollment", async () => {
             stubBrowser(SECURITY, "?mfa=enroll");
-            stubBackend((url) => (url.endsWith("/register/requirements") ? requirements() : null));
+            stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements() : null));
             const api = await import("@/app/lib/api");
 
             await api.settlePrivilegedMfaStanding("ceremony");
@@ -209,7 +302,7 @@ describe("privileged MFA confinement in the browser", () => {
 
         it("never releases after a safe exit or a plain check", async () => {
             stubBrowser(SECURITY, "?mfa=enroll");
-            stubBackend((url) => (url.endsWith("/register/requirements") ? requirements() : null));
+            stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements() : null));
             const api = await import("@/app/lib/api");
 
             await api.settlePrivilegedMfaStanding("exit");
@@ -220,7 +313,7 @@ describe("privileged MFA confinement in the browser", () => {
 
         it("never releases on the approval step", async () => {
             stubBrowser(SECURITY, "?mfa=approve");
-            stubBackend((url) => (url.endsWith("/register/requirements") ? requirements() : null));
+            stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements() : null));
             const api = await import("@/app/lib/api");
 
             await api.settlePrivilegedMfaStanding("ceremony");
@@ -232,7 +325,7 @@ describe("privileged MFA confinement in the browser", () => {
             stubBrowser("/dashboard");
             stubBackend((url) => {
                 if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
-                if (url.endsWith("/register/requirements")) return requirements();
+                if (url.endsWith(REQUIREMENTS)) return requirements();
                 return null;
             });
             const api = await import("@/app/lib/api");

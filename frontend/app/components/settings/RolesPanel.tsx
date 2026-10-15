@@ -192,8 +192,10 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
         if (!workspaceId) return;
         try {
             if (editing) {
-                const updated = await confinement.run((acknowledge) =>
-                    updateWorkspaceRole(workspaceId, editing.id, name, permissions, acknowledge));
+                const updated = await confinement.run(
+                    t("confinementSubjectRoleEdit", { name }),
+                    (acknowledge) => updateWorkspaceRole(workspaceId, editing.id, name, permissions, acknowledge),
+                );
                 if (updated === null) throw new ConfinementAcknowledgementDeclined();
                 setRoles((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
                 toastSuccess(t("updated"));
