@@ -122,7 +122,7 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(USER_ID), isNull(), isNull(),
                 eq("Unenrolled Privileged Integration"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"), any(HttpServletRequest.class));
+                eq("enrollment_required"), any(HttpServletRequest.class), any());
     }
 
     /**
@@ -151,7 +151,7 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         verify(auditService, times(1)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(UNAPPROVED_USER_ID), isNull(), isNull(),
                 eq("Unapproved Privileged Integration"), eq("Privileged account confined pending passkey approval"),
-                eq("attestation_required"), any(HttpServletRequest.class));
+                eq("attestation_required"), any(HttpServletRequest.class), any());
     }
 
     @Test
@@ -171,7 +171,7 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         verify(auditService).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(USER_ID), isNull(), isNull(),
                 eq("Unenrolled Privileged Integration"), eq("Privileged account confined pending MFA enrollment"),
-                eq("enrollment_required"), deniedRequest.capture());
+                eq("enrollment_required"), deniedRequest.capture(), any());
         assertEquals("cross-site", deniedRequest.getValue().getHeader("Sec-Fetch-Site"));
         assertEquals("no-cors", deniedRequest.getValue().getHeader("Sec-Fetch-Mode"));
         assertEquals("image", deniedRequest.getValue().getHeader("Sec-Fetch-Dest"));

@@ -730,6 +730,39 @@ class AuditServiceTest {
     }
 
     @Test
+    void denialAuditUsesItsResolvedAddressWithoutReadingTheRejectedForwardedHeaderAgain() {
+        service = new AuditService(sessionSecurityService, auditLogMapper, auditIntegrityService,
+            objectMapper, tenantContext, new ClientIpResolver("10.0.0.1"),
+            correlationPseudonymizer, new AutomationScope());
+        MockHttpServletRequest raw = new MockHttpServletRequest("GET", "/api/companies");
+        raw.setRemoteAddr("10.0.0.1");
+        raw.addHeader("X-Forwarded-For", "198.51.100.19\u0085");
+        raw.addHeader("User-Agent", "denied-request-test");
+        raw.addHeader("Sec-Fetch-Site", "cross-site");
+        HttpServletRequest request = new StrictHttpFirewall().getFirewalledRequest(raw);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        try {
+            assertThrows(RequestRejectedException.class, () ->
+                service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                    "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request));
+            verifyNoInteractions(auditIntegrityService);
+
+            service.recordStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 7, null, null,
+                "Admin", "Privileged account confined pending MFA enrollment", "enrollment_required", request,
+                "10.0.0.1");
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+        }
+
+        ArgumentCaptor<AuditLog> appended = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(appended.capture());
+        assertEquals("10.0.0.1", appended.getValue().getIpAddress());
+        assertEquals("denied-request-test", appended.getValue().getUserAgent());
+        assertEquals(objectMapper.valueToTree(Map.of("error", "enrollment_required", "secFetchSite", "cross-site")),
+            objectMapper.readTree(appended.getValue().getContext()));
+    }
+
+    @Test
     void strictFailureAuditWithFetchMetadataPropagatesAppendFailures() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("Sec-Fetch-Site", "cross-site");

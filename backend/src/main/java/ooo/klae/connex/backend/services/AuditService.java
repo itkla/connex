@@ -367,6 +367,39 @@ public class AuditService {
     public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
             Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
             HttpServletRequest request) {
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
+                refusalContext(reason, request), true, true, workspaceId, orgId, true);
+    }
+
+    /**
+     * Records an already-decided refusal using the address selected for its denial-audit key.
+     * The forwarding header is not read again while building the row; other request metadata
+     * and advisory fetch metadata retain their usual handling. Persistence failures propagate.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed sanitized failure classification
+     * @param request already-denied request whose fetch metadata is advisory
+     * @param resolvedClientIp server-resolved address used by the denial-audit limiter
+     */
+    public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request, String resolvedClientIp) {
+        AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
+        entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            resolveRequestMetadata(entry, attrs);
+        }
+        appendAndObserve(entry, true);
+    }
+
+    private Object refusalContext(String reason, HttpServletRequest request) {
         Map<String, Object> context = new LinkedHashMap<>();
         if (reason != null) {
             context.put("error", truncate(reason, ERROR_MAX));
@@ -374,8 +407,7 @@ public class AuditService {
         copyFetchMetadata(request, context, "Sec-Fetch-Site", "secFetchSite");
         copyFetchMetadata(request, context, "Sec-Fetch-Mode", "secFetchMode");
         copyFetchMetadata(request, context, "Sec-Fetch-Dest", "secFetchDest");
-        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
-                context.isEmpty() ? null : context, true, true, workspaceId, orgId, true);
+        return context.isEmpty() ? null : context;
     }
 
     private static void copyFetchMetadata(HttpServletRequest request, Map<String, Object> context,
@@ -866,8 +898,12 @@ public class AuditService {
         if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs)) {
             return;
         }
+        entry.setIpAddress(clientIp(attrs.getRequest()));
+        resolveRequestMetadata(entry, attrs);
+    }
+
+    private void resolveRequestMetadata(AuditLog entry, ServletRequestAttributes attrs) {
         HttpServletRequest req = attrs.getRequest();
-        entry.setIpAddress(clientIp(req));
         entry.setUserAgent(truncate(req.getHeader("User-Agent"), USER_AGENT_MAX));
         entry.setSessionId(sessionHash(req));
         entry.setRequestId(requestId(attrs));

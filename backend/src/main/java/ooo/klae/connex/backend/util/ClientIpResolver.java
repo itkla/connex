@@ -27,8 +27,6 @@ import jakarta.servlet.http.HttpServletRequest;
  * right-to-left until it reaches the first untrusted address. Every hop must be an IP
  * literal; missing or malformed chains fall back to the direct peer. With no trusted
  * proxies configured (the default), the client-supplied header is never trusted.
- * A header read rejected by the request firewall with {@link RequestRejectedException}
- * is treated as a malformed chain; other header-read exceptions propagate.
  */
 @Component
 public class ClientIpResolver {
@@ -91,9 +89,26 @@ public class ClientIpResolver {
     }
 
     /**
+     * Resolves the address for a denial-audit limiter key, falling back to the direct peer when
+     * the request firewall rejects the forwarding-header read. Other exceptions propagate.
+     *
+     * <p>Use only after a refusal has already been decided and is being audited, never for
+     * request admission, authentication throttling or other authorization decisions. The caller
+     * must pass this same address to the audit writer without resolving the header again.
+     *
+     * @param request the already-denied request
+     * @return the resolved client IP or direct peer, or {@code null} when unavailable
+     */
+    public String resolveForDenialAudit(HttpServletRequest request) {
+        try {
+            return resolve(request);
+        } catch (RequestRejectedException ignored) {
+            return request.getRemoteAddr();
+        }
+    }
+
+    /**
      * Resolves the client address together with the provenance needed by per-IP throttles.
-     * Missing, malformed or firewall-rejected forwarding headers return the direct peer
-     * with {@code forwardedByTrustedProxy=false}.
      *
      * @param request the inbound request
      * @return the resolved address and whether it came from a trusted sanitizing proxy
@@ -104,12 +119,7 @@ public class ClientIpResolver {
                 || !isTrusted(remoteAddr)) {
             return new ResolvedClientIp(remoteAddr, false);
         }
-        String forwarded;
-        try {
-            forwarded = request.getHeader("X-Forwarded-For");
-        } catch (RequestRejectedException ignored) {
-            return new ResolvedClientIp(remoteAddr, false);
-        }
+        String forwarded = request.getHeader("X-Forwarded-For");
         if (forwarded == null || forwarded.isBlank()) {
             return new ResolvedClientIp(remoteAddr, false);
         }

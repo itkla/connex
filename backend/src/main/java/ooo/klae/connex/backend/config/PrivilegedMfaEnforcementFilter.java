@@ -149,15 +149,16 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
      */
     private void recordDenial(HttpServletRequest request, User user, String action, String summary,
             String reason) {
+        String clientIp = clientIpResolver.resolveForDenialAudit(request);
         Optional<DenialAuditRateLimiter.Admission> admission =
-                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIpResolver.resolve(request));
+                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp);
         if (admission.isEmpty()) {
             return;
         }
         boolean written = false;
         try {
             auditService.recordStrictFailureIndependentScoped(action, "user", user.getId(), null, null,
-                    user.getDisplayName(), summary, reason, request);
+                    user.getDisplayName(), summary, reason, request, clientIp);
             written = true;
         } catch (RuntimeException e) {
             log.error("Failed to record access denial action={} userId={}", action, user.getId(), e);

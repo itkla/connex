@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -196,6 +197,8 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             recordDenial(request, exception);
             PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
                 exception.code, exception.getMessage());
+        } catch (RequestRejectedException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             unexpectedFailure(request, response, credentialId);
         } finally {
@@ -325,8 +328,9 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
      */
     private void recordDenial(HttpServletRequest request, PrivilegedMfaDenialException denial) {
         User user = denial.user;
+        String clientIp = clientIpResolver.resolveForDenialAudit(request);
         Optional<DenialAuditRateLimiter.Admission> admission = denialAuditRateLimiter.acquire(
-            user.getId(), MFA_DENIED_ACTION, denial.reason, clientIpResolver.resolve(request));
+            user.getId(), MFA_DENIED_ACTION, denial.reason, clientIp);
         if (admission.isEmpty()) {
             return;
         }
@@ -337,7 +341,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.setContext(auditContext);
         try {
             auditService.recordStrictFailureIndependentScoped(MFA_DENIED_ACTION, "user", user.getId(),
-                null, null, user.getDisplayName(), denial.summary, denial.reason, request);
+                null, null, user.getDisplayName(), denial.summary, denial.reason, request, clientIp);
             written = true;
         } catch (RuntimeException exception) {
             log.error("Failed to record access denial action={} userId={}",

@@ -100,15 +100,27 @@ class ClientIpResolverTest {
     }
 
     @Test
-    void fallsBackToThePeerWhenTheFirewallRejectsTheForwardedHeader() {
+    void existingResolutionMethodsPropagateFirewallRejectedForwardedHeaders() {
         ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
         MockHttpServletRequest request =
             request("172.31.0.2", "198.51.100.19\u0085, 172.30.0.2");
         FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
 
         assertThrows(RequestRejectedException.class, () -> firewalled.getHeader("X-Forwarded-For"));
-        assertEquals("172.31.0.2", resolver.resolve(firewalled));
-        assertEquals(new ResolvedClientIp("172.31.0.2", false), resolver.resolveWithProvenance(firewalled));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolve(firewalled));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolveWithProvenance(firewalled));
+    }
+
+    @Test
+    void denialAuditResolutionFallsBackToThePeerWhenTheFirewallRejectsTheForwardedHeader() {
+        ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
+        MockHttpServletRequest request =
+            request("172.31.0.2", "198.51.100.19\u0085, 172.30.0.2");
+        FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+        assertThrows(RequestRejectedException.class, () -> firewalled.getHeader("X-Forwarded-For"));
+        assertEquals("172.31.0.2", resolver.resolveForDenialAudit(firewalled));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolve(firewalled));
     }
 
     @Test
@@ -120,6 +132,7 @@ class ClientIpResolverTest {
 
         assertEquals("198.51.100.19", resolver.resolve(firewalled));
         assertEquals(new ResolvedClientIp("198.51.100.19", true), resolver.resolveWithProvenance(firewalled));
+        assertEquals("198.51.100.19", resolver.resolveForDenialAudit(firewalled));
     }
 
     @Test
@@ -142,6 +155,7 @@ class ClientIpResolverTest {
 
             assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolve(firewalled)));
             assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolveWithProvenance(firewalled)));
+            assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolveForDenialAudit(firewalled)));
         }
     }
 
