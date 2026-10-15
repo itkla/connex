@@ -208,7 +208,8 @@
         "confinementSubjectRole": "Change {name} to {role}",
         "confinementSubjectAdd": "Add {email} as {role}",
         "passkeyNotApproved": "Passkey not approved",
-        "passkeyNotApprovedHint": "None of their passkeys is approved in this organization yet. Give them a passkey approval code from this member's menu."
+        "passkeyNotApprovedHint": "None of their passkeys is approved in this organization yet. Give them a passkey approval code from this member's menu.",
+        "membersRefreshFailed": "The member list couldn't refresh. Reload the page to see the latest approval status."
     },
     "OrgDomains": {
         "title": "Allowed domains",

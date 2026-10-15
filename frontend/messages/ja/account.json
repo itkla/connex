@@ -116,7 +116,9 @@
         "exitRefusedOrgNotMember": "あなたはすでにこの組織のメンバーではありません。",
         "exitRefusedOrgLastOwner": "あなたはこの組織の最後のオーナーです。退出する前に、別のメンバーをオーナーにしてください。",
         "approvalRefreshFailed": "パスキーは承認されましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。",
-        "confinementRecheck": "もう一度確認"
+        "confinementRecheck": "もう一度確認",
+        "exitRefreshFailed": "退出しましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。",
+        "addedRefreshFailed": "パスキーは追加されましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。"
     },
     "AccountConnections": {
         "title": "連携アカウント",

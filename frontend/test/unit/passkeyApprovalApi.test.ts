@@ -191,7 +191,7 @@ describe("passkey approval code requests", () => {
         });
         const api = await import("@/app/lib/api");
 
-        await expect(api.leaveOrganization(3)).resolves.toBeUndefined();
+        await expect(api.leaveOrganization(3)).resolves.toBe("failed");
         await expect(api.addOrgMemberByEmail(3, "someone@example.com", "admin")).rejects.toMatchObject({
             status: 403,
             code: api.PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,

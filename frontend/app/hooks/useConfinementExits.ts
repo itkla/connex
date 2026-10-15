@@ -2,8 +2,15 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 
-import { ApiError, leaveOrganization, settlePrivilegedMfaStanding } from "@/app/lib/api";
+import {
+    ApiError,
+    leaveOrganization,
+    settlePrivilegedMfaStanding,
+    type PrivilegedMfaSettleOutcome,
+} from "@/app/lib/api";
+import { toastError } from "@/app/lib/toast";
 
 /** What a confined account can leave to end the privilege that confines it (#1534). */
 export type ConfinementExitTarget =
@@ -27,6 +34,20 @@ const KNOWN_REFUSALS: ReadonlySet<string> = new Set<ConfinementExitRefusal>([
     "ORG_LAST_OWNER",
 ]);
 
+/**
+ * How a surface leaves a workspace, since that changes the browser's workspace selection. Both
+ * resolve how the standing read that followed settled, or null when nothing was read.
+ */
+export type ConfinementWorkspaceExit = {
+    /** Leaves the workspace and publishes the server's new selection. */
+    leave: (workspaceId: number) => Promise<PrivilegedMfaSettleOutcome | null>;
+    /**
+     * Catches up with a workspace the account no longer belongs to, because it was removed or left
+     * elsewhere: reads the server's selection and the standing again, as after a departure.
+     */
+    reconcile: () => Promise<PrivilegedMfaSettleOutcome | null>;
+};
+
 /** The exits in progress and refused, and the action that takes one. */
 export type ConfinementExits = {
     /** The exit being taken, by {@link confinementExitKey}, or null. */
@@ -36,6 +57,9 @@ export type ConfinementExits = {
     /** Takes an exit; resolves true once the server accepted it. */
     leave: (target: ConfinementExitTarget) => Promise<boolean>;
 };
+
+/** The code the server answers a workspace exit with once the account is no longer a member. */
+const WORKSPACE_ALREADY_LEFT_CODE = "RESOURCE_NOT_FOUND";
 
 /** Whether a refusal code is one of the exit refusals the server names. */
 function isNamedRefusal(code: string | undefined): code is Exclude<ConfinementExitRefusal, "OTHER"> {
@@ -54,46 +78,47 @@ export function confinementExitKey(target: ConfinementExitTarget): string {
  * organization navigation, drop at once. Leaving a workspace changes the browser's workspace
  * selection, so the surface supplies how; without it, only organizations can be left. A refusal
  * is kept by its stable code for the surface to explain, and the confinement stays as the server
- * left it. An organization the account had already left elsewhere counts as left: the standing is
- * read again and the page refreshed, as after an accepted exit.
- * @param leaveWorkspace how this surface leaves a workspace, when it can
+ * left it. An organization or workspace the account had already left elsewhere counts as left: the
+ * page catches up with the server as after an accepted exit. When the standing cannot be read again
+ * after an exit, the exit still counts and the account is told the page could not update.
+ * @param workspaceExit how this surface leaves a workspace, when it can
  * @returns the exit state and the action
  */
-export function useConfinementExits(
-    leaveWorkspace?: (workspaceId: number) => Promise<void>,
-): ConfinementExits {
+export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): ConfinementExits {
     const router = useRouter();
+    const t = useTranslations("AccountSecurity");
     const [leavingKey, setLeavingKey] = useState<string | null>(null);
     const [refusals, setRefusals] = useState<Readonly<Record<string, ConfinementExitRefusal>>>({});
 
     const leave = useCallback(async (target: ConfinementExitTarget) => {
         const key = confinementExitKey(target);
-        setLeavingKey(key);
-        try {
-            if (target.kind === "organization") {
-                await leaveOrganization(target.orgId);
-                router.refresh();
-            } else if (leaveWorkspace) {
-                await leaveWorkspace(target.workspaceId);
-            } else {
-                return false;
-            }
+        const settled = (outcome: PrivilegedMfaSettleOutcome | null) => {
             setRefusals((previous) => {
                 const next = { ...previous };
                 delete next[key];
                 return next;
             });
+            if (outcome === "failed") toastError(t("exitRefreshFailed"));
             return true;
+        };
+        setLeavingKey(key);
+        try {
+            if (target.kind === "organization") {
+                const outcome = await leaveOrganization(target.orgId);
+                router.refresh();
+                return settled(outcome);
+            }
+            if (!workspaceExit) return false;
+            return settled(await workspaceExit.leave(target.workspaceId));
         } catch (err) {
             if (target.kind === "organization" && err instanceof ApiError && err.code === "ORG_NOT_MEMBER") {
-                await settlePrivilegedMfaStanding("exit");
+                const outcome = await settlePrivilegedMfaStanding("exit");
                 router.refresh();
-                setRefusals((previous) => {
-                    const next = { ...previous };
-                    delete next[key];
-                    return next;
-                });
-                return true;
+                return settled(outcome);
+            }
+            if (target.kind === "workspace" && workspaceExit && err instanceof ApiError
+                && err.code === WORKSPACE_ALREADY_LEFT_CODE) {
+                return settled(await workspaceExit.reconcile().catch(() => "failed" as const));
             }
             const refusal: ConfinementExitRefusal = err instanceof ApiError && isNamedRefusal(err.code)
                 ? err.code
@@ -103,7 +128,7 @@ export function useConfinementExits(
         } finally {
             setLeavingKey(null);
         }
-    }, [leaveWorkspace, router]);
+    }, [router, t, workspaceExit]);
 
     return { leavingKey, refusals, leave };
 }

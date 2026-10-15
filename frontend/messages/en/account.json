@@ -116,7 +116,9 @@
         "exitRefusedOrgNotMember": "You're no longer a member of this organization.",
         "exitRefusedOrgLastOwner": "You're this organization's last owner. Make someone else an owner before you leave.",
         "approvalRefreshFailed": "Your passkey was approved, but this page couldn't update. Check again in a moment.",
-        "confinementRecheck": "Check again"
+        "confinementRecheck": "Check again",
+        "exitRefreshFailed": "You've left, but this page couldn't update. Check again in a moment.",
+        "addedRefreshFailed": "Your passkey was added, but this page couldn't update. Check again in a moment."
     },
     "AccountConnections": {
         "title": "Connected accounts",

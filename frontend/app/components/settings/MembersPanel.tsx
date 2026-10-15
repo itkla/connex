@@ -283,9 +283,9 @@ function MembersWorkspacePanel({
             const loaded = await getWorkspaceMembers(workspaceId);
             if (refreshId === membersRefresh.current) setMembers(loaded);
         } catch {
-            return;
+            if (refreshId === membersRefresh.current) toastError(t("membersRefreshFailed"));
         }
-    }, [workspaceId]);
+    }, [t, workspaceId]);
 
     useEffect(() => {
         if (!workspaceId || (!canManageMembers && !canManageRoles)) return;

@@ -208,7 +208,8 @@
         "confinementSubjectRole": "{name} を {role} に変更",
         "confinementSubjectAdd": "{email} を {role} として追加",
         "passkeyNotApproved": "パスキー未承認",
-        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。"
+        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。",
+        "membersRefreshFailed": "メンバー一覧を更新できませんでした。最新の承認状況を表示するには、ページを再読み込みしてください。"
     },
     "OrgDomains": {
         "title": "許可ドメイン",

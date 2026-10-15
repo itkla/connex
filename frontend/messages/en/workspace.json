@@ -282,7 +282,8 @@
         "ownershipOfferWithdrawFailed": "Couldn't withdraw the ownership offer",
         "confinementSubjectRole": "Change {name} to {role}",
         "passkeyNotApproved": "Passkey not approved",
-        "passkeyNotApprovedHint": "None of their passkeys is approved in this organization yet. Give them a passkey approval code from this member's menu."
+        "passkeyNotApprovedHint": "None of their passkeys is approved in this organization yet. Give them a passkey approval code from this member's menu.",
+        "membersRefreshFailed": "The member list couldn't refresh. Reload the page to see the latest approval status."
     },
     "WorkspaceRoles": {
         "title": "Roles",

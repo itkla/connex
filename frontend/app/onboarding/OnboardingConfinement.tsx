@@ -63,8 +63,9 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
         },
         {
             onEnrolled: async () => {
-                const [loaded] = await Promise.all([getPasskeys(), refresh("ceremony")]);
+                const [loaded, standing] = await Promise.all([getPasskeys(), refresh("ceremony")]);
                 setPasskeys(loaded);
+                return standing;
             },
             onProofRejected: () => void refresh("check"),
         },

@@ -10,6 +10,7 @@ import {
     finishPasskeyRegistration,
     MAIL_TRANSPORT_UNAVAILABLE_CODE,
     requestPasskeyBootstrapConfirmation,
+    type PrivilegedMfaSettleOutcome,
 } from "@/app/lib/api";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { isWebAuthnCancellation } from "@/app/lib/webauthnCancellation";
@@ -50,16 +51,18 @@ export type PasskeyEnrollment = {
  * no workspace (#1534). A privileged, password-backed account's first passkey needs the emailed
  * confirmation and then its current password; the server checks both proofs again, so this only
  * sequences the ceremony. Once the server accepts a passkey, `onEnrolled` runs before the success
- * toast; if that follow-up fails, the enrollment is still announced, since the passkey exists, with
- * a separate note that the list could not be refreshed. A refusal of the first-passkey proofs, with
- * or without the password step, calls `onProofRejected` so the caller can re-read what is required.
+ * toast and resolves how its standing read settled. If that follow-up fails, the enrollment is still
+ * announced, since the passkey exists, with a separate note that the list could not be refreshed;
+ * if only the standing read failed, the note says the page could not update instead. A refusal of
+ * the first-passkey proofs, with or without the password step, calls `onProofRejected` so the
+ * caller can re-read what is required.
  * @param requirements what the account's requirements say the enrollment needs
  * @param callbacks what to do after an accepted enrollment and after a refused first-passkey proof
  * @returns the enrollment state and actions
  */
 export function usePasskeyEnrollment(
     requirements: PasskeyEnrollmentRequirements,
-    callbacks: { onEnrolled: () => Promise<void>; onProofRejected: () => void },
+    callbacks: { onEnrolled: () => Promise<PrivilegedMfaSettleOutcome>; onProofRejected: () => void },
 ): PasskeyEnrollment {
     const t = useTranslations("AccountSecurity");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -74,14 +77,10 @@ export function usePasskeyEnrollment(
     const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
         const credential = await startRegistration({ optionsJSON });
         await finishPasskeyRegistration(deviceLabel(), credential);
-        let reconciled = true;
-        try {
-            await callbacks.onEnrolled();
-        } catch {
-            reconciled = false;
-        }
+        const standing = await callbacks.onEnrolled().catch(() => "unloaded" as const);
         toastSuccess(t("added"));
-        if (!reconciled) toastError(t("loadFailed"));
+        if (standing === "unloaded") toastError(t("loadFailed"));
+        else if (standing === "failed") toastError(t("addedRefreshFailed"));
     };
 
     const sendConfirmation = async () => {

@@ -704,10 +704,13 @@ export function forgetPrivilegedMfaStanding(): void {
     resetPrivilegedMfaState();
 }
 
-/** Reads the standing again after a safe exit, only when the browser was confined. */
-async function settleAfterSafeExit(): Promise<void> {
-    if (activePrivilegedMfaConfinement() === null) return;
-    await settlePrivilegedMfaStanding("exit");
+/**
+ * Reads the standing again after a safe exit, only when the browser was confined.
+ * @returns how the read settled, or null when the browser was not confined and nothing was read
+ */
+async function settleAfterSafeExit(): Promise<PrivilegedMfaSettleOutcome | null> {
+    if (activePrivilegedMfaConfinement() === null) return null;
+    return settlePrivilegedMfaStanding("exit");
 }
 
 function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
@@ -5127,10 +5130,11 @@ export function removeOrgMember(orgId: number, userId: number) {
 /**
  * Leaves an organization (#1534). A confined account may always send it; once it succeeds, the
  * account's standing is read again so a departure that ended the privilege also ends confinement.
+ * @returns how that read settled, or null when the browser was not confined
  */
-export async function leaveOrganization(orgId: number) {
+export async function leaveOrganization(orgId: number): Promise<PrivilegedMfaSettleOutcome | null> {
     await postJson<void>(`/api/orgs/${orgId}/leave`);
-    await settleAfterSafeExit();
+    return settleAfterSafeExit();
 }
 
 /** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
@@ -5358,12 +5362,18 @@ export function declineWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/decline`, {});
 }
 
+/** The workspace selection after leaving one, and how the standing read that followed settled. */
+export type LeftWorkspaceSelection = Types.WorkspaceSelection & {
+    /** How the standing read settled, or null when the browser was not confined. */
+    standing: PrivilegedMfaSettleOutcome | null;
+};
+
 /**
  * Leaves a workspace and returns the server's new selection. A confined account may always send it;
  * once it succeeds, the account's standing is read again so a departure that ended the privilege
  * also ends confinement before the caller navigates.
  */
-export async function leaveWorkspace(id: number) {
+export async function leaveWorkspace(id: number): Promise<LeftWorkspaceSelection> {
     const selection = await withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
             () => postWorkspaceSelectionJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
@@ -5376,8 +5386,8 @@ export async function leaveWorkspace(id: number) {
         ),
         "workspace",
     );
-    await settleAfterSafeExit();
-    return selection;
+    const standing = await settleAfterSafeExit();
+    return { ...selection, standing };
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {

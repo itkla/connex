@@ -20,7 +20,9 @@ const backend = vi.hoisted(() => ({
     approve: null as ((orgId: number) => void) | null,
     reason: null as "enrollment" | "attestation" | null,
     failed: false,
-    leaveWorkspace: vi.fn<(id: number) => Promise<{ activeWorkspaceId: number | null }>>(),
+    leaveWorkspace: vi.fn<(id: number) => Promise<{ activeWorkspaceId: number | null; standing: "applied" | "failed" | null }>>(),
+    readSelection: vi.fn<() => Promise<{ activeWorkspaceId: number | null; workspaces: [] }>>(),
+    settle: vi.fn<(settlement: string) => Promise<"applied" | "failed">>(),
     publish: vi.fn(),
     replace: vi.fn(),
     routerRefresh: vi.fn(),
@@ -32,6 +34,8 @@ vi.mock("@/app/lib/api", async (importOriginal) => ({
     beginPasskeyRegistration: backend.beginPasskeyRegistration,
     finishPasskeyRegistration: backend.finishPasskeyRegistration,
     leaveWorkspace: backend.leaveWorkspace,
+    readAuthoritativeWorkspaceSelection: backend.readSelection,
+    settlePrivilegedMfaStanding: backend.settle,
 }));
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
     ...await importOriginal<typeof import("@simplewebauthn/browser")>(),
@@ -310,7 +314,7 @@ describe("the Security page while a privileged account is confined", () => {
 
         it("leaves through the workspace selection and publishes the server's selection", async () => {
             withWorkspaceExit();
-            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: 9 });
+            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: 9, standing: "applied" });
             await renderPanel();
 
             await leaveSales();
@@ -323,13 +327,31 @@ describe("the Security page while a privileged account is confined", () => {
 
         it("goes to onboarding when no workspace remains, where any remaining confinement is handled", async () => {
             withWorkspaceExit();
-            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: null });
+            backend.leaveWorkspace.mockResolvedValueOnce({ activeWorkspaceId: null, standing: null });
             await renderPanel();
 
             await leaveSales();
 
             expect(backend.publish).toHaveBeenCalledWith(null);
             expect(backend.replace).toHaveBeenCalledWith("/onboarding");
+        });
+
+        it("catches up with a workspace already left elsewhere instead of refusing the exit", async () => {
+            withWorkspaceExit();
+            backend.leaveWorkspace.mockRejectedValueOnce(
+                new ApiError("You are not a member of this workspace", 404, "RESOURCE_NOT_FOUND"),
+            );
+            backend.readSelection.mockResolvedValueOnce({ activeWorkspaceId: 9, workspaces: [] });
+            backend.settle.mockResolvedValueOnce("applied");
+            await renderPanel();
+
+            await leaveSales();
+
+            expect(backend.readSelection).toHaveBeenCalledOnce();
+            expect(backend.settle).toHaveBeenCalledWith("exit");
+            expect(backend.publish).toHaveBeenCalledWith(9);
+            expect(backend.routerRefresh).toHaveBeenCalled();
+            expect(container.textContent).not.toContain(enAccount.AccountSecurity.exitRefused);
         });
 
         it("explains a refused exit and keeps the panel usable", async () => {

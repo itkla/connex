@@ -24,7 +24,7 @@ import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
 import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
-import { toastSuccess } from "@/app/lib/toast";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -176,9 +176,10 @@ export default function OrgMembersPanel({
                 toastSuccess(t("ownershipOffered", { name }));
                 return;
             }
-            await reload(orgId);
+            const reloaded = await reload(orgId).then(() => true, () => false);
             ownershipOffers.refresh();
             toastSuccess(t("roleUpdatedToast"));
+            if (!reloaded) toastError(t("membersRefreshFailed"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err);

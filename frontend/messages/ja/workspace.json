@@ -282,7 +282,8 @@
         "ownershipOfferWithdrawFailed": "オーナー提案を取り消せませんでした",
         "confinementSubjectRole": "{name} を {role} に変更",
         "passkeyNotApproved": "パスキー未承認",
-        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。"
+        "passkeyNotApprovedHint": "この組織で承認されたパスキーがまだありません。このメンバーのメニューからパスキー承認コードを発行してください。",
+        "membersRefreshFailed": "メンバー一覧を更新できませんでした。最新の承認状況を表示するには、ページを再読み込みしてください。"
     },
     "WorkspaceRoles": {
         "title": "ロール",

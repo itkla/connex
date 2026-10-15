@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import {
@@ -19,10 +19,12 @@ import {
     deletePasskey,
     getPasskeys,
     leaveWorkspace,
+    readAuthoritativeWorkspaceSelection,
     renamePasskey,
+    settlePrivilegedMfaStanding,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
-import { useConfinementExits } from "@/app/hooks/useConfinementExits";
+import { useConfinementExits, type ConfinementWorkspaceExit } from "@/app/hooks/useConfinementExits";
 import { usePasskeyEnrollment } from "@/app/hooks/usePasskeyEnrollment";
 import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
@@ -162,24 +164,37 @@ export default function SecurityPanel() {
         },
         {
             onEnrolled: async () => {
-                const [loaded] = await Promise.all([getPasskeys(), refreshStanding("ceremony")]);
+                const [loaded, standing] = await Promise.all([getPasskeys(), refreshStanding("ceremony")]);
                 setPasskeys(loaded);
+                return standing;
             },
             onProofRejected: retryLoad,
         },
     );
 
-    const leaveWorkspaceFromSecurity = useCallback(async (workspaceId: number) => {
-        await runSelectionChange(async (publishActiveWorkspace) => {
-            const selection = await leaveWorkspace(workspaceId);
-            publishActiveWorkspace(selection.activeWorkspaceId);
-            if (selection.activeWorkspaceId === null) {
+    const workspaceExit = useMemo<ConfinementWorkspaceExit>(() => {
+        const follow = (publishActiveWorkspace: (id: number | null) => void, activeWorkspaceId: number | null) => {
+            publishActiveWorkspace(activeWorkspaceId);
+            if (activeWorkspaceId === null) {
                 router.replace("/onboarding");
             }
             router.refresh();
-        });
+        };
+        return {
+            leave: (workspaceId) => runSelectionChange(async (publishActiveWorkspace) => {
+                const selection = await leaveWorkspace(workspaceId);
+                follow(publishActiveWorkspace, selection.activeWorkspaceId);
+                return selection.standing;
+            }),
+            reconcile: () => runSelectionChange(async (publishActiveWorkspace) => {
+                const selection = await readAuthoritativeWorkspaceSelection();
+                const standing = await settlePrivilegedMfaStanding("exit");
+                follow(publishActiveWorkspace, selection.activeWorkspaceId);
+                return standing;
+            }),
+        };
     }, [router, runSelectionChange]);
-    const exits = useConfinementExits(leaveWorkspaceFromSecurity);
+    const exits = useConfinementExits(workspaceExit);
 
     const openRename = (passkey: Passkey) => {
         setRenameTarget(passkey);

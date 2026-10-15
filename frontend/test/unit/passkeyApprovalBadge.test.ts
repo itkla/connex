@@ -39,11 +39,30 @@ describe("the passkey-not-approved badge on member rows", () => {
         expect(sendInvite).toMatch(/membersRefresh\.current \+= 1;\s+setMembers\(\(prev\) => \[\.\.\.prev\.filter/);
     });
 
+    it("says when the roster could not be read again, instead of leaving a stale badge silently", () => {
+        const workspacePanel = source("app/components/settings/MembersPanel.tsx");
+        const refresh = workspacePanel.slice(
+            workspacePanel.indexOf("const refreshMembers = useCallback"),
+            workspacePanel.indexOf("}, [t, workspaceId]);"),
+        );
+        expect(refresh).toMatch(/catch \{\s+if \(refreshId === membersRefresh\.current\) toastError\(t\("membersRefreshFailed"\)\);/);
+
+        const organizationPanel = source("app/components/organization/OrgMembersPanel.tsx");
+        const changeRole = organizationPanel.slice(
+            organizationPanel.indexOf("async function changeRole"),
+            organizationPanel.indexOf("async function confirmRemove"),
+        );
+        expect(changeRole).toContain("const reloaded = await reload(orgId).then(() => true, () => false);");
+        expect(changeRole.indexOf('toastSuccess(t("roleUpdatedToast"));'))
+            .toBeLessThan(changeRole.indexOf('if (!reloaded) toastError(t("membersRefreshFailed"));'));
+    });
+
     it("has its copy in both languages for both lists", () => {
         for (const messages of [enWorkspace.WorkspaceMembers, jaWorkspace.WorkspaceMembers,
             enOrganization.OrgMembers, jaOrganization.OrgMembers]) {
             expect(messages.passkeyNotApproved).toBeTruthy();
             expect(messages.passkeyNotApprovedHint).toBeTruthy();
+            expect(messages.membersRefreshFailed).toBeTruthy();
         }
     });
 });
