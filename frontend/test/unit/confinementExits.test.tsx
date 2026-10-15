@@ -13,10 +13,12 @@ const api = vi.hoisted(() => ({
     settle: vi.fn<(settlement: string) => Promise<PrivilegedMfaSettleOutcome>>(),
     refresh: vi.fn(),
     toastError: vi.fn(),
+    showApiError: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: api.refresh }) }));
 vi.mock("@/app/lib/toast", () => ({ toastError: api.toastError }));
+vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => api.showApiError }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
@@ -66,6 +68,7 @@ beforeEach(() => {
     api.settle.mockResolvedValue("applied");
     api.refresh.mockReset();
     api.toastError.mockReset();
+    api.showApiError.mockReset();
 });
 
 afterEach(async () => {
@@ -136,6 +139,7 @@ describe("leaving what confines a privileged account", () => {
 
     it("still counts an organization exit when the standing cannot be read again, and says so", async () => {
         api.leaveOrganization.mockResolvedValueOnce("failed");
+        api.settle.mockResolvedValueOnce("failed");
         await mountExits();
 
         let left = false;
@@ -151,9 +155,23 @@ describe("leaving what confines a privileged account", () => {
         expect(current().refusals["organization:3"]).toBeUndefined();
     });
 
+    it("reads the standing once more before warning, and stays quiet when that read succeeds", async () => {
+        api.leaveOrganization.mockResolvedValueOnce("failed");
+        await mountExits();
+
+        let left = false;
+        await act(async () => {
+            left = await current().leave({ kind: "organization", orgId: 3, name: "Acme" });
+        });
+
+        expect(left).toBe(true);
+        expect(api.settle).toHaveBeenCalledWith("exit");
+        expect(api.toastError).not.toHaveBeenCalled();
+    });
+
     it("says so when an organization already left elsewhere cannot be read again", async () => {
         api.leaveOrganization.mockRejectedValueOnce(new ApiError("Not a member", 404, "ORG_NOT_MEMBER"));
-        api.settle.mockResolvedValueOnce("failed");
+        api.settle.mockResolvedValueOnce("failed").mockResolvedValueOnce("failed");
         await mountExits();
 
         let left = false;
@@ -182,6 +200,7 @@ describe("leaving what confines a privileged account", () => {
     });
 
     it("says so when a workspace exit's standing cannot be read again", async () => {
+        api.settle.mockResolvedValueOnce("failed");
         await mountExits(workspaceExitFor(vi.fn(async () => "failed" as const)));
 
         let left = false;
@@ -214,13 +233,14 @@ describe("leaving what confines a privileged account", () => {
         expect(api.toastError).not.toHaveBeenCalled();
     });
 
-    it("still counts a workspace left elsewhere when catching up fails, and says so", async () => {
+    it("still counts a workspace left elsewhere when catching up fails, and reports why through the shared toast", async () => {
+        const catchUpFailure = new ApiError("Unauthorized", 401);
         const workspaceExit = workspaceExitFor(
             vi.fn(async (): Promise<PrivilegedMfaSettleOutcome | null> => {
                 throw new ApiError("You are not a member of this workspace", 404, "RESOURCE_NOT_FOUND");
             }),
             vi.fn(async (): Promise<PrivilegedMfaSettleOutcome | null> => {
-                throw new Error("selection unavailable");
+                throw catchUpFailure;
             }),
         );
         await mountExits(workspaceExit);
@@ -232,9 +252,8 @@ describe("leaving what confines a privileged account", () => {
 
         expect(left).toBe(true);
         expect(current().refusals["workspace:7"]).toBeUndefined();
-        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed, {
-            description: enAccount.AccountSecurity.exitRefreshFailedDescription,
-        });
+        expect(api.showApiError).toHaveBeenCalledWith(catchUpFailure, "exitRefreshFailed", "exitRefreshFailedDescription");
+        expect(api.toastError).not.toHaveBeenCalled();
     });
 
     it("explains anything the server did not name generically", async () => {

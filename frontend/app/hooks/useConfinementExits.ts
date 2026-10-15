@@ -10,6 +10,7 @@ import {
     settlePrivilegedMfaStanding,
     type PrivilegedMfaSettleOutcome,
 } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError } from "@/app/lib/toast";
 
 /** What a confined account can leave to end the privilege that confines it (#1534). */
@@ -80,25 +81,32 @@ export function confinementExitKey(target: ConfinementExitTarget): string {
  * is kept by its stable code for the surface to explain, and the confinement stays as the server
  * left it. An organization or workspace the account had already left elsewhere counts as left: the
  * page catches up with the server as after an accepted exit. When the standing cannot be read again
- * after an exit, the exit still counts and the account is told the page could not update.
+ * after an exit, it is read once more, since a transient failure or a concurrent read may already
+ * have caught the page up; only when that also fails is the account told the page could not update.
+ * The exit counts either way, and a failure to catch up with a workspace left elsewhere is reported
+ * through the shared error toast, so an expired session still leads to sign-in.
  * @param workspaceExit how this surface leaves a workspace, when it can
  * @returns the exit state and the action
  */
 export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): ConfinementExits {
     const router = useRouter();
     const t = useTranslations("AccountSecurity");
+    const showApiError = useApiErrorToast("AccountSecurity");
     const [leavingKey, setLeavingKey] = useState<string | null>(null);
     const [refusals, setRefusals] = useState<Readonly<Record<string, ConfinementExitRefusal>>>({});
 
     const leave = useCallback(async (target: ConfinementExitTarget) => {
         const key = confinementExitKey(target);
-        const settled = (outcome: PrivilegedMfaSettleOutcome | null) => {
+        const forgetRefusal = () => {
             setRefusals((previous) => {
                 const next = { ...previous };
                 delete next[key];
                 return next;
             });
-            if (outcome === "failed") {
+        };
+        const settled = async (outcome: PrivilegedMfaSettleOutcome | null) => {
+            forgetRefusal();
+            if (outcome === "failed" && await settlePrivilegedMfaStanding("exit") === "failed") {
                 toastError(t("exitRefreshFailed"), { description: t("exitRefreshFailedDescription") });
             }
             return true;
@@ -108,19 +116,25 @@ export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): C
             if (target.kind === "organization") {
                 const outcome = await leaveOrganization(target.orgId);
                 router.refresh();
-                return settled(outcome);
+                return await settled(outcome);
             }
             if (!workspaceExit) return false;
-            return settled(await workspaceExit.leave(target.workspaceId));
+            return await settled(await workspaceExit.leave(target.workspaceId));
         } catch (err) {
             if (target.kind === "organization" && err instanceof ApiError && err.code === "ORG_NOT_MEMBER") {
                 const outcome = await settlePrivilegedMfaStanding("exit");
                 router.refresh();
-                return settled(outcome);
+                return await settled(outcome);
             }
             if (target.kind === "workspace" && workspaceExit && err instanceof ApiError
                 && err.code === WORKSPACE_ALREADY_LEFT_CODE) {
-                return settled(await workspaceExit.reconcile().catch(() => "failed" as const));
+                try {
+                    return await settled(await workspaceExit.reconcile());
+                } catch (reconcileError) {
+                    forgetRefusal();
+                    showApiError(reconcileError, "exitRefreshFailed", "exitRefreshFailedDescription");
+                    return true;
+                }
             }
             const refusal: ConfinementExitRefusal = err instanceof ApiError && isNamedRefusal(err.code)
                 ? err.code
@@ -130,7 +144,7 @@ export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): C
         } finally {
             setLeavingKey(null);
         }
-    }, [router, t, workspaceExit]);
+    }, [router, showApiError, t, workspaceExit]);
 
     return { leavingKey, refusals, leave };
 }
