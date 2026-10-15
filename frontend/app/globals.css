@@ -159,7 +159,10 @@
   --color-brand-light: ; */
 }
 
-:root {
+/* A surface drawn in the light palette whatever the theme, such as onboarding's fixed white canvas,
+   so token-styled components inside it stay legible under a dark theme. */
+:root,
+.light-surface {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

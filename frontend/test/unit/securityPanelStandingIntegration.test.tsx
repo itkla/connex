@@ -15,7 +15,14 @@ const harness = vi.hoisted(() => ({
 
 vi.mock("@/app/hooks/usePasskeySupport", () => ({ usePasskeySupport: () => true }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
-vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ workspaces: [] }) }));
+vi.mock("@/app/hooks/useWorkspace", () => ({
+    useWorkspace: () => ({
+        workspaces: [],
+        runSelectionChange: async (change: (publish: (id: number | null) => void) => Promise<unknown>) =>
+            change(() => undefined),
+    }),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-14T00:00:00Z") }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn() }));
 vi.mock("@/app/components/motion/Rise", () => ({

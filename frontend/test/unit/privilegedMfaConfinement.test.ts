@@ -259,6 +259,20 @@ describe("privileged MFA confinement in the browser", () => {
     it.each([
         { label: "an empty body", body: {} },
         { label: "a text flag", body: { currentPasswordRequired: "no", emailConfirmationRequired: false, emailConfirmationSatisfied: false } },
+        ...[-1, 0, 1.5, 2 ** 60].map((id) => ({ label: `a membership id of ${id}`, body: {
+            currentPasswordRequired: false,
+            emailConfirmationRequired: false,
+            emailConfirmationSatisfied: false,
+            standing: "SATISFIED",
+            privilegedMemberships: [{ orgId: id, orgName: "Acme", orgRole: "admin", workspaces: [] }],
+        } })),
+        { label: "a malformed workspace exit", body: {
+            currentPasswordRequired: false,
+            emailConfirmationRequired: false,
+            emailConfirmationSatisfied: false,
+            standing: "SATISFIED",
+            privilegedMemberships: [{ orgId: 3, orgName: "Acme", orgRole: null, workspaces: [{ workspaceId: -7, workspaceName: "Sales" }] }],
+        } },
         { label: "a malformed gap", body: {
             currentPasswordRequired: false,
             emailConfirmationRequired: false,

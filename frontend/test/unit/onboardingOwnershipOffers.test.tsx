@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +55,9 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
     }),
 }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => vi.fn() }));
+vi.mock("@/app/onboarding/OnboardingConfinement", () => ({
+    default: (): ReactNode => createElement("div", { "data-testid": "onboarding-confinement" }, "confinement"),
+}));
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({ default: () => null }));
 vi.mock("@/app/components/account/OwnershipConfinementDialog", () => ({
     default: ({ offers: state }: { offers: SelfOwnershipOffers }): ReactNode =>
@@ -142,7 +147,7 @@ describe("onboarding ownership offers", () => {
         standing.confined = true;
         await renderOnboarding();
 
-        expect(container.textContent).toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("[data-testid='onboarding-confinement']")).not.toBeNull();
         expect(container.querySelector("form")).toBeNull();
         expect(container.textContent).not.toContain("Onboarding.createButton");
         expect(container.textContent).not.toContain("Onboarding.joinButton");
@@ -153,9 +158,6 @@ describe("onboarding ownership offers", () => {
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
         expect(button("Onboarding.signOut")).toBeDefined();
-
-        await act(async () => button("Onboarding.confinedRecheck").click());
-        expect(standing.refresh).toHaveBeenCalledWith("check");
     });
 
     it("offers nothing that confinement could refuse until the standing is known", async () => {
@@ -194,11 +196,20 @@ describe("onboarding ownership offers", () => {
         )).toBe(false);
     });
 
+    it("draws onboarding in the light palette whatever the theme, so token-styled parts stay legible", async () => {
+        offers.state = selfOffers([]);
+        await renderOnboarding();
+
+        expect(container.firstElementChild?.classList.contains("light-surface")).toBe(true);
+        expect(container.firstElementChild?.classList.contains("text-foreground")).toBe(true);
+        expect(readFileSync(path.resolve(process.cwd(), "app/globals.css"), "utf8")).toMatch(/:root,\s*\.light-surface \{/);
+    });
+
     it("keeps workspace creation and joining for an account that is not confined", async () => {
         offers.state = selfOffers([]);
         await renderOnboarding();
 
-        expect(container.textContent).not.toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("[data-testid='onboarding-confinement']")).toBeNull();
         expect(container.querySelectorAll("form")).toHaveLength(2);
     });
 
