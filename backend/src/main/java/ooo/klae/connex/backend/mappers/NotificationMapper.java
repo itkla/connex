@@ -55,6 +55,23 @@ public interface NotificationMapper {
         @Param("offset") int offset
     );
 
+    /** Traverses a bounded inbox snapshot by ID without depending on mutation success. */
+    List<Notification> findPage(
+        @Param("recipientId") int recipientId,
+        @Param("status") String status,
+        @Param("types") List<String> types,
+        @Param("categories") List<String> categories,
+        @Param("severities") List<String> severities,
+        @Param("workspaceId") Integer workspaceId,
+        @Param("contextType") String contextType,
+        @Param("contextId") Integer contextId,
+        @Param("asOf") String asOf,
+        @Param("limit") int limit,
+        @Param("offset") int offset,
+        @Param("afterId") long afterId,
+        @Param("cutoffId") long cutoffId
+    );
+
     default List<Notification> findPage(
         int recipientId,
         String status,
@@ -397,4 +414,12 @@ public interface NotificationMapper {
      * SET NULL (#440 increment 3).
      */
     int clearActorAnywhere(@Param("userId") int userId);
+    /** Resolves an ownership notice under its offer X lock in the same routed transaction. */
+    int resolveOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
+    /** Erases an offer notice under its offer X lock, including already resolved history. */
+    int deleteOwnershipOffer(@Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId, @Param("offerId") String offerId);
+
 }

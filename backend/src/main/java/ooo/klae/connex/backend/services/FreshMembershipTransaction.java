@@ -31,7 +31,7 @@ public class FreshMembershipTransaction {
     public <T> T execute(int workspaceId, Supplier<T> work) {
         T result = tenantWorkScope.inWorkspace(
             workspaceId,
-            () -> transactionTemplate.execute(status -> work.get()));
+            () -> OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status -> work.get()));
         return Objects.requireNonNull(result, "fresh-membership transaction result");
     }
 }

@@ -66,6 +66,7 @@ class TenantTeardownLateResidualTest {
             sessionSecurityService,
             tenantWorkScope,
             controlMapper,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.OwnershipOfferMapper.class),
             controlOperations,
             lifecycleAccess,
             tenantTransaction,
@@ -76,6 +77,8 @@ class TenantTeardownLateResidualTest {
             clock);
         when(tenantWorkScope.unrouted(any())).thenAnswer(invocation ->
             invocation.<Supplier<?>>getArgument(0).get());
+        when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation ->
+            invocation.<ooo.klae.connex.backend.tenant.ControlPlaneRead<?>>getArgument(0).read());
         when(lifecycleAccess.withRoute(any(), anyInt(), any())).thenAnswer(invocation ->
             invocation.<Supplier<?>>getArgument(2).get());
         when(tenantTransaction.objectKeys(anyInt(), any(), anyInt()))

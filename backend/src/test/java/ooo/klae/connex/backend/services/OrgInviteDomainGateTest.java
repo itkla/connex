@@ -12,6 +12,8 @@ import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The organization allowlist is the ceiling on every workspace invite/join path (#316, Option B):
@@ -50,6 +52,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         return user;
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_isConstrainedByTheOrgAllowlist() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
@@ -60,12 +63,14 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         assertTrue(ok.getInvite() != null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_isUnrestrictedWhenTheOrgHasNoAllowlist() {
         InviteResultDto ok = inviteService.createInvite(workspaceId, currentUser, "bob@anywhere.com", "member");
         assertTrue(ok.getInvite() != null, "an org with no allowlist must not gate invites");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void addExistingMember_isConstrainedByTheOrgAllowlist() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
@@ -77,6 +82,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         inviteService.addExistingMember(workspaceId, currentUser.getId(), insider.getEmail(), "member");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void acceptInvite_appliesTheOrgCeilingAtAcceptTime() {
         String email = "newcomer-" + unique() + "@acme.com";
@@ -90,6 +96,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
             "a policy tightened after the invite must block acceptance");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_isBlockedByTheOrgGateEvenWithNoWorkspaceList() {
         orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
@@ -102,6 +109,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(workspaceId, insider.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void approveMembership_reAppliesTheOrgCeilingAtActivation() {
         User outsider = register("pending-" + unique() + "@other.com");
@@ -114,6 +122,7 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
             "a pending member whose domain the org disallowed after the invite cannot activate");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void redeemLink_isUnrestrictedWhenBothListsEmpty() {
         InviteLinkDto link = inviteLinkService.createLink(workspaceId, currentUser, "member", null, null);

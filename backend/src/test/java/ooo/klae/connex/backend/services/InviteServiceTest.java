@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class InviteServiceTest extends AbstractServiceTest {
 
@@ -32,6 +34,7 @@ class InviteServiceTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired NotificationMapper notificationMapper;
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inviteNewEmail_returnsTokenInviteThenAccepts() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Invite WS", currentUser.getId());
@@ -51,6 +54,7 @@ class InviteServiceTest extends AbstractServiceTest {
         assertTrue(workspaceMapper.isMember(ws.getId(), invitee.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void acceptInvite_revalidatesInvitersCurrentGrantAuthority() {
         tenantContext.clear();
@@ -77,6 +81,7 @@ class InviteServiceTest extends AbstractServiceTest {
         assertFalse(workspaceMapper.isMember(ws.getId(), invitee.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inviteExistingUser_addsPendingMemberAndNotifies() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Notify WS", currentUser.getId());
@@ -98,6 +103,7 @@ class InviteServiceTest extends AbstractServiceTest {
         assertEquals(ws.getId(), inbox.get(0).getWorkspaceId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inviteExistingUserTwice_isRejectedWhilePending() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Dupe WS", currentUser.getId());
@@ -108,6 +114,7 @@ class InviteServiceTest extends AbstractServiceTest {
             () -> inviteService.createInvite(ws.getId(), currentUser, existing.getEmail(), "member"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void preview_reportsWorkspaceAndValidity() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Preview WS", currentUser.getId());
@@ -120,6 +127,7 @@ class InviteServiceTest extends AbstractServiceTest {
         assertTrue(preview.isValid());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void accept_rejectsMismatchedEmail() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Mismatch WS", currentUser.getId());
@@ -131,6 +139,7 @@ class InviteServiceTest extends AbstractServiceTest {
             () -> inviteService.acceptInvite(result.getInvite().getToken(), other));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void accept_rejectsRevokedInvite() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Revoke WS", currentUser.getId());
@@ -144,6 +153,7 @@ class InviteServiceTest extends AbstractServiceTest {
             () -> inviteService.acceptInvite(result.getInvite().getToken(), invitee));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void createInvite_requiresAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Gated WS", currentUser.getId());
@@ -154,6 +164,7 @@ class InviteServiceTest extends AbstractServiceTest {
             () -> inviteService.createInvite(ws.getId(), member, "x@example.com", "member"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberManageDelegateCanInviteMemberButNotAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
@@ -170,6 +181,7 @@ class InviteServiceTest extends AbstractServiceTest {
                 ws.getId(), delegate, "admin-" + unique() + "@example.com", "admin"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberManageDelegateCannotAddExistingAdmin() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
@@ -184,6 +196,7 @@ class InviteServiceTest extends AbstractServiceTest {
                 ws.getId(), delegate.getId(), existing.getEmail(), "admin"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void addExistingMember_createsPendingMembership() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Direct WS", currentUser.getId());
@@ -197,6 +210,7 @@ class InviteServiceTest extends AbstractServiceTest {
         assertFalse(workspaceMapper.isMember(ws.getId(), existing.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void addExistingMember_rejectsUnknownEmail() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Unknown WS", currentUser.getId());

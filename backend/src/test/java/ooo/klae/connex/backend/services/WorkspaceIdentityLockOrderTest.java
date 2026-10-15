@@ -63,6 +63,7 @@ class WorkspaceIdentityLockOrderTest {
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
 
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
 
     @AfterEach

@@ -28,6 +28,8 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Team;
+import ooo.klae.connex.backend.beans.ReportGoal;
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
@@ -44,7 +46,11 @@ import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.GoalMapper;
+import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
@@ -72,6 +78,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class UserOffboardingOrderTest {
+    @Mock private DepartureApprovalGuard departureApprovalGuard;
+    @Mock private GoalMapper goalMapper;
+    @Mock private ApprovalPolicyMapper approvalPolicyMapper;
+    @Mock private DocumentApprovalMapper documentApprovalMapper;
     @Mock private NoteMapper noteMapper;
     @Mock private ActivityMapper activityMapper;
     @Mock private AiChatMapper aiChatMapper;
@@ -110,11 +120,45 @@ class UserOffboardingOrderTest {
     @Mock private ApiCredentialLifecycleService apiCredentialLifecycleService;
     @Spy private TenantContext tenantContext = new TenantContext();
 
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
+    @Mock private OrganizationMapper ownershipOfferOrganizationMapper;
     @InjectMocks private UserOffboardingService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void ownershipScopeMetadata() {
+        org.mockito.Mockito.lenient().when(workspaceMapper.lockWorkspaceOrgIdForShare(7)).thenReturn(13);
+    }
 
     @AfterEach
     void clearTenantContext() {
         tenantContext.clear();
+    }
+
+    @Test
+    void departureDeletesOnlyIdsCapturedBeforeTheGuard() {
+        ReportGoal goal = new ReportGoal();
+        goal.setId(21);
+        ApprovalStepApprover template = new ApprovalStepApprover();
+        template.setId(22);
+        ApprovalStepApprover frozen = new ApprovalStepApprover();
+        frozen.setId(23);
+        when(goalMapper.findDepartureReferences(7, 9)).thenReturn(List.of(goal));
+        when(approvalPolicyMapper.findDepartureReferences(7, 9)).thenReturn(List.of(template));
+        when(documentApprovalMapper.findDepartureReferences(7, 9)).thenReturn(List.of(frozen));
+
+        var references = service.captureDepartureReferences(7, 9);
+        service.assertCanDepart(7, 9);
+        service.cleanupDepartureReferences(references);
+
+        InOrder order = inOrder(goalMapper, approvalPolicyMapper, documentApprovalMapper, departureApprovalGuard);
+        order.verify(goalMapper).findDepartureReferences(7, 9);
+        order.verify(approvalPolicyMapper).findDepartureReferences(7, 9);
+        order.verify(documentApprovalMapper).findDepartureReferences(7, 9);
+        order.verify(departureApprovalGuard).assertCanDepart(7, 9);
+        order.verify(goalMapper).deleteDepartingOwner(7, 21, 9);
+        order.verify(approvalPolicyMapper).deleteDepartingApprover(7, 22, 9);
+        order.verify(documentApprovalMapper).deleteDepartingApprover(7, 23, 9);
+        order.verifyNoMoreInteractions();
     }
 
     @Test
@@ -138,14 +182,16 @@ class UserOffboardingOrderTest {
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
-            tenantWorkScope, workspaceMapper, providerCapturePurgeService,
+            tenantWorkScope, workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             notificationMapper, dealMapper, relationshipSignalMapper, teamMapper,
             apiCredentialLifecycleService);
         order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
+        order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
@@ -216,13 +262,15 @@ class UserOffboardingOrderTest {
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
-            providerCapturePurgeService, notificationMapper,
+            workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
             personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper,
             teamMapper, apiCredentialLifecycleService);
+        order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
+        order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
@@ -273,7 +321,8 @@ class UserOffboardingOrderTest {
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
             personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
-            relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper);
+            relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper,
+            departureApprovalGuard, goalMapper, approvalPolicyMapper, documentApprovalMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -281,6 +330,7 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
+        order.verify(departureApprovalGuard).assertCanErase(9);
         order.verify(workflowOffboardingService).offboard(9, plan);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUserAnywhere(9);
@@ -321,6 +371,9 @@ class UserOffboardingOrderTest {
         order.verify(teamMapper).getByIdForUpdate(8, 14);
         order.verify(teamMapper).deleteMembershipsAnywhere(9);
         order.verify(teamMapper).clearManagerAnywhere(9);
+        order.verify(goalMapper).findDepartureReferencesAnywhere(9);
+        order.verify(approvalPolicyMapper).findDepartureReferencesAnywhere(9);
+        order.verify(documentApprovalMapper).findDepartureReferencesAnywhere(9);
     }
 
     private Team team(int workspaceId, int id) {
@@ -372,7 +425,8 @@ class UserOffboardingOrderTest {
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
             auditService,
             apiCredentialLifecycleService,
-            tenantContext
+            tenantContext,
+            mock(ooo.klae.connex.backend.mappers.OwnershipOfferMapper.class)
         );
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
@@ -423,8 +477,9 @@ class UserOffboardingOrderTest {
         order.verify(apiCredentialLifecycleService).deleteForAccount(9, credentialRoots);
         order.verify(userMapper).delete(9);
 
-        InOrder revocationOrder = inOrder(userMapper, accountSessionRevocationService);
+        InOrder revocationOrder = inOrder(userMapper, catalogOffboardingService, accountSessionRevocationService);
         revocationOrder.verify(userMapper).delete(9);
+        revocationOrder.verify(catalogOffboardingService).sweepAssignmentsAfterDeletion(9);
         revocationOrder.verify(accountSessionRevocationService).expireAll(9);
     }
 
@@ -432,7 +487,8 @@ class UserOffboardingOrderTest {
             UserMapper userMapper,
             TenantWorkScope tenantWorkScope,
             UserDeletionTransaction deletionTransaction,
-            AccountSessionRevocationService accountSessionRevocationService) {
+            AccountSessionRevocationService accountSessionRevocationService,
+            UserAccountCatalogOffboardingService cleanup) {
         return new UserService(
             userMapper,
             mock(ActivityMapper.class),
@@ -446,7 +502,7 @@ class UserOffboardingOrderTest {
             mock(UserProfilePictureTransaction.class),
             tenantWorkScope,
             mock(ProviderAccountOffboardingService.class),
-            mock(UserAccountCatalogOffboardingService.class),
+            cleanup,
             deletionTransaction,
             accountSessionRevocationService);
     }
@@ -464,6 +520,9 @@ class UserOffboardingOrderTest {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
         AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(tenantWorkScope.unroutedRead(any()))
+            .thenAnswer(invocation -> invocation.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
@@ -473,10 +532,12 @@ class UserOffboardingOrderTest {
         when(userMapper.getUserById(11)).thenReturn(null);
 
         assertThrows(IllegalStateException.class,
-            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation, cleanup)
                 .delete(11));
 
-        verify(revocation).expireAll(11);
+        var order = inOrder(cleanup, revocation);
+        order.verify(cleanup).sweepAssignmentsAfterDeletion(11);
+        order.verify(revocation).expireAll(11);
     }
 
     /** A deletion that genuinely rolled back must leave the surviving account's sessions alone. */
@@ -486,6 +547,9 @@ class UserOffboardingOrderTest {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
         AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(tenantWorkScope.unroutedRead(any()))
+            .thenAnswer(invocation -> invocation.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
@@ -495,10 +559,30 @@ class UserOffboardingOrderTest {
         when(userMapper.getUserById(12)).thenReturn(new ooo.klae.connex.backend.beans.User());
 
         assertThrows(IllegalStateException.class,
-            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation, cleanup)
                 .delete(12));
 
         verify(revocation, never()).expireAll(12);
+        verify(cleanup, never()).sweepAssignmentsAfterDeletion(12);
+    }
+
+    @Test
+    void cleanupFailureStillRevokesAndPreservesTheOriginalAmbiguousFailure() {
+        UserMapper users = mock(UserMapper.class);
+        TenantWorkScope scope = mock(TenantWorkScope.class);
+        UserDeletionTransaction deletion = mock(UserDeletionTransaction.class);
+        AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        UserAccountCatalogOffboardingService cleanup = mock(UserAccountCatalogOffboardingService.class);
+        when(scope.unrouted(any())).thenAnswer(call -> call.<java.util.function.Supplier<Object>>getArgument(0).get());
+        when(scope.unroutedRead(any())).thenAnswer(call -> call.<ooo.klae.connex.backend.tenant.ControlPlaneRead<Object>>getArgument(0).read());
+        doThrow(new IllegalArgumentException()).when(cleanup).sweepAssignmentsAfterDeletion(15);
+        UserService userService = deletionOnlyUserService(users, scope, deletion, revocation, cleanup);
+        userService.delete(15);
+        verify(revocation).expireAll(15);
+        RuntimeException original = new IllegalStateException("ambiguous commit");
+        doThrow(original).when(deletion).delete(eq(15), anyString());
+        assertEquals(original, assertThrows(IllegalStateException.class, () -> userService.delete(15)));
+        verify(revocation, org.mockito.Mockito.times(2)).expireAll(15);
     }
 
 }

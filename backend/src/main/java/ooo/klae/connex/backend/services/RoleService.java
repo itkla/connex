@@ -29,6 +29,7 @@ public class RoleService {
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
     private final PrivilegedAccountService privilegedAccountService;
+    private final OwnershipOfferWriter ownershipOfferWriter;
 
     public List<WorkspaceRole> listRoles(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
@@ -95,6 +96,7 @@ public class RoleService {
         }
         applyPermissions(workspaceId, roleId, valid);
         privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
+        ownershipOfferWriter.invalidateScopeLocked(workspaceService.getOrgId(workspaceId), workspaceId);
         auditService.record("workspace.role.update", "workspace", workspaceId, name,
                 "Updated role " + name, null);
         return roleMapper.findRole(workspaceId, roleId);

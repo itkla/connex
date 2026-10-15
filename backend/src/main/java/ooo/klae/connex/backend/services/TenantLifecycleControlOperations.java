@@ -38,6 +38,8 @@ public class TenantLifecycleControlOperations {
 
     private final TenantLifecycleControlMapper mapper;
     private final UserMapper userMapper;
+    private final OwnershipOfferWriter ownershipOfferWriter;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     /** Atomically validates an active workspace and acquires an export lease. */
     @Transactional(
@@ -159,7 +161,7 @@ public class TenantLifecycleControlOperations {
      * exclusive workspace lock that subject-linked writes contend for, so a
      * request committed after an earlier unlocked check still refuses the fence.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public AcquiredWorkspace acquireWorkspaceTeardown(
             int orgId,
             int workspaceId,
@@ -180,13 +182,14 @@ public class TenantLifecycleControlOperations {
         OperationLease lease = insertLease(orgId, workspaceId, TEARDOWN);
         if (rootExists) {
             mapper.markWorkspaceTearingDown(orgId, workspaceId);
+            ownershipOfferWriter.invalidateWorkspaceLifecycleLocked(orgId, workspaceId);
             mapper.clearSsoJitWorkspace(orgId, workspaceId);
         }
         return new AcquiredWorkspace(workspace, lease);
     }
 
     /** Acquires a teardown lease for a workspace already fenced by organization teardown. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public AcquiredWorkspace acquireOrganizationWorkspaceTeardown(
             int orgId,
             int workspaceId,
@@ -201,7 +204,7 @@ public class TenantLifecycleControlOperations {
      * shared lock on, so no request can be created into the fence window and
      * then cascade away with the organization root.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public void markOrganizationTearingDown(int orgId, int actorId) {
         lockActor(actorId);
         if (mapper.lockOrganization(orgId) == null) {
@@ -213,10 +216,12 @@ public class TenantLifecycleControlOperations {
             throw new ConflictException("A tenant operation lease still blocks teardown");
         }
         mapper.markOrganizationTearingDown(orgId);
+        ownershipOfferWriter.invalidateScopeLocked(orgId, null);
+        events.publishEvent(new OwnershipOfferOrganizationFenced(orgId));
     }
 
     /** Deletes an already verified workspace root and its cascading control rows. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public void deleteWorkspaceRoot(
             int orgId,
             int workspaceId,
@@ -241,6 +246,7 @@ public class TenantLifecycleControlOperations {
                 teardownLease.token())) {
             throw new IllegalStateException("Workspace teardown lease was not owned at terminal deletion");
         }
+        ownershipOfferWriter.invalidateWorkspaceBeforeRootDeletionLocked(orgId, workspaceId);
         mapper.clearSubjectRequestWorkspaceLinks(orgId, workspaceId);
         if (workspace != null) {
             mapper.clearSsoJitWorkspace(orgId, workspaceId);
@@ -336,7 +342,7 @@ public class TenantLifecycleControlOperations {
     }
 
     /** Deletes a verified empty organization root and its cascading control rows. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public void deleteOrganizationRoot(int orgId, int actorId) {
         lockActor(actorId);
         if (mapper.lockOrganization(orgId) == null) {
@@ -348,6 +354,7 @@ public class TenantLifecycleControlOperations {
                 || mapper.countOperationLeasesInOrg(orgId) != 0) {
             throw new IllegalStateException("Organization still has workspace roots");
         }
+        ownershipOfferWriter.invalidateScopeBeforeRootDeletionLocked(orgId, null);
         if (mapper.deleteOrganization(orgId) != 1) {
             throw new IllegalStateException("Organization lifecycle root was not deleted");
         }

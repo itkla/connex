@@ -133,9 +133,39 @@ individual has accepted a new operational responsibility.
    identity and aggregate usage evidence to the tracked work. Rollbacks must not reactivate retired
    mappings; a deliberate EOL extension needs a new reviewed decision before expiry.
 
-No endpoints are presently annotated `@Deprecated`, so the lifecycle ledger has no deprecation or
-retirement rows. It is not evidence of a historic shutdown. Compatibility candidates below must go
-through the decision step before dates or removals are invented.
+No endpoints are presently annotated `@Deprecated`. The lifecycle ledger retains the disclosure
+GET/HEAD retirement tombstones approved in #2004; deployment evidence is still required before
+that issue closes. Compatibility candidates below must go through the decision step before dates
+or removals are invented.
+
+## Disclosure method migration (#2004)
+
+The Security Owner's 2026-10-12 decision replaces
+`GET /api/orgs/{orgId}/data-subject-requests/{requestId}/disclosure` and its implicit HEAD with
+`POST` on the same path. There is no GET/HEAD alias or redirect. The POST requires an authenticated
+session, a valid CSRF header, organization admin/owner authority, and fresh account-bound WebAuthn
+step-up. The body is optional; the SPA sends `{}` as JSON. Success remains HTTP 200 with the existing
+`DataSubjectDisclosureDto`, after the strict disclosure-access audit commits. Request type, identity
+verification, and linked-subject checks are unchanged.
+
+Authorized retired GET/HEAD requests receive 405 (method denied); anonymous requests receive 401
+from the session security chain. Both paths must perform no disclosure assembly and append no
+disclosure-access audit. The HTTP integration test covers all four probes independently of the
+remaining generated inventory. POST is a different method and does not overlap either tombstone;
+the list/detail GET mappings do not match the disclosure suffix. OPTIONS remains available.
+
+Deploy backend and frontend together. Existing browser clients must refresh to load the POST
+wrapper; an old client receives 405 until it refreshes. CLI/integration usage is not measured, so
+the absence of other callers in source is not evidence of zero external usage. Publish the method
+migration with the coordinated release. Before closing #2004, attach staging revision and direct
+backend/frontend-proxy probes for authorized and anonymous GET/HEAD and one authorized POST.
+
+Preparation or assembly failure prevents the success audit. Final audit failure returns 503 with
+no disclosure payload, and the audit INSERT and integrity-head advance roll back together. A
+committed audit remains recorded if the response or download later fails. An explicit retry
+assembles again and adds another access event; there is no automatic network/503 retry. The SPA's
+bounded CSRF-refresh and step-up refusal retries remain unchanged. See [LOCKING.md](LOCKING.md)
+for the three transaction phases and retained race windows.
 
 ## Current source audit (2026-09-08)
 
@@ -169,3 +199,7 @@ claim of a complete penetration test or proof of production usage. Public metada
 choice; compatibility endpoints have no evidence supporting immediate removal. Production deployment
 revision, per-route usage, owner-approved compatibility EOL dates, and historical shutdown evidence
 were not available in this lane.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

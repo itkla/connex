@@ -167,7 +167,10 @@
     "noUsers": "ユーザーが見つかりません",
     "noCollaborators": "追加できるメンバーがいません",
     "cancel": "キャンセル",
-    "inbox": "受信トレイ"
+    "inbox": "受信トレイ",
+    "ownershipOfferTitle": "オーナー提案",
+    "ownershipOfferWorkspaceBody": "{workspace} のオーナー権限が提案されました。設定で確認してください。",
+    "ownershipOfferOrganizationBody": "組織のオーナー権限が提案されました。設定で確認してください。"
   },
   "NotificationsLayout": {
     "title": "通知",

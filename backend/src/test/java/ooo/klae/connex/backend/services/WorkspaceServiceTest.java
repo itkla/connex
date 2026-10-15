@@ -14,6 +14,10 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import static org.mockito.Mockito.inOrder;
 
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
@@ -32,6 +36,67 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @MockitoSpyBean private WorkspaceMapper orderedMemberships;
+    @MockitoSpyBean private UserMapper orderedUsers;
+
+    @Test
+    void onlyExactNowaitFailureIsTranslatedToTheExistingConflictContract() {
+        User target = newUser();
+        org.springframework.dao.DataAccessResourceFailureException busy =
+            new org.springframework.dao.DataAccessResourceFailureException("busy",
+                new java.sql.SQLException("busy", "HY000", 3572));
+        org.mockito.Mockito.doThrow(busy).when(orderedMemberships)
+            .lockAuthorizationMembershipWithoutWaiting(workspace.getId(), target.getId());
+        try {
+            assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class, () ->
+                workspaceService.lockActiveMemberWithoutWaiting(workspace.getId(), target.getId()));
+            org.springframework.dao.DataAccessResourceFailureException unrelated =
+                new org.springframework.dao.DataAccessResourceFailureException("other",
+                    new java.sql.SQLException("other", "40001", 3572));
+            org.mockito.Mockito.doThrow(unrelated).when(orderedMemberships)
+                .lockAuthorizationMembershipWithoutWaiting(workspace.getId(), target.getId());
+            assertEquals(unrelated, assertThrows(org.springframework.dao.DataAccessResourceFailureException.class, () ->
+                workspaceService.lockActiveMemberWithoutWaiting(workspace.getId(), target.getId())));
+        } finally {
+            org.mockito.Mockito.reset(orderedMemberships);
+        }
+    }
+
+    @Test
+    void combinedAuthorityLocksTheUnionAscendingWithoutTargetAccountRoots() {
+        User lower = currentUser;
+        User actor = newUser();
+        User higher = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), actor.getId(), "admin");
+        userMapper.reserveAccountDeletion(higher.getId(), "sweep-test");
+        var authority = workspaceService.lockedMemberPermissionsAndMemberships(
+            workspace.getId(), actor.getId(), Set.of(higher.getId(), lower.getId()));
+        assertEquals(Set.of(lower.getId(), higher.getId()), authority.activeMembershipIds());
+        assertTrue(authority.permissions().contains(Permission.CAMPAIGN_MANAGE));
+        var order = inOrder(orderedUsers, orderedMemberships);
+        order.verify(orderedUsers).isAccountDeletionReservedForShare(actor.getId());
+        order.verify(orderedMemberships).lockActiveWorkspaceForShare(workspace.getId());
+        order.verify(orderedMemberships).lockAuthorizationMembershipWithoutWaiting(workspace.getId(), lower.getId());
+        order.verify(orderedMemberships).lockAuthorizationMembership(workspace.getId(), actor.getId());
+        order.verify(orderedMemberships).lockAuthorizationMembershipWithoutWaiting(workspace.getId(), higher.getId());
+        org.mockito.Mockito.verify(orderedUsers, org.mockito.Mockito.never()).isAccountDeletionReservedForShare(higher.getId());
+    }
+
+    @Test
+    void combinedAuthorityExcludesUnavailableTargetsAndEmptyWrapperPreservesEarlyReturns() {
+        User pending = newPendingMember();
+        var authority = workspaceService.lockedMemberPermissionsAndMemberships(
+            workspace.getId(), currentUser.getId(), Set.of(pending.getId(), Integer.MAX_VALUE));
+        assertEquals(Set.of(), authority.activeMembershipIds());
+        assertEquals(workspaceService.lockedMemberPermissionsFor(workspace.getId(), currentUser.getId()), authority.permissions());
+        userMapper.reserveAccountDeletion(currentUser.getId(), "sweep-test");
+        org.mockito.Mockito.clearInvocations(orderedUsers, orderedMemberships);
+        assertEquals(Set.of(), workspaceService.lockedMemberPermissionsFor(workspace.getId(), currentUser.getId()));
+        var order = inOrder(orderedUsers, orderedMemberships);
+        order.verify(orderedUsers).isAccountDeletionReservedForShare(currentUser.getId());
+        order.verifyNoMoreInteractions();
+    }
 
     @Test
     void roleAuthorizationSeparatesCreationFromNonNullableMutation() throws Exception {

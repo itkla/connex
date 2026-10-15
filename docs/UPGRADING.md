@@ -88,6 +88,124 @@ not run old and new backend versions concurrently across this migration. The sta
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
 
+### V227/V228 campaign unsubscribe cutover
+
+The 2026-10-12 owner decision authorizes build and merge when green; staging's next deployment is
+the coordinated restart. This supersedes the earlier merge hold and needs no additional restart
+window approval. V227 creates the tenant-plane `campaign_delivery_unsubscribe_token` digest history
+and backfills **every delivery, irrespective of status**. On one automatic boot, Flyway applies V227
+and V228 together with all writers stopped; there is no manual checkpoint between them. V228 first
+reasserts completeness with an `INSERT ... SELECT ... WHERE NOT EXISTS` for each missing digest,
+then uses the still-present bearer to replace historical copies case-insensitively. Free-text delivery
+errors and event details use `[redacted]`; provider message and event ids use the lowercase digest,
+joining events on both workspace and delivery ids. V228 rekeys event ids with `UPDATE IGNORE`,
+which skips any row whose digest correlation form would violate the workspace/provider event key.
+This covers collisions with existing canonical keys and between multiple legacy rows being rekeyed,
+including rows belonging to different deliveries. A second update sets every event key still
+containing its delivery's bearer to NULL. One canonical key survives each collision; multiple NULL
+keys are permitted, and webhook redeliveries still deduplicate against the surviving canonical key.
+V228 also clears any provider message id still containing its owning delivery's bearer after the
+single replacement pass, including self-overlap recreated by that replacement.
+These updates can run again after a failed history row.
+
+V228 rewrites each delivery's **own** bearer. A different delivery's bearer embedded in a historical
+identifier can exist only if a provider echoed foreign bearers before the upgrade; those copies are outside
+V228's guarantee. Matching every workspace token against every historical identifier would require
+a quadratic scan. Runtime dispatch and webhooks instead use workspace-scoped digest matching.
+Runtime correlation rescans replacements for at most four passes and fails closed if a recorded
+bearer remains: NULL message/event id storage, or no match on webhook message lookup.
+After the upgrade, incoming raw provider ids use the same correlation form before lookup and dedupe,
+so historical message ids still correlate. Only 64-hex windows whose lowercased SHA-256 digest is
+recorded in the resolved workspace match; unrelated identifiers stay byte-identical. Digest probes
+are plain primary-key consistent reads and acquire no row locks.
+V228 then drops both token indexes, the generated hash column, and the raw bearer column in one ALTER.
+Existing fragment links keep working for their delivery's lifetime, without expiry, through the preserved digests. Historical backups
+and previously generated export ZIPs are outside this remediation.
+
+1. Close ingress and stop **every old backend replica and writer**, including scheduler workers.
+   Drain bounded provider calls where possible. Do not run old and new replicas concurrently; the
+   previous binary reads and writes the removed columns. The coordinated Compose restart boundary
+   used for V170 applies here too.
+2. Inventory every tenant catalog (pooled and dedicated) and take the normal pre-cutover backup.
+   With writers stopped, record each catalog's delivery count, maximum delivery id, and a protected
+   inventory of `(workspace_id, id, unsubscribe_token_hash)` for post-cutover comparison. Preserve
+   that inventory with the backup; it contains digests, never raw bearers.
+3. With writers stopped, run the tenant lineage through V228 for every inventoried catalog other
+   than the configured default, using the normal catalog migration tooling. Each run applies V227
+   and V228 together. Activate only the new release: its automatic startup applies both migrations
+   together in the configured default catalog; it does not enumerate dedicated catalogs. V228
+   enforces the backfill before removing its source. Keep ingress closed until verification finishes,
+   and keep every old writer stopped. In **each catalog**, verify both token
+   columns and indexes are absent and the composite cascading FK is present. Substitute the recorded
+   maximum id in the post-cutover query below and require zero missing deliveries. Confirm the
+   surviving delivery count within that boundary equals the recorded count, and compare every
+   legacy digest and its workspace/delivery ownership with the protected inventory. New deliveries
+   legitimately have no digest until dispatch, and later attempts can add digests, so an unbounded
+   delivery count or exact total child count is not a completeness check after activation.
+
+   ```sql
+   SELECT COUNT(*) AS missing_legacy_deliveries
+   FROM campaign_delivery d
+   WHERE d.id <= <recorded_max_delivery_id>
+     AND NOT EXISTS (
+       SELECT 1 FROM campaign_delivery_unsubscribe_token t
+       WHERE t.workspace_id = d.workspace_id AND t.delivery_id = d.id
+     );
+   SELECT COUNT(*) AS surviving_legacy_deliveries
+   FROM campaign_delivery
+   WHERE id <= <recorded_max_delivery_id>;
+   ```
+
+   Verify unsubscribe exchange/preview/confirmation, then reopen writers and ingress. Do not touch
+   suppression, consent, or recovery evidence during migration.
+
+**No previous-binary rollback is supported after V228.** Recovery must move forward with the new
+binary. **Staging's automatic deploy currently rolls back to the previous release if a failure
+occurs after activation during this cutover deploy.** That previous backend cannot run against
+V228's schema: campaign materialization, dispatch, and unsubscribe lookups fail until the next
+deploy re-activates the new release. Operators must not keep a rolled-back pre-V228 backend serving;
+close ingress and stop it, then restore service with a release containing V228 using forward
+recovery. An enforced deployment rollback floor is tracked in
+[#2065](https://github.com/itkla/connex/issues/2065).
+
+A migrated claim in flight has no reconstructable bearer: an explicitly opted-in idempotent
+replay keeps its submission key but renders a fresh link. A body-comparing provider rejects it and
+the delivery becomes ambiguous, requiring the existing provider/suppression reconciliation check;
+a body-insensitive provider returns the original receipt. No automatic replay is enabled for SMTP
+or connectors without the explicit deduplication guarantee. Previously emailed links still resolve.
+
+**Partially committed DDL:** keep all writers and ingress stopped, inspect physical schema and Flyway
+history independently, and preserve the digest table. MySQL DDL commits independently of Flyway's
+history bookkeeping; `repair` alone never undoes it. If V227 created the child but backfill/history
+failed while both legacy columns remain, the raw-derived source still exists: drop only that new
+child table, repair the failed V227 entry using the normal migration tooling, then rerun the
+automatic migration boot. V228 reasserts the backfill and repeats the idempotent diagnostic and event-key cleanup
+before its ALTER; require the post-cutover
+catalog-wide checks above before reopening service. Do not drop the child once legacy columns
+are gone.
+
+If V228's ALTER committed but history recording failed, first verify the preserved child against the
+recorded inventory and verify that V227 is recorded successful. Recreate **empty removable columns
+and indexes only**, while every writer remains stopped, then repair the failed V228 entry and rerun
+V228 with the new binary:
+
+```sql
+ALTER TABLE campaign_delivery
+  ADD COLUMN unsubscribe_token CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  ADD COLUMN unsubscribe_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin
+    GENERATED ALWAYS AS (LOWER(SHA2(unsubscribe_token, 256))) STORED,
+  ADD UNIQUE KEY uq_campaign_delivery_token (unsubscribe_token),
+  ADD UNIQUE KEY uq_campaign_delivery_token_hash (unsubscribe_token_hash);
+```
+
+These temporary NULL columns reconstruct no bearer and cannot serve an old binary; all lookup
+continues from the preserved child. V228 ignores these NULL source hashes while preserving all
+existing child rows. Its `NOT EXISTS` backfill also makes a retry safe if the INSERT committed but
+the ALTER or history recording failed. If the ALTER did not commit, leave its original columns alone
+and repair/rerun the failed V228 entry. If schema/history or the recorded digest inventory do not
+match either state, keep the deployment closed and recover from the pre-cutover backup in an isolated
+catalog through the new lineage; never guess at missing digests or start the previous binary.
+
 ### V185 workspace-invite authorization cutover
 
 `V185__workspace_invite_grant_authorization.sql` adds the protocol marker that lets the new backend
@@ -686,7 +804,8 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    prefix in the no-logging rules until that resend is complete — see the V203/V204 cutover section
    above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
-   containers. Remove the target deployment directory, re-verify and extract the exact prior signed
+   containers. **Exception: after the V227/V228 campaign unsubscribe cutover, use its forward-recovery
+   procedure above; do not start the previous binary.** For other upgrades, Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
    backup** and start the previous version. Changing only image digest variables is not a rollback
@@ -702,3 +821,7 @@ request and `main` push. `FlywayUpgradeIntegrationTest` migrates representative 
 quota, deletion-queue, and import state through the current lineage. A full
 **restore-a-previous-release image → migrate → smoke** gate remains a follow-up once stable released
 version baselines exist.
+
+## Ownership consent (#1534 slice 4o)
+
+Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.

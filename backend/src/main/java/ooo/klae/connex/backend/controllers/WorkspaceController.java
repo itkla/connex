@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,6 +28,8 @@ import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
+import ooo.klae.connex.backend.dto.MemberRoleChange;
+import ooo.klae.connex.backend.dto.OwnershipOfferCreatedDto;
 import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
@@ -41,6 +44,7 @@ import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Workspace membership and switching. Lists the caller's workspaces, creates a
@@ -51,11 +55,13 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 @RequiredArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
+    private final ooo.klae.connex.backend.services.OwnershipOfferService ownershipOfferService;
     private final PrivilegedMfaAttestationService attestationService;
     private final InviteService inviteService;
     private final InviteLinkService inviteLinkService;
     private final AllowedDomainService allowedDomainService;
     private final AuthService authService;
+    private final TenantWorkScope tenantWorkScope;
     private final WorkspaceCookie workspaceCookie;
 
     @GetMapping
@@ -191,14 +197,14 @@ public class WorkspaceController {
     }
 
     @PatchMapping("/{id}/members/{userId}")
-    public MemberDto updateMemberRole(@PathVariable int id, @PathVariable int userId,
+    public ResponseEntity<?> updateMemberRole(@PathVariable int id, @PathVariable int userId,
             @Valid @RequestBody UpdateMemberRoleRequest request) {
-        int actorId = authService.getCurrentUser().getId();
+        int actorId = tenantWorkScope.unroutedRead(() -> authService.getCurrentUser().getId());
         boolean acknowledged = Boolean.TRUE.equals(request.getAcknowledgeConfinement());
-        if (request.getRoleId() != null) {
-            return workspaceService.assignCustomRole(id, actorId, userId, request.getRoleId(), acknowledged);
-        }
-        return workspaceService.changeMemberRole(id, actorId, userId, request.getRole(), acknowledged);
+        MemberRoleChange<MemberDto> result = ownershipOfferService.changeWorkspaceRole(
+            id, actorId, userId, request.getRole(), request.getRoleId(), acknowledged);
+        return result.offer() == null ? ResponseEntity.ok(result.currentMember())
+            : ResponseEntity.accepted().body(OwnershipOfferCreatedDto.from(result));
     }
 
     @DeleteMapping("/{id}/members/{userId}")

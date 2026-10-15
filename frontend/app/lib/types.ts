@@ -4459,6 +4459,51 @@ export type WorkspaceMember = {
     status?: string;
 };
 
+/** Lifecycle state of an ownership offer (#1534 decision 4). */
+export type OwnershipOfferState = "OPEN" | "ACCEPTED" | "DECLINED" | "REVOKED" | "EXPIRED" | "INVALIDATED";
+
+/**
+ * An offer of workspace or organization ownership. Promotion to owner needs the offeree's consent:
+ * until they accept, they keep their current role. Offer ids are lossless decimal strings. The
+ * display labels let the offeree see who offered which scope, and let owners see who was offered.
+ */
+export type OwnershipOffer = {
+    id: string;
+    scopeKind: "WORKSPACE" | "ORGANIZATION";
+    orgId: number;
+    workspaceId: number | null;
+    offerorUserId: number;
+    offereeUserId: number;
+    state: OwnershipOfferState;
+    createdAt: string;
+    expiresAt: string;
+    closedAt: string | null;
+    closedByUserId: number | null;
+    closureReason: string | null;
+    scopeName: string | null;
+    offerorDisplayName: string | null;
+    offereeDisplayName: string | null;
+    offereeEmail: string | null;
+};
+
+/** The 202 body returned when an owner promotion becomes an offer instead of a role change. */
+export type OwnershipOfferCreated<T> = {
+    outcome: "ownership_offer";
+    offer: OwnershipOffer;
+    currentMember: T | null;
+};
+
+/** Privileged-MFA standing reported to an account that just accepted ownership. */
+export type PrivilegedStanding = "UNPRIVILEGED" | "SATISFIED" | "ENROLLMENT_REQUIRED" | "ATTESTATION_REQUIRED";
+
+/** Result of accepting an ownership offer. */
+export type OwnershipOfferAcceptance = {
+    offer: OwnershipOffer;
+    membership: WorkspaceMember | OrgMember | null;
+    standing: PrivilegedStanding;
+    enforcedStanding: PrivilegedStanding;
+};
+
 export type CustomRole = {
     id: number;
     name: string;

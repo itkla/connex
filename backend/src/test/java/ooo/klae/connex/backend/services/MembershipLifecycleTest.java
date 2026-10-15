@@ -16,6 +16,8 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.TeamMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class MembershipLifecycleTest extends AbstractServiceTest {
 
@@ -29,6 +31,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         return notificationMapper.countPage(recipientId, null, null, null, null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void addExistingMember_createsPendingMembershipWithNoAccess() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Pending WS", currentUser.getId());
@@ -41,6 +44,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertTrue(workspaceService.permissionsFor(ws.getId(), invitee.getId()).isEmpty());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void approveMembership_activatesMember() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Approve WS", currentUser.getId());
@@ -53,6 +57,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertTrue(workspaceService.pendingMemberships(invitee.getId()).isEmpty());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void declineMembership_removesPendingRow() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline WS", currentUser.getId());
@@ -64,6 +69,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertNull(workspaceMapper.getMember(ws.getId(), invitee.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void leaveWorkspace_removesActiveMember() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Leave WS", currentUser.getId());
@@ -76,6 +82,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void leaveWorkspaceAndSelectNextPersistsRemainingMembership() {
         WorkspaceMembershipDto first = workspaceService.createWorkspace("Leave First", currentUser.getId());
         WorkspaceMembershipDto second = workspaceService.createWorkspace("Leave Second", currentUser.getId());
@@ -91,6 +98,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertEquals(second.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void leaveWorkspace_lastOwnerCannotLeave() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Solo WS", currentUser.getId());
@@ -98,6 +106,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
             () -> workspaceService.leaveWorkspace(ws.getId(), currentUser.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void declineMembership_removesTheInviteNotifications() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline Notif WS", currentUser.getId());
@@ -110,6 +119,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertEquals(0, recipientNotificationCount(invitee.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void removeMember_cleansNotificationsAndCollaboratorSeats() {
         User member = newUser();
@@ -137,6 +147,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         assertNull(teamMapper.getById(workspace.getId(), team.getId()).getManagerUserId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void leaveWorkspace_cleansTheLeaverContent() {
         User member = newUser();

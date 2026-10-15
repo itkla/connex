@@ -1,0 +1,43 @@
+CREATE TABLE ownership_offer (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id INT NOT NULL,
+    workspace_id INT NULL,
+    scope_kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    scope_id INT GENERATED ALWAYS AS (COALESCE(workspace_id, org_id)) VIRTUAL,
+    offeror_user_id INT NOT NULL,
+    offeree_user_id INT NOT NULL,
+    membership_id BIGINT NULL COMMENT 'Workspace membership generation at creation',
+    state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'OPEN',
+    open_slot TINYINT GENERATED ALWAYS AS (CASE WHEN state = 'OPEN' THEN 1 ELSE NULL END) STORED,
+    created_at DATETIME(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    closed_at DATETIME(6) NULL,
+    closed_by_user_id INT NULL COMMENT 'Explicitly cleared before erasure audit heads; nullable attribution has no FK',
+    closure_reason VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    delivery_state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'PENDING',
+    delivery_workspace_id INT NULL,
+    delivery_membership_id BIGINT NULL,
+    CONSTRAINT fk_ownership_offer_org FOREIGN KEY (org_id) REFERENCES organization(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownership_offer_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownership_offer_offeror FOREIGN KEY (offeror_user_id) REFERENCES app_user(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ownership_offer_offeree FOREIGN KEY (offeree_user_id) REFERENCES app_user(id) ON DELETE CASCADE,
+    CONSTRAINT chk_ownership_offer_parties CHECK (offeror_user_id <> offeree_user_id),
+    CONSTRAINT chk_ownership_offer_scope CHECK (
+        (scope_kind = 'WORKSPACE' AND workspace_id IS NOT NULL AND membership_id IS NOT NULL)
+        OR (scope_kind = 'ORGANIZATION' AND workspace_id IS NULL AND membership_id IS NULL)),
+    CONSTRAINT chk_ownership_offer_state CHECK (
+        state IN ('OPEN', 'ACCEPTED', 'DECLINED', 'REVOKED', 'EXPIRED', 'INVALIDATED')),
+    CONSTRAINT chk_ownership_offer_expiry CHECK (expires_at > created_at),
+    CONSTRAINT chk_ownership_offer_closure CHECK (
+        (state = 'OPEN' AND closed_at IS NULL) OR (state <> 'OPEN' AND closed_at IS NOT NULL)),
+    CONSTRAINT chk_ownership_offer_delivery CHECK (delivery_state IN ('PENDING', 'DELIVERED', 'NONE')),
+    UNIQUE KEY uq_ownership_offer_open (scope_kind, scope_id, offeree_user_id, open_slot),
+    INDEX idx_ownership_offer_offeror (offeror_user_id, id),
+    INDEX idx_ownership_offer_offeree (offeree_user_id, id),
+    INDEX idx_ownership_offer_pending_offeree (state, offeree_user_id, expires_at, id),
+    INDEX idx_ownership_offer_workspace (workspace_id, id),
+    INDEX idx_ownership_offer_org (org_id, id),
+    INDEX idx_ownership_offer_expiry (state, expires_at, id),
+    INDEX idx_ownership_offer_delivery (state, delivery_state, id),
+    INDEX idx_ownership_offer_closure_actor (closed_by_user_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Ownership consent; offers confer no authority';

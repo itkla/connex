@@ -5,6 +5,7 @@ import java.util.List;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,11 +20,15 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.AddOrgMemberRequest;
 import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
+import ooo.klae.connex.backend.dto.MemberRoleChange;
+import ooo.klae.connex.backend.dto.OwnershipOfferCreatedDto;
 import ooo.klae.connex.backend.dto.OrgMemberRequest;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.OrgMemberService;
+import ooo.klae.connex.backend.services.OwnershipOfferService;
 import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Organization membership administration (#316). Listing an org's members
@@ -36,8 +41,10 @@ import ooo.klae.connex.backend.services.PrivilegedMfaAttestationService;
 public class OrgMemberController {
 
     private final OrgMemberService orgMemberService;
+    private final OwnershipOfferService ownershipOfferService;
     private final PrivilegedMfaAttestationService attestationService;
     private final AuthService authService;
+    private final TenantWorkScope tenantWorkScope;
 
     @GetMapping
     public List<OrgMembershipDto> myOrganizations() {
@@ -50,25 +57,27 @@ public class OrgMemberController {
     }
 
     @PostMapping("/{orgId}/members")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void addMember(@PathVariable int orgId, @Valid @RequestBody AddOrgMemberRequest request) {
-        orgMemberService.setMemberByEmail(orgId, authService.getCurrentUser().getId(),
+    public ResponseEntity<?> addMember(@PathVariable int orgId, @Valid @RequestBody AddOrgMemberRequest request) {
+        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, currentUserId(), null,
                 request.getEmail(), request.getOrgRole(),
                 Boolean.TRUE.equals(request.getAcknowledgeConfinement()));
+        return result.offer() == null ? ResponseEntity.noContent().build()
+            : ResponseEntity.accepted().body(OwnershipOfferCreatedDto.from(result));
     }
 
     @PutMapping("/{orgId}/members/{userId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void setMember(@PathVariable int orgId, @PathVariable int userId,
+    public ResponseEntity<?> setMember(@PathVariable int orgId, @PathVariable int userId,
             @Valid @RequestBody OrgMemberRequest request) {
-        orgMemberService.setMember(orgId, authService.getCurrentUser().getId(), userId, request.getOrgRole(),
+        MemberRoleChange<OrgMemberDto> result = ownershipOfferService.changeOrganizationRole(orgId, currentUserId(), userId, null, request.getOrgRole(),
                 Boolean.TRUE.equals(request.getAcknowledgeConfinement()));
+        return result.offer() == null ? ResponseEntity.noContent().build()
+            : ResponseEntity.accepted().body(OwnershipOfferCreatedDto.from(result));
     }
 
     @DeleteMapping("/{orgId}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable int orgId, @PathVariable int userId) {
-        orgMemberService.removeMember(orgId, authService.getCurrentUser().getId(), userId);
+        ownershipOfferService.removeOrganizationMember(orgId, currentUserId(), userId);
     }
 
     /**
@@ -79,7 +88,7 @@ public class OrgMemberController {
     @PostMapping("/{orgId}/leave")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void leave(@PathVariable int orgId) {
-        orgMemberService.leave(orgId, authService.getCurrentUser().getId());
+        ownershipOfferService.leaveOrganization(orgId, currentUserId());
     }
 
     /**
@@ -98,5 +107,9 @@ public class OrgMemberController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revokeMfaAttestation(@PathVariable int orgId, @PathVariable int userId) {
         attestationService.revokeForOrganization(orgId, authService.getCurrentUser().getId(), userId);
+    }
+
+    private int currentUserId() {
+        return tenantWorkScope.unroutedRead(() -> authService.getCurrentUser().getId());
     }
 }

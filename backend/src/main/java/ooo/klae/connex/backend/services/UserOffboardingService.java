@@ -12,20 +12,25 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AiWatchMapper;
+import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
+import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
@@ -78,6 +83,10 @@ public class UserOffboardingService {
         }
     }
 
+    private final DepartureApprovalGuard departureApprovalGuard;
+    private final GoalMapper goalMapper;
+    private final ApprovalPolicyMapper approvalPolicyMapper;
+    private final DocumentApprovalMapper documentApprovalMapper;
     private final NoteMapper noteMapper;
     private final ActivityMapper activityMapper;
     private final AiChatMapper aiChatMapper;
@@ -114,6 +123,8 @@ public class UserOffboardingService {
     private final TenantContext tenantContext;
     private final SequenceMapper sequenceMapper;
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
+    private final OwnershipOfferWriter ownershipOfferWriter;
+    private final OrganizationMapper ownershipOfferOrganizationMapper;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -150,6 +161,51 @@ public class UserOffboardingService {
         }
     }
 
+    /** Checks named approval routes before any workspace departure cleanup. */
+    public void assertCanDepart(int workspaceId, int userId) {
+        departureApprovalGuard.assertCanDepart(workspaceId, userId);
+    }
+
+    /** Captured before the departure guard so concurrent references remain for reconciliation. */
+    public record DepartureReferences(
+            int workspaceId,
+            int userId,
+            List<Integer> goalIds,
+            List<Integer> policyApproverIds,
+            List<Integer> documentApproverIds) {
+        public DepartureReferences {
+            goalIds = List.copyOf(goalIds);
+            policyApproverIds = List.copyOf(policyApproverIds);
+            documentApproverIds = List.copyOf(documentApproverIds);
+        }
+    }
+
+    /** Discovers exact reference ids before the sole named approver guard, without new locks. */
+    public DepartureReferences captureDepartureReferences(int workspaceId, int userId) {
+        return new DepartureReferences(workspaceId, userId,
+            goalMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(goal -> goal.getId()).toList(),
+            approvalPolicyMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(approver -> approver.getId()).toList(),
+            documentApprovalMapper.findDepartureReferences(workspaceId, userId).stream()
+                .map(approver -> approver.getId()).toList());
+    }
+
+    /**
+     * Deletes only captured personal goals and template/frozen approvers after the departure's
+     * cleanup, audit and selection-update tail. Concurrently committed references survive at every
+     * isolation level; conditional deletes also retain references reassigned since discovery.
+     */
+    public void cleanupDepartureReferences(DepartureReferences references) {
+        int workspaceId = references.workspaceId();
+        int userId = references.userId();
+        references.goalIds().forEach(id -> goalMapper.deleteDepartingOwner(workspaceId, id, userId));
+        references.policyApproverIds().forEach(id ->
+            approvalPolicyMapper.deleteDepartingApprover(workspaceId, id, userId));
+        references.documentApproverIds().forEach(id ->
+            documentApprovalMapper.deleteDepartingApprover(workspaceId, id, userId));
+    }
+
     /**
      * Clears personal workspace data for a user who is about to receive a
      * brand-new membership. This removes saved views and preferences, assistant-chat
@@ -177,7 +233,14 @@ public class UserOffboardingService {
     }
 
     private void prepareFreshMembershipInWorkspace(int workspaceId, int userId) {
+        Integer orgId = workspaceMapper.lockWorkspaceOrgIdForShare(workspaceId);
+        if (orgId == null) {
+            throw new ResourceNotFoundException("Workspace not found");
+        }
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
+            ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
+            ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
+            ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
             providerCapturePurgeService.purge(
                 workspaceId, userId, ConnectedAccountProviders.GOOGLE);
             providerCapturePurgeService.purge(
@@ -249,12 +312,21 @@ public class UserOffboardingService {
      * Authored chat sessions are retained with {@code created_by_user_id} intact;
      * only permanent account erasure nulls that provenance.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
-     * membership removal flows inside their transaction.
+     * membership removal flows inside their transaction. Callers check
+     * {@link #assertCanDepart(int, int)} after their existing lock prefix and append
+     * {@link #cleanupDepartureReferences(DepartureReferences)} after their audit and selection-update tail.
      *
      * @param workspaceId the workspace the member is leaving
      * @param userId the departing member
      */
     public void detachMemberContent(int workspaceId, int userId) {
+        Integer orgId = workspaceMapper.lockWorkspaceOrgIdForShare(workspaceId);
+        if (orgId == null) {
+            throw new ResourceNotFoundException("Workspace not found");
+        }
+        ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
+        ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
+        ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
         providerCapturePurgeService.purge(
             workspaceId, userId, ConnectedAccountProviders.GOOGLE);
         providerCapturePurgeService.purge(
@@ -289,7 +361,7 @@ public class UserOffboardingService {
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
      * (CASCADE — saved-view preferences, saved views, dashboards, assistant-chat grants,
-     * notifications, collaborator seats, and team seats)
+     * notifications, collaborator seats, team seats, personal goals, and named approver rows)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
      * campaign ownership, duplicate-review dismissal actors, assistant-chat provenance,
      * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
@@ -298,6 +370,7 @@ public class UserOffboardingService {
      * Statements are grouped deletes-then-nulls for readability except that affected team
      * parents are locked in deterministic order before team seats are deleted and manager
      * references are cleared. Must run inside the caller's deletion transaction.
+     * Surviving goal creators are cleared, while decisions and appended assignment history remain.
      * Recipient memberships are locked in user-id order before notification
      * rows so concurrent inbox mutations use the same membership-to-notification
      * lock order. Recipients whose actor reference is cleared receive a
@@ -330,6 +403,7 @@ public class UserOffboardingService {
     }
 
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
+        departureApprovalGuard.assertCanErase(userId);
         workflowOffboardingService.offboard(userId, locks.workflowPlan());
         Set<Integer> actorRecipientIds = new TreeSet<>(locks.actorRecipientIds());
         actorRecipientIds.addAll(notificationMapper.lockRecipientIdsByActor(userId));
@@ -383,6 +457,16 @@ public class UserOffboardingService {
         lockTeamReferences(teamMapper.findReferencesForUserAnywhere(userId));
         teamMapper.deleteMembershipsAnywhere(userId);
         teamMapper.clearManagerAnywhere(userId);
+        goalMapper.findDepartureReferencesAnywhere(userId).forEach(goal -> {
+            goalMapper.deleteDepartingOwnerAnywhere(goal.getWorkspaceId(), goal.getId(), userId);
+            goalMapper.clearDepartingCreatorAnywhere(goal.getWorkspaceId(), goal.getId(), userId);
+        });
+        approvalPolicyMapper.findDepartureReferencesAnywhere(userId).forEach(approver ->
+            approvalPolicyMapper.deleteDepartingApproverAnywhere(
+                approver.getWorkspaceId(), approver.getId(), userId));
+        documentApprovalMapper.findDepartureReferencesAnywhere(userId).forEach(approver ->
+            documentApprovalMapper.deleteDepartingApproverAnywhere(
+                approver.getWorkspaceId(), approver.getId(), userId));
     }
 
     private void lockTeamReferences(List<Team> teams) {

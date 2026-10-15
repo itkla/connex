@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
+    ArrowUturnLeftIcon,
     CheckIcon,
     EllipsisHorizontalIcon,
     EnvelopeIcon,
@@ -17,6 +18,7 @@ import {
 
 import type {
     CustomRole,
+    OwnershipOffer,
     WorkspaceInvite,
     WorkspaceInviteLink,
     WorkspaceMember,
@@ -30,12 +32,15 @@ import {
     getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
+    getWorkspaceOwnershipOffers,
     getWorkspaceRoles,
+    isOwnershipOfferCreated,
     issueWorkspaceMfaAttestation,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
     revokeWorkspaceMfaAttestation,
+    revokeWorkspaceOwnershipOffer,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -43,6 +48,7 @@ import { useGrantedPermissions, usePermission } from "@/app/hooks/usePermissions
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -298,17 +304,52 @@ function MembersWorkspacePanel({
         return request;
     }, [workspaceId]);
 
+    const ownershipOffers = useScopeOwnershipOffers(
+        workspaceId,
+        isOwner,
+        getWorkspaceOwnershipOffers,
+        (err) => showApiError(err, "ownershipOffersLoadFailed"),
+    );
+    const { openOfferByOfferee } = ownershipOffers;
+
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
             const updated = await updateMemberRole(workspaceId, userId, next);
+            if (isOwnershipOfferCreated<WorkspaceMember>(updated)) {
+                const { offer, currentMember } = updated;
+                if (currentMember) {
+                    setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
+                }
+                ownershipOffers.remember(offer);
+                const name = members.find((m) => m.id === userId)?.displayName ?? "";
+                toastSuccess(t("ownershipOffered", { name }));
+                return;
+            }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err, "roleChangeFailed");
+            }
+        } finally {
+            setBusyMemberId(null);
+        }
+    };
+
+    const withdrawOwnershipOffer = async (offer: OwnershipOffer) => {
+        if (!workspaceId) return;
+        setBusyMemberId(offer.offereeUserId);
+        try {
+            await revokeWorkspaceOwnershipOffer(workspaceId, offer.id);
+            ownershipOffers.forget(offer.id);
+            toastSuccess(t("ownershipOfferWithdrawn"));
+        } catch (err) {
+            if (!handlePasskeyStepUpError(err)) {
+                showApiError(err, "ownershipOfferWithdrawFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -321,6 +362,7 @@ function MembersWorkspacePanel({
         try {
             const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -338,6 +380,7 @@ function MembersWorkspacePanel({
         try {
             await removeWorkspaceMember(workspaceId, removeTarget.id);
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
+            ownershipOffers.refresh();
             toastSuccess(t("removed"));
             setRemoveTarget(null);
         } catch (err) {
@@ -372,6 +415,7 @@ function MembersWorkspacePanel({
             if (result.member) {
                 const member = result.member;
                 setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
+                ownershipOffers.refresh();
                 toastSuccess(t("memberInvited"));
             } else if (result.invite) {
                 const invite = result.invite;
@@ -558,6 +602,8 @@ function MembersWorkspacePanel({
                                         || (canManageRoles && grantableCustomRoles.length > 0)
                                     );
                                 const removable = canManageMembers && !isSelf && !protectedOwner;
+                                const openOffer = openOfferByOfferee.get(member.id);
+                                const withdrawable = isOwner && openOffer !== undefined;
                                 const currentCustomRoleIsGrantable = member.roleId != null
                                     && grantableCustomRoles.some((candidate) => candidate.id === member.roleId);
                                 const currentBuiltInRole = member.roleId == null && isWorkspaceRole(member.role)
@@ -591,6 +637,11 @@ function MembersWorkspacePanel({
                                                 {pending && (
                                                     <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                         {t("pending")}
+                                                    </Badge>
+                                                )}
+                                                {openOffer && (
+                                                    <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
+                                                        {t("ownershipPending")}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -656,7 +707,7 @@ function MembersWorkspacePanel({
                                             ) : null}
                                         </div>
 
-                                        {(removable || attestable) && (
+                                        {(removable || attestable || withdrawable) && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -672,6 +723,15 @@ function MembersWorkspacePanel({
                                                         <DropdownMenuItem onSelect={() => setApprovalTarget(member)}>
                                                             <KeyIcon className="size-4" />
                                                             {t("approvalCode")}
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                    {withdrawable && openOffer && (
+                                                        <DropdownMenuItem
+                                                            disabled={busy}
+                                                            onSelect={() => withdrawOwnershipOffer(openOffer)}
+                                                        >
+                                                            <ArrowUturnLeftIcon className="size-4" />
+                                                            {t("withdrawOwnershipOffer")}
                                                         </DropdownMenuItem>
                                                     )}
                                                     {removable && (

@@ -7,6 +7,11 @@
     id, username, display_name, email, email_verified, password_hash, session_epoch, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
 
+  <select id="findExistingIds" resultType="int">
+    SELECT id FROM app_user WHERE id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="getAllUsers" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user

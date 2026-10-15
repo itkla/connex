@@ -47,6 +47,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -746,8 +747,25 @@ class RoleRecoveryIntegrationTest {
     }
 
     private void restoreOwner(User actor, User target) throws Exception {
-        request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
-            .andExpect(status().isOk());
+        String previousRole = workspaceMapper.getRole(workspace.getId(), target.getId());
+        Integer previousRoleId = workspaceMapper.getMemberRoleId(workspace.getId(), target.getId());
+        if ("owner".equals(previousRole)) {
+            request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
+                .andExpect(status().isOk());
+        } else {
+            var offered = objectMapper.readTree(
+                request(actor, patch(memberPath(target)).content("{\"role\":\"owner\"}"))
+                    .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString());
+            assertEquals("ownership_offer", offered.path("outcome").asString());
+            assertEquals(previousRole, workspaceMapper.getRole(workspace.getId(), target.getId()));
+            assertEquals(previousRoleId, workspaceMapper.getMemberRoleId(workspace.getId(), target.getId()));
+            String offerId = offered.path("offer").path("id").asString();
+            var accepted = objectMapper.readTree(
+                request(target, post("/api/ownership-offers/" + offerId + "/accept").content("{}"))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+            assertEquals("ACCEPTED", accepted.path("offer").path("state").asString());
+            assertEquals("owner", accepted.path("membership").path("builtInRole").asString());
+        }
         assertBuiltInOwner(target);
     }
 
@@ -767,7 +785,9 @@ class RoleRecoveryIntegrationTest {
             return realMapper.lockWorkspace(workspace.getId());
         }).when(workspaceMapper).lockWorkspace(workspace.getId());
         try (var executor = Executors.newSingleThreadExecutor(task -> new Thread(task, "role-recovery-contender"))) {
-            var future = new TransactionTemplate(transactionManager).execute(transaction -> {
+            TransactionTemplate template = new TransactionTemplate(transactionManager);
+            template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            var future = template.execute(transaction -> {
                 userMapper.lockById(owner.getId());
                 workspaceMapper.lockWorkspace(workspace.getId());
                 var pending = executor.submit(() -> {
@@ -810,6 +830,13 @@ class RoleRecoveryIntegrationTest {
         session.setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, System.currentTimeMillis());
         session.setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, actor.getId());
         PublicApiTestSecuritySupport.stepUp(session, actor.getId());
+        Integer credentialRowId = Objects.requireNonNull(jdbcTemplate.queryForObject(
+            "SELECT c.id FROM webauthn_credential c"
+                + " JOIN webauthn_user_entity u ON u.id = c.user_entity_user_id WHERE u.user_id = ?",
+            Integer.class, actor.getId()), "test passkey");
+        session.setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_PROOF_ATTR,
+            actor.getId() + ":" + session.getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR)
+                + ":" + credentialRowId);
         return mockMvc.perform(builder.header("X-Workspace-Id", workspace.getId())
             .contentType(MediaType.APPLICATION_JSON).session(session).with(user(actor)).with(csrf().asHeader()));
     }

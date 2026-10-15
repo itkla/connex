@@ -3,8 +3,10 @@ package ooo.klae.connex.backend.services;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.IntConsumer;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
+import ooo.klae.connex.backend.dto.MemberRoleChange;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -51,6 +54,7 @@ public class OrgMemberService {
     private final SessionSecurityService sessionSecurityService;
     private final RegistrationVerificationService registrationVerificationService;
     private final PrivilegedAccountService privilegedAccountService;
+    private final OwnershipOfferWriter ownershipOfferWriter;
 
     /**
      * Records a user as the founding owner of a freshly created organization and covers the
@@ -63,6 +67,10 @@ public class OrgMemberService {
      * @return the number of the owner's passkeys now covered in the organization
      */
     public int addFoundingOwner(int orgId, int userId) {
+        if (organizationMapper.lockById(orgId) == null || !orgMemberMapper.getMembers(orgId).isEmpty()
+                || orgMemberMapper.hasOrganizationWorkspace(orgId)) {
+            throw new ConflictException("Founding ownership requires a newly provisioned organization");
+        }
         orgMemberMapper.addFoundingMember(orgId, userId);
         return attestationMapper.insertFoundingCoverage(orgId, userId);
     }
@@ -156,8 +164,8 @@ public class OrgMemberService {
      * audit write atomic, at the {@code READ COMMITTED} isolation its tenancy read relies on.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
-        setMemberByEmail(orgId, actorId, emailRaw, roleRaw, false);
+    public MemberRoleChange<OrgMemberDto> setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
+        return setMemberByEmail(orgId, actorId, emailRaw, roleRaw, false);
     }
 
     /**
@@ -169,8 +177,25 @@ public class OrgMemberService {
      * @param acknowledgeConfinement whether the actor accepts that the account may be confined
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void setMemberByEmail(
+    public MemberRoleChange<OrgMemberDto> setMemberByEmail(
             int orgId, int actorId, String emailRaw, String roleRaw, boolean acknowledgeConfinement) {
+        return setMemberByEmail(orgId, actorId, emailRaw, roleRaw, acknowledgeConfinement, targetId -> {});
+    }
+
+    /**
+     * Captures the eligible account resolved by email for refusal attribution before taking roots.
+     * The callback only captures the local target id; it must not acquire locks or append audits.
+     * Failures before resolution do not invoke it. Authorization and mailbox rechecks remain under
+     * this READ COMMITTED transaction, as in the ordinary by-email entry point.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public MemberRoleChange<OrgMemberDto> setMemberByEmail(
+            int orgId, int actorId, String emailRaw, String roleRaw, boolean acknowledgeConfinement,
+            IntConsumer resolvedTarget) {
+        Objects.requireNonNull(resolvedTarget, "resolvedTarget");
+        if (roleRaw != null && "owner".equalsIgnoreCase(roleRaw.trim())) {
+            OwnershipOfferWriter.requireReadCommitted();
+        }
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
@@ -179,12 +204,13 @@ public class OrgMemberService {
         if (targetId == null) {
             throw notAnActiveTenant();
         }
+        resolvedTarget.accept(targetId);
         lockMembershipUserRoots(actorId, targetId);
         User fresh = userMapper.getUserByIdForShare(targetId);
         if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {
             throw new ConflictException("The account's email changed; refresh and try again");
         }
-        applyMember(orgId, actorId, targetId, role, acknowledgeConfinement);
+        return applyMember(orgId, actorId, targetId, role, acknowledgeConfinement);
     }
 
     /**
@@ -195,8 +221,8 @@ public class OrgMemberService {
      * that order so role changes serialize with organization mutations, audit
      * attribution, and account deletion.
      *
-     * <p>This is the single writer of {@code org_member} for both the by-id and by-email
-     * endpoints, so the mailbox-proof check lives here: while the instance runs registration
+     * <p>This is the shared entry point for both the by-id and by-email endpoints, so the
+     * mailbox-proof check lives here: while the instance runs registration
      * verification, an account that has not proven its address cannot be <em>granted</em> org-wide
      * authority, whichever endpoint addressed it. The check is scoped to that grant — an account
      * that already holds an {@code org_member} row keeps being manageable, so a legacy unverified
@@ -219,10 +245,14 @@ public class OrgMemberService {
      * all: an existing member or an existing tenant. An unknown account and an outsider answer that
      * read alike and are refused before taking any lock, so neither the refusal nor its cost tells
      * them apart. The answer is revalidated under the locks.
+     *
+     * <p>Promotion of a non-owner creates consent and preserves the current membership, including
+     * its absence. The offeree must accept before ownership is granted; existing-owner repair and
+     * other role changes retain their direct behavior.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
-        setMember(orgId, actorId, targetUserId, roleRaw, false);
+    public MemberRoleChange<OrgMemberDto> setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
+        return setMember(orgId, actorId, targetUserId, roleRaw, false);
     }
 
     /**
@@ -231,25 +261,34 @@ public class OrgMemberService {
      * change that makes the account newly privileged here without a passkey approved here is
      * refused unless acknowledged (#1534).
      *
-     * @param acknowledgeConfinement whether the actor accepts that the account may be confined
+     * @param acknowledgeConfinement whether the actor accepts confinement from a direct role change;
+     * ownership offers require the offeree's acknowledgement at acceptance instead
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void setMember(
+    public MemberRoleChange<OrgMemberDto> setMember(
             int orgId, int actorId, int targetUserId, String roleRaw, boolean acknowledgeConfinement) {
+        if (roleRaw != null && "owner".equalsIgnoreCase(roleRaw.trim())) {
+            OwnershipOfferWriter.requireReadCommitted();
+        }
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
         if (!orgMemberMapper.isEligibleForMembership(orgId, targetUserId)) {
             throw notAnActiveTenant();
         }
-        applyMember(orgId, actorId, targetUserId, role, acknowledgeConfinement);
+        return applyMember(orgId, actorId, targetUserId, role, acknowledgeConfinement);
     }
 
-    private void applyMember(int orgId, int actorId, int targetUserId, OrgRole role, boolean acknowledgeConfinement) {
+    private MemberRoleChange<OrgMemberDto> applyMember(int orgId, int actorId, int targetUserId, OrgRole role, boolean acknowledgeConfinement) {
         try {
             lockMembershipUserRoots(actorId, targetUserId);
         } catch (ResourceNotFoundException unknownTarget) {
             throw notAnActiveTenant();
+        }
+        if (role == OrgRole.OWNER) {
+            ownershipOfferWriter.requireUnreserved(actorId);
+            ownershipOfferWriter.requireUnreserved(targetUserId);
+            ownershipOfferWriter.requireActorAuthentication(actorId);
         }
         if (organizationMapper.lockActiveById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
@@ -259,7 +298,9 @@ public class OrgMemberService {
             throw notAnActiveTenant();
         }
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
-        if (orgMemberMapper.getRoleForUpdate(orgId, targetUserId) == null) {
+        String currentRole = role == OrgRole.OWNER ? orgMemberMapper.lockExactRole(orgId, targetUserId)
+            : orgMemberMapper.getRoleForUpdate(orgId, targetUserId);
+        if (currentRole == null) {
             if (!orgMemberMapper.isActiveWorkspaceTenant(orgId, targetUserId)) {
                 throw notAnActiveTenant();
             }
@@ -270,6 +311,10 @@ public class OrgMemberService {
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }
+        if (role == OrgRole.OWNER && !"owner".equals(currentRole)) {
+            return new MemberRoleChange<>(currentMember(orgId, targetUserId),
+                ownershipOfferWriter.createLocked(orgId, null, actorId, targetUserId));
+        }
         ConfinementBaseline baseline =
                 privilegedAccountService.confinementBaseline(() -> orgId, List.of(targetUserId));
         if (actorId == targetUserId) {
@@ -278,8 +323,10 @@ public class OrgMemberService {
             orgMemberMapper.addMemberClearingFounder(orgId, targetUserId, role.name().toLowerCase());
         }
         privilegedAccountService.requireConfinementAcknowledged(baseline, acknowledgeConfinement);
+        ownershipOfferWriter.invalidateScopeLocked(orgId, null);
         auditService.record("org.member.set", "organization", orgId, target.getDisplayName(),
                 "Set " + target.getDisplayName() + " to org " + role.name().toLowerCase(), null);
+        return MemberRoleChange.direct(currentMember(orgId, targetUserId));
     }
 
     /**
@@ -287,7 +334,7 @@ public class OrgMemberService {
      * organization must always keep at least one owner. Sorted actor/target users
      * are locked before the organization and owner rows.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void removeMember(int orgId, int actorId, int targetUserId) {
         requireOrgOwner(orgId, actorId);
         sessionSecurityService.requireRecentAuthentication(actorId);
@@ -302,6 +349,7 @@ public class OrgMemberService {
         if (orgMemberMapper.removeMember(orgId, targetUserId) == 0) {
             throw new ResourceNotFoundException("User is not an organization member");
         }
+        ownershipOfferWriter.invalidatePartyLocked(orgId, null, targetUserId);
         auditService.record("org.member.remove", "organization", orgId, null,
                 "Removed org member " + targetUserId, null);
     }
@@ -330,6 +378,7 @@ public class OrgMemberService {
             throw new BadRequestException("An organization must keep at least one owner");
         }
         orgMemberMapper.removeMember(orgId, userId);
+        ownershipOfferWriter.invalidatePartyLocked(orgId, null, userId);
         auditService.recordStrictScoped("org.member.leave", "organization", orgId, null, orgId,
                 null, "Left the organization", null);
     }
@@ -364,6 +413,33 @@ public class OrgMemberService {
      * authority. The lock makes authorization, the last-owner check, and the
      * subsequent mutation one serialized step inside the surrounding transaction.
      */
+    /** Reads the current organization member without fabricating an interim membership. */
+    OrgMemberDto currentMember(int orgId, int userId) {
+        return orgMemberMapper.getMembers(orgId).stream().filter(member -> member.getId() == userId)
+            .findFirst().orElse(null);
+    }
+
+    /** Locks consent's account prefix in ascending order with shared organization account roots. */
+    void lockOfferAccounts(List<Integer> users, boolean checkReservations) {
+        for (int userId : new TreeSet<>(users)) {
+            if (userMapper.lockByIdForShare(userId) == null) {
+                throw new ResourceNotFoundException("Ownership offer not found");
+            }
+            if (checkReservations) {
+                ownershipOfferWriter.requireUnreserved(userId);
+            }
+        }
+    }
+
+    /** Locks the organization, owner rows and exact offeree row in the established hierarchy. */
+    void lockOwnershipOfferScope(int orgId, int offereeId) {
+        if (organizationMapper.lockById(orgId) == null) {
+            throw new ResourceNotFoundException("Ownership offer not found");
+        }
+        orgMemberMapper.lockOwnerIds(orgId);
+        orgMemberMapper.lockExactRole(orgId, offereeId);
+    }
+
     private List<Integer> lockCurrentOwnerIds(int orgId, int actorId) {
         List<Integer> ownerIds = orgMemberMapper.lockOwnerIds(orgId);
         if (!ownerIds.contains(actorId)) {

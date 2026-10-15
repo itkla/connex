@@ -167,4 +167,7 @@
     WHERE om.user_id = #{userId} AND o.lifecycle_state = 'active'
     ORDER BY o.name, o.id
   </select>
+  <select id="hasOrganizationWorkspace" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM workspace WHERE org_id = #{orgId})
+  </select>
 </mapper>

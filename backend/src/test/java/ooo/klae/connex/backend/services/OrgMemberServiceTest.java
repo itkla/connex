@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
  * organization records its creator as the founding owner (the runtime equivalent
  * of the V44 backfill).
  */
+@org.springframework.transaction.annotation.Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
 class OrgMemberServiceTest extends AbstractServiceTest {
 
     @Autowired private OrgMemberService orgMemberService;
@@ -34,6 +35,7 @@ class OrgMemberServiceTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private OwnershipOfferService ownershipOfferService;
 
     private static final String NOT_A_TENANT =
         "Only active members of a workspace in this organization can be added to it";
@@ -169,8 +171,12 @@ class OrgMemberServiceTest extends AbstractServiceTest {
         User admin = newUser();
         orgMemberMapper.addMember(orgId, admin.getId(), "admin");
 
-        orgMemberService.setMember(orgId, currentUser.getId(), admin.getId(), "owner");
-
+        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUpCurrent(jdbcTemplate, currentUser);
+        var offer = orgMemberService.setMember(orgId, currentUser.getId(), admin.getId(), "owner");
+        assertEquals("admin", orgMemberMapper.getRole(orgId, admin.getId()));
+        authenticateAs(admin, workspace.getId());
+        ooo.klae.connex.backend.support.OwnershipOfferTestFixtures.stepUpCurrent(jdbcTemplate, admin);
+        ownershipOfferService.accept(Long.parseLong(offer.offer().id()), admin.getId(), false);
         assertEquals("owner", orgMemberMapper.getRole(orgId, admin.getId()));
     }
 

@@ -572,7 +572,22 @@
     "leaveConfirmBody": "このワークスペースへのアクセスを失います。割り当てられたタスクは未割り当てになり、所有する案件は所有者を失います。",
     "cancel": "キャンセル",
     "left": "ワークスペースを退出しました",
-    "leaveFailed": "ワークスペースを退出できませんでした"
+    "leaveFailed": "ワークスペースを退出できませんでした",
+    "offersLoadFailed": "オーナー提案を読み込めませんでした",
+    "ownershipTitle": "オーナー提案",
+    "ownershipSubtitle": "オーナーになるよう提案されています。承認するまで何も変わりません。",
+    "ownershipOfferTitle": "{scope} のオーナー",
+    "ownershipOfferMeta": "提案者: {name} ・ 期限: {date}",
+    "ownershipOfferExpires": "期限: {date}",
+    "ownershipScopeWorkspace": "ワークスペース",
+    "ownershipScopeOrganization": "組織",
+    "ownershipAccepted": "{scope} のオーナーになりました",
+    "ownershipAcceptFailed": "オーナー提案を承認できませんでした",
+    "ownershipDeclined": "オーナー提案を辞退しました",
+    "ownershipDeclineFailed": "オーナー提案を辞退できませんでした",
+    "ownershipConfinementTitle": "{scope} のオーナーになりますか？",
+    "ownershipConfinementBody": "オーナーは、別のオーナーが承認したパスキーでサインインします。承認されるまでは、パスキーの設定、パスキー承認コードの入力、または退出のみ行えます。",
+    "ownershipConfinementAccept": "承認して続ける"
   },
   "AccountConnectionConsent": {
     "title": "{provider} を連携",

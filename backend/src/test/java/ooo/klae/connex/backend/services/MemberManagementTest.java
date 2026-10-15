@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Task;
@@ -34,17 +36,19 @@ class MemberManagementTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void changeRole_promotesMember() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Promote WS", currentUser.getId());
         User member = newUser();
         workspaceMapper.addMember(ws.getId(), member.getId(), "member");
 
-        MemberDto updated = workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), member.getId(), "admin");
+        MemberDto updated = workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), member.getId(), "admin").currentMember();
 
         assertEquals("admin", updated.getRole());
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void changeRole_cannotDemoteLastOwner() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner WS", currentUser.getId());
 
@@ -53,6 +57,7 @@ class MemberManagementTest extends AbstractServiceTest {
     }
 
     @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     void removeMember_unassignsTasksAndPreservesThem() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Remove WS", currentUser.getId());
         User member = newUser();
@@ -74,6 +79,7 @@ class MemberManagementTest extends AbstractServiceTest {
         assertTrue(taskMapper.getTasksByAssignedToId(ws.getId(), member.getId()).isEmpty());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void removeMember_cannotRemoveLastOwner() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Solo Owner WS", currentUser.getId());

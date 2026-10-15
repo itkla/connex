@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,6 +14,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import jakarta.mail.Part;
+import jakarta.mail.Multipart;
 
 import com.jayway.jsonpath.JsonPath;
 
@@ -32,6 +38,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
@@ -39,6 +48,7 @@ import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignMessage;
+import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.ContactChannelConsent;
 import ooo.klae.connex.backend.beans.Person;
@@ -55,6 +65,13 @@ import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryCredentials;
+import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
+import ooo.klae.connex.backend.mail.ResolvedMailConfig;
+import ooo.klae.connex.backend.support.SmtpCaptureServer;
 
 /**
  * Drives the public unsubscribe endpoints through the real security filter chain and the real
@@ -73,6 +90,7 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
  * "scope before transaction" ordering is asserted separately by {@code DeliveryUnsubscribeServiceTest}.
  */
 @SpringBootTest
+@TestPropertySource(properties = "connex.delivery.enabled=true")
 @Transactional
 class DeliveryUnsubscribeIntegrationTest {
 
@@ -87,6 +105,8 @@ class DeliveryUnsubscribeIntegrationTest {
     @Autowired private SuppressionMapper suppressionMapper;
     @Autowired private ConsentMapper consentMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private CampaignDispatchService campaignDispatchService;
+    @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
 
     private MockMvc mockMvc;
 
@@ -95,6 +115,95 @@ class DeliveryUnsubscribeIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void smtpCaptureLinkExchangesPreviewsAndConfirmsWhileExportedDigestIsNotABearer() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+            Person person = newPerson(workspace);
+            jdbcTemplate.update("UPDATE person SET email = 'recipient@dest.test' WHERE id = ?", person.getId());
+            Campaign campaign = newCampaign(workspace);
+            CampaignAudienceSnapshot snapshot = newSnapshot(workspace, campaign);
+            CampaignMessage message = newMessage(workspace, campaign);
+            CampaignMessageRevision revision = new CampaignMessageRevision();
+            revision.setWorkspaceId(workspace.getId());
+            revision.setMessageId(message.getId());
+            revision.setVersion(1);
+            revision.setLocale("en");
+            revision.setSubject("Unsubscribe SMTP capture");
+            revision.setBodyHtml("<p>Hello</p><a href=\"{{unsubscribe_url}}\">Unsubscribe</a>");
+            campaignMessageMapper.insertRevision(revision);
+            CampaignSend send = newSend(workspace, campaign, snapshot, message);
+            CampaignDelivery delivery = new CampaignDelivery();
+            delivery.setSendId(send.getId());
+            delivery.setPersonId(person.getId());
+            delivery.setAddress("recipient@dest.test");
+            delivery.setStatus("pending");
+            campaignDeliveryMapper.insertDeliveries(workspace.getId(), List.of(delivery));
+            int deliveryId = campaignDeliveryMapper.getBySendAndPerson(
+                    workspace.getId(), send.getId(), person.getId()).getId();
+            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+            when(deliveryProviderConfigService.resolveForWorkspace(
+                    workspace.getId(), DeliveryChannel.EMAIL)).thenReturn(new ResolvedDeliveryProvider(
+                            "smtp", DeliveryChannel.EMAIL, workspace.getId(), null, null, null,
+                            DeliveryCredentials.none(), false, "f".repeat(64), config));
+
+            assertTrue(campaignDispatchService.processSend(workspace.getId(), send.getId()));
+            assertEquals("dispatched", campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+            String body = mimeText(smtp.awaitMessage());
+            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(body);
+            assertTrue(token.find());
+            String bearer = token.group(1);
+            String exportedDigest = jdbcTemplate.queryForObject(
+                    "SELECT token_hash FROM campaign_delivery_unsubscribe_token WHERE delivery_id = ?",
+                    String.class, deliveryId);
+            assertEquals(OneTimeTokenDigest.sha256(bearer), exportedDigest);
+            Browser browser = bootstrapBrowser();
+            exchange(exportedDigest, 404, browser);
+            Cookie grant = flowCookie(exchange(bearer, 303, browser));
+            MvcResult preview = mockMvc.perform(get("/api/delivery/unsubscribe")
+                    .session(browser.session()).cookie(grant, browser.bindingCookie()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.unsubscribed").value(false)).andReturn();
+            mockMvc.perform(post("/api/delivery/unsubscribe")
+                    .session(browser.session()).cookie(grant, browser.bindingCookie()).with(csrf().asHeader())
+                    .contentType(MediaType.APPLICATION_JSON).content(confirmBody(flowIdOf(preview))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.unsubscribed").value(true));
+            RequestContextHolder.resetRequestAttributes();
+            assertTrue(campaignDeliveryMapper.hasEvent(workspace.getId(), deliveryId, "unsubscribed"));
+            assertEquals(1, jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM suppression_entry WHERE workspace_id = ? AND reason = 'unsubscribe'",
+                    Integer.class, workspace.getId()));
+            assertTrue(consentMapper.getForPerson(workspace.getId(), person.getId()).stream()
+                    .anyMatch(consent -> "revoked".equals(consent.getStatus())));
+        } finally {
+            RequestContextHolder.resetRequestAttributes();
+            jdbcTemplate.update("DELETE FROM one_time_link_flow WHERE routing_workspace_id = ?", workspace.getId());
+            for (String table : List.of("campaign_delivery", "campaign_send", "campaign_audience_snapshot",
+                    "campaign_message_revision", "campaign_message", "campaign", "contact_channel_consent_event",
+                    "contact_channel_consent", "suppression_entry", "person")) {
+                jdbcTemplate.update("DELETE FROM " + table + " WHERE workspace_id = ?", workspace.getId());
+            }
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
+        }
+    }
+
+    private static String mimeText(Part part) throws Exception {
+        Object content = part.getContent();
+        if (content instanceof String text) {
+            return text;
+        }
+        if (content instanceof Multipart multipart) {
+            StringBuilder body = new StringBuilder();
+            for (int index = 0; index < multipart.getCount(); index++) {
+                body.append(mimeText(multipart.getBodyPart(index)));
+            }
+            return body.toString();
+        }
+        throw new AssertionError("Unexpected captured MIME content");
     }
 
     @Test
@@ -112,7 +221,7 @@ class DeliveryUnsubscribeIntegrationTest {
                 && value.contains("Max-Age=600")));
 
         assertEquals(OneTimeTokenDigest.sha256(recipient.token()), jdbcTemplate.queryForObject(
-            "SELECT unsubscribe_token_hash FROM campaign_delivery WHERE id = ?",
+            "SELECT token_hash FROM campaign_delivery_unsubscribe_token WHERE delivery_id = ?",
             String.class,
             recipient.deliveryId()));
         assertEquals(OneTimeTokenDigest.sha256(recipient.token()), jdbcTemplate.queryForObject(
@@ -405,10 +514,11 @@ class DeliveryUnsubscribeIntegrationTest {
         delivery.setPersonId(person.getId());
         delivery.setAddress("recipient@dest.test");
         delivery.setStatus("dispatched");
-        delivery.setUnsubscribeToken(token);
         campaignDeliveryMapper.insertDeliveries(workspace.getId(), List.of(delivery));
-        CampaignDelivery stored = campaignDeliveryMapper.getByTokenHash(
-            OneTimeTokenDigest.sha256(token));
+        CampaignDelivery stored = campaignDeliveryMapper.getBySendAndPerson(
+            workspace.getId(), send.getId(), person.getId());
+        campaignDeliveryMapper.insertUnsubscribeTokenHash(
+            workspace.getId(), stored.getId(), OneTimeTokenDigest.sha256(token));
         assertNotNull(stored, "the seeded delivery was not persisted");
         return new Recipient(workspace.getId(), stored.getId(), person.getId(), token);
     }

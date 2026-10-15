@@ -167,7 +167,10 @@
     "noUsers": "No users found",
     "noCollaborators": "No teammates available",
     "cancel": "Cancel",
-    "inbox": "Inbox"
+    "inbox": "Inbox",
+    "ownershipOfferTitle": "Ownership offer",
+    "ownershipOfferWorkspaceBody": "You've been offered ownership of {workspace}. Review it in Settings.",
+    "ownershipOfferOrganizationBody": "You've been offered ownership of an organization. Review it in Settings."
   },
   "NotificationsLayout": {
     "title": "Notifications",

@@ -62,6 +62,7 @@ public final class TablePlaneRegistry {
         "one_time_link_flow",
         "org_allowed_domain",
         "org_member",
+        "ownership_offer",
         "org_placement",
         "organization",
         "organization_duplicate_decision_lock",
@@ -105,6 +106,7 @@ public final class TablePlaneRegistry {
     public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
         "api_credential",
         "audit_log",
+        "ownership_offer",
         "privileged_mfa_attestation_grant",
         "secret_value",
         "tenant_cleanup_tombstone",
@@ -142,6 +144,7 @@ public final class TablePlaneRegistry {
         "campaign_audience_snapshot",
         "campaign_delivery",
         "campaign_delivery_event",
+        "campaign_delivery_unsubscribe_token",
         "campaign_message",
         "campaign_message_revision",
         "campaign_send",

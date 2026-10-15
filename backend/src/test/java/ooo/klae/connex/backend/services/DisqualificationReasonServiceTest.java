@@ -27,6 +27,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Resolved fallback, materialisation, archival, uniqueness, audit, and RBAC behavior (#559). */
 class DisqualificationReasonServiceTest extends AbstractServiceTest {
@@ -64,6 +66,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, workspace.getId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void untouchedWorkspaceGetsExactlyTheNineBuiltInsWithoutPersistingRows() {
         List<DisqualificationReasonDto> reasons = reasonService.getActive();
@@ -78,6 +81,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(0, countRows());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void firstEditMaterializesEveryBuiltInAndRelabelsTheSelectedOne() {
         DisqualificationReasonDto fallback = reasonService.getAll().getFirst();
@@ -95,6 +99,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.update"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customCodesAreUniqueWithinTheWorkspaceAtTheServiceAndDatabaseAndCannotBeRenamed() {
         DisqualificationReasonDto custom = reasonService.create(
@@ -115,6 +120,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.create"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void archivedReasonsLeaveTheirLabelsResolvableAndCanBeRestored() {
         DisqualificationReasonDto custom = reasonService.create(
@@ -134,6 +140,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertEquals(1, auditCount("disqualification.reason.restore"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void memberWithoutWorkspaceSettingsCanReadButCannotUseAnyMutator() {
         DisqualificationReasonDto active = reasonService.create(
@@ -161,6 +168,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertTrue(reasonService.resolve(workspace.getId(), archived.code()).archivedAt() != null);
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void auditPayloadKeepsCallerAuthoredLabelsOutOfEveryReasonEvent() {
         String sensitiveLabel = "alex.personal@example.com";
@@ -184,6 +192,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         }
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anotherWorkspaceCannotUpdateArchiveOrRestoreAReasonById() {
         DisqualificationReasonDto local = reasonService.create(
@@ -199,6 +208,7 @@ class DisqualificationReasonServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class, () -> reasonService.restore(local.id()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void codeAndPositionValidationRejectsValuesThatCannotBeStoredSafely() {
         DisqualificationReasonRequest canonicalRequest =

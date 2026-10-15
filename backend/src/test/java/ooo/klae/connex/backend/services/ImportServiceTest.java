@@ -53,6 +53,8 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class ImportServiceTest extends AbstractServiceTest {
 
@@ -677,6 +679,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 row.getMergedRowCount())));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void companyImportCoalescesReferencesAndReplaysWithoutSideEffects() {
         Tag firstTag = newTag();
@@ -1042,6 +1045,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 created.getId()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personImportThreeIdenticalReplaysKeepCanonicalStateStable() {
         Company company = newCompany();
@@ -1254,6 +1258,7 @@ class ImportServiceTest extends AbstractServiceTest {
                     workspace.getId(), selected.getId()).getWebsite()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void manualImportsRepairMissingCanonicalIdentitiesOnce() {
         User replayActor = memberWithPermissions(
@@ -2055,6 +2060,7 @@ class ImportServiceTest extends AbstractServiceTest {
             .noneMatch(deal -> deal.getName().startsWith("Bounded value ")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void dealImportReplayUsesPersistedMoneyPrecision() {
         Pipeline pipeline = newPipeline();
@@ -2440,6 +2446,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(closed.getEndedAt(), current.getStartedAt());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personImport_matchUpdateRequiresUpdatePermission() {
         List<ColumnMapping> mapping = List.of(
@@ -2480,6 +2487,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(stateBefore, importState());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personImportCommitRefusesOriginalProofAfterCreatePermissionIsRevoked() {
         WorkspaceRole role = roleService.createRole(
@@ -2520,6 +2528,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 email));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void companyAndDealPreviews_requireUpdatePermissionForMatchedRows() {
         Company companyDraft = new Company();
@@ -2542,6 +2551,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty")));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personPreview_requiresCompanyCreateForMissingActiveWorkspaceCompany() {
         String companyName = "Missing Company " + unique();
@@ -2555,6 +2565,7 @@ class ImportServiceTest extends AbstractServiceTest {
             .anyMatch(company -> companyName.equals(company.getName())));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personPreview_requiresTagManageForMissingActiveWorkspaceTag() {
         String tagName = "missing_" + unique();
@@ -2567,6 +2578,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertNull(tagMapper.getTagByName(workspace.getId(), tagName));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personPreview_requiresCustomFieldManageForMissingActiveWorkspaceDefinition() {
         String fieldKey = "budget_" + unique();
@@ -2580,6 +2592,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personPreview_allowsExistingActiveWorkspaceDependenciesWithoutManagePermissions() {
         Company company = newCompany();
@@ -2613,6 +2626,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getCreated());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void personPreviewAndCommit_allowAuthorizedDependencyCreation() {
         String companyName = "Authorized Company " + unique();
@@ -2644,6 +2658,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertNotNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void skippedAndInvalidRows_doNotRequireDependencyPermissionsOrCreateDependencies() {
         String email = unique() + "@x.test";
@@ -2687,6 +2702,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", fieldKey));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void foreignWorkspaceDependencies_doNotSatisfyPreviewPermissionPreflight() {
         String companyName = "Foreign Company " + unique();

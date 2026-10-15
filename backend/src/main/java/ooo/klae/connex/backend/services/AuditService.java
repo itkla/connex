@@ -329,6 +329,23 @@ public class AuditService {
                 context, true, true, workspaceId, orgId, true);
     }
 
+    /** Captures a strict refusal while roots are held and appends only after their transaction completes. */
+    public void deferStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason) {
+        Object context = reason == null ? null : Map.of("error", truncate(reason, ERROR_MAX));
+        AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, context, true, workspaceId, orgId, true);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) {
+                    appendAndObserve(entry, true);
+                }
+            });
+        } else {
+            appendAndObserve(entry, true);
+        }
+    }
+
     /**
      * Records a strict, independently scoped failure with advisory fetch metadata from the request.
      *

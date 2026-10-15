@@ -27,12 +27,14 @@ import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 
 @SpringBootTest(properties = "connex.tenant-lifecycle.teardown-settle-delay=0s")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberService orgMemberService;
+    @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private TenantExportService exportService;
     @Autowired private TenantExportGrantService exportGrantService;
     @Autowired private TenantTeardownService teardownService;
@@ -350,7 +352,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
 
         User otherActor = newUser();
         additionalUserIds.add(otherActor.getId());
-        orgMemberService.addFoundingOwner(organization.getId(), otherActor.getId());
+        orgMemberMapper.addMember(organization.getId(), otherActor.getId(), "owner");
         TenantExportGrantService.TenantExportGrant actorGrant = exportGrantService.issue(
             organization.getId(),
             target.getId(),

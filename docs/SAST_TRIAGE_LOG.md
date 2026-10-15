@@ -1222,4 +1222,15 @@ above, not a false positive.
 - #120 is left `fixed`. On reopen it recomputed to `fixed`, because its `src/…` path lineage is no
   longer reported, so it has no live finding to suppress. That matches the 2026-09-01 handling of
   stale records above. It was briefly re-dismissed in error and then reopened back to `fixed`.
-- Moving disclosure assembly to `POST` remains open as an alternative for the Security Owner.
+- At that time, moving disclosure assembly to `POST` remained an alternative for the Security Owner.
+
+**Superseding owner decision, 2026-10-12**, tracked on
+[#2004](https://github.com/itkla/connex/issues/2004): the Security Owner approved moving disclosure
+assembly and its strict access audit to a CSRF-protected POST, with the frontend and backend API
+contract deployed together. The implementation removes GET and implicit HEAD without an alias or
+redirect and preserves the existing authorization, step-up, assembly and fail-closed audit flow;
+see [the API migration contract](backend/API_SURFACE.md#disclosure-method-migration-2004).
+The historical dispositions above remain evidence of the earlier assessment. #41's dismissal
+stands until shipment and automatic CodeQL resolution is evidenced; #120 remains fixed. Post-merge
+CodeQL scan evidence and staging direct/proxy retirement probes must be attached to #2004 before
+closure. Post-merge scan and deployed retirement evidence remain pending.

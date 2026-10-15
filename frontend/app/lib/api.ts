@@ -399,6 +399,7 @@ const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/webauthn/credentials",
     "/api/capabilities",
     "/api/workspaces",
+    "/api/ownership-offers",
 ]);
 const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/logout",
@@ -411,10 +412,10 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/webauthn/attestation",
 ]);
 /**
- * The safe exits (#1534): leaving the workspace or organization whose membership confines the
- * account. Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
+ * The safe actions (#1534): leaving a workspace or organization and declining ownership.
+ * Mirrors the server filter's `SAFE_EXIT_PATH`, so a confined client can always send them.
  */
-const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^\/api\/(?:workspaces|orgs)\/\d+\/leave$/;
+const PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = /^(?:\/api\/(?:workspaces|orgs)\/\d+\/leave|\/api\/ownership-offers\/\d+\/decline)$/;
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
@@ -4827,12 +4828,26 @@ export function teardownOrganization(orgId: number, confirmation: string) {
     );
 }
 
+/**
+ * Adds an organization member by email. Making someone an owner returns an ownership offer they must
+ * accept (202) instead of changing their role; any other role returns nothing (204).
+ */
 export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
-    return postJson<void>(`/api/orgs/${orgId}/members`, { email, orgRole });
+    return postJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
+        `/api/orgs/${orgId}/members`,
+        { email, orgRole },
+    );
 }
 
+/**
+ * Changes an organization member's role. Promoting to owner returns an ownership offer they must
+ * accept (202) instead of changing their role; any other change returns nothing (204).
+ */
 export function setOrgMemberRole(orgId: number, userId: number, orgRole: Types.OrgRole) {
-    return putJson<void>(`/api/orgs/${orgId}/members/${userId}`, { orgRole });
+    return putJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
+        `/api/orgs/${orgId}/members/${userId}`,
+        { orgRole },
+    );
 }
 
 export function removeOrgMember(orgId: number, userId: number) {
@@ -4897,12 +4912,15 @@ export function updateDataSubjectRequest(orgId: number, requestId: number, body:
 }
 
 /**
- * Assembles the subject-scoped disclosure for a verified disclosure request. The payload is the
- * operator-facing raw material (Art. 33 assembly); callers save it as a file rather than render it.
+ * Assembles the subject-scoped disclosure for a verified disclosure request. Every assembly is
+ * recorded as an access audit, so it is a CSRF-protected POST rather than a GET a cross-site page
+ * could trigger (#2004). The payload is the operator-facing raw material (Art. 33 assembly);
+ * callers save it as a file rather than render it.
  */
-export function getDataSubjectDisclosure(orgId: number, requestId: number) {
-    return getJson<Record<string, unknown>>(
+export function assembleDataSubjectDisclosure(orgId: number, requestId: number) {
+    return postJson<Record<string, unknown>>(
         `/api/orgs/${orgId}/data-subject-requests/${requestId}/disclosure`,
+        {},
         { cache: "no-store" },
     );
 }
@@ -5117,8 +5135,66 @@ export function addWorkspaceMember(workspaceId: number, email: string, role: Typ
     return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
 }
 
+/**
+ * Changes a workspace member's built-in role. Promoting to owner returns an ownership offer the
+ * member must accept (202) and leaves their role unchanged; any other change returns the member.
+ */
 export function updateMemberRole(workspaceId: number, userId: number, role: Types.WorkspaceRole) {
-    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { role });
+    return patchJson<Types.WorkspaceMember | Types.OwnershipOfferCreated<Types.WorkspaceMember>>(
+        `/api/workspaces/${workspaceId}/members/${userId}`,
+        { role },
+    );
+}
+
+/** Whether a role-change response is an ownership offer rather than the changed member. */
+export function isOwnershipOfferCreated<T>(value: unknown): value is Types.OwnershipOfferCreated<T> {
+    return typeof value === "object" && value !== null && "outcome" in value && value.outcome === "ownership_offer";
+}
+
+/** Lists the signed-in account's own pending ownership offers. Reachable while confined. */
+export function getMyOwnershipOffers(init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>("/api/ownership-offers", { cache: "no-store", ...init });
+}
+
+/** Lists a workspace's pending ownership offers. Only the workspace's owners may read them. */
+export function getWorkspaceOwnershipOffers(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>(`/api/workspaces/${workspaceId}/ownership-offers`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+/** Lists an organization's pending ownership offers. Only the organization's owners may read them. */
+export function getOrgOwnershipOffers(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.OwnershipOffer[]>(`/api/orgs/${orgId}/ownership-offers`, { cache: "no-store", ...init });
+}
+
+/**
+ * Accepts an ownership offer. Acceptance needs recent passkey authentication, which the shared
+ * request path obtains. When accepting would confine the account until another owner approves its
+ * passkey, the server answers 409 `PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED`; the caller
+ * explains that and retries with `acknowledgeConfinement`.
+ */
+export function acceptOwnershipOffer(offerId: string, acknowledgeConfinement = false) {
+    return postJson<Types.OwnershipOfferAcceptance>(
+        `/api/ownership-offers/${encodeURIComponent(offerId)}/accept`,
+        acknowledgeConfinement ? { acknowledgeConfinement: true } : {},
+    );
+}
+
+/** Declines an ownership offer. Reachable while confined, because declining grants nothing. */
+export function declineOwnershipOffer(offerId: string) {
+    return postJson<void>(`/api/ownership-offers/${encodeURIComponent(offerId)}/decline`);
+}
+
+/** Withdraws a pending workspace ownership offer. Any current owner of the workspace may. */
+export function revokeWorkspaceOwnershipOffer(workspaceId: number, offerId: string) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/ownership-offers/${encodeURIComponent(offerId)}`);
+}
+
+/** Withdraws a pending organization ownership offer. Any current owner of the organization may. */
+export function revokeOrgOwnershipOffer(orgId: number, offerId: string) {
+    return deleteJson<void>(`/api/orgs/${orgId}/ownership-offers/${encodeURIComponent(offerId)}`);
 }
 
 export function assignMemberCustomRole(workspaceId: number, userId: number, roleId: number) {

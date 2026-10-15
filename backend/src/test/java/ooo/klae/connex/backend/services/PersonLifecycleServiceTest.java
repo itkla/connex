@@ -43,6 +43,8 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The contact lead-lifecycle state machine, its append-only history, and the browser filter it
@@ -92,6 +94,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, workspace.getId());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void enteringTheLifecycleRecordsTheStageAndAppendsOneHistoryRow() {
         Person person = newPerson(newCompany());
@@ -113,6 +116,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void theCurrentStateExposesOnlyThePermittedNextMoves() {
         Person person = newPerson(newCompany());
@@ -127,6 +131,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             lifecycleService.getLifecycle(person.getId()).allowedTransitions());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anImpossibleTransitionIsRejectedAndChangesNothing() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -138,6 +143,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals(1, lifecycleService.getHistory(person.getId()).size());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void disqualifyingRequiresAReasonAndRecyclingClearsIt() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -162,6 +168,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
                 .findFirst().orElseThrow().reason());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aReasonIsRefusedWhenTheContactIsNotBeingDisqualified() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -171,6 +178,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             request(PersonLifecycleStage.WORKING, PersonDisqualificationReason.NO_FIT, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void convertingRequiresALinkedDeal() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -190,6 +198,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals(PersonLifecycleStage.CONVERTED, converted.getLifecycleStage());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void reSelectingTheCurrentStageUpdatesNotesWithoutRecordingATransition() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -201,6 +210,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals(1, lifecycleService.getHistory(person.getId()).size());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void withdrawingClearsTheContactStateButKeepsTheTimeline() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -215,6 +225,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals("not a prospect", history.getFirst().note());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aRestrictedOrArchivedContactCannotBeMoved() {
         Person suspended = newPerson(newCompany());
@@ -230,6 +241,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             archived.getId(), request(PersonLifecycleStage.NEW, null, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void anotherTenantCanNeitherMoveNorReadTheLifecycle() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -247,6 +259,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.WORKING, null, null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aSharedInContactKeepsItsLifecycleInsideTheOwningWorkspace() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -279,6 +292,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             MemberScope.allTeam(), List.of(PersonLifecycleStage.DISQUALIFIED), false, null, false, null, false, false, null));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void disqualifyingForAnotherReasonRequiresANote() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -296,6 +310,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     }
 
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void lifecycleServiceRejectsNoncanonicalReasonCodesWithoutStoringThem() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -309,6 +324,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertNull(reload(person).getDisqualifiedReason());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void customReasonIsValidatedStoredListedExportedAndLabeledInCurrentStateAndHistory() {
         DisqualificationReasonDto custom = reason(
@@ -356,6 +372,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertTrue(!csv.contains("Wrong workspace label"));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void contactCsvUsesTheLocalizedBuiltInLabelWhenNoWorkspaceLabelExists() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -373,6 +390,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         }
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void contactCsvDoesNotResolveANoncanonicalStoredCodeThroughTheCatalogCollation() {
         DisqualificationReasonDto custom = reason(
@@ -391,6 +409,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertTrue(!csv.contains(custom.label()));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void unavailableAndOtherWorkspaceReasonCodesAreRejectedTheSameWay() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -404,6 +423,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.DISQUALIFIED, "FOREIGN_ONLY", null)));
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void noteRequirementComesFromTheConfiguredReason() {
         DisqualificationReasonDto custom = reason(
@@ -418,6 +438,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
                 .getLifecycleStage());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void archivedCurrentReasonCanBeResubmittedForANoteOnlyEdit() {
         DisqualificationReasonDto custom = reason(
@@ -436,6 +457,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             lifecycleService.getLifecycle(person.getId()).reasonLabel());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void aConvertedContactCanStillBeAnnotatedAfterItsDealLinkIsRemoved() {
         Person person = enterLifecycle(newPerson(newCompany()));
@@ -455,6 +477,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         assertEquals("deal link cleaned up", annotated.getQualificationNotes());
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void theBrowserFilterAndFacetsSeparateStagedContactsFromTheRest() {
         Company company = newCompany();

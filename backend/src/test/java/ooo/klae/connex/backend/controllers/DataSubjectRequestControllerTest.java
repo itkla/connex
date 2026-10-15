@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -64,7 +65,8 @@ class DataSubjectRequestControllerTest {
         assertEquals(HttpStatus.CREATED, create.getAnnotation(ResponseStatus.class).value());
         assertEquals("/{requestId}", get.getAnnotation(GetMapping.class).value()[0]);
         assertEquals("/{requestId}", update.getAnnotation(PutMapping.class).value()[0]);
-        assertEquals("/{requestId}/disclosure", disclosure.getAnnotation(GetMapping.class).value()[0]);
+        assertEquals("/{requestId}/disclosure", disclosure.getAnnotation(PostMapping.class).value()[0]);
+        assertNull(disclosure.getAnnotation(GetMapping.class));
         assertTrue(create.getParameters()[1].isAnnotationPresent(Valid.class));
         assertTrue(update.getParameters()[2].isAnnotationPresent(Valid.class));
     }

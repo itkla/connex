@@ -152,8 +152,8 @@ class OrganizationTenancyAndExitIntegrationTest {
                 workspaceMapper.removeMember(workspace.getId(), target.getId());
             },
             "app_user", target.getId(), true,
-            List.of(() -> steppedUpAs(owner, () -> orgMemberService.setMember(
-                organization.getId(), owner.getId(), target.getId(), "admin"))));
+            List.of(() -> steppedUpAs(owner, () -> { orgMemberService.setMember(
+                organization.getId(), owner.getId(), target.getId(), "admin"); })));
 
         assertEquals(List.of(NOT_A_TENANT), outcomes);
         assertNull(orgMemberMapper.getRole(organization.getId(), target.getId()));
@@ -175,8 +175,8 @@ class OrganizationTenancyAndExitIntegrationTest {
                 workspaceMapper.removeMember(workspace.getId(), target.getId());
             },
             "app_user", target.getId(), true,
-            List.of(() -> steppedUpAs(owner, () -> orgMemberService.setMemberByEmail(
-                organization.getId(), owner.getId(), target.getEmail(), "admin"))));
+            List.of(() -> steppedUpAs(owner, () -> { orgMemberService.setMemberByEmail(
+                organization.getId(), owner.getId(), target.getEmail(), "admin"); })));
 
         assertEquals(List.of(NOT_A_TENANT), outcomes);
         assertNull(orgMemberMapper.getRole(organization.getId(), target.getId()));
@@ -202,8 +202,8 @@ class OrganizationTenancyAndExitIntegrationTest {
             },
             "organization", organization.getId(), false,
             List.of(
-                () -> steppedUpAs(owner, () -> orgMemberService.setMember(
-                    organization.getId(), owner.getId(), tenant.getId(), "admin")),
+                () -> steppedUpAs(owner, () -> { orgMemberService.setMember(
+                    organization.getId(), owner.getId(), tenant.getId(), "admin"); }),
                 () -> leave(organization, admin)));
 
         assertEquals(List.of(NOT_AN_OWNER, NOT_A_MEMBER), outcomes);

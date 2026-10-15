@@ -58,6 +58,11 @@ class TenantScopeArchTest {
     }
 
     /**
+     * Catalog-pinned account departure discovery (#1953) also spans workspaces: reference discovery
+     * binds the departing user, while active/open routing facts stay internal to the sole-named
+     * approver guard and never become response data. Subsequent cleanup uses exact workspace, row,
+     * and user keys without adding aggregate locks.
+     *
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
      * Each is provably tenant-safe without it: the notification inbox is
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
@@ -80,6 +85,13 @@ class TenantScopeArchTest {
      * tombstones.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findWatermark",
+        "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.GoalMapper.findDepartureReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.ApprovalPolicyMapper.findActiveStepsForDepartureAnywhere",
+        "ooo.klae.connex.backend.mappers.ApprovalPolicyMapper.findDepartureReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.DocumentApprovalMapper.findOpenStepsForDepartureAnywhere",
+        "ooo.klae.connex.backend.mappers.DocumentApprovalMapper.findDepartureReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countsByCategory",

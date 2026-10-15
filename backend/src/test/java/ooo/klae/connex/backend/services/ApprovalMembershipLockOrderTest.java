@@ -40,6 +40,7 @@ class ApprovalMembershipLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService workspaceService;
 
     @Test

@@ -48,6 +48,20 @@ class OrgMemberServiceLockOrderTest {
     @Mock private PrivilegedCredentialAttestationMapper attestationMapper;
     @Mock private PrivilegedAccountService privilegedAccountService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void ownershipTransactionContext() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+            java.sql.Connection.TRANSACTION_READ_COMMITTED);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearOwnershipTransactionContext() {
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private OrgMemberService service;
 
     @Test
@@ -137,6 +151,7 @@ class OrgMemberServiceLockOrderTest {
     /** Founding flags the owner as founder before covering the owner's existing passkeys (#1534). */
     @Test
     void foundingAnOrganizationFlagsTheFounderAndCoversTheirExistingPasskeys() {
+        when(organizationMapper.lockById(7)).thenReturn(7);
         when(attestationMapper.insertFoundingCoverage(7, 9)).thenReturn(2);
 
         assertEquals(2, service.addFoundingOwner(7, 9));

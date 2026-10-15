@@ -197,7 +197,14 @@
     "roleUpdatedToast": "権限を更新しました",
     "removedToast": "管理者を削除しました",
     "approvalCode": "パスキー承認コード",
-    "memberActions": "管理者の操作"
+    "memberActions": "管理者の操作",
+    "ownershipOffered": "{name} にオーナー権限を提案しました。承認されるとオーナーになります。",
+    "ownershipPending": "オーナー提案中",
+    "withdrawOwnershipOffer": "オーナー提案を取り消す",
+    "ownershipOfferWithdrawn": "オーナー提案を取り消しました",
+    "ownershipOffersLoadFailed": "保留中のオーナー提案を読み込めませんでした",
+    "pendingOffersTitle": "保留中のオーナー提案",
+    "offereeUnknown": "招待したアカウント"
   },
   "OrgDomains": {
     "title": "許可ドメイン",
