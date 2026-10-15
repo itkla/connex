@@ -8,6 +8,7 @@ import type { ConfinementExits } from "@/app/hooks/useConfinementExits";
 
 const api = vi.hoisted(() => ({
     leaveOrganization: vi.fn<(orgId: number) => Promise<void>>(),
+    settle: vi.fn(async () => "applied" as const),
     refresh: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: api.refresh }) 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     leaveOrganization: api.leaveOrganization,
+    settlePrivilegedMfaStanding: api.settle,
 }));
 
 let container: HTMLDivElement;
@@ -95,6 +97,21 @@ describe("leaving what confines a privileged account", () => {
 
         expect(leaveWorkspace).toHaveBeenCalledWith(7);
         expect(current().refusals["workspace:7"]).toBe(code);
+    });
+
+    it("counts an organization the account already left elsewhere as left", async () => {
+        api.leaveOrganization.mockRejectedValueOnce(new ApiError("Not a member", 404, "ORG_NOT_MEMBER"));
+        await mountExits();
+
+        let left = false;
+        await act(async () => {
+            left = await current().leave({ kind: "organization", orgId: 3, name: "Acme" });
+        });
+
+        expect(left).toBe(true);
+        expect(api.settle).toHaveBeenCalledWith("exit");
+        expect(api.refresh).toHaveBeenCalledOnce();
+        expect(current().refusals["organization:3"]).toBeUndefined();
     });
 
     it("explains anything the server did not name generically", async () => {

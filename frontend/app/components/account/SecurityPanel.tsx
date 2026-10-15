@@ -279,7 +279,7 @@ export default function SecurityPanel() {
                         reason={cardReason}
                         requirements={requirements}
                         passkeys={passkeys}
-                        action={cardReason === "attestation" && supported ? (
+                        action={cardReason === "attestation" && supported && !loadingPasskeys && !passkeysFailed ? (
                             <Button
                                 type="button"
                                 variant="brand"

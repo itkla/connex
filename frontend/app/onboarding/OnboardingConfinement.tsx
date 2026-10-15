@@ -29,6 +29,8 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
     const tOnboarding = useTranslations("Onboarding");
     const supported = usePasskeySupport();
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+    const [passkeysState, setPasskeysState] = useState<"loading" | "ready" | "failed">("loading");
+    const [passkeysReload, setPasskeysReload] = useState(0);
     const [approvalOpen, setApprovalOpen] = useState(false);
     const { requirements, reason, refresh } = standing;
     const exits = useConfinementExits();
@@ -36,12 +38,16 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
     useEffect(() => {
         let cancelled = false;
         getPasskeys().then((loaded) => {
-            if (!cancelled) setPasskeys(loaded);
-        }, () => undefined);
+            if (cancelled) return;
+            setPasskeys(loaded);
+            setPasskeysState("ready");
+        }, () => {
+            if (!cancelled) setPasskeysState("failed");
+        });
         return () => {
             cancelled = true;
         };
-    }, [requirements]);
+    }, [requirements, passkeysReload]);
 
     const enrollment = usePasskeyEnrollment(
         {
@@ -67,9 +73,31 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
 
     const action = !supported ? (
         <p className="text-sm text-muted-foreground">{t("unsupported")}</p>
+    ) : cardReason === "attestation" && passkeysState === "failed" ? (
+        <>
+            <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+            <Button
+                type="button"
+                variant="outline"
+                size="inline"
+                onClick={() => {
+                    setPasskeysState("loading");
+                    setPasskeysReload((count) => count + 1);
+                }}
+            >
+                {t("retry")}
+            </Button>
+        </>
     ) : cardReason === "attestation" ? (
-        <Button type="button" variant="brand" size="inline" onClick={() => setApprovalOpen(true)}>
-            {t("approvalEnter")}
+        <Button
+            type="button"
+            variant="brand"
+            size="inline"
+            disabled={passkeysState !== "ready"}
+            aria-busy={passkeysState === "loading"}
+            onClick={() => setApprovalOpen(true)}
+        >
+            {passkeysState === "loading" ? <Loader2Icon className="size-4 animate-spin" /> : t("approvalEnter")}
         </Button>
     ) : awaitingConfirmation ? (
         <>

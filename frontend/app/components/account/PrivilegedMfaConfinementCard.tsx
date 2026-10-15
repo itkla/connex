@@ -64,6 +64,7 @@ export default function PrivilegedMfaConfinementCard({
     footer?: ReactNode;
 }) {
     const t = useTranslations("AccountSecurity");
+    const tMembership = useTranslations("AccountInvites");
     const format = useFormatter();
     const titleId = useId();
     const [confirming, setConfirming] = useState<ConfinementExitTarget | null>(null);
@@ -189,7 +190,7 @@ export default function PrivilegedMfaConfinementCard({
                             <DialogDescription>
                                 {confirming.kind === "organization"
                                     ? t("exitConfirmOrganization")
-                                    : t("exitConfirmWorkspace")}
+                                    : tMembership("leaveConfirmBody")}
                             </DialogDescription>
                         </DialogHeader>
                         <DialogFooter>

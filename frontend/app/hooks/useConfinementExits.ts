@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { ApiError, leaveOrganization } from "@/app/lib/api";
+import { ApiError, leaveOrganization, settlePrivilegedMfaStanding } from "@/app/lib/api";
 
 /** What a confined account can leave to end the privilege that confines it (#1534). */
 export type ConfinementExitTarget =
@@ -52,8 +52,10 @@ export function confinementExitKey(target: ConfinementExitTarget): string {
  * workspace. Leaving an organization goes straight to the API, which re-reads the standing once
  * the server accepts, and then refreshes the page so roles derived from the membership, such as
  * organization navigation, drop at once. Leaving a workspace changes the browser's workspace
- * selection, so the surface supplies how; without it, only organizations can be left. A refusal is kept by its
- * stable code for the surface to explain, and the confinement stays as the server left it.
+ * selection, so the surface supplies how; without it, only organizations can be left. A refusal
+ * is kept by its stable code for the surface to explain, and the confinement stays as the server
+ * left it. An organization the account had already left elsewhere counts as left: the standing is
+ * read again and the page refreshed, as after an accepted exit.
  * @param leaveWorkspace how this surface leaves a workspace, when it can
  * @returns the exit state and the action
  */
@@ -83,6 +85,16 @@ export function useConfinementExits(
             });
             return true;
         } catch (err) {
+            if (target.kind === "organization" && err instanceof ApiError && err.code === "ORG_NOT_MEMBER") {
+                await settlePrivilegedMfaStanding("exit");
+                router.refresh();
+                setRefusals((previous) => {
+                    const next = { ...previous };
+                    delete next[key];
+                    return next;
+                });
+                return true;
+            }
             const refusal: ConfinementExitRefusal = err instanceof ApiError && isNamedRefusal(err.code)
                 ? err.code
                 : "OTHER";

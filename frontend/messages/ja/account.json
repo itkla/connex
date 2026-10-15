@@ -108,7 +108,6 @@
         "exitLeaveWorkspace": "{name} から退出",
         "exitConfirmTitle": "{name} から退出しますか？",
         "exitConfirmOrganization": "この組織でのロールがなくなります。ワークスペースのメンバーシップはそのまま残ります。",
-        "exitConfirmWorkspace": "このワークスペースとそのレコードにアクセスできなくなります。",
         "exitConfirm": "退出する",
         "exitRefused": "退出できませんでした。もう一度お試しください。",
         "exitRefusedWorkspaceLastOwner": "あなたはこのワークスペースの最後のオーナーです。退出する前に、別のメンバーをオーナーにしてください。",

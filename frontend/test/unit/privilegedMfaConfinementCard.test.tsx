@@ -128,6 +128,15 @@ describe("the confinement card", () => {
         expect(container.querySelector("[role='dialog']")).toBeNull();
     });
 
+    it("warns about the assignment and ownership changes before leaving a workspace", async () => {
+        await renderCard(exitsWith());
+
+        await act(async () => button("Leave Sales").click());
+
+        expect(container.querySelector("[role='dialog']")?.textContent)
+            .toContain(enAccount.AccountInvites.leaveConfirmBody);
+    });
+
     it("explains a refused exit beside it in the reader's language", async () => {
         await renderCard(exitsWith({ refusals: { "organization:3": "ORG_LAST_OWNER", "workspace:7": "OTHER" } }));
 

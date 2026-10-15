@@ -230,6 +230,19 @@ describe("the Security page while a privileged account is confined", () => {
         expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
     });
 
+    it("withholds code entry until the passkeys have been read", async () => {
+        backend.getPasskeys.mockImplementation(() => new Promise(() => undefined));
+        backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [
+            { credentialId: "cred-laptop", orgId: 1, orgName: "Acme" },
+        ]);
+        await renderPanel();
+
+        expect(confinementCard()).not.toBeNull();
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === enAccount.AccountSecurity.approvalEnter,
+        )).toBe(false);
+    });
+
     it("re-reads the standing as a ceremony once a code is redeemed", async () => {
         backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
         backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [

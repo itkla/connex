@@ -141,6 +141,20 @@ describe("confinement on onboarding, for an account with no workspace", () => {
         expect(mocks.beginRegistration).not.toHaveBeenCalled();
     });
 
+    it("withholds code entry until the passkeys are read, and offers a retry when they cannot be", async () => {
+        mocks.getPasskeys.mockRejectedValueOnce(new Error("offline"));
+        await renderConfinement(standingFor("ATTESTATION_REQUIRED"));
+
+        expect(container.textContent).toContain(enAccount.AccountSecurity.loadFailed);
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === enAccount.AccountSecurity.approvalEnter,
+        )).toBe(false);
+
+        await act(async () => button(enAccount.AccountSecurity.retry).click());
+
+        expect(button(enAccount.AccountSecurity.approvalEnter).disabled).toBe(false);
+    });
+
     it("redeems an approval code and re-reads the standing as a ceremony", async () => {
         const standing = standingFor("ATTESTATION_REQUIRED");
         await renderConfinement(standing);

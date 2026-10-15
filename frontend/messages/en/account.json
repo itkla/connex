@@ -108,7 +108,6 @@
         "exitLeaveWorkspace": "Leave {name}",
         "exitConfirmTitle": "Leave {name}?",
         "exitConfirmOrganization": "You'll lose your role in this organization. Your workspace memberships stay as they are.",
-        "exitConfirmWorkspace": "You'll lose access to this workspace and its records.",
         "exitConfirm": "Leave",
         "exitRefused": "Couldn't leave. Try again.",
         "exitRefusedWorkspaceLastOwner": "You're this workspace's last owner. Make someone else an owner before you leave.",
