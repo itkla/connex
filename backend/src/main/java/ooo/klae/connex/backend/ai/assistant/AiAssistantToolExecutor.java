@@ -571,9 +571,7 @@ public class AiAssistantToolExecutor {
         }
         seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
-            List<Note> notes = person.getNotes() == null
-                    ? List.of()
-                    : Arrays.asList(person.getNotes());
+            List<Note> notes = historyService.notesForPerson(person.getId(), MAX_NOTES, includePrivateNotes);
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
                             notes,
@@ -604,7 +602,7 @@ public class AiAssistantToolExecutor {
         if (includeNotes) {
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            historyService.notesForCompany(company.getId(), MAX_NOTES),
+                            historyService.notesForCompany(company.getId(), MAX_NOTES, includePrivateNotes),
                             Note::getPerson,
                             Note::getReferences,
                             resources.maskingContext())
@@ -659,7 +657,7 @@ public class AiAssistantToolExecutor {
         if (includeNotes) {
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            dealService.getNotesByDealId(deal.getId()),
+                            historyService.notesForDeal(deal.getId(), MAX_NOTES, includePrivateNotes),
                             Note::getPerson,
                             Note::getReferences,
                             resources.maskingContext())
@@ -790,6 +788,8 @@ public class AiAssistantToolExecutor {
             }
         }
         if (personIds.isEmpty()) {
+            records.stream().filter(Objects::nonNull).forEach(record ->
+                    seedMemberReferences(record, structuredReferences.apply(record), maskingContext));
             return List.copyOf(records);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -816,7 +816,21 @@ public class AiAssistantToolExecutor {
                             .map(EntityReference::getRefId)
                             .allMatch(processableIds::contains);
                 })
+                .peek(record -> seedMemberReferences(record,
+                        structuredReferences.apply(record), maskingContext))
                 .toList();
+    }
+
+    private static void seedMemberReferences(
+            Object record, List<EntityReference> references, MaskingContext context) {
+        AiAssistantMemberIdentifiers.seedReferences(references, context);
+        String content = switch (record) {
+            case Note note -> note.getContent();
+            case Activity activity -> activity.getNotes();
+            case Task task -> task.getDescription();
+            default -> null;
+        };
+        AiAssistantMemberIdentifiers.seedReferenceText(content, context);
     }
 
     private static boolean putBounded(

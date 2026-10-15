@@ -33,14 +33,14 @@ class AiConversationPreprocessingArchTest {
 
         String assembler = code(source("assistant/AiAssistantPromptAssembler"));
         String history = compact(methodBody(assembler, "appendHistory"));
-        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( content, context)"));
-        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles())"));
-        assertTrue(history.contains("MaskingEngine.maskFreeText(summary, context)"));
+        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( content, context, Map.of(), replayMemberValues(message))"));
+        assertTrue(history.contains("MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles(), replayMemberValues(message))"));
+        assertTrue(history.contains("MaskingEngine.maskFreeText(summary, context, Map.of(), replayMemberValues(message))"));
         String summary = compact(methodBody(assembler, "assembleSummary"));
         assertEquals(1, Pattern.compile(Pattern.quote(
-                "MaskingEngine.maskFreeText( content, context)"))
+                "MaskingEngine.maskFreeText( content, context, Map.of(), replayMemberValues(existingSummary))"))
                 .matcher(summary).results().count());
-        assertTrue(summary.contains("MaskingEngine.maskFreeText( content, context, replayHandles)"));
+        assertTrue(summary.contains("MaskingEngine.maskFreeText( content, context, replayHandles, replayMemberValues(message))"));
         assertTrue(summary.contains("replayHandles = replay.handles();"));
         assertFalse(assembler.contains("stripDurableLinks"));
         assertFalse(assembler.contains("remapHandles"));
@@ -56,47 +56,80 @@ class AiConversationPreprocessingArchTest {
                 "AiAssistantStepGuard.containsTaskHandle", "Map.of", "MaskingEngine.maskConversationalFreeText",
                 "MaskingEngine.maskFreeText", "crmDataMasked", "equals", "message.getAuthorKind",
                 "objectMapper.valueToTree", "prompt.assistantTurn", "prompt.userTurn", "reauthorizeAnswer",
-                "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize"));
+                "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize", "replayMemberValues"));
         assertCalls(assembler, "assembleSummary", Set.of(
                 "Map.of", "MaskingEngine.maskFreeText", "PromptAssembly.builder",
                 "crmDataMasked", "data.put", "equals", "message.getAuthorKind",
                 "message.getContent", "message.getStructuredJson", "objectMapper.valueToTree", "prompt.build",
                 "prompt.userTurn", "reauthorizeAnswer", "reauthorizeSummary", "reauthorizeUser", "replay.content",
-                "replay.handles", "system", "transcript.add"));
+                "replay.handles", "system", "transcript.add", "replayMemberValues"));
         assertCalls(assembler, "reauthorizeAnswer", Set.of(
                 "IllegalStateException", "List.of", "Map.of", "Map.copyOf", "ReplayAnswer",
                 "citations.add", "handles.put", "stored.handle", "message.getContent",
                 "message.getStructuredJson", "metadata.get", "objectMapper.readTree", "orElse",
                 "resources.handleFor", "stored.id", "stored.kind", "storedCitations.isArray", "storedResource",
-                "storedResources.isArray"));
+                "storedResources.isArray", "identifiers.isArray", "identifiers.size", "storedSummaryIdentifier",
+                "seedStoredIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeSummary", Set.of(
-                "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
+                "seedStoredIdentifier", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
-                "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
-                "storedIdentifiers.size", "storedResource", "storedResources.isArray", "storedSummaryIdentifier"));
+                "resources.handleFor", "stored.id", "stored.kind", "storedIdentifiers.isArray",
+                "storedIdentifiers.size", "storedResource", "storedResources.isArray", "storedSummaryIdentifier", "seedMemberIdentifiers"));
         assertCalls(assembler, "reauthorizeUser", Set.of(
-                "MaskingEngine.maskField", "equals", "isEmpty", "kind.asString", "kind.isString",
+                "seedStoredIdentifier", "equals", "isEmpty", "kind.asString", "kind.isString",
                 "message.getContent", "message.getStructuredJson", "metadata.get", "objectMapper.readTree",
-                "resources.handleFor", "stored.id", "stored.kind", "stored.value", "storedIdentifiers.isArray",
+                "resources.handleFor", "stored.id", "stored.kind", "storedIdentifiers.isArray",
                 "storedIdentifiers.size", "storedResourceIdentity", "storedResources.isArray",
-                "storedResources.isEmpty", "storedSummaryIdentifier"));
+                "storedResources.isEmpty", "storedSummaryIdentifier", "seedMemberIdentifiers"));
+        assertCalls(assembler, "seedMemberIdentifiers", Set.of(
+                "metadata.get", "members.isArray", "members.size", "identifiers.isArray", "identifiers.size",
+                "storedSummaryIdentifier", "stored.kind", "IllegalStateException", "seedStoredIdentifier"));
+        assertCalls(assembler, "seedStoredIdentifier", Set.of(
+                "stored.kind", "context.registerMemberCandidate", "stored.value", "MaskingEngine.maskField"));
+        assertEquals("if (stored.kind() == EntityKind.MEMBER) { context.registerMemberCandidate(stored.value()); } "
+                        + "else { MaskingEngine.maskField(stored.kind(), stored.value(), context); }",
+                compact(methodBody(assembler, "seedStoredIdentifier")).strip());
+        String members = compact(methodBody(assembler, "seedMemberIdentifiers"));
+        assertTrue(members.contains("metadata.get( )"));
+        assertTrue(members.contains("members.size() > limit - otherCount"));
+        assertTrue(members.contains("if (stored.kind() != EntityKind.MEMBER)"));
+        assertCalls(assembler, "replayMemberValues", Set.of(
+                "message.getStructuredJson", "List.of", "objectMapper.readTree", "metadata.get",
+                "identifiers.isArray", "storedSummaryIdentifier", "stored.kind", "stored.value", "members.add",
+                "List.copyOf", "IllegalStateException", "identifier.get", "path.asString", "startsWith",
+                "replayMemberRequiresContainment"));
+        assertCalls(assembler, "replayMemberRequiresContainment", Set.of(
+                "identifier.get", "matching.isString", "equals", "matching.asString", "IllegalStateException"));
+        assertReturns(assembler, "replayMemberRequiresContainment", List.of("true", "false"));
+        assertTrue(compact(methodBody(assembler, "replayMemberValues"))
+                .contains("&& replayMemberRequiresContainment(identifier)"));
+        assertTrue(source("assistant/AiAssistantPromptAssembler")
+                .contains("!matching.isString() || !\"mention\".equals(matching.asString())"));
+        assertTrue(source("assistant/AiAssistantPromptAssembler")
+                .contains("path == null || !path.asString().startsWith(\"/suggestions/\")"));
         assertCalls(assembler, "crmDataMasked", Set.of("Map.of", "serialize"));
         assertCalls(assembler, "serialize", Set.of("IllegalStateException", "objectMapper.writeValueAsString"));
         assertTrue(compact(methodBody(assembler, "reauthorizeAnswer"))
                 .contains("return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));"));
         assertProseAssignments(assembler, "appendHistory", List.of(
                 "summary = reauthorizeSummary(message, resources, context);",
-                "replay = reauthorizeAnswer(message, resources);",
-                "masked = MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles());",
+                "replay = reauthorizeAnswer(message, resources, context);",
+                "masked = MaskingEngine.maskConversationalFreeText( replay.content(), context, replay.handles(), replayMemberValues(message));",
                 "content = reauthorizeUser(message, resources, context);",
-                "masked = MaskingEngine.maskConversationalFreeText( content, context);",
+                "masked = MaskingEngine.maskConversationalFreeText( content, context, Map.of(), replayMemberValues(message));",
                 "serialized = serialize(Map.of( , masked));"));
         assertProseAssignments(assembler, "assembleSummary", List.of(
                 "content = message.getContent();",
-                "replay = reauthorizeAnswer(message, resources);",
+                "replay = reauthorizeAnswer(message, resources, context);",
                 "content = replay.content();",
                 "content = reauthorizeUser(message, resources, context);",
                 "content = reauthorizeSummary(existingSummary, resources, context);"));
+        String answer = compact(methodBody(assembler, "reauthorizeAnswer"));
+        assertTrue(answer.contains("identifiers.size() > MAX_SUMMARY_IDENTIFIERS"));
+        assertTrue(answer.contains("if (stored.kind() != EntityKind.MEMBER)"));
+        assertTrue(answer.contains("seedStoredIdentifier(stored, context);"));
+        assertEquals(1, Pattern.compile(Pattern.quote("seedStoredIdentifier"))
+                .matcher(answer).results().count());
         assertReturns(assembler, "reauthorizeAnswer", List.of(
                 "new ReplayAnswer(message.getContent(), List.of(), Map.of())", "null", "null",
                 "new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles))"));
@@ -135,7 +168,9 @@ class AiConversationPreprocessingArchTest {
         assertFalse(masking.contains("ConversationText.preprocess("));
         assertFalse(context.contains("ConversationText.preprocess("));
         assertFalse(outbound.contains("ConversationText.preprocess("));
-        assertTrue(masking.contains("return ConversationText.finishMasked(replaced.toString());"));
+        assertTrue(masking.contains("return replaceSpansWithInsertions(text, spans, linkSyntax).text();"));
+        assertTrue(masking.contains("return new MaskedText(ConversationText.finishMasked(replaced.toString()), inserted);"));
+        assertTrue(masking.contains("return new MaskedText(ConversationText.finishMasked(masked.toString()), inserted);"));
         assertTrue(masking.contains("masked = maskFreeTextPreservingIssuedPlaceholders(masked, ctx, preserveTrustedCollisions);"));
         assertTrue(masking.contains("return CanonicalText.prepare(value);"));
         assertTrue(masking.contains("prepared = text;"));

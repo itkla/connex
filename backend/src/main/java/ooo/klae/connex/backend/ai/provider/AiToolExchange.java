@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.ai.provider;
 
+import java.util.List;
 import java.util.Objects;
+
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 
 /**
  * One ephemeral assistant function call followed by its masked tool-role result.
@@ -14,10 +17,23 @@ import java.util.Objects;
  * @param maskedResult the masked tool-role result that answered it
  * @param step the model step this call belonged to, from 1
  * @param callOrdinal the call's position within that step, or 0 when it was the step's only call
+ * @param resultSegments request-local origin information covering exactly the masked result
  */
-public record AiToolExchange(AiToolCall call, String maskedResult, int step, int callOrdinal) {
+public record AiToolExchange(AiToolCall call, String maskedResult, int step, int callOrdinal,
+        @com.fasterxml.jackson.annotation.JsonIgnore List<OutboundSegment> resultSegments) {
+    /** Direct server JSON results carry static keys and tenant-bearing scalar values. */
+    public AiToolExchange(AiToolCall call, String maskedResult, int step, int callOrdinal) {
+        this(call, maskedResult, step, callOrdinal,
+                List.of(new OutboundSegment(maskedResult, OutboundSegment.Origin.TENANT_TOOL_RESULT)));
+    }
+
     public AiToolExchange {
         Objects.requireNonNull(call, "call");
+        resultSegments = List.copyOf(resultSegments);
+        if (!resultSegments.stream().map(OutboundSegment::text).collect(java.util.stream.Collectors.joining())
+                .equals(maskedResult)) {
+            throw new IllegalArgumentException("Native tool result provenance must cover its exact text");
+        }
         if (maskedResult == null || maskedResult.isBlank()) {
             throw new IllegalArgumentException("AI tool result is required");
         }

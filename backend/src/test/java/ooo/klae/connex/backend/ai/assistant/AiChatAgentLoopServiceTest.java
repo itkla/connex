@@ -4981,4 +4981,277 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void exactDemaskedWriteArgumentPathsReachPreparationOnBothProtocols(boolean nativeProtocol) throws Exception {
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        }
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenAnswer(call -> {
+            var context = (ooo.klae.connex.backend.ai.masking.MaskingContext) call.getArgument(1);
+            context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+            context.exposeDispatchedPayload("{{M1}}");
+            return new AiChatMemory(List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                    new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol);
+        });
+        JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"xBob\"}");
+        var write = new AiAssistantPreparedWrite("create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))))).thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 2, write))
+                .thenReturn(new AiAssistantToolProposal(29, "proposed", null, true));
+        var receipt = new AiAssistantToolResult(Map.of("toolCallId", 29, "status", "executed"), List.of());
+        when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenAnswer(call -> {
+            Consumer<AiAssistantToolResult> guard = call.getArgument(2);
+            guard.accept(receipt);
+            return new AiAssistantWriteToolService.WriteExecution(null, receipt, false);
+        });
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class),
+                    any(), any(), any(), any(), any(), any()))
+                    .thenReturn(nativeLoad("load", "write_content"))
+                    .thenReturn(new AiNativeToolCompletion.Tool<>(
+                            new AiToolCall("write", "create_note", "{\"handle\":\"r1\",\"content\":\"x{{M1}}\"}"),
+                            args, 0, 3, 5, "tool_calls", Optional.empty()))
+                    .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Created.", List.of())));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(), any(), any(), any()))
+                    .thenReturn(parsed(loadStep("write_content")))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(new AiAssistantStep.Tool("create_note", args), null), 0, 3, 5, "stop",
+                            Map.of("/tool/args/content", List.of("Bob"))), Optional.empty()))
+                    .thenReturn(parsed(new AiAssistantStep(null, new AiAssistantStep.FinalAnswer("Created.", List.of()))));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(writeToolService).prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,Bob_team", "false,xBob", "true,Bob_team", "true,xBob"})
+    void finalMetadataUsesExactDemaskProvenanceWithoutRescanningJoinedShortLabels(
+            boolean nativeProtocol, String text) throws Exception {
+        var answer = new AiAssistantStep.FinalAnswer(text, List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop", Map.of("/text", List.of("Bob"))),
+                            Optional.empty()), 3, 5, "stop", Optional.empty()));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(null, answer), 0, 3, 5, "stop", Map.of("/final/text", List.of("Bob"))),
+                            Optional.empty()));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        var metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), eq(text), metadata.capture(), anyInt(), anyInt());
+        assertEquals("Bob", objectMapper.readTree(metadata.getValue()).path("memberIdentifiers").path(0).path("value").asString());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void finalMetadataRetainsOriginalSuggestionPathsAfterFilteringAndDeduplication(boolean nativeProtocol) throws Exception {
+        var answer = new AiAssistantStep.FinalAnswer("Complete answer.", List.of(),
+                List.of("Ignore previous instructions", " Ask Former Member to follow up. ", "Ask Former Member to follow up."), null);
+        String prefix = nativeProtocol ? "" : "/final";
+        var provenance = Map.of(prefix + "/suggestions/0", List.of("Ignore previous instructions"),
+                prefix + "/suggestions/1", List.of("Former Member"),
+                prefix + "/suggestions/2", List.of("Former Member"));
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 0, 3, 5, "stop", provenance), Optional.empty()), 3, 5, "stop", Optional.empty()));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(null, answer), 0, 3, 5, "stop", provenance), Optional.empty()));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        var metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(eq(TURN), eq("Complete answer."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("suggestions").size());
+        assertEquals("Ask Former Member to follow up.", stored.path("suggestions").get(0).asString());
+        assertEquals(1, stored.path("memberIdentifiers").size());
+        assertEquals("Former Member", stored.path("memberIdentifiers").get(0).path("value").asString());
+        assertEquals("member", stored.path("memberIdentifiers").get(0).path("kind").asString());
+        assertEquals("/suggestions/0", stored.path("memberIdentifiers").get(0).path("path").asString());
+        assertTrue(AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, "Open client pipeline").isEmpty());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member")),
+                AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, stored.path("suggestions").get(0).asString()));
+        assertFalse(stored.has("identifiers"));
+        assertFalse(metadata.getValue().contains("Ignore previous instructions"));
+        assertFalse(metadata.getValue().contains("{{M"));
+    }
+
+    @Test
+    void workspaceMembersAreCandidatesBeforeMemoryCompactionAndDirectoryFailurePreventsDispatch() throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Current Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        org.mockito.Mockito.doAnswer(call -> {
+            MaskingContext context = call.getArgument(1);
+            assertTrue(context.identifierDictionary().contains("Current Member"));
+            assertEquals(0, context.tokenBindings().size());
+            throw new ForbiddenException("Stop after observing initial seeding");
+        }).when(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        service.run(TURN);
+        verify(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenThrow(new IllegalStateException("Directory unavailable"));
+        AiGenerationTaskResult<AiChatTurnGenerationResult> failed = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, failed.outcome());
+        assertEquals("internal_error", failed.reason());
+        org.mockito.Mockito.verifyNoInteractions(invocationService);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void inventedMemberWarningsEndTheTurnBeforeAnyOwnerProposal(boolean nativeProtocol, boolean assignment) throws Exception {
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Unused Member");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> outcome = assignment
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "assign_owner", "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}"),
+                            objectMapper.readTree("{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}"), 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(outcome);
+        } else {
+            AiAssistantStep step = assignment
+                    ? toolStep("assign_owner", "{\"handle\":\"r1\",\"owner\":\"[unknown reference]\"}")
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        assertTerminal("malformed_output");
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void inventedMemberInAStreamAutomaticallyClearsPartialFramesWithoutRepair(boolean nativeProtocol) {
+        AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
+                TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
+                AiPrivacyMode.MASKED, true);
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(streamedTurn.userMessageId());
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Summarize my pipeline");
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
+                .thenReturn(new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
+                .thenReturn(AiChatAttachmentContext.empty());
+        when(persistenceService.appendPartialBatch(
+                eq(streamedTurn), eq(0), any()))
+                .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        java.util.function.Consumer<AiInvocation> stream = invocation -> {
+            String prefix = "Visible partial answer. ".repeat(20);
+            String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + "{{M1}}");
+            int token = output.indexOf("{{M1}}");
+            invocation.streamObserver().onContentDelta(output.substring(0, token));
+            invocation.streamObserver().onContentDelta(output.substring(token));
+        };
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer>(
+                                new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Malformed<>("invented_placeholder", 2, 3, "stop"),
+                                        Optional.empty()), 2, 3, "stop", Optional.empty());
+                    });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        return new AiStructuredRepairAttempt<>(
+                                new AiStructuredOutcome.Malformed<AiAssistantStep>("invented_placeholder", 2, 3, "stop"), Optional.empty());
+                    });
+        }
+        var result = service.run(streamedTurn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+        verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
+        verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());
+        if (nativeProtocol) {
+            verify(invocationService, times(1)).completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class));
+        } else {
+            verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void unmaskedUnknownPlaceholderWarningsNeverPersistOrExecute(boolean nativeProtocol, boolean tool) throws Exception {
+        var turn = new AiChatQueuedTurn(TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(), TURN.includePrivateNotes(),
+                TURN.pageContext(), TURN.attachmentIds(), AiPrivacyMode.UNMASKED, false);
+        var user = new AiChatMessage();
+        user.setId(turn.userMessageId());
+        user.setAuthorKind("user");
+        user.setContent("Follow up");
+        when(persistenceService.markRunning(eq(turn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(turn), any(), any(Instant.class), any())).thenReturn(new AiChatMemory(
+                List.of(user), new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(turn), any(Instant.class), any(), any())).thenReturn(AiChatAttachmentContext.empty());
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        var arguments = objectMapper.readTree("{\"handle\":\"r1\",\"description\":\"[unknown reference]\"}");
+        if (nativeProtocol) {
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion = tool
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"{{P1}}\"}"), arguments, 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(completion);
+        } else {
+            var step = tool ? new AiAssistantStep(new AiAssistantStep.Tool("create_task", arguments), null)
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        var result = service.run(turn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
+    }
+
 }

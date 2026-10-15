@@ -382,4 +382,98 @@ class AiChatStreamingProgressTest {
         verify(persistence, org.mockito.Mockito.never()).appendPartialBatch(any(), anyInt(), any());
     }
 
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> splitRefusedMemberSpellings() {
+        return java.util.stream.Stream.of(false, true).flatMap(nativeProtocol -> java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "{{m", "1}}"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "｛｛ｍ", "１｝｝"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "﹛﹛Ｍ", "1﹜﹜")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("splitRefusedMemberSpellings")
+    void splitNoncanonicalMemberTokensNeverReachPartialFrames(boolean nativeProtocol, String start, String end) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Unused Member");
+        var progress = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence, context);
+        var observer = progress.observer(nativeProtocol);
+        String safe = "Safe answer words. ".repeat(40);
+        String opening = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
+        observer.onContentDelta(opening + safe + start);
+        var batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        for (String batch : batches.getAllValues()) {
+            assertTrue(!batch.contains(start));
+            assertTrue(!batch.contains("{{") && !batch.contains("｛") && !batch.contains("﹛"));
+        }
+        observer.onContentDelta(end + (nativeProtocol ? "\"}" : "\"}}"));
+        var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish(safe + start + end));
+        assertEquals("malformed_output", refused.terminalReason());
+        assertEquals("invented_placeholder", refused.detailReason());
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertTrue(batches.getAllValues().stream().noneMatch(batch -> batch.contains(start) || batch.contains(end)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unexposedMemberRefusalSurvivesRealTransportAndResetsAlreadyFlushedFrames(boolean nativeProtocol) throws Exception {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Unused Member");
+        var queued = turn(AiPrivacyMode.MASKED);
+        var progress = new AiChatStreamingProgress(queued, persistence, context);
+        var observer = progress.observer(nativeProtocol);
+        String prefix = "Safe answer words. ".repeat(40);
+        String answer = prefix + "{{M1}}";
+        String body = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, answer);
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/stream", exchange -> {
+            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(bytes);
+            }
+        });
+        server.start();
+        var client = ooo.klae.connex.backend.ai.egress.FixedAiProviderClientTestSupport.loopback();
+        try {
+            String host = "stream.example.test";
+            var response = org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> client.postStream(
+                    java.net.URI.create("http://" + host + ":" + server.getAddress().getPort() + "/stream"),
+                    java.util.Set.of(host), java.util.Map.of(), org.apache.hc.core5.http.ContentType.APPLICATION_JSON,
+                    new byte[0], ooo.klae.connex.backend.ai.egress.AiRequestDeadline.afterMillis(10_000),
+                    "member stream fixture", observer, input -> {
+                        String text = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                        int token = text.indexOf("{{M1}}");
+                        observer.onContentDelta(text.substring(0, token));
+                        observer.onContentDelta(text.substring(token));
+                        return text;
+                    }));
+            assertEquals(200, response.statusCode());
+            if (nativeProtocol) {
+                verify(persistence, org.mockito.Mockito.never()).appendPartialBatch(any(), anyInt(), any());
+            } else {
+                verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), any());
+            }
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                    () -> observer.finish(answer));
+            assertEquals("malformed_output", refused.terminalReason());
+            assertEquals("invented_placeholder", refused.detailReason());
+            progress.reset();
+            verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(queued),
+                    org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+            var repaired = progress.observer(nativeProtocol);
+            repaired.onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"));
+            assertEquals("Ready", repaired.finish("Ready"));
+        } finally {
+            ooo.klae.connex.backend.ai.egress.FixedAiProviderClientTestSupport.close(client);
+            server.stop(0);
+        }
+    }
+
 }

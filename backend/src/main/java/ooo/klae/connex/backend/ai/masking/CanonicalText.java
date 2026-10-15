@@ -318,6 +318,11 @@ final class CanonicalText {
 
     /** Every UTF-16 code unit maps to its complete source code point or composed grapheme. */
     record Projection(String value, int[] starts, int[] ends) {
+        /** A reversible replacement must not split one source character's normalized expansion. */
+        boolean isSourceBoundary(int offset) {
+            return offset == 0 || offset == value.length() || sourceEnd(offset) <= sourceStart(offset);
+        }
+
         int sourceStart(int offset) {
             return starts[offset];
         }

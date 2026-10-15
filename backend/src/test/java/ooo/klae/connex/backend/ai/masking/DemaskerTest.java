@@ -12,6 +12,24 @@ class DemaskerTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
 
     @Test
+    void memberTokenProvenanceRemainsExactAlongsideRawCandidateProvenance() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Bob");
+        context.tokenFor(EntityKind.MEMBER, "Li");
+        context.exposeDispatchedPayload("{{M1}}");
+        var tree = mapper.createObjectNode();
+        tree.putObject("final").put("text", "{{M1}}_team x{{M1}} Bob {{M2}} {{M99}}");
+        tree.putArray("a/b~c").add("x{{M1}}");
+        var provenance = new java.util.LinkedHashMap<String, java.util.List<String>>();
+        int warnings = Demasker.demaskTree(tree, context, (path, member) ->
+                provenance.computeIfAbsent(path, ignored -> new java.util.ArrayList<>()).add(member));
+        assertEquals(2, warnings);
+        assertEquals("Bob_team xBob Bob [unknown reference] [unknown reference]", tree.path("final").path("text").asString());
+        assertEquals(java.util.Map.of("/final/text", java.util.List.of("Bob", "Bob"),
+                "/a~1b~0c/0", java.util.List.of("Bob")), provenance);
+    }
+
+    @Test
     void demaskRoundTripsIssuedTokens() {
         MaskingContext ctx = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
@@ -85,4 +103,43 @@ class DemaskerTest {
         assertEquals(0, warnings);
         assertEquals("owned by Mina Patel", root.get(person).asString());
     }
+    @org.junit.jupiter.api.Test
+    void boundMembersRequireExposureAndRetainEarlierDispatchedExposure() {
+        MaskingContext context = new MaskingContext();
+        String token = context.tokenFor(EntityKind.MEMBER, "Alice Member");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        context.exposeDispatchedPayload("{\"content\":\"No member here\"}");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        context.exposeDispatchedPayload("{\"content\":\"" + token + "\"}");
+        context.exposeDispatchedPayload("{\"content\":\"Later step\"}");
+        assertEquals("Alice Member", Demasker.demask(token, context).text());
+        assertEquals(1, Demasker.demask("{{M99}}", context).warnings());
+        assertEquals("M1", Demasker.demask("M1", context).text());
+    }
+
+    @Test
+    void rawMentionsProtectProvenanceButLetterAdjacentLatinContainmentIsNotAMention() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        var tree = mapper.readTree("{\"summary\":\"Bob_team\",\"notMention\":\"xBob client\",\"args\":{\"description\":\"Ask Li\"}}");
+        var provenance = new java.util.LinkedHashMap<String, java.util.List<String>>();
+        assertEquals(0, Demasker.demaskTree(tree, context, (path, member) ->
+                provenance.computeIfAbsent(path, ignored -> new java.util.ArrayList<>()).add(member)));
+        assertEquals(java.util.Map.of("/summary", java.util.List.of("Bob"),
+                "/args/description", java.util.List.of("Li")), provenance);
+        assertEquals(java.util.List.of(), context.tokenBindings());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"{{m1}}", "｛｛Ｍ１｝｝", "{{Ｍ1}}", "{{M１}}"})
+    void noncanonicalMemberSyntaxWarnsEvenForAnExposedToken(String token) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Bob");
+        context.exposeDispatchedPayload("{{M1}}");
+        assertEquals(new Demasker.DemaskResult("[unknown reference]", 1), Demasker.demask(token, context));
+        org.junit.jupiter.api.Assertions.assertTrue(context.containsUnexposedMemberToken(token));
+        assertEquals(new Demasker.DemaskResult("Bob", 0), Demasker.demask("{{ M1 }}", context));
+    }
+
 }

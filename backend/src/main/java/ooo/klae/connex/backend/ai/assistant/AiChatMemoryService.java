@@ -230,7 +230,8 @@ public class AiChatMemoryService {
                         throughSeq,
                         summaryResources.snapshot(),
                         context,
-                        generated);
+                        generated,
+                        parsed.memberIdentifiers().getOrDefault("/summary", List.of()));
                 requireBeforeDeadline(deadline);
                 summary = persistenceService.upsertHistorySummary(
                         turn,
@@ -379,7 +380,8 @@ public class AiChatMemoryService {
             int throughSeq,
             java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
             MaskingContext context,
-            String generatedSummary) {
+            String generatedSummary,
+            List<String> demaskedMembers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -390,16 +392,26 @@ public class AiChatMemoryService {
             String maskedSummary = MaskingEngine.maskFreeText(generatedSummary, context);
             List<java.util.Map<String, String>> storedIdentifiers = context.tokenBindings().stream()
                     .filter(binding -> maskedSummary.contains(binding.getKey()))
+                    .filter(binding -> !"member".equals(identifierKind(binding.getKey())))
                     .map(binding -> java.util.Map.of(
                             "kind", identifierKind(binding.getKey()),
                             "value", binding.getValue()))
                     .toList();
+            var memberIdentifiers = demaskedMembers.stream()
+                    .map(value -> java.util.Map.of("kind", "member", "value", value)).toList();
+            if (storedIdentifiers.size() + memberIdentifiers.size() > 200
+                    || memberIdentifiers.stream().anyMatch(identifier ->
+                            !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(identifier.get("value")))
+                    || storedIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)) {
+                throw new IllegalStateException("Assistant summary identifier metadata is invalid");
+            }
             java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
             metadata.put("kind", "history_summary");
             metadata.put("sourceFromSeq", sourceFromSeq);
             metadata.put("throughSeq", throughSeq);
             metadata.put("resources", storedResources);
             metadata.put("identifiers", storedIdentifiers);
+            metadata.put("memberIdentifiers", memberIdentifiers);
             return objectMapper.writeValueAsString(metadata);
         } catch (JacksonException exception) {
             throw new IllegalStateException(
@@ -450,6 +462,7 @@ public class AiChatMemoryService {
             case 'D' -> "deal";
             case 'E' -> "email";
             case 'H' -> "phone";
+            case 'M' -> "member";
             default -> throw new IllegalStateException(
                     "Assistant summary identifier token is invalid");
         };

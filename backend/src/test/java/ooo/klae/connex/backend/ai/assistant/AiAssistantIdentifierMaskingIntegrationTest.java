@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Organization;
@@ -75,20 +76,57 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     @Autowired private PersonMapper personMapper;
     @Autowired private PipelineMapper pipelineMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private ooo.klae.connex.backend.mappers.UserMapper userMapper;
+    @Autowired private ooo.klae.connex.backend.mappers.NoteMapper noteMapper;
+    @Autowired private ooo.klae.connex.backend.services.ReferenceService referenceService;
+    @Autowired private ooo.klae.connex.backend.tenant.TenantContext tenantContext;
+    @Autowired private AiAssistantToolExecutor realToolExecutor;
+    @Autowired private ooo.klae.connex.backend.mappers.ActivityMapper activityMapper;
+    @Autowired private ooo.klae.connex.backend.mappers.TaskMapper taskMapper;
+    @Autowired private AiAssistantScopeReadService scopeReadService;
+    @Autowired private AiAssistantWorkBriefReadService workBriefReadService;
+    @Autowired private AiAssistantWriteToolService writeToolService;
 
     private Workspace workspace;
+    private Workspace committedForeignWorkspace;
+    private List<String> committedMemberUsernames = List.of();
+    private boolean committedMemberFixture;
     private AiAssistantMaskingTestSupport support;
 
     /** Releases request captures retained by Mockito's inline mock registry after each test. */
     @AfterEach
     void releaseFixtureMocks() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        tenantContext.clear();
+        if (committedMemberFixture && workspace != null) {
+            jdbc.update("DELETE FROM entity_reference WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM note WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM activity WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM task WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM company WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM workspace_member WHERE workspace_id IN (?, ?)", workspace.getId(),
+                    committedForeignWorkspace == null ? 0 : committedForeignWorkspace.getId());
+            jdbc.update("DELETE FROM workspace WHERE id IN (?, ?)", workspace.getId(),
+                    committedForeignWorkspace == null ? 0 : committedForeignWorkspace.getId());
+            if (!committedMemberUsernames.isEmpty()) {
+                jdbc.update("DELETE FROM app_user WHERE username IN (?, ?, ?, ?)", committedMemberUsernames.toArray());
+            }
+            jdbc.update("DELETE FROM organization WHERE id = ?", workspace.getOrgId());
+        }
         if (support != null) {
             support.releaseFixtureMocks();
         }
     }
 
     @BeforeEach
-    void setUpWorkspace() {
+    void setUpWorkspace(org.junit.jupiter.api.TestInfo info) {
+        committedMemberFixture = info.getTestMethod().map(method -> Set.of(
+                "realMemberDirectoryAndAuthoredReferenceLabelsStayMaskedAcrossRenameAndFreshReplay",
+                "storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay",
+                "queuedUserReferenceSpellingsRemainMaskedOnFirstDispatchAndFreshReplay")
+                .contains(method.getName())).orElse(false);
         Organization organization = new Organization();
         organization.setName("Masking " + unique());
         organization.setSlug("masking-" + unique());
@@ -905,7 +943,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
         when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
                 workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
-        return new AiAssistantIdentifierResolver(identifierMapper, workspaceService, scope);
+        return new AiAssistantIdentifierResolver(identifierMapper, workspaceService, scope, referenceService);
     }
 
     private Company newCompany(String name) {
@@ -951,4 +989,342 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     private static String unique() {
         return UUID.randomUUID().toString().substring(0, 8);
     }
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void queuedUserReferenceSpellingsRemainMaskedOnFirstDispatchAndFreshReplay(boolean nativeProtocol) throws Exception {
+        var fixture = memberReferenceFixture();
+        jdbc.update("UPDATE app_user SET display_name = 'Alice & Bob' WHERE id = ?", fixture.actor().getId());
+        var pending = userMapper.getUserByUsername("pending-" + fixture.suffix());
+        var foreign = userMapper.getUserByUsername("foreign-" + fixture.suffix());
+        var directory = support.fixtureMock(WorkspaceService.class);
+        var scope = support.fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
+        when(directory.getCurrentWorkspaceId()).thenReturn(workspace.getId());
+        when(directory.getMembers(workspace.getId())).thenReturn(workspaceMapper.getMembers(workspace.getId()));
+        when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
+                workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
+        var resolver = new AiAssistantIdentifierResolver(identifierMapper, directory, scope, referenceService);
+        String text = "Ask [Prior Member Label](user:" + fixture.actor().getId() + ") and "
+                + "[Alice &amp; Bob](user:" + fixture.actor().getId() + ") with "
+                + "[Pending Alias](user:" + pending.getId() + ") and "
+                + "[Foreign Alias](user:" + foreign.getId() + ")";
+        var resolution = resolver.resolve(text);
+        assertTrue(resolution.resources().isEmpty());
+        assertEquals(Set.of("Prior Member Label", "Alice & Bob", "Alice &amp; Bob", "Pending Alias"),
+                resolution.identifiers().stream().map(AiAssistantIdentifierResolver.Identifier::value)
+                        .collect(Collectors.toSet()));
+        var mapper = JsonMapper.builder().build();
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent(text);
+        user.setStructuredJson(mapper.writeValueAsString(Map.of("kind", "user_message", "resources", List.of(),
+                "identifiers", List.of(), "memberIdentifiers", resolution.identifiers().stream()
+                        .map(identifier -> Map.of("kind", "member", "value", identifier.value())).toList())));
+        jdbc.update("UPDATE app_user SET display_name = 'Later Member Label' WHERE id = ?", fixture.actor().getId());
+        var assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        for (int replay = 0; replay < 2; replay++) {
+            var context = new MaskingContext();
+            if (replay == 0) {
+                resolver.seed(resolution, context);
+            }
+            var resources = new AiChatResourceRegistry(context);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(),
+                            new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(user), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages());
+            for (String label : List.of("Prior Member Label", "Alice &amp; Bob", "Alice & Bob", "Pending Alias")) {
+                assertFalse(payload.contains(label), label);
+            }
+            for (String label : List.of("Prior Member Label", "Alice &amp; Bob", "Pending Alias")) {
+                String token = context.tokenBindings().stream().filter(entry -> label.equals(entry.getValue()))
+                        .map(Map.Entry::getKey).findFirst().orElseThrow();
+                assertTrue(payload.contains(token));
+                assertEquals(label, Demasker.demask(token, context).text());
+            }
+            assertEquals(0, capture.warnings());
+            assertFalse(context.identifierDictionary().contains("Foreign Alias"));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void realMemberDirectoryAndAuthoredReferenceLabelsStayMaskedAcrossRenameAndFreshReplay(boolean nativeProtocol)
+            throws Exception {
+        MemberReferenceFixture fixture = memberReferenceFixture();
+        Person person = fixture.person();
+        var actor = fixture.actor();
+        String suffix = fixture.suffix();
+        ObjectMapper mapper = JsonMapper.builder().build();
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        for (int replay = 0; replay < 2; replay++) {
+            MaskingContext context = new MaskingContext();
+            AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+            assertTrue(context.identifierDictionary().contains("Renamed Member Label"));
+            assertTrue(context.identifierDictionary().contains("fallback-" + suffix));
+            assertFalse(context.identifierDictionary().contains("Pending Member Label"));
+            assertFalse(context.identifierDictionary().contains("Foreign Member Label"));
+            assertEquals(0, context.tokenBindings().size());
+            AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+            resources.register("person", person.getId());
+            AiAssistantToolResult result = realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+            for (String label : List.of("Prior Member Label", "Other Prior Label", "Pending Member Label", "Pending Alias")) {
+                assertTrue(context.identifierDictionary().contains(label), label);
+            }
+            String projected = mapper.writeValueAsString(result.data());
+            assertFalse(projected.contains("Prior"));
+            assertFalse(projected.contains("Other Prior"));
+            assertFalse(projected.contains("Pending Member"));
+            assertFalse(projected.contains("Pending Alias"));
+            var readArguments = mapper.readTree("{\"handle\":\"r1\",\"limit\":10}");
+            var activityResult = realToolExecutor.execute("list_activities", readArguments, resources, true);
+            var taskResult = realToolExecutor.execute("list_tasks", readArguments, resources, true);
+            var scopeResult = scopeReadService.scopeActivities(AiChatQueryScope.none(), "person", null, List.of(), 30, 50, 5, resources);
+            var commitments = workBriefReadService.workCommitments(actor.getId(), 7, 10, resources);
+            assertEquals(1, commitments.data().get("returnedCommitments"));
+            String commitmentsText = mapper.writeValueAsString(commitments.data());
+            assertFalse(commitmentsText.contains("Prior"));
+            assertFalse(commitmentsText.contains("Pending"));
+            String scopeText = mapper.writeValueAsString(scopeResult.data());
+            assertFalse(scopeText.contains("Prior Member"));
+            assertFalse(scopeText.contains("Pending Member"));
+            var turn = AiAssistantPromptAssembler.ToolTurn.soleCall(1, "get_record", result);
+            var activityTurn = AiAssistantPromptAssembler.ToolTurn.soleCall(2, "list_activities", activityResult);
+            var taskTurn = AiAssistantPromptAssembler.ToolTurn.soleCall(3, "list_tasks", taskResult);
+            var turns = List.of(turn, activityTurn, taskTurn);
+            var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(), empty, turns, context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(), empty, turns, context, resources, AiAssistantToolCatalog.ALL);
+            var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
+                    Map.of(turn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-note", "get_record", "{\"handle\":\"r1\"}"),
+                            activityTurn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-activity", "list_activities", "{\"handle\":\"r1\",\"limit\":10}"),
+                            taskTurn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("read-task", "list_tasks", "{\"handle\":\"r1\",\"limit\":10}")),
+                    context, budget, null).exchanges() : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+            String modelFinal = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Prior Member Label")
+                    + " and " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Other Prior Label")
+                    + " met " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Pending Member Label")
+                    + " and " + context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Pending Alias") + ".";
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, modelFinal), false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages()) + mapper.writeValueAsString(capture.request().nativeTools());
+            for (String label : List.of("Prior Member", "Other Prior", "Pending Member", "Pending Alias", "Renamed Member", "Foreign Member")) {
+                assertFalse(payload.contains(label), label);
+            }
+            assertTrue(payload.contains("{{M1}}"));
+            String finalText = "Prior Member Label and Other Prior Label met Pending Member Label and Pending Alias.";
+            List<String> provenance = capture.memberIdentifiers().getOrDefault(nativeProtocol ? "/text" : "/final/text", List.of());
+            assertEquals(Set.of("Prior Member Label", "Other Prior Label", "Pending Member Label", "Pending Alias"), Set.copyOf(provenance));
+            AiChatMessage priorAnswer = new AiChatMessage();
+            priorAnswer.setAuthorKind("assistant");
+            priorAnswer.setContent(finalText);
+            priorAnswer.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), resources.snapshot(), Map.of(),
+                    AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), provenance));
+            MaskingContext fresh = new MaskingContext();
+            var freshResources = new AiChatResourceRegistry(fresh);
+            var page = realToolExecutor.pageContext(assembler.replayPageContext(List.of(priorAnswer)), freshResources);
+            var replayPrompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(priorAnswer), page, List.of(), fresh, freshResources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(priorAnswer), page, List.of(), fresh, freshResources, AiAssistantToolCatalog.ALL);
+            var replayCapture = support.captureAssistantPayload(replayPrompt, fresh, mapper, nativeProtocol, List.of(), AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String replayPayload = mapper.writeValueAsString(replayCapture.request().messages());
+            for (String label : provenance) {
+                assertFalse(replayPayload.contains(label), label);
+            }
+            assertTrue(replayPayload.contains("{{M1}}"));
+        }
+    }
+
+
+    @ParameterizedTest
+    @CsvSource({"complete_task,false", "complete_task,true", "reschedule_task,false", "reschedule_task,true"})
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay(
+            String tool, boolean nativeProtocol) throws Exception {
+        MemberReferenceFixture fixture = memberReferenceFixture();
+        var storedTask = referenceService.hydrateTasks(workspace.getId(),
+                List.of(taskMapper.getTaskById(workspace.getId(), fixture.task().getId()))).getFirst();
+        assertTrue(storedTask.getDescription().contains("[Prior Member Label](user:"));
+        assertTrue(storedTask.getDescription().contains("[Pending Member Label](user:"));
+        var delegate = mock(ooo.klae.connex.backend.services.TaskService.class);
+        when(delegate.complete(storedTask.getId())).thenReturn(storedTask);
+        when(delegate.reschedule(storedTask.getId(), "2026-10-15")).thenReturn(storedTask);
+        AiAssistantWriteTool declared = "complete_task".equals(tool)
+                ? new AiAssistantCompleteTaskWriteTool(delegate) : new AiAssistantRescheduleTaskWriteTool(delegate);
+        AiAssistantWriteToolRequest request = "complete_task".equals(tool)
+                ? new AiAssistantWriteToolRequest.CompleteTask("t1")
+                : new AiAssistantWriteToolRequest.RescheduleTask("t1", "2026-10-15");
+        var outcome = declared.apply(new AiAssistantWriteTool.Execution(
+                new AiAssistantWriteTool.Authority(workspace.getId(), fixture.actor().getId(), 29,
+                        java.time.Instant.parse("2026-10-13T00:00:00Z")),
+                new AiAssistantWriteTool.Row(new AiAssistantWriteTool.Target("task", storedTask.getId()), request),
+                List.of(), null, new AiAssistantWriteTool.LockedTarget(null, null), (start, end) -> {
+                    throw new AssertionError("Task writes cannot read schedule conflicts");
+                }));
+        ObjectMapper mapper = JsonMapper.builder().build();
+        String storedJson = mapper.writeValueAsString(Map.of("tier", "confirm", "outcome", outcome.data()));
+        assertFalse(storedJson.contains("{{M"));
+        var write = new AiAssistantPreparedWrite(tool, AiAssistantToolCatalog.ToolTier.CONFIRM,
+                "task", storedTask.getId(), "{}");
+        var proposal = new AiAssistantToolProposal(29, "executed", storedJson, true);
+        var assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
+        for (int replay = 0; replay < 2; replay++) {
+            var result = writeToolService.proposalResult(write, proposal);
+            assertEquals(storedTask.getDescription(), ((Map<?, ?>) result.data().get("outcome")).get("description"));
+            var context = new MaskingContext();
+            AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+            assertFalse(context.identifierDictionary().contains("Prior Member Label"));
+            assertFalse(context.identifierDictionary().contains("Pending Member Label"));
+            result.identifiers().forEach(identifier -> identifier.seed(context));
+            assertEquals(0, context.tokenBindings().size());
+            assertTrue(context.identifierDictionary().contains("Prior Member Label"));
+            assertTrue(context.identifierDictionary().contains("Pending Member Label"));
+            var resources = new AiChatResourceRegistry(context);
+            var turn = AiAssistantPromptAssembler.ToolTurn.soleCall(1, tool, result);
+            var turns = List.of(turn);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(), empty, turns, context, resources, List.of(), budget,
+                            AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(), empty, turns, context, resources, AiAssistantToolCatalog.ALL);
+            var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
+                    Map.of(turn.ref(), new ooo.klae.connex.backend.ai.provider.AiToolCall("task-outcome", tool,
+                            mapper.writeValueAsString(request))), context, budget, null).exchanges()
+                    : List.<ooo.klae.connex.backend.ai.provider.AiToolExchange>of();
+            String answer = "{\"text\":\"{{M1}} and {{M3}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
+                    nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}", false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages())
+                    + mapper.writeValueAsString(capture.request().nativeTools());
+            for (String label : List.of("Prior Member Label", "Other Prior Label", "Pending Member Label", "Pending Alias")) {
+                assertFalse(payload.contains(label), label);
+            }
+            assertTrue(payload.contains("{{M1}}"));
+            assertTrue(payload.contains("{{M3}}"));
+            assertEquals(0, capture.warnings());
+            assertEquals("Prior Member Label and Pending Member Label", Demasker.demask("{{M1}} and {{M3}}", context).text());
+            assertEquals(4, context.tokenBindings().size());
+            String guessed = "{\"text\":\"{{M5}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+            var refused = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
+                    nativeProtocol ? guessed : "{\"tool\":null,\"final\":" + guessed + "}", false, null);
+            assertEquals(1, refused.warnings());
+            var demaskedGuess = Demasker.demask("{{M5}}", context);
+            assertEquals(1, demaskedGuess.warnings());
+            for (String label : List.of("Prior Member Label", "Pending Member Label", "Renamed Member Label")) {
+                assertFalse(demaskedGuess.text().contains(label));
+            }
+            assertEquals(4, context.tokenBindings().size());
+        }
+        verify(delegate, org.mockito.Mockito.times("complete_task".equals(tool) ? 1 : 0)).complete(storedTask.getId());
+        verify(delegate, org.mockito.Mockito.times("reschedule_task".equals(tool) ? 1 : 0))
+                .reschedule(storedTask.getId(), "2026-10-15");
+        assertTrue(storedJson.contains("Prior Member Label"));
+        assertTrue(storedJson.contains("Pending Member Label"));
+    }
+
+    private MemberReferenceFixture memberReferenceFixture() {
+        String suffix = unique();
+        Workspace foreign = new Workspace();
+        foreign.setOrgId(workspace.getOrgId());
+        foreign.setName("Foreign " + suffix);
+        foreign.setSlug("foreign-" + suffix);
+        workspaceMapper.insert(foreign);
+        committedForeignWorkspace = foreign;
+        committedMemberUsernames = List.of("active-" + suffix, "pending-" + suffix, "foreign-" + suffix, "fallback-" + suffix);
+        jdbc.update("INSERT INTO app_user (username, display_name, email, password_hash, timezone) VALUES "
+                        + "(?, 'Prior Member Label', ?, 'fixture-hash', 'UTC'), "
+                        + "(?, 'Pending Member Label', ?, 'fixture-hash', 'UTC'), "
+                        + "(?, 'Foreign Member Label', ?, 'fixture-hash', 'UTC'), "
+                        + "(?, '', ?, 'fixture-hash', 'UTC')",
+                "active-" + suffix, "active-" + suffix + "@example.test",
+                "pending-" + suffix, "pending-" + suffix + "@example.test",
+                "foreign-" + suffix, "foreign-" + suffix + "@example.test",
+                "fallback-" + suffix, "fallback-" + suffix + "@example.test");
+        jdbc.update("INSERT INTO workspace_member (workspace_id, user_id, role, status) "
+                        + "SELECT IF(username = ?, ?, ?), id, 'owner', IF(username = ?, 'pending', 'active') "
+                        + "FROM app_user WHERE username IN (?, ?, ?, ?)",
+                "foreign-" + suffix, foreign.getId(), workspace.getId(), "pending-" + suffix,
+                "active-" + suffix, "pending-" + suffix, "foreign-" + suffix, "fallback-" + suffix);
+        var actor = userMapper.getUserByUsername("active-" + suffix);
+        var pending = userMapper.getUserByUsername("pending-" + suffix);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        tenantContext.set(workspace.getId(), workspace.getOrgId(), actor.getId(), "owner", null);
+        Person person = newPerson(newCompany("Reference Fixture"), "Reference Contact");
+        ooo.klae.connex.backend.beans.Note note = new ooo.klae.connex.backend.beans.Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setAuthor(actor);
+        note.setPerson(person);
+        note.setVisibility("workspace");
+        note.setTitle("Reference coverage");
+        String authored = "x".repeat(490) + " [Prior Member Label](user:" + actor.getId() + ") "
+                + "[Other Prior Label](user:" + actor.getId() + ") "
+                + "[Pending Member Label](user:" + pending.getId() + ") "
+                + "[Pending Alias][invite]\n\n[invite]: user:" + pending.getId();
+        note.setContent(authored);
+        noteMapper.insert(note);
+        referenceService.syncReferences(workspace.getId(), note.getId(), authored);
+        var activity = new ooo.klae.connex.backend.beans.Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setCreatedBy(actor);
+        activity.setPerson(person);
+        activity.setType("meeting");
+        activity.setSubject("Reference meeting");
+        activity.setNotes(authored);
+        activity.setTimestamp("2026-10-13 00:00:00");
+        activityMapper.insert(activity);
+        referenceService.syncReferences(workspace.getId(), ooo.klae.connex.backend.services.ReferenceService.SOURCE_ACTIVITY,
+                activity.getId(), authored);
+        var task = new ooo.klae.connex.backend.beans.Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setAssignedTo(actor);
+        task.setPerson(person);
+        task.setDescription(authored);
+        task.setStatus("todo");
+        task.setDueDate("2026-10-12");
+        taskMapper.insert(task);
+        referenceService.syncReferences(workspace.getId(), ooo.klae.connex.backend.services.ReferenceService.SOURCE_TASK,
+                task.getId(), authored);
+        jdbc.update("UPDATE app_user SET display_name = 'Renamed Member Label' WHERE id = ?", actor.getId());
+        return new MemberReferenceFixture(person, actor, task, suffix);
+    }
+
+    private record MemberReferenceFixture(
+            Person person, ooo.klae.connex.backend.beans.User actor,
+            ooo.klae.connex.backend.beans.Task task, String suffix) {
+    }
+
+    @Test
+    void sharedNoteQueriesExcludePrivateRowsBeforeApplyingTheLimit() {
+        Company company = newCompany("Privacy parent");
+        Person person = newPerson(company, "Privacy contact");
+        String username = "privacy-" + unique();
+        jdbc.update("INSERT INTO app_user (username, display_name, email, password_hash, timezone) "
+                + "VALUES (?, 'Privacy actor', ?, 'fixture-hash', 'UTC')", username, username + "@example.test");
+        var actor = userMapper.getUserByUsername(username);
+        jdbc.update("INSERT INTO note (workspace_id, person_id, author_id, visibility, title, content, created_at, updated_at) "
+                + "SELECT ?, ?, ?, IF(sequence.n < 12, 'private', 'workspace'), CONCAT('note-', sequence.n), 'Visible prose', "
+                + "TIMESTAMP('2026-10-13') - INTERVAL sequence.n MINUTE, "
+                + "TIMESTAMP('2026-10-13') - INTERVAL sequence.n MINUTE "
+                + "FROM (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 "
+                + "UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 "
+                + "UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL SELECT 13) sequence",
+                workspace.getId(), person.getId(), actor.getId());
+        assertEquals(2, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0, null, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0, null, true).size());
+        assertEquals(2, noteMapper.getAiAssistantVisibleNotesByCompanyId(workspace.getId(), company.getId(), actor.getId(),
+                List.of(workspace.getId()), 10, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByPersonId(workspace.getId(), person.getId(), actor.getId(), 10, 0).size());
+        Deal deal = newDeal(company, "Privacy deal");
+        jdbc.update("UPDATE note SET deal_id = ? WHERE workspace_id = ? AND person_id = ?", deal.getId(), workspace.getId(), person.getId());
+        assertEquals(2, noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), actor.getId(), 10, 0, null, false).size());
+        assertEquals(10, noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), actor.getId(), 10, 0, null, true).size());
+    }
+
 }

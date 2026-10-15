@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.SavedView;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SegmentService;
@@ -77,6 +79,7 @@ public class AiAssistantScopeReadService {
     private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ReferenceService referenceService;
 
     /**
      * One resolved cohort and the honesty counters its resolution produced.
@@ -199,6 +202,19 @@ public class AiAssistantScopeReadService {
             identifiers.add(new Identifier(kind, label.name()));
         }
         identifiers.forEach(identifier -> identifier.seed(resources.maskingContext()));
+        List<Activity> storedProse = activities.stream().map(activity -> {
+            Activity prose = new Activity();
+            prose.setId(activity.id());
+            prose.setSubject(activity.subject());
+            prose.setNotes(activity.notes());
+            return prose;
+        }).toList();
+        Map<Integer, Activity> readerProse = new LinkedHashMap<>();
+        for (Activity prose : referenceService.hydrateActivities(workspaceId, storedProse)) {
+            AiAssistantMemberIdentifiers.seedReferences(prose.getReferences(), resources.maskingContext());
+            AiAssistantMemberIdentifiers.seedReferenceText(prose.getNotes(), resources.maskingContext());
+            readerProse.put(prose.getId(), prose);
+        }
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
         List<Map<String, Object>> rowData = new ArrayList<>();
         for (AiAssistantScopeActivity activity : activities) {
@@ -209,8 +225,9 @@ public class AiAssistantScopeReadService {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("handle", resources.register(kind, activity.scopeRecordId()));
             putBounded(row, "type", activity.type(), budget, resources.maskingContext());
-            putBounded(row, "subject", activity.subject(), budget, resources.maskingContext());
-            putBounded(row, "notes", activity.notes(), budget, resources.maskingContext());
+            Activity prose = java.util.Objects.requireNonNull(readerProse.get(activity.id()), "readerProse");
+            putBounded(row, "subject", prose.getSubject(), budget, resources.maskingContext());
+            putBounded(row, "notes", prose.getNotes(), budget, resources.maskingContext());
             putTemporal(row, "at", activity.timestamp(), budget, resources.maskingContext());
             rowData.add(row);
         }

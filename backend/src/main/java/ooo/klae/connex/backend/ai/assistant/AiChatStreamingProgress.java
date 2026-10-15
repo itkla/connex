@@ -32,6 +32,7 @@ final class AiChatStreamingProgress {
     private boolean excluded;
     private boolean streamTruncated;
     private boolean taskHandle;
+    private boolean refusedMember;
 
     /**
      * Creates the streaming batcher for one turn.
@@ -76,7 +77,12 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        if (excluded || streamTruncated || taskHandle) {
+        if (excluded || streamTruncated || taskHandle || refusedMember) {
+            return;
+        }
+        if (demasking && maskingContext.containsUnexposedMemberToken(text)) {
+            refusedMember = true;
+            pending.setLength(0);
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -260,6 +266,7 @@ final class AiChatStreamingProgress {
         excluded = false;
         streamTruncated = false;
         taskHandle = false;
+        refusedMember = false;
         lastCheckNanos = System.nanoTime();
     }
 
@@ -319,6 +326,9 @@ final class AiChatStreamingProgress {
          */
         String finish(String expectedText) {
             String projected = projector.finish();
+            if (refusedMember || demasking && maskingContext.containsUnexposedMemberToken(projected)) {
+                throw AiAssistantLoopException.malformed("invented_placeholder");
+            }
             String comparable = demasking
                     ? Demasker.demask(projected, maskingContext).text()
                     : projected;

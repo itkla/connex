@@ -634,6 +634,14 @@ Restart only a release at or above the rollback floor. Have affected accounts re
 vouching grantor, or use operator break-glass recovery where that route is unavailable, before
 reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
 
+### Ask Connex member masking (#1822): rollback compatibility
+
+This release has no schema change and is rollback-safe. Raw member provenance is stored in the
+separate `memberIdentifiers` metadata field on answers, user messages and summaries. Older
+releases ignore that field and continue replaying without member-name masking, exactly as they
+behaved before #1822. Existing `identifiers` arrays retain only their previously supported kinds.
+No writer flag, reader-first rollout or MEMBER-specific rollback floor is required.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close

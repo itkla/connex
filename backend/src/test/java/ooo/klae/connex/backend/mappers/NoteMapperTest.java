@@ -138,6 +138,53 @@ class NoteMapperTest extends AbstractMapperTest {
         assertEquals(List.of(visibleNote.getId()), notes.stream().map(Note::getId).toList());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "person,archived", "person,suspended", "person,ceased", "person,inaccessible",
+            "deal,archived", "deal,suspended", "deal,ceased", "deal,inaccessible"})
+    void assistantPersonAndDealNotesFilterRestrictedLinksBeforeTheirLimit(String kind, String restriction) {
+        User user = newUser();
+        Company company = newCompany();
+        Person visible = newPerson(company);
+        Person restricted = newPerson(company);
+        switch (restriction) {
+            case "archived" -> jdbcTemplate.update("UPDATE person SET archived_at = NOW() WHERE id = ?", restricted.getId());
+            case "suspended" -> personMapper.updateProcessingRestrictions(workspace.getId(), restricted.getId(), true, false);
+            case "ceased" -> personMapper.updateProcessingRestrictions(workspace.getId(), restricted.getId(), false, true);
+            case "inaccessible" -> jdbcTemplate.update("UPDATE person SET workspace_id = ? WHERE id = ?",
+                    newWorkspace().getId(), restricted.getId());
+            default -> throw new IllegalArgumentException("Unknown fixture restriction");
+        }
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), company);
+        Note eligible = build("eligible", user, visible, deal);
+        eligible.setVisibility("workspace");
+        noteMapper.insert(eligible);
+        jdbcTemplate.update("UPDATE note SET updated_at = '2000-01-01' WHERE id = ?", eligible.getId());
+        jdbcTemplate.update("""
+                INSERT INTO note (workspace_id, content, author_id, person_id, deal_id, visibility)
+                SELECT ?, 'restricted linked note', ?, ?, ?, 'workspace' FROM
+                  (SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+                   UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) fixture
+                """, workspace.getId(), user.getId(), visible.getId(), deal.getId());
+        jdbcTemplate.update("""
+                INSERT INTO entity_reference (workspace_id, source_type, source_id, ref_type, ref_id, label)
+                SELECT workspace_id, 'note', id, 'person', ?, ? FROM note
+                WHERE workspace_id = ? AND person_id = ? AND deal_id = ? AND id <> ?
+                """, restricted.getId(), restricted.getName(), workspace.getId(), visible.getId(), deal.getId(), eligible.getId());
+        List<Note> unfiltered = "person".equals(kind)
+                ? noteMapper.getVisibleNotesByPersonId(workspace.getId(), visible.getId(), user.getId(), 10, 0)
+                : noteMapper.getVisibleNotesByDealId(workspace.getId(), deal.getId(), user.getId(), 10, 0);
+        assertEquals(10, unfiltered.size());
+        assertFalse(unfiltered.stream().anyMatch(note -> note.getId() == eligible.getId()));
+        List<Note> notes = "person".equals(kind)
+                ? noteMapper.getAiAssistantVisibleNotesByPersonId(workspace.getId(), visible.getId(), user.getId(),
+                        List.of(workspace.getId()), 10, false)
+                : noteMapper.getAiAssistantVisibleNotesByDealId(workspace.getId(), deal.getId(), user.getId(),
+                        List.of(workspace.getId()), 10, false);
+        assertEquals(List.of(eligible.getId()), notes.stream().map(Note::getId).toList());
+    }
+
     @Test
     void getNotesByPersonIdsBatchesOnlyRequestedWorkspaceContacts() {
         User user = newUser();

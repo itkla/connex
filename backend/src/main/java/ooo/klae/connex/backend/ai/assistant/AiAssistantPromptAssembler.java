@@ -17,8 +17,10 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
+import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
@@ -35,6 +37,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 @RequiredArgsConstructor
 public class AiAssistantPromptAssembler {
+    private static final Set<String> FIXED_TOOL_RESULT_FIELDS = Set.of("tool", "tier", "status", "recordType");
     private static final int MAX_USER_IDENTIFIERS = 20;
     private static final int MAX_SUMMARY_IDENTIFIERS = 200;
     private static final int MAX_SUMMARY_IDENTIFIER_CHARS = 1_000;
@@ -218,9 +221,17 @@ public class AiAssistantPromptAssembler {
     public record NativeReplay(
             List<AiToolExchange> exchanges,
             String repairMessage,
-            ToolBudgetAudit audit) {
+            ToolBudgetAudit audit,
+            List<OutboundSegment> repairSegments) {
+        /** Unclassified text keeps ordinary tenant-data scanning. */
+        public NativeReplay(List<AiToolExchange> exchanges, String repairMessage, ToolBudgetAudit audit) {
+            this(exchanges, repairMessage, audit, repairMessage == null ? List.of()
+                    : List.of(new OutboundSegment(repairMessage, OutboundSegment.Origin.TENANT_DATA)));
+        }
+
         public NativeReplay {
             exchanges = List.copyOf(exchanges);
+            repairSegments = List.copyOf(repairSegments);
             java.util.Objects.requireNonNull(audit, "audit");
         }
 
@@ -406,18 +417,20 @@ public class AiAssistantPromptAssembler {
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
-        String repairContent = repair == null ? null : repairRequest(repair, context);
+        List<OutboundSegment> repairSegments = repair == null ? List.of() : repairRequest(repair, context);
+        String repairContent = repair == null ? null : joinSegments(repairSegments);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
-        for (String toolResult : boundedToolResults(
-                toolTurns, context, budget, budget.toolResultBytes()).contents()) {
-            prompt.userTurn(toolResult);
+        List<String> toolResults = boundedToolResults(
+                toolTurns, context, budget, budget.toolResultBytes()).contents();
+        for (int index = 0; index < toolResults.size(); index++) {
+            prompt.segmentedUserTurn(toolResultSegments(toolResults.get(index), catalogToolResult(toolTurns.get(index))));
         }
         if (repairContent != null) {
-            prompt.userTurn(repairContent);
+            prompt.segmentedUserTurn(repairSegments);
         }
         return prompt.build();
     }
@@ -510,13 +523,11 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.directive() != null && !skill.directive().isBlank()
                 && budget.fits(skill.directive(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.directive());
-            prompt.userTurn(skill.directive());
+            prompt.staticUserTurn(skill.directive());
         }
         if (skill.scopeDirective() != null && !skill.scopeDirective().isBlank()
                 && budget.fits(skill.scopeDirective(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.scopeDirective());
-            prompt.userTurn(skill.scopeDirective());
+            prompt.staticUserTurn(skill.scopeDirective());
         }
         if (!skill.evidence().isEmpty()) {
             prompt.userTurn(boundedSkillEvidence(
@@ -524,8 +535,7 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.closingDirective() != null && !skill.closingDirective().isBlank()
                 && budget.fits(skill.closingDirective(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.closingDirective());
-            prompt.userTurn(skill.closingDirective());
+            prompt.staticUserTurn(skill.closingDirective());
         }
     }
 
@@ -637,11 +647,12 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String repairContent = repair == null
-                ? null
+        List<OutboundSegment> repairSegments = repair == null ? List.of()
                 : repair.schemaRule().startsWith("native_")
-                        ? nativeToolRepairRequest(repair.schemaRule(), maxParallelCalls)
+                        ? List.of(new OutboundSegment(nativeToolRepairRequest(repair.schemaRule(), maxParallelCalls),
+                                OutboundSegment.Origin.SERVER_STATIC))
                         : nativeFinalRepairRequest(repair, context);
+        String repairContent = repair == null ? null : joinSegments(repairSegments);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
@@ -661,9 +672,9 @@ public class AiAssistantPromptAssembler {
                             call.thoughtSignature()),
                     exchange.result(),
                     turn.seq(),
-                    turn.call()));
+                    turn.call(), toolResultSegments(exchange.result(), catalogToolResult(turn))));
         }
-        return new NativeReplay(exchanges, repairContent, bounded.audit());
+        return new NativeReplay(exchanges, repairContent, bounded.audit(), repairSegments);
     }
 
     /**
@@ -987,6 +998,34 @@ public class AiAssistantPromptAssembler {
         }
     }
 
+    /**
+     * Marks only server-constructed tool results, preserving the serializer's exact bytes and
+     * either ordering of its two schema fields. User text never enters this classification path.
+     */
+    private static List<OutboundSegment> toolResultSegments(String content, boolean catalog) {
+        String beginning = CRM_DATA_BEGIN + "\n{";
+        String ending = "}\n" + CRM_DATA_END;
+        String discriminator = "\"type\":\"tool_result\"";
+        int begin;
+        int end;
+        if (content.startsWith(beginning + discriminator + ",\"data\":") && content.endsWith(ending)) {
+            begin = beginning.length() + discriminator.length() + ",\"data\":".length();
+            end = content.length() - ending.length();
+        } else if (content.startsWith(beginning + "\"data\":")
+                && content.endsWith("," + discriminator + ending)) {
+            begin = beginning.length() + "\"data\":".length();
+            end = content.length() - ("," + discriminator + ending).length();
+        } else {
+            throw new IllegalStateException("Assistant tool result envelope is invalid");
+        }
+        if (catalog) {
+            return List.of(new OutboundSegment(content, OutboundSegment.Origin.SERVER_STATIC));
+        }
+        return List.of(new OutboundSegment(content.substring(0, begin), OutboundSegment.Origin.SERVER_STATIC),
+                new OutboundSegment(content.substring(begin, end), OutboundSegment.Origin.TENANT_TOOL_RESULT),
+                new OutboundSegment(content.substring(end), OutboundSegment.Origin.SERVER_STATIC));
+    }
+
     private String toolResultContent(ToolTurn turn, MaskingContext context) {
         return crmDataMasked("tool_result", maskedToolResult(turn, context));
     }
@@ -1100,15 +1139,51 @@ public class AiAssistantPromptAssembler {
         data.put("tool", turn.tool());
         data.put("result", turn.result().data());
         JsonNode payload = objectMapper.valueToTree(data);
-        boolean statesTheActiveSet = AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
-                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
+        boolean statesTheActiveSet = catalogToolResult(turn);
         JsonNode rendered = statesTheActiveSet
                 ? requireDeclaredVocabulary(payload)
-                : maskStrings(payload, context);
+                : maskToolStrings(payload, context, turn.result().identifiers().stream()
+                        .filter(identifier -> "member".equals(identifier.kind())).toList(), "", false);
         if (!(rendered instanceof ObjectNode object)) {
             throw new IllegalStateException("Assistant tool result payload is invalid");
         }
         return object;
+    }
+
+    /** Containment belongs only to a provenance field; unrelated siblings keep ordinary boundary rules. */
+    private JsonNode maskToolStrings(
+            JsonNode node, MaskingContext context, List<Identifier> identifiers, String path, boolean fixedValue) {
+        if (node.isString()) {
+            List<String> members = fixedValue ? List.of() : identifiers.stream()
+                    .filter(identifier -> identifier.path() != null && path.equals("/result" + identifier.path()))
+                    .map(Identifier::value).toList();
+            return context.withReplayMemberValues(members, () -> {
+                String masked = MaskingEngine.maskTemporal(node.asString(), context);
+                OutboundLeakScan.assertNoLeakInServerEnvelope(objectMapper.writeValueAsString(masked), context, objectMapper);
+                return objectMapper.getNodeFactory().textNode(masked);
+            });
+        }
+        if (node instanceof ObjectNode object) {
+            ObjectNode masked = objectMapper.createObjectNode();
+            object.properties().forEach(entry -> masked.set(entry.getKey(), maskToolStrings(entry.getValue(), context,
+                    identifiers, path + "/" + AiAssistantMemberIdentifiers.pointerSegment(entry.getKey()),
+                    FIXED_TOOL_RESULT_FIELDS.contains(entry.getKey()))));
+            return masked;
+        }
+        if (node instanceof ArrayNode array) {
+            ArrayNode masked = objectMapper.createArrayNode();
+            for (int index = 0; index < array.size(); index++) {
+                masked.add(maskToolStrings(array.get(index), context, identifiers, path + "/" + index, false));
+            }
+            return masked;
+        }
+        return node;
+    }
+
+    /** Successful catalog data is validated before budgeting; refused loads keep ordinary masking. */
+    private static boolean catalogToolResult(ToolTurn turn) {
+        return AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
+                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
     }
 
     private JsonNode requireDeclaredVocabulary(JsonNode node) {
@@ -1359,6 +1434,54 @@ public class AiAssistantPromptAssembler {
             SkillReference skill,
             List<AiChatNarration> narration,
             List<AiChatTodo> todos) {
+        return finalMetadata(turnId, citations, suggestions, resources, observations,
+                toolBudgetAudit, skill, narration, todos, List.of());
+    }
+
+    /** Persists referenced member labels as bounded raw provenance, never as token bindings. */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
+            ToolBudgetAudit toolBudgetAudit,
+            SkillReference skill,
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos,
+            List<String> memberIdentifiers) {
+        return finalMetadata(turnId, citations, suggestions, resources, observations, toolBudgetAudit,
+                skill, narration, todos, Map.of("/text", memberIdentifiers));
+    }
+
+    /** Persists raw member provenance at its retained answer-text or suggestion JSON pointer. */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
+            ToolBudgetAudit toolBudgetAudit,
+            SkillReference skill,
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos,
+            Map<String, List<String>> memberIdentifiersByPath) {
+        if (memberIdentifiersByPath.values().stream().mapToLong(List::size).sum() > MAX_SUMMARY_IDENTIFIERS) {
+            throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+        }
+        var memberIdentifiers = new LinkedHashSet<Identifier>();
+        memberIdentifiersByPath.forEach((path, values) -> {
+            if (!"/text".equals(path) && !java.util.stream.IntStream.range(0, suggestions.size())
+                    .anyMatch(index -> ("/suggestions/" + index).equals(path))) {
+                throw new IllegalStateException("Assistant answer identifier path is invalid");
+            }
+            values.forEach(value -> memberIdentifiers.add(new Identifier("member", value, path)));
+        });
+        if (memberIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS
+                || memberIdentifiers.stream().anyMatch(identifier -> identifier.value() == null || identifier.value().isBlank()
+                        || !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(identifier.value()))) {
+            throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+        }
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
@@ -1388,6 +1511,9 @@ public class AiAssistantPromptAssembler {
             metadata.put("citations", resolved);
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
+            if (!memberIdentifiers.isEmpty()) {
+                metadata.put("memberIdentifiers", List.copyOf(memberIdentifiers));
+            }
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
             }
@@ -1460,7 +1586,7 @@ public class AiAssistantPromptAssembler {
                 if (message.getStructuredJson() == null) {
                     continue;
                 }
-                ReplayAnswer replay = reauthorizeAnswer(message, resources);
+                ReplayAnswer replay = reauthorizeAnswer(message, resources, context);
                 if (replay == null) {
                     continue;
                 }
@@ -1475,14 +1601,14 @@ public class AiAssistantPromptAssembler {
             transcript.add(Map.of(
                     "role", message.getAuthorKind(),
                     "content", MaskingEngine.maskFreeText(
-                            content, context, replayHandles)));
+                            content, context, replayHandles, replayMemberValues(message))));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         if (existingSummary != null) {
             String content = reauthorizeSummary(existingSummary, resources, context);
             if (content != null) {
                 data.put("priorSummary", MaskingEngine.maskFreeText(
-                        content, context));
+                        content, context, Map.of(), replayMemberValues(existingSummary)));
             }
         }
         data.put("messages", transcript);
@@ -1649,7 +1775,7 @@ public class AiAssistantPromptAssembler {
                         ENDING_FINAL_EXAMPLE);
     }
 
-    private String repairRequest(AiStructuredRepair repair, MaskingContext context) {
+    private List<OutboundSegment> repairRequest(AiStructuredRepair repair, MaskingContext context) {
         return repairRequest(
                 repair,
                 context,
@@ -1657,7 +1783,7 @@ public class AiAssistantPromptAssembler {
                         + "Return one corrected JSON step only.\n");
     }
 
-    private String nativeFinalRepairRequest(
+    private List<OutboundSegment> nativeFinalRepairRequest(
             AiStructuredRepair repair,
             MaskingContext context) {
         return repairRequest(
@@ -1684,18 +1810,23 @@ public class AiAssistantPromptAssembler {
                 + " rule. Return " + calls + " or one valid JSON final answer.";
     }
 
-    private String repairRequest(
+    private List<OutboundSegment> repairRequest(
             AiStructuredRepair repair,
             MaskingContext context,
             String instruction) {
         context.addTrustedStaticText(instruction);
-        String serialized = serialize(Map.of(
-                "schemaRule", repair.schemaRule(),
-                "output", MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
-                        repair.offendingOutput(), context),
-                "truncated", repair.truncated()));
-        return instruction
-                + MODEL_OUTPUT_BEGIN + "\n" + serialized + "\n" + MODEL_OUTPUT_END;
+        MaskingEngine.MaskedText output = MaskingEngine.maskFreeTextPreservingIssuedPlaceholdersWithInsertions(
+                repair.offendingOutput(), context);
+        return List.of(
+                new OutboundSegment(instruction + MODEL_OUTPUT_BEGIN + "\n{\"schemaRule\":"
+                        + serialize(repair.schemaRule()) + ",\"output\":", OutboundSegment.Origin.SERVER_STATIC),
+                OutboundSegment.jsonString(output, OutboundSegment.Origin.PROVIDER_AUTHORED, objectMapper),
+                new OutboundSegment(",\"truncated\":" + repair.truncated() + "}\n" + MODEL_OUTPUT_END,
+                        OutboundSegment.Origin.SERVER_STATIC));
+    }
+
+    private static String joinSegments(List<OutboundSegment> segments) {
+        return segments.stream().map(OutboundSegment::text).collect(java.util.stream.Collectors.joining());
     }
 
     private void appendHistory(
@@ -1709,16 +1840,16 @@ public class AiAssistantPromptAssembler {
                 return;
             }
             prompt.userTurn(crmDataMasked("conversation_summary", objectMapper.valueToTree(Map.of(
-                    "summary", MaskingEngine.maskFreeText(summary, context)))));
+                    "summary", MaskingEngine.maskFreeText(summary, context, Map.of(), replayMemberValues(message))))));
             return;
         }
         if ("assistant".equals(message.getAuthorKind())) {
-            ReplayAnswer replay = reauthorizeAnswer(message, resources);
+            ReplayAnswer replay = reauthorizeAnswer(message, resources, context);
             if (replay == null || AiAssistantStepGuard.containsTaskHandle(replay.content())) {
                 return;
             }
             String masked = MaskingEngine.maskConversationalFreeText(
-                    replay.content(), context, replay.handles());
+                    replay.content(), context, replay.handles(), replayMemberValues(message));
             if (AiAssistantStepGuard.containsTaskHandle(masked)) {
                 return;
             }
@@ -1732,13 +1863,13 @@ public class AiAssistantPromptAssembler {
             return;
         }
         String masked = MaskingEngine.maskConversationalFreeText(
-                content, context);
+                content, context, Map.of(), replayMemberValues(message));
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }
 
     private ReplayAnswer reauthorizeAnswer(
-            AiChatMessage message, AiChatResourceRegistry resources) {
+            AiChatMessage message, AiChatResourceRegistry resources, MaskingContext context) {
         if (message.getStructuredJson() == null) {
             return new ReplayAnswer(message.getContent(), List.of(), Map.of());
         }
@@ -1776,6 +1907,20 @@ public class AiAssistantPromptAssembler {
                 handles.put(stored.handle(), freshHandle);
             }
         }
+        JsonNode identifiers = metadata.get("identifiers");
+        if (identifiers != null) {
+            if (!identifiers.isArray() || identifiers.size() > MAX_SUMMARY_IDENTIFIERS) {
+                throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+            }
+            for (JsonNode identifier : identifiers) {
+                StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+                if (stored.kind() != EntityKind.MEMBER) {
+                    throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+                }
+                seedStoredIdentifier(stored, context);
+            }
+        }
+        seedMemberIdentifiers(metadata, context, MAX_SUMMARY_IDENTIFIERS);
         return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));
     }
 
@@ -1804,6 +1949,7 @@ public class AiAssistantPromptAssembler {
                 return null;
             }
         }
+        seedMemberIdentifiers(metadata, context, MAX_SUMMARY_IDENTIFIERS);
         JsonNode storedIdentifiers = metadata.get("identifiers");
         if (storedIdentifiers == null || !storedIdentifiers.isArray()
                 || storedIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS) {
@@ -1811,7 +1957,7 @@ public class AiAssistantPromptAssembler {
         }
         for (JsonNode identifier : storedIdentifiers) {
             StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
-            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+            seedStoredIdentifier(stored, context);
         }
         return message.getContent();
     }
@@ -1841,6 +1987,7 @@ public class AiAssistantPromptAssembler {
                 return null;
             }
         }
+        seedMemberIdentifiers(metadata, context, MAX_USER_IDENTIFIERS);
         JsonNode storedIdentifiers = metadata.get("identifiers");
         if (storedIdentifiers == null || !storedIdentifiers.isArray()) {
             return storedResources.isEmpty() ? message.getContent() : null;
@@ -1853,9 +2000,76 @@ public class AiAssistantPromptAssembler {
             if (stored.kind() == EntityKind.EMAIL || stored.kind() == EntityKind.PHONE) {
                 return null;
             }
-            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+            seedStoredIdentifier(stored, context);
         }
         return message.getContent();
+    }
+
+    /** Reads only provenance from a message whose metadata and authority were already validated. */
+    private List<String> replayMemberValues(AiChatMessage message) {
+        if (message.getStructuredJson() == null) {
+            return List.of();
+        }
+        try {
+            JsonNode metadata = objectMapper.readTree(message.getStructuredJson());
+            Set<String> members = new LinkedHashSet<>();
+            for (String field : List.of("identifiers", "memberIdentifiers")) {
+                JsonNode identifiers = metadata.get(field);
+                if (identifiers != null && identifiers.isArray()) {
+                    for (JsonNode identifier : identifiers) {
+                        StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+                        JsonNode path = identifier.get("path");
+                        if (stored.kind() == EntityKind.MEMBER
+                                && (path == null || !path.asString().startsWith("/suggestions/"))
+                                && replayMemberRequiresContainment(identifier)) {
+                            members.add(stored.value());
+                        }
+                    }
+                }
+            }
+            return List.copyOf(members);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Assistant member identifier metadata could not be read", exception);
+        }
+    }
+
+    /** Queue-time mentions keep word boundaries; exact demask provenance retains its replay coverage. */
+    private static boolean replayMemberRequiresContainment(JsonNode identifier) {
+        JsonNode matching = identifier.get("matching");
+        if (matching == null) {
+            return true;
+        }
+        if (!matching.isString() || !"mention".equals(matching.asString())) {
+            throw new IllegalStateException("Assistant member matching metadata is invalid");
+        }
+        return false;
+    }
+
+    private void seedMemberIdentifiers(JsonNode metadata, MaskingContext context, int limit) {
+        JsonNode members = metadata.get("memberIdentifiers");
+        if (members == null) {
+            return;
+        }
+        JsonNode identifiers = metadata.get("identifiers");
+        int otherCount = identifiers != null && identifiers.isArray() ? identifiers.size() : 0;
+        if (!members.isArray() || members.size() > limit - otherCount) {
+            throw new IllegalStateException("Assistant member identifier metadata is invalid");
+        }
+        for (JsonNode identifier : members) {
+            StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+            if (stored.kind() != EntityKind.MEMBER) {
+                throw new IllegalStateException("Assistant member identifier metadata is invalid");
+            }
+            seedStoredIdentifier(stored, context);
+        }
+    }
+
+    private void seedStoredIdentifier(StoredSummaryIdentifier stored, MaskingContext context) {
+        if (stored.kind() == EntityKind.MEMBER) {
+            context.registerMemberCandidate(stored.value());
+        } else {
+            MaskingEngine.maskField(stored.kind(), stored.value(), context);
+        }
     }
 
     private static StoredResource storedResource(JsonNode resource) {
@@ -1886,7 +2100,9 @@ public class AiAssistantPromptAssembler {
         JsonNode value = identifier.get("value");
         if (kind == null || !kind.isString()
                 || value == null || !value.isString() || value.asString().isBlank()
-                || value.asString().length() > MAX_SUMMARY_IDENTIFIER_CHARS) {
+                || ("member".equals(kind.asString())
+                        ? !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(value.asString())
+                        : value.asString().length() > MAX_SUMMARY_IDENTIFIER_CHARS)) {
             throw new IllegalStateException("Assistant summary identifier metadata is invalid");
         }
         EntityKind entityKind = switch (kind.asString()) {
@@ -1895,6 +2111,7 @@ public class AiAssistantPromptAssembler {
             case "deal" -> EntityKind.DEAL;
             case "email" -> EntityKind.EMAIL;
             case "phone" -> EntityKind.PHONE;
+            case "member" -> EntityKind.MEMBER;
             default -> throw new IllegalStateException(
                     "Assistant summary identifier metadata is invalid");
         };

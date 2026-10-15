@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -58,6 +59,7 @@ public class AiChatTurnPersistenceService {
     private static final String TIMED_OUT = "timed_out";
     private static final String GENERATION_TIMEOUT = "generation_timeout";
     private static final int RESOLVE_TIMEOUT_SECONDS = 30;
+    private static final int MAX_USER_IDENTIFIERS = 20;
     private static final String USER = "user";
     private static final String ASSISTANT = "assistant";
     private static final String SYSTEM = "system";
@@ -169,8 +171,30 @@ public class AiChatTurnPersistenceService {
                 identifierResolver.resolve(request.content());
         identifierResolution.resources().forEach(resource ->
                 messageResources.register(resource.kind(), resource.id()));
+        var identifiers = new ArrayList<>(identifierResolution.identifiers());
+        var exactSuggestionMembers = new java.util.LinkedHashSet<String>();
+        AiChatMessage latestAnswer = chatMapper.getLatestAnswer(workspaceId, sessionId);
+        if (latestAnswer != null && latestAnswer.getStructuredJson() != null) {
+            try {
+                AiAssistantMemberIdentifiers.suggestionIdentifiers(
+                        objectMapper.readTree(latestAnswer.getStructuredJson()), request.content())
+                        .forEach(identifier -> {
+                            exactSuggestionMembers.add(identifier.value());
+                            var member = new AiAssistantIdentifierResolver.Identifier(
+                                    ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, identifier.value());
+                            if (!identifiers.contains(member)) {
+                                identifiers.add(member);
+                            }
+                        });
+            } catch (JacksonException exception) {
+                throw new IllegalStateException("Assistant suggestion provenance could not be read", exception);
+            }
+        }
+        if (identifiers.size() > MAX_USER_IDENTIFIERS) {
+            throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+        }
         message.setStructuredJson(userMessageMetadata(
-                messageResources.snapshot(), identifierResolution.identifiers()));
+                messageResources.snapshot(), List.copyOf(identifiers), exactSuggestionMembers));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();
@@ -610,7 +634,8 @@ public class AiChatTurnPersistenceService {
 
     private String userMessageMetadata(
             java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
-            List<AiAssistantIdentifierResolver.Identifier> identifiers) {
+            List<AiAssistantIdentifierResolver.Identifier> identifiers,
+            java.util.Set<String> exactSuggestionMembers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -619,6 +644,7 @@ public class AiChatTurnPersistenceService {
                             "id", entry.getValue().id()))
                     .toList();
             List<java.util.Map<String, String>> storedIdentifiers = identifiers.stream()
+                    .filter(identifier -> identifier.kind() != ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER)
                     .map(identifier -> java.util.Map.of(
                             "kind", identifier.kind().name().toLowerCase(java.util.Locale.ROOT),
                             "value", identifier.value()))
@@ -626,7 +652,13 @@ public class AiChatTurnPersistenceService {
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "kind", "user_message",
                     "resources", storedResources,
-                    "identifiers", storedIdentifiers));
+                    "identifiers", storedIdentifiers,
+                    "memberIdentifiers", identifiers.stream()
+                            .filter(identifier -> identifier.kind() == ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER)
+                            .map(identifier -> exactSuggestionMembers.contains(identifier.value())
+                                    ? java.util.Map.of("kind", "member", "value", identifier.value())
+                                    : java.util.Map.of("kind", "member", "value", identifier.value(), "matching", "mention"))
+                            .toList()));
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Assistant user message metadata could not be serialized", exception);

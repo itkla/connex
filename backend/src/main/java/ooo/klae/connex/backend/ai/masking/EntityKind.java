@@ -9,7 +9,8 @@ public enum EntityKind {
     COMPANY("C"),
     DEAL("D"),
     EMAIL("E"),
-    PHONE("H");
+    PHONE("H"),
+    MEMBER("M");
 
     private final String tokenPrefix;
 

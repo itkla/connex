@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
+
 /**
  * Static native definitions plus ephemeral completed exchanges for one provider request.
  *
@@ -16,13 +18,27 @@ import java.util.Set;
  * @param maxParallelCalls how many calls this step's response may carry, from 1; the adapter that
  *     serializes the request and the parser that bounds the response read it here rather than each
  *     resolving the operator's endpoint declaration separately
+ * @param repairSegments origin-preserving parts whose concatenation is the repair message
  */
 public record AiNativeToolRequest(
         List<AiToolDefinition> definitions,
         List<AiToolExchange> exchanges,
         String repairMessage,
         boolean finalOnly,
-        int maxParallelCalls) {
+        int maxParallelCalls,
+        @com.fasterxml.jackson.annotation.JsonIgnore List<OutboundSegment> repairSegments) {
+
+    /** Unclassified repair text remains tenant-bearing rather than gaining a static exemption. */
+    public AiNativeToolRequest(
+            List<AiToolDefinition> definitions,
+            List<AiToolExchange> exchanges,
+            String repairMessage,
+            boolean finalOnly,
+            int maxParallelCalls) {
+        this(definitions, exchanges, repairMessage, finalOnly, maxParallelCalls,
+                repairMessage == null ? List.of()
+                        : List.of(new OutboundSegment(repairMessage, OutboundSegment.Origin.TENANT_DATA)));
+    }
 
     /** Creates a request whose step carries one call, as every undeclared endpoint's does. */
     public AiNativeToolRequest(
@@ -43,6 +59,12 @@ public record AiNativeToolRequest(
     public AiNativeToolRequest {
         definitions = List.copyOf(Objects.requireNonNull(definitions, "definitions"));
         exchanges = List.copyOf(Objects.requireNonNull(exchanges, "exchanges"));
+        repairSegments = List.copyOf(Objects.requireNonNull(repairSegments, "repairSegments"));
+        String segmentedRepair = repairSegments.stream().map(OutboundSegment::text)
+                .collect(java.util.stream.Collectors.joining());
+        if (!segmentedRepair.equals(repairMessage == null ? "" : repairMessage)) {
+            throw new IllegalArgumentException("AI native repair origins must cover its complete text");
+        }
         if (definitions.isEmpty()) {
             throw new IllegalArgumentException("AI native tool definitions are required");
         }

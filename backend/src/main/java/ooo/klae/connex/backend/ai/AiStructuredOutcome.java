@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.ai;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Result of a structured AI invocation. A {@link Parsed} carries the demasked, type-bound content;
@@ -14,6 +17,8 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
     String REASON_TRUNCATED = "truncated";
     /** Provider output did not contain a usable JSON object for the requested shape. */
     String REASON_MALFORMED = "malformed_output";
+    /** Provider output guessed a MEMBER placeholder never exposed by Connex. */
+    String REASON_INVENTED_PLACEHOLDER = "invented_placeholder";
 
     /**
      * Successful structured completion.
@@ -22,13 +27,22 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
      * @param inputTokens provider-reported input token count
      * @param outputTokens provider-reported output token count
      * @param stopReason provider stop reason
+     * @param memberIdentifiers raw MEMBER provenance by textual JSON pointer, captured during demasking
      * @param <T> feature content type
      */
-    record Parsed<T>(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason)
+    record Parsed<T>(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason,
+            Map<String, List<String>> memberIdentifiers)
             implements AiStructuredOutcome<T> {
 
         public Parsed {
             Objects.requireNonNull(value, "value");
+            memberIdentifiers = Objects.requireNonNull(memberIdentifiers, "memberIdentifiers").entrySet().stream()
+                    .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
+        }
+
+        /** Creates a completion with no MEMBER replacements. */
+        public Parsed(T value, int demaskWarnings, int inputTokens, int outputTokens, String stopReason) {
+            this(value, demaskWarnings, inputTokens, outputTokens, stopReason, Map.of());
         }
 
         @Override
@@ -43,7 +57,7 @@ public sealed interface AiStructuredOutcome<T> permits AiStructuredOutcome.Parse
 
     /**
      * Structured completion that could not be parsed into the requested shape.
-     * @param reason stable failure reason drawn from {@link #REASON_TRUNCATED} or {@link #REASON_MALFORMED}
+     * @param reason stable malformed, truncated, or invented-placeholder refusal reason
      * @param inputTokens provider-reported input token count
      * @param outputTokens provider-reported output token count
      * @param stopReason provider stop reason

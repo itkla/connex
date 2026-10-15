@@ -107,7 +107,25 @@ public class AiAssistantHistoryService {
                         workspaceId, companyId, organizationWorkspaceIds, limit));
     }
 
-    List<Note> notesForCompany(int companyId, int limit) {
+    /** Loads full reader-authorized note prose before assistant screening or truncation. */
+    List<Note> notesForPerson(int personId, int limit, boolean includePrivateNotes) {
+        requireLimit(limit);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrate(workspaceId, noteMapper.getAiAssistantVisibleNotesByPersonId(
+                workspaceId, personId, workspaceService.getCurrentUserId(),
+                currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes));
+    }
+
+    /** Loads full reader-authorized deal note prose before assistant screening or truncation. */
+    List<Note> notesForDeal(int dealId, int limit, boolean includePrivateNotes) {
+        requireLimit(limit);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrate(workspaceId, noteMapper.getAiAssistantVisibleNotesByDealId(
+                workspaceId, dealId, workspaceService.getCurrentUserId(),
+                currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes));
+    }
+
+    List<Note> notesForCompany(int companyId, int limit, boolean includePrivateNotes) {
         requireLimit(limit);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
@@ -119,7 +137,7 @@ public class AiAssistantHistoryService {
                         companyId,
                         currentUserId,
                         organizationWorkspaceIds,
-                        limit));
+                        limit, includePrivateNotes));
     }
 
     private List<Integer> currentOrganizationWorkspaceIds(int workspaceId) {

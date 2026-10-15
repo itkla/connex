@@ -5,11 +5,13 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.Deal;
@@ -179,4 +181,74 @@ class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
         assertFalse(applied.result().has("verification"));
         assertFalse(applied.result().has("taskId"));
     }
+
+    @ParameterizedTest
+    @CsvSource({"complete_task,false", "complete_task,true", "reschedule_task,false", "reschedule_task,true"})
+    void storedDescriptionMemberCandidatesMaskFreshAndReplayedOutcomesAndRejectGuesses(
+            String tool, boolean nativeProtocol) throws Exception {
+        Task task = task();
+        String description = "Follow up with [Former Member](user:21) and [Pending Member](user:22).";
+        task.setDescription(description);
+        when(taskService.assistantStateVersion(73)).thenReturn(TaskService.assistantStateVersion(task));
+        when(taskService.complete(73)).thenReturn(task);
+        when(taskService.reschedule(73, "2026-10-15")).thenReturn(task);
+        AiAssistantWriteToolService service = service();
+        String date = "reschedule_task".equals(tool) ? ",\"due_date\":\"2026-10-15\"" : "";
+        var write = propose(service, tool, "{\"handle\":\"t1\"" + date + "}", "task", 73);
+        service.approve(TURN.sessionId(), TOOL_CALL_ID);
+        String stored = capturedExecutedResult();
+        assertTrue(stored.contains("Former Member"));
+        assertTrue(stored.contains("Pending Member"));
+        assertFalse(stored.contains("{{M"));
+        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var support = new AiAssistantMaskingTestSupport(TURN.workspaceId(), 11);
+        try {
+            for (int replay = 0; replay < 2; replay++) {
+                var result = service.proposalResult(write, new AiAssistantToolProposal(
+                        TOOL_CALL_ID, "executed", stored, true));
+                assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member", "/outcome/description"),
+                        new AiAssistantToolResult.Identifier("member", "Pending Member", "/outcome/description")), result.identifiers());
+                var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+                context.registerMemberCandidate("Renamed Member");
+                result.identifiers().forEach(identifier -> identifier.seed(context));
+                assertEquals(0, context.tokenBindings().size());
+                var resources = new AiChatResourceRegistry(context);
+                var prompt = nativeProtocol
+                        ? assembler.assembleNative(List.of(), result, List.of(), context, resources,
+                                List.of(), budget, AiAssistantToolCatalog.ALL)
+                        : assembler.assemble(List.of(), result, List.of(), context, resources,
+                                AiAssistantToolCatalog.ALL);
+                String answer = "{\"text\":\"{{M1}} and {{M2}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+                String output = nativeProtocol ? answer : "{\"tool\":null,\"final\":" + answer + "}";
+                var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol,
+                        List.of(), output, false, null);
+                String payload = objectMapper.writeValueAsString(capture.request().messages());
+                assertFalse(payload.contains("Former Member"));
+                assertFalse(payload.contains("Pending Member"));
+                assertFalse(payload.contains("Renamed Member"));
+                assertTrue(payload.contains("{{M1}}"));
+                assertTrue(payload.contains("{{M2}}"));
+                assertEquals(0, capture.warnings());
+                assertEquals("Former Member and Pending Member",
+                        ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}} and {{M2}}", context).text());
+                String guessed = "{\"text\":\"{{M3}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+                var refused = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, List.of(),
+                        nativeProtocol ? guessed : "{\"tool\":null,\"final\":" + guessed + "}", false, null);
+                assertEquals(1, refused.warnings());
+                var demaskedGuess = ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M3}}", context);
+                assertEquals(1, demaskedGuess.warnings());
+                for (String label : List.of("Former Member", "Pending Member", "Renamed Member")) {
+                    assertFalse(demaskedGuess.text().contains(label));
+                }
+                assertEquals(2, context.tokenBindings().size());
+                assertEquals(description, objectMapper.readTree(stored).path("outcome").path("description").asString());
+            }
+            verify(taskService, times("complete_task".equals(tool) ? 1 : 0)).complete(73);
+            verify(taskService, times("reschedule_task".equals(tool) ? 1 : 0)).reschedule(73, "2026-10-15");
+        } finally {
+            support.releaseFixtureMocks();
+        }
+    }
+
 }

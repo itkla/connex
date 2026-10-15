@@ -29,6 +29,7 @@ class AiChatMapperTest extends AbstractMapperTest {
 
     @Autowired private AiChatMapper chatMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
 
     @Test
     void sessionAndMessageColumnsRoundTrip() {
@@ -57,6 +58,32 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(owner.getId(), foundMessage.getAuthorUserId());
         assertEquals("A durable message", foundMessage.getContent());
         assertNotNull(foundMessage.getCreatedAt());
+    }
+
+    @Test
+    void latestAnswerExcludesFailedUserTurnsAndOtherSessionsAndWorkspaces() {
+        User owner = newUser();
+        AiChatSession first = session(workspace, owner, "First", "private");
+        AiChatSession second = session(workspace, owner, "Second", "private");
+        Workspace foreign = newWorkspace();
+        AiChatSession third = session(foreign, owner, "Foreign", "private");
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), first.getId()));
+        jdbcTemplate.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, author_kind, content, structured_json) VALUES "
+                        + "(?, ?, 1, 'assistant', 'Old answer', '{}'), (?, ?, 2, 'assistant', 'Latest answer', ?), "
+                        + "(?, ?, 3, 'user', 'Failed request', NULL), (?, ?, 9, 'assistant', 'Other session', '{}'), "
+                        + "(?, ?, 99, 'assistant', 'Foreign workspace', '{}')",
+                workspace.getId(), first.getId(), workspace.getId(), first.getId(),
+                "{\"suggestions\":[\"Ask Former Member\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}",
+                workspace.getId(), first.getId(), workspace.getId(), second.getId(), foreign.getId(), third.getId());
+        sqlSession.clearCache();
+        AiChatMessage latest = chatMapper.getLatestAnswer(workspace.getId(), first.getId());
+        assertEquals(2, latest.getSeq());
+        assertEquals("assistant", latest.getAuthorKind());
+        assertEquals("Latest answer", latest.getContent());
+        assertTrue(latest.getStructuredJson().contains("Former Member"));
+        assertEquals("Other session", chatMapper.getLatestAnswer(workspace.getId(), second.getId()).getContent());
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), third.getId()));
+        assertNull(chatMapper.getLatestAnswer(foreign.getId(), first.getId()));
     }
 
     @Test

@@ -271,7 +271,7 @@
   <select id="getVisibleNotesByPersonId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
-      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+      AND (visibility = 'workspace' OR (#{includePrivateNotes} AND author_id = #{currentUserId}))
     <include refid="timelineNoteCursor"/>
     ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -280,7 +280,7 @@
   <select id="getVisibleNotesByDealId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
-      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+      AND (visibility = 'workspace' OR (#{includePrivateNotes} AND author_id = #{currentUserId}))
     <include refid="timelineNoteCursor"/>
     ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -327,10 +327,28 @@
     LIMIT #{limit}
   </select>
 
+  <select id="getAiAssistantVisibleNotesByPersonId" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.person_id = #{personId}
+      AND (n.visibility = 'workspace' OR (#{includePrivateNotes} AND n.author_id = #{currentUserId}))
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getAiAssistantVisibleNotesByDealId" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.deal_id = #{dealId}
+      AND (n.visibility = 'workspace' OR (#{includePrivateNotes} AND n.author_id = #{currentUserId}))
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
   <select id="getAiAssistantVisibleNotesByCompanyId" resultMap="NoteResult">
     SELECT <include refid="qualifiedNoteColumns"/> FROM note n
     WHERE n.workspace_id = #{workspaceId}
-      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND (n.visibility = 'workspace' OR (#{includePrivateNotes} AND n.author_id = #{currentUserId}))
       AND <include refid="assistantLinkedPeopleProcessable"/>
       AND (EXISTS (SELECT 1 FROM person p
           WHERE p.id = n.person_id AND p.company_id = #{companyId}

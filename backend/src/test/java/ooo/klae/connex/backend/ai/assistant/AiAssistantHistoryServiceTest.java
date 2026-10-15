@@ -113,7 +113,7 @@ class AiAssistantHistoryServiceTest {
                 .thenReturn(dealTasks);
         when(taskMapper.getAiAssistantTasksByCompanyId(7, 5, List.of(7, 9), 8))
                 .thenReturn(companyTasks);
-        when(noteMapper.getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9))
+        when(noteMapper.getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9, false))
                 .thenReturn(companyNotes);
         when(referenceService.hydrateActivities(eq(7), same(personActivities))).thenReturn(hydratedPersonActivities);
         when(referenceService.hydrateActivities(eq(7), same(dealActivities))).thenReturn(hydratedDealActivities);
@@ -129,7 +129,7 @@ class AiAssistantHistoryServiceTest {
         assertEquals(hydratedPersonTasks, service.tasksForPerson(17, 5));
         assertEquals(hydratedDealTasks, service.tasksForDeal(8, 6));
         assertEquals(hydratedCompanyTasks, service.tasksForCompany(5, 8));
-        assertEquals(hydratedCompanyNotes, service.notesForCompany(5, 9));
+        assertEquals(hydratedCompanyNotes, service.notesForCompany(5, 9, false));
 
         verify(activityMapper).getAiAssistantActivitiesByPersonId(7, 17, List.of(7, 9), null, null, 3);
         verify(activityMapper).getAiAssistantActivitiesByDealId(7, 8, List.of(7, 9), null, null, 4);
@@ -137,7 +137,7 @@ class AiAssistantHistoryServiceTest {
         verify(taskMapper).getAiAssistantTasksByPersonId(7, 17, List.of(7, 9), 5);
         verify(taskMapper).getAiAssistantTasksByDealId(7, 8, List.of(7, 9), 6);
         verify(taskMapper).getAiAssistantTasksByCompanyId(7, 5, List.of(7, 9), 8);
-        verify(noteMapper).getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9);
+        verify(noteMapper).getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 9, false);
         verify(referenceService).hydrateActivities(eq(7), same(personActivities));
         verify(referenceService).hydrateActivities(eq(7), same(dealActivities));
         verify(referenceService).hydrateActivities(eq(7), same(companyActivities));
@@ -183,4 +183,15 @@ class AiAssistantHistoryServiceTest {
                 workspaceService,
                 referenceService);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void privacyModeReachesEveryNoteQueryBeforeItsLimit(boolean includePrivate) {
+        service.notesForPerson(17, 10, includePrivate);
+        service.notesForDeal(8, 10, includePrivate);
+        service.notesForCompany(5, 10, includePrivate);
+        verify(noteMapper).getAiAssistantVisibleNotesByPersonId(7, 17, 11, List.of(7, 9), 10, includePrivate);
+        verify(noteMapper).getAiAssistantVisibleNotesByDealId(7, 8, 11, List.of(7, 9), 10, includePrivate);
+        verify(noteMapper).getAiAssistantVisibleNotesByCompanyId(7, 5, 11, List.of(7, 9), 10, includePrivate);
+    }
+
 }

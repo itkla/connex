@@ -48,6 +48,13 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void assistantPersonAndDealNoteReadsRemainTenantScoped() {
+        for (String method : Set.of("getAiAssistantVisibleNotesByPersonId", "getAiAssistantVisibleNotesByDealId")) {
+            assertTrue(interceptor.requiresResolvedContext(NS + "NoteMapper." + method));
+        }
+    }
+
+    @Test
     void approvalMetadataStatementsRetainTheirControlAndWorkspaceClassifications() {
         assertTrue(TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.contains(NS + "UserMapper"));
         assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.privilegedMemberships"));

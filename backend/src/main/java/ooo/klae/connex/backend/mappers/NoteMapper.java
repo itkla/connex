@@ -70,16 +70,24 @@ public interface NoteMapper {
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByPersonId(workspaceId, personId, currentUserId, limit, offset, null);
     }
+    default List<Note> getVisibleNotesByPersonId(int workspaceId, int personId,
+            int currentUserId, int limit, int offset, NotePageCursor before) {
+        return getVisibleNotesByPersonId(workspaceId, personId, currentUserId, limit, offset, before, true);
+    }
     List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId,
         @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
-        @Param("before") NotePageCursor before);
+        @Param("before") NotePageCursor before, @Param("includePrivateNotes") boolean includePrivateNotes);
     default List<Note> getVisibleNotesByDealId(int workspaceId, int dealId,
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByDealId(workspaceId, dealId, currentUserId, limit, offset, null);
     }
+    default List<Note> getVisibleNotesByDealId(int workspaceId, int dealId,
+            int currentUserId, int limit, int offset, NotePageCursor before) {
+        return getVisibleNotesByDealId(workspaceId, dealId, currentUserId, limit, offset, before, true);
+    }
     List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
         @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
-        @Param("before") NotePageCursor before);
+        @Param("before") NotePageCursor before, @Param("includePrivateNotes") boolean includePrivateNotes);
     default List<Note> getVisibleNotesByAuthorId(int workspaceId, int authorId,
             int currentUserId, int limit, int offset) {
         return getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId, limit, offset, null);
@@ -96,12 +104,27 @@ public interface NoteMapper {
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);
+    List<Note> getAiAssistantVisibleNotesByPersonId(
+            @Param("workspaceId") int workspaceId, @Param("personId") int personId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
+    List<Note> getAiAssistantVisibleNotesByDealId(
+            @Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
+    default List<Note> getAiAssistantVisibleNotesByCompanyId(int workspaceId, int companyId,
+            int currentUserId, List<Integer> organizationWorkspaceIds, int limit) {
+        return getAiAssistantVisibleNotesByCompanyId(workspaceId, companyId, currentUserId,
+                organizationWorkspaceIds, limit, true);
+    }
     List<Note> getAiAssistantVisibleNotesByCompanyId(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId,
             @Param("currentUserId") int currentUserId,
             @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
-            @Param("limit") int limit);
+            @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> getWorkspaceNotesByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);

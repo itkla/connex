@@ -292,4 +292,67 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertTrue(stored(note).isEmpty());
     }
 
+    @Test
+    void memberReferenceCandidatesExcludeBlankLabelsBeforeIdentifierConstruction() {
+        for (String label : List.of("", " ", "\t", "\n", "\u2003")) {
+            assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42)"));
+            assertEquals(List.of("Li"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    "[" + label + "](user:42) and [Li](user:42)"));
+        }
+    }
+
+    @Test
+    void readerVisibleMemberLabelsIncludeRepeatedTargetsAndReferenceStyleLabels() {
+        assertEquals(List.of("Old Alice", "Other Old Label", "Pending Invitee", "Shortcut"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Old Alice](user:42) and [Other Old Label](user:42) "
+                                + "[Pending Invitee][pending] and [Shortcut]\n\n"
+                                + "[pending]: user:43\n[Shortcut]: user:44"));
+        assertEquals(List.of("Nested [Alice]"), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Nested [Alice]](user:42)"));
+        assertEquals(List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                "[Contact](person:42) (unavailable member)"));
+    }
+
+    @Test
+    void readerAuthorizedMemberCandidatesKeepEncodedSourceLabelsAndDecodedLabels() {
+        assertEquals(List.of("Alice & Bob", "Pending <Name>", "Alice &amp; Bob", "Pending &lt;Name&gt;"),
+                ReferenceService.memberLabelsFromReaderVisibleContent(
+                        "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n\n[invite]: user:43"));
+    }
+
+    @Test
+    void readerAuthorizedMemberCandidatesParseOriginalEncodedDelimiters() {
+        for (var label : List.of(
+                java.util.Map.entry("Al&#93;ice", "Al]ice"),
+                java.util.Map.entry("Al&#91;ice", "Al[ice"),
+                java.util.Map.entry("Alice &amp; Bob", "Alice & Bob"))) {
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "](user&#58;42)"));
+            assertEquals(List.of(label.getValue(), label.getKey()),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(
+                            "[" + label.getKey() + "][member&#93;key]\n\n[member&#93;key]: user&#58;42"));
+        }
+    }
+
+    @Test
+    void memberDefinitionTitlesNeverSuppressEncodedLabelCandidates() {
+        for (String lineBreak : List.of("&#10;", "&#x0A;", "&NewLine;", "&#13;")) {
+            for (String title : List.of("\"a" + lineBreak + "b\"", "'a" + lineBreak + "b'", "(a" + lineBreak + "b)")) {
+                for (String destination : List.of("user&#58;42", "<user&#58;42>", "&#32;user&#58;42&#32;")) {
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob][m]\n\n[m]: " + destination + " " + title),
+                            destination + " " + title);
+                    assertEquals(List.of("Alice & Bob", "Alice &amp; Bob"),
+                            ReferenceService.memberLabelsFromReaderVisibleContent(
+                                    "[Alice &amp; Bob](" + destination + " " + title + ")"),
+                            destination + " " + title);
+                }
+            }
+        }
+    }
+
 }

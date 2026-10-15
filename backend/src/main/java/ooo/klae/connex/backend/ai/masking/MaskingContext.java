@@ -1,13 +1,17 @@
 package ooo.klae.connex.backend.ai.masking;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -23,14 +27,25 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
  */
 public final class MaskingContext {
     private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
+    private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
+    private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z][1-9][0-9]*)\\s*}}");
+    private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
+    private static final Pattern PLACEHOLDER_PREFIX = Pattern.compile("\\{\\{?\\s*+[A-Za-z]?[0-9]*+\\s*+}?");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
     private final Map<String, IdentifierEntry> rawIdentifierEntries = new LinkedHashMap<>();
+    private final Map<String, Set<EntityKind>> identifierKinds = new LinkedHashMap<>();
     private final Set<String> unsafeIdentifierValues = new LinkedHashSet<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
+    private final Set<String> trustedStaticFields = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
+    private final Set<String> exposedTokens = new LinkedHashSet<>();
+    private final Set<String> reservedTokens = new LinkedHashSet<>();
+    private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
+    private final Map<String, MaskingContext> admittedProviderCalls = new LinkedHashMap<>();
+    private Set<String> replayMemberValues = Set.of();
     private final AiPrivacyMode privacyMode;
 
     /** Creates a request-local masked context. */
@@ -62,6 +77,14 @@ public final class MaskingContext {
         if (rawValue == null || rawValue.isBlank()) {
             throw new IllegalArgumentException("Cannot tokenize a blank identifier");
         }
+        if (kind == EntityKind.MEMBER) {
+            memberIdentifierValues.add(rawValue);
+        }
+        registerIdentifier(kind, rawValue, originalValueToToken.get(rawValue));
+        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
+        if (entry != null && (entry.placeholderShaped() || entry.irreversibleMemberSymbol())) {
+            return MaskingEngine.REDACTED;
+        }
         String token = originalValueToToken.get(rawValue);
         if (token == null) {
             token = nextToken(kind);
@@ -69,24 +92,231 @@ public final class MaskingContext {
             tokenToOriginalValue.put(token, rawValue);
             tokenToKind.put(token, kind);
         }
-        if (!rawIdentifierEntries.containsKey(rawValue)) {
-            CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
-            String canonicalValue = stored.literal();
-            if (isCanonicalDictionaryEligible(canonicalValue)
-                    || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
-                identifierDictionary.add(rawValue);
-                rawIdentifierEntries.put(rawValue,
-                        new IdentifierEntry(rawValue, canonicalValue,
-                                stored.label(), token,
-                                Objects.requireNonNull(tokenToKind.get(token)), !stored.converged()));
-                if (!stored.converged()) {
-                    unsafeIdentifierValues.add(canonicalValue);
-                    log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
-                }
+        registerIdentifier(kind, rawValue, token);
+        return (entry != null && entry.unsafe()) || originalValueForToken(token) == null
+                ? MaskingEngine.REDACTED : token;
+    }
+
+    /** Registers a member label for replacement and scanning without issuing a token. */
+    public void registerMemberCandidate(String rawValue) {
+        if (rawValue != null && !rawValue.isBlank()) {
+            memberIdentifierValues.add(rawValue);
+            if (privacyMode != AiPrivacyMode.UNMASKED || !CanonicalText.storedIdentifier(rawValue).converged()) {
+                registerIdentifier(EntityKind.MEMBER, rawValue, originalValueToToken.get(rawValue));
             }
         }
-        IdentifierEntry entry = rawIdentifierEntries.get(rawValue);
-        return entry != null && entry.unsafe() ? MaskingEngine.REDACTED : token;
+    }
+
+    private void registerIdentifier(EntityKind kind, String rawValue, String token) {
+        Set<EntityKind> kinds = identifierKinds.get(rawValue);
+        if (kinds == null || !kinds.contains(kind)) {
+            EnumSet<EntityKind> combined = kinds == null ? EnumSet.of(kind) : EnumSet.copyOf(kinds);
+            combined.add(kind);
+            identifierKinds.put(rawValue, Set.copyOf(combined));
+        }
+        IdentifierEntry existing = rawIdentifierEntries.get(rawValue);
+        if (existing != null) {
+            boolean memberSymbol = existing.irreversibleMemberSymbol()
+                    || kind == EntityKind.MEMBER && isShortNonAsciiSymbol(rawValue, existing.canonicalValue());
+            if (existing.token() == null && token != null || memberSymbol != existing.irreversibleMemberSymbol()) {
+                rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue,
+                        existing.canonicalValue(), existing.labelValue(), token == null ? existing.token() : token,
+                        token == null ? existing.kind() : Objects.requireNonNull(tokenToKind.get(token)),
+                        existing.unsafe() || memberSymbol, existing.placeholderShaped(), memberSymbol));
+            }
+            return;
+        }
+        CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(rawValue);
+        var placeholders = DISPATCHED_TOKEN.matcher(java.text.Normalizer.normalize(
+                rawValue, java.text.Normalizer.Form.NFKC).toUpperCase(java.util.Locale.ROOT));
+        boolean placeholderShaped = false;
+        while (placeholders.find()) {
+            placeholderShaped = true;
+            reservedTokens.add("{{" + placeholders.group(1) + "}}");
+        }
+        String canonicalValue = stored.literal();
+        boolean memberSymbol = kind == EntityKind.MEMBER && isShortNonAsciiSymbol(rawValue, canonicalValue);
+        if (isCanonicalDictionaryEligible(canonicalValue)
+                || rawValue.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH || memberSymbol) {
+            identifierDictionary.add(rawValue);
+            rawIdentifierEntries.put(rawValue, new IdentifierEntry(rawValue, canonicalValue,
+                    stored.label(), token, token == null ? kind : tokenToKind.get(token),
+                    !stored.converged() || placeholderShaped || memberSymbol, placeholderShaped, memberSymbol));
+            if (!stored.converged()) {
+                unsafeIdentifierValues.add(canonicalValue);
+                log.warn("AI stored identifier omitted: non-converging label projection; kind={}", kind);
+            }
+        }
+    }
+
+    /** Short non-ASCII symbols carry member identity but cannot supply reversible placeholders. */
+    static boolean isShortNonAsciiSymbol(String rawValue, String canonicalValue) {
+        return !canonicalValue.isEmpty() && canonicalValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                && canonicalValue.codePoints().noneMatch(Character::isLetterOrDigit)
+                && rawValue.codePoints().anyMatch(value -> value > 127
+                        && !Character.isWhitespace(value) && !Character.isSpaceChar(value));
+    }
+
+    /**
+     * Records member tokens in the final envelope at the actual provider dispatch boundary.
+     * Earlier dispatched tokens remain reversible throughout this request.
+     */
+    public void exposeDispatchedPayload(String serializedPayload) {
+        var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(serializedPayload, "serializedPayload"));
+        while (matcher.find()) {
+            String token = "{{" + matcher.group(1) + "}}";
+            if (originalValueForToken(token) != null) {
+                exposedTokens.add(token);
+            }
+        }
+    }
+
+    boolean isMemberIdentifier(String rawValue) {
+        return memberIdentifierValues.contains(rawValue);
+    }
+
+    /** Keeps every non-member policy even when another kind owns this value's single token. */
+    boolean hasNonMemberIdentifier(String rawValue) {
+        return identifierKinds.getOrDefault(rawValue, Set.of()).stream().anyMatch(kind -> kind != EntityKind.MEMBER);
+    }
+
+    boolean isExposedMemberToken(String token) {
+        return exposedTokens.contains(token) && memberIdentifierValues.contains(originalValueForToken(token));
+    }
+
+    /**
+     * Detects unexposed member placeholders, including tokens reconstructed by link cleanup.
+     * The identity source map preserves doubled braces that ordinary prose canonicalization cancels.
+     */
+    public boolean containsUnexposedMemberToken(String text) {
+        return !refusedMemberPlaceholders(text).isEmpty();
+    }
+
+    /** Source spans whose spelling or exposure cannot be demasked by the canonical token parser. */
+    List<PlaceholderSpan> refusedMemberPlaceholders(String text) {
+        Objects.requireNonNull(text, "text");
+        var labels = placeholderProjection(text);
+        var matcher = MEMBER_PLACEHOLDER.matcher(labels.value());
+        List<PlaceholderSpan> refused = new ArrayList<>();
+        while (matcher.find()) {
+            String canonicalToken = "{{" + matcher.group(1).toUpperCase(java.util.Locale.ROOT) + "}}";
+            if (Character.toUpperCase(matcher.group(1).charAt(0)) != 'M'
+                    && !memberIdentifierValues.contains(tokenToOriginalValue.get(canonicalToken))) {
+                continue;
+            }
+            int start = labels.starts()[matcher.start()];
+            int end = labels.ends()[matcher.end() - 1];
+            var literal = DISPATCHED_TOKEN.matcher(text.substring(start, end));
+            if (!literal.matches() || !literal.group(1).equals(matcher.group(1).toUpperCase(java.util.Locale.ROOT))
+                    || demaskableValueForToken("{{" + matcher.group(1).toUpperCase(java.util.Locale.ROOT) + "}}") == null) {
+                refused.add(new PlaceholderSpan(start, end));
+            }
+        }
+        return List.copyOf(refused);
+    }
+
+    /**
+     * Withholds every incomplete spelling recognized by member validation, preserving its original
+     * offset through the same NFKC and label projection. A flush cannot publish a refused prefix.
+     */
+    public static int withheldPlaceholderStart(String text, int safeLength) {
+        var labels = placeholderProjection(text.substring(0, safeLength));
+        int start = labels.value().lastIndexOf('{');
+        if (start < 0) {
+            return safeLength;
+        }
+        if (start > 0 && labels.value().charAt(start - 1) == '{') {
+            start--;
+        }
+        return PLACEHOLDER_PREFIX.matcher(labels.value().substring(start)).matches()
+                ? labels.starts()[start] : safeLength;
+    }
+
+    private static CanonicalText.Projection placeholderProjection(String text) {
+        StringBuilder normalized = new StringBuilder();
+        List<Integer> starts = new ArrayList<>();
+        List<Integer> ends = new ArrayList<>();
+        var units = SOURCE_GRAPHEME.matcher(text);
+        while (units.find()) {
+            String unit = java.text.Normalizer.normalize(units.group(), java.text.Normalizer.Form.NFKC);
+            normalized.append(unit);
+            for (int index = 0; index < unit.length(); index++) {
+                starts.add(units.start());
+                ends.add(units.end());
+            }
+        }
+        return ConversationText.projectLabels(new CanonicalText.Projection(normalized.toString(),
+                starts.stream().mapToInt(Integer::intValue).toArray(),
+                ends.stream().mapToInt(Integer::intValue).toArray()));
+    }
+
+    record PlaceholderSpan(int start, int end) {
+    }
+
+    /** Captures known raw member mentions using the same script-aware boundary gate as user text. */
+    public List<String> memberCandidatesIn(String text) {
+        return memberCandidatesIn(text, List.of());
+    }
+
+    /**
+     * Adds precise demask provenance only at the originating textual field. Raw candidates still
+     * require mention boundaries; token-derived values must remain contained after typed normalization.
+     * Input projections are built once and reused across the complete candidate set.
+     */
+    public List<String> memberCandidatesIn(String text, List<String> demaskedValues) {
+        Objects.requireNonNull(text, "text");
+        Set<String> recorded = Set.copyOf(demaskedValues);
+        if (memberIdentifierValues.isEmpty() || text.isBlank()) {
+            return List.of();
+        }
+        var input = MaskingEngine.mentionScanText(text);
+        var candidates = privacyMode == AiPrivacyMode.UNMASKED ? memberIdentifierValues.stream()
+                : rawIdentifierEntries.values().stream().map(IdentifierEntry::rawValue)
+                        .filter(this::isMemberIdentifier);
+        return candidates.filter(value -> MaskingEngine.containsMemberMention(input, value)
+                        || recorded.contains(value) && MaskingEngine.containsRecordedMemberValue(input, value))
+                .toList();
+    }
+
+    String demaskableValueForToken(String token) {
+        return memberIdentifierValues.contains(tokenToOriginalValue.get(token)) && !exposedTokens.contains(token)
+                ? null : originalValueForToken(token);
+    }
+
+    /**
+     * Freezes the raw-member admission policy before a native tool can discover further labels.
+     * The snapshot is request-local, never persisted, and does not authorize token demasking.
+     */
+    public void recordProviderCallAdmission(String id) {
+        MaskingContext snapshot = new MaskingContext(privacyMode);
+        snapshot.tokenToOriginalValue.putAll(tokenToOriginalValue);
+        snapshot.tokenToKind.putAll(tokenToKind);
+        snapshot.originalValueToToken.putAll(originalValueToToken);
+        snapshot.rawIdentifierEntries.putAll(rawIdentifierEntries);
+        snapshot.identifierKinds.putAll(identifierKinds);
+        snapshot.memberIdentifierValues.addAll(memberIdentifierValues);
+        snapshot.identifierDictionary.addAll(identifierDictionary);
+        admittedProviderCalls.putIfAbsent(Objects.requireNonNull(id, "id"), snapshot);
+    }
+
+    /** Raw replay uses admission's candidate set; placeholder checks always use the live context. */
+    public MaskingContext providerCallAdmissionContext(String id) {
+        return admittedProviderCalls.getOrDefault(id, this);
+    }
+
+    /** Applies containment only while masking and scanning the one message owning this provenance. */
+    public <T> T withReplayMemberValues(List<String> values, Supplier<T> work) {
+        Set<String> previous = replayMemberValues;
+        replayMemberValues = Set.copyOf(values);
+        try {
+            return work.get();
+        } finally {
+            replayMemberValues = previous;
+        }
+    }
+
+    boolean requiresMemberContainment(String rawValue) {
+        return replayMemberValues.contains(rawValue);
     }
 
     /** Recognizes an unsafe structured value without projecting its exhausted label again. */
@@ -107,6 +337,8 @@ public final class MaskingContext {
      * <p>Eligibility uses the stored replacement canonicalization, so control-only names cannot
      * become empty matchers. Short symbol-only canonical values are also excluded; short names
      * containing a letter or digit, including single-character CJK surnames, remain protected.
+     * MEMBER candidates additionally retain short non-ASCII symbols for irreversible redaction;
+     * short ASCII punctuation-only labels retain the generic exclusion.
      * Raw values long enough for {@link OutboundLeakScan} remain in its dictionary independently
      * of replacement eligibility, preserving fail-closed scanning when separator folding removes
      * their entire value or reduces it below the scanner's floor.
@@ -141,6 +373,7 @@ public final class MaskingContext {
     public void addTrustedStaticText(String text) {
         if (text != null && !text.isBlank()) {
             trustedStaticTexts.add(OutboundLeakScan.normalizeForScan(text));
+            trustedStaticFields.add(text);
         }
     }
 
@@ -149,9 +382,14 @@ public final class MaskingContext {
      * own normalization.
      *
      * @param rawValue seeded identifier raw value
-     * @return true when the server's own prompt text contains the value
+     * @return true for a non-member identifier when the server text contains the value
      */
     public boolean isTrustedTextCollision(String rawValue) {
+        return !isMemberIdentifier(rawValue) && isTrustedNonMemberTextCollision(rawValue);
+    }
+
+    /** Applies the legacy static-text exemption only to the non-member side of a protection union. */
+    boolean isTrustedNonMemberTextCollision(String rawValue) {
         if (trustedStaticTexts.isEmpty()) {
             return false;
         }
@@ -164,6 +402,11 @@ public final class MaskingContext {
             }
         }
         return false;
+    }
+
+    /** Recognizes one complete registered server-authored field, never a label-wide exemption. */
+    boolean isTrustedStaticField(String value) {
+        return trustedStaticFields.contains(value);
     }
 
     /**
@@ -192,7 +435,9 @@ public final class MaskingContext {
     /** Detects identifier reuse anywhere in a value, including short structured identifiers. */
     public boolean containsSeededIdentifierValue(String value) {
         String candidate = OutboundLeakScan.normalizeForScan(value);
-        for (String original : originalValueToToken.keySet()) {
+        Set<String> originals = new LinkedHashSet<>(originalValueToToken.keySet());
+        originals.addAll(rawIdentifierEntries.keySet());
+        for (String original : originals) {
             CanonicalText.StoredIdentifier stored = CanonicalText.storedIdentifier(original);
             if (!stored.literal().isEmpty() && candidate.contains(stored.literal())
                     || !stored.label().isEmpty() && candidate.contains(stored.label())) {
@@ -234,7 +479,9 @@ public final class MaskingContext {
                 this,
                 tokenToOriginalValue.size(),
                 rawIdentifierEntries.size(),
-                unsafeIdentifierValues.size());
+                unsafeIdentifierValues.size(), new LinkedHashMap<>(rawIdentifierEntries),
+                new LinkedHashSet<>(memberIdentifierValues), new LinkedHashSet<>(reservedTokens),
+                new LinkedHashMap<>(identifierKinds));
     }
 
     /**
@@ -271,11 +518,20 @@ public final class MaskingContext {
         for (String token : withdrawn(tokenToOriginalValue.keySet(), checkpoint.tokens)) {
             originalValueToToken.remove(tokenToOriginalValue.remove(token));
             tokenToKind.remove(token);
+            exposedTokens.remove(token);
         }
         for (String rawValue : withdrawn(rawIdentifierEntries.keySet(), checkpoint.identifiers)) {
             rawIdentifierEntries.remove(rawValue);
             identifierDictionary.remove(rawValue);
         }
+        rawIdentifierEntries.clear();
+        rawIdentifierEntries.putAll(checkpoint.entries);
+        identifierKinds.clear();
+        identifierKinds.putAll(checkpoint.identifierKinds);
+        memberIdentifierValues.clear();
+        memberIdentifierValues.addAll(checkpoint.memberValues);
+        reservedTokens.clear();
+        reservedTokens.addAll(checkpoint.reservedTokens);
         unsafeIdentifierValues.removeAll(
                 withdrawn(unsafeIdentifierValues, checkpoint.unsafeIdentifiers));
     }
@@ -285,8 +541,11 @@ public final class MaskingContext {
         return "MaskingContext{redacted}";
     }
 
+    /** Refuses literal identifier spellings even when their colliding binding predates registration. */
     String originalValueForToken(String token) {
-        return tokenToOriginalValue.get(token);
+        String original = tokenToOriginalValue.get(token);
+        IdentifierEntry entry = rawIdentifierEntries.get(original);
+        return reservedTokens.contains(token) || entry != null && entry.irreversibleMemberSymbol() ? null : original;
     }
 
     List<IdentifierEntry> identifierEntries() {
@@ -298,8 +557,12 @@ public final class MaskingContext {
     }
 
     private String nextToken(EntityKind kind) {
-        int next = tokenCounts.merge(kind, 1, Integer::sum);
-        return "{{" + kind.tokenPrefix() + next + "}}";
+        String token;
+        do {
+            int next = tokenCounts.merge(kind, 1, Integer::sum);
+            token = "{{" + kind.tokenPrefix() + next + "}}";
+        } while (reservedTokens.contains(token));
+        return token;
     }
 
     /** A position in one context's binding order, which only that context can restore to. */
@@ -308,24 +571,35 @@ public final class MaskingContext {
         private final int tokens;
         private final int identifiers;
         private final int unsafeIdentifiers;
+        private final Map<String, IdentifierEntry> entries;
+        private final Set<String> memberValues;
+        private final Set<String> reservedTokens;
+        private final Map<String, Set<EntityKind>> identifierKinds;
 
         private Checkpoint(
-                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers) {
+                MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers,
+                Map<String, IdentifierEntry> entries, Set<String> memberValues, Set<String> reservedTokens,
+                Map<String, Set<EntityKind>> identifierKinds) {
             this.context = context;
             this.tokens = tokens;
             this.identifiers = identifiers;
             this.unsafeIdentifiers = unsafeIdentifiers;
+            this.entries = entries;
+            this.memberValues = memberValues;
+            this.reservedTokens = reservedTokens;
+            this.identifierKinds = identifierKinds;
         }
     }
 
     record IdentifierEntry(
-            String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind, boolean unsafe) {
+            String rawValue, String canonicalValue, String labelValue, String token, EntityKind kind,
+            boolean unsafe, boolean placeholderShaped, boolean irreversibleMemberSymbol) {
         boolean replacementEligible() {
-            return isCanonicalDictionaryEligible(canonicalValue);
+            return isCanonicalDictionaryEligible(canonicalValue) || irreversibleMemberSymbol;
         }
 
         boolean labelEligible() {
-            return isCanonicalDictionaryEligible(labelValue);
+            return isCanonicalDictionaryEligible(labelValue) || irreversibleMemberSymbol && !labelValue.isEmpty();
         }
     }
 }

@@ -203,6 +203,11 @@ public interface AiChatMapper {
         @Param("maxSeq") int maxSeq,
         @Param("limit") int limit);
 
+    /** Loads the latest assistant answer within one workspace and session. */
+    AiChatMessage getLatestAnswer(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
     AiChatMessage getHistorySummary(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);

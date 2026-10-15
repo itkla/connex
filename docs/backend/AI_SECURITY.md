@@ -52,6 +52,252 @@ Features do not build raw prompts.
 
 Any new feature must preserve the same masking and leak-scan boundary for every provider/protocol path.
 
+### Ask Connex member identifiers
+
+The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, company, deal,
+email and phone identifiers. A member's nonblank display name is protected; username is protected
+only when it supplies the existing blank-display-name fallback. Exact raw values retain the shared
+cross-kind deduplication rule. No member resource handle or new model-visible read field is added.
+Short symbol-only member labels containing a non-ASCII symbol, including a single emoji, are
+registered for irreversible `[redacted]` replacement and matching outbound scanning, never reversible
+tokens. Short labels made only of ASCII punctuation or whitespace remain outside the dictionary:
+masking a member named `.` or `?` would otherwise destroy ordinary punctuation. This is a bounded
+residual; it does not exempt non-ASCII symbol labels.
+
+Before memory preparation or compaction, the loop registers every active member label from the
+exact current workspace through `WorkspaceService.getMembers`. Directory labels are match
+candidates, not reversible bindings, and the directory is never serialized to a provider. Queue-time
+member provenance records only boundary-aware mentions within the combined 20-identifier limit,
+without adding resources; record mentions retain their existing canonical mention gate. Directory read failures abort before provider dispatch; the
+candidate dictionary is never truncated and a failed masked request is never retried unmasked.
+Approved `UNMASKED` disclosure retains its existing posture. Unknown provider placeholders still
+produce demasking warnings and fail closed in every disclosure mode.
+History and compaction register MEMBER provenance through the same privacy-aware candidate path,
+including legacy metadata. They do not issue tokens merely to read provenance. The per-message
+masked replay leak check runs only in masked disclosure; universal contact and special-care screens
+still apply to unmasked text.
+
+Stored prose can name a member who has renamed themselves or is still pending. Notes, activities,
+task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
+from reader-authorized content before assistant screening or truncation, regardless of current name
+or membership status. Repeated references to one user and reference-style Markdown retain all
+labels, including both authored HTML-entity spellings and decoded labels. The collector covers the
+following constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+
+| Covered construct | One-line example |
+| --- | --- |
+| Canonical inline tokens, including label code spans and backslash escapes | ``[Alice \` `]` Former](user:42)`` |
+| Canonical destination separators | `[Alice](user:42)`, `[Alice](user&colon;42)`, `[Alice](user\:42)` |
+| Authored and HTML-decoded label spellings | `[Alice &amp; Bob](user:42)` registers both `Alice &amp; Bob` and `Alice & Bob` |
+| Full reference links | `[Alice][m]\n\n[m]: user:42` |
+| Collapsed reference links | `[Alice][]\n\n[Alice]: user:42` |
+| Shortcut reference links | `[Alice]\n\n[Alice]: user:42` |
+| Failed-inline and failed-definition shortcut fallbacks | `[Alice](not a link)\n\n[Alice]: user:42`; `[Alice]: welcome back.\n\n[Alice]: user:42` |
+| Prose and paragraph-continuation shortcuts followed by a colon | `Hello\n[Alice]: welcome.\n\n[Alice]: user:42` |
+| Definitions at document start, after a blank line, or after another definition | `[m]: user:42\n[n]: user:43\n\n[Alice][m]`; `Hello\n\n[m]: user:42\n\n[Alice][m]` |
+| Blockquote and list-container definitions | `[Alice][m]\n\n> [m]: <user:42>`; `[Alice][m]\n\n- [m]: user:42` |
+| Continued definition keys and destinations, with LF, CR or CRLF | `[Alice][m n]\n\n> [m\n> n]:\r> <user:42>` |
+| Titled definitions, without decoding the title for member detection | `[Alice][m]\n\n[m]: user:42 "a&#10;b"` |
+| Unicode case-folded and whitespace-collapsed keys | `[Alice][SS]\n\n[ß]: user:42`; `[Alice][m n]\n\n[M\tN]: user:42` |
+| The shared 999-code-point label bound, checked before copying or normalization | `"[" + "😀".repeat(999) + "](user:42)"` is accepted; 1,000 code points are outside the bound |
+
+The implemented paragraph-interruption rules determine when a following definition may start:
+
+| Paragraph rule | One-line example |
+| --- | --- |
+| Blank lines end paragraphs | `Hello\n\n[m]: user:42` |
+| ATX headings, fenced code openers, thematic breaks, block quotes and setext underlines can interrupt | `Hello\n# Heading`, ``Hello\n```java``, `Hello\n***`, `Hello\n> quote`, `Hello\n===` |
+| A new list item can interrupt only if nonempty; an ordered item must start at 1 | `Hello\n* item` and `Hello\n1. item` interrupt; `Hello\n* ` and `Hello\n2. item` continue the paragraph |
+| HTML block starts of types 1–6 can interrupt; type 7 cannot | `Hello\n<script>`, `Hello\n<!--`, `Hello\n<?pi?>`, `Hello\n<!DOCTYPE html>`, `Hello\n<![CDATA[`, `Hello\n<div>` interrupt; `Hello\n<custom>` does not |
+| Indented code cannot interrupt | `Hello\n    code` continues the paragraph |
+| Container paragraphs retain lazy continuations | `> Hello\n[Alice]: welcome.\n\n[Alice]: user:42` keeps the first bracket as a shortcut usage |
+
+Code and escape handling use one shared sequential delimiter table following
+[CommonMark 0.31.2 §§2.4 and 6.1](https://spec.commonmark.org/0.31.2/#code-spans).
+Outside code, a backslash escapes the next ASCII punctuation character. An unescaped backtick run
+opens code only when a later raw run has exactly the same length; that whole span is literal,
+including its backslashes and brackets. Unmatched runs stay text. The next matching run is
+precomputed once, so no opener rescans the source. Code-aware structural readings retain the
+listed blank-line and block-start boundaries. Canonical local entries use the same transitions
+without depending on preceding block state; the extra no-code reading remains conservative.
+Unambiguous explicit reference keys
+remain keys; ambiguous bracket readings stay independent. The scans and fixed-number reading merge
+remain linear in stored prose length, with the label bound applied before extraction. Member
+provenance writers and readers use the same code-point bound, including supplementary characters.
+
+Full CommonMark parity is **not claimed**. Any construct not listed above is a bounded residual
+tracked in [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser
+for both reference readers; the owner decision is pending. In particular, raw HTML block state is
+not modelled, and reference-style labels adjacent to raw HTML remain in that residual.
+Current active members are masked everywhere through directory candidates. Prose mentions of
+former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
+bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company
+notes; private sessions retain the requester's own private notes. These reads retain the existing
+workspace/reader predicates and assistant history limit of at most 20 rows; `NoteBodyReadBoundaryArchTest` pins both the exact callers and hydration. This is runtime provenance handling, with no name heuristics or historical backfill.
+Person, deal and company assistant note queries also exclude restricted or inaccessible linked
+people in SQL before their limit, including inline person references. Ineligible recent notes
+cannot crowd older eligible notes out of the assistant's bounded page.
+
+`AiAssistantWriteTool.modelIdentifiers` is a pure stored-outcome projection. `assign_owner` declares
+the committed owner label as MEMBER provenance, excluding the removal sentinel. Fresh execution
+and replay use that same label without a new directory lookup, including after rename or
+offboarding. Member cards and raw stored write outcomes retain their existing content. Final answer
+metadata stores both exact member replacements captured during demasking and every known member
+candidate contained in the persisted raw text, even when no token was allocated or exposed. Summary
+metadata follows the same rule, within the existing count and value-length limits. All echoing write
+tools retain raw argument provenance in their server-authored durable envelope and restore it from
+both stored proposal and result on replay, without changing public arguments, outcomes or cards.
+Proposal provenance remains available when an older binary writes its older result format. Readers reseed that provenance for ordinary history and compaction under
+a fresh masking context; no token binding is persisted. In that stored message only, every recorded
+member label is replaced and leak-scanned by containment, regardless of label length or adjacency.
+Only matches aligned with complete source characters receive reversible tokens. A containment match
+that cuts through a character's compatibility expansion irreversibly redacts its complete source
+span with `[redacted]`, so demasking cannot replace unmatched characters. Other labels and other
+messages retain ordinary short-label word boundaries. Tool-result containment and leak checks
+operate per tenant-bearing textual value; fixed tool, tier, status and record-type fields retain
+their ordinary matching rules.
+
+Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
+member tokens present in the final payload after screening, budgeting and truncation. Only tokens
+exposed in an actual dispatch during the current run can demask; earlier dispatches in the run remain
+valid, and history inside a dispatched payload counts. A guessed unissued or unexposed member token
+in a final answer, stream or tool argument follows invented-placeholder refusal and cannot reveal
+the name or create an owner proposal. This includes dropped tool rows, oversized attachments,
+redaction-only matches and omitted replay messages. Candidate and bound values both participate in
+the outbound scan, including short Unicode names, with the replacer's matching rules. These rules
+apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
+separate pre-existing issue. Registered identifiers containing placeholder syntax are irreversible:
+they receive `[redacted]`, never reversible bindings. Their placeholder spellings are reserved even
+if another identifier already holds that binding, so a literal member label cannot authorize it.
+
+Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
+MEMBER tokens before envelope/schema validation or repair retention. Complete provider text and
+native argument strings receive a conservative, linear Unicode/backslash escape projection before
+parsing, repair or replay admission, even when a valid object prefix precedes an offending suffix.
+Native call ids, names and thought signatures use the same complete-text check. Encoded unexposed
+MEMBER tokens cannot earn a repair dispatch; the projection is used only for refusal and never changes
+retained text. Plain-text completions used for attachment descriptions also refuse escaped unexposed
+MEMBER tokens with a warning and empty output, before the description can be replayed. Noncanonical lowercase or
+NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
+syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
+on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
+reset through the transport. Incomplete lowercase and NFKC-equivalent token prefixes use the same
+normalization and source offsets as token validation, and are withheld across streaming flushes.
+Context-free bare-placeholder checks require braces for MEMBER, so
+ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
+text is excluded only in its own fields; a collision never exempts a member label in tenant text.
+Native call ids, names and thought signatures receive the same unexposed-token check as arguments
+before validation, persistence or replay. Replaying any provider-authored native call field cannot
+grant exposure, even when it contains a bound placeholder. The dispatch exposure projection excludes
+the entire call by position and retains the server-authored tool result; the complete replay payload
+still passes the ordinary byte budget and outbound leak scan. Previously exposed tokens remain valid
+inside opaque fields without altering those fields.
+Final server-authored masking markers `[redacted]` and `[omitted by policy]` are excluded by
+position from MEMBER leak matching. Genuine source occurrences are replaced before these markers
+are inserted; a member named “Redacted” receives no label-wide exemption. Strict provider-authored
+scanning keeps its existing checks. Outbound text retains its origin independently of serialization:
+server-static system directives, repair instructions, schema keys and validated catalog tool names
+never participate in MEMBER raw-name scanning. Tenant messages, stored content and masked tool results
+are scanned as tenant data. Replayed native ids, arguments and repair model output remain provider-authored, with a strict
+MEMBER scan of raw and JSON-decoded text. Opaque thought signatures retain placeholder checks
+without MEMBER-only raw-name matching, as described below. The masker
+records exact UTF-16 spans only when it writes a replacement marker or placeholder; schema-repair
+segments carry those offsets through JSON escaping and message assembly. MEMBER scanning neutralizes
+only these recorded insertions while preserving JSON decoding. Provider-authored text that merely
+looks like `[redacted]` or `[omitted by policy]` receives no exemption, including when the same field
+also contains genuine masker insertions. This insertion provenance is request-local and never
+persisted. Only tenant-data segments may grant dispatch exposure; provider text and static vocabulary
+cannot authorize a hidden binding. Server-created markers in tool results retain their positional
+exemption. Unclassified repair text defaults to tenant data. Field projections are built once per scanned segment and reused
+across the complete candidate dictionary. Tool-result provenance retains the JSON pointer of each originating textual field; containment
+never extends to unrelated sibling fields. Unscoped legacy declarations retain ordinary
+boundary-aware matching. For persisted provider-authored text, provenance
+includes exact demask replacements independently of adjacency, supplemented by raw candidates
+matched with the same boundary-aware member matcher as user provenance. In space-delimited scripts,
+Unicode letters and digits are word characters; underscores and punctuation are separators.
+Han, Hiragana, Katakana, Hangul and Thai need no boundaries. MEMBER replacement and outbound leak
+scanning use this same boundary rule for labels of every length, so `Иван` matches `Иван пришёл`
+but leaves the distinct surname `Иванов` intact when that value is MEMBER-only. Values registered
+under several kinds retain the union of every applicable protection, independently of which kind
+issued their shared token first. A member named `Acme` cannot weaken COMPANY residual redaction or
+containment scanning of `AcmeCorp`. Recorded MEMBER provenance cannot promote another kind's
+residual-only match into a reversible token, including equal source spans beside accented letters. Checkpoints restore those kind registrations along with bindings.
+Legacy static-text exemptions apply only to non-member policies; MEMBER matching retains its
+origin-scoped rules. Other identifier kinds retain their existing rules. Exposure gating follows the raw value's MEMBER role too: a PERSON,
+COMPANY or DEAL token sharing that value requires dispatch exposure even if allocated before member
+registration. Invalidating a binding with a placeholder-shaped label does not erase that MEMBER
+association; its opaque native fields remain subject to invented-placeholder refusal. Dispatched tokens of every kind are remembered so later member registration preserves
+legitimate exposure. Non-colliding existing kinds keep their existing demasking contract (#2056).
+
+Native call admission screens ids and arguments with the same strict raw-member predicate as replay,
+using identical raw field values, without an extra JSON encoding of ids at admission. The shared
+segment screen checks raw text and decoded JSON fields with the segment's recorded insertion spans
+and candidate snapshot before any AUTO mutation can execute. A refused call is malformed and retains any existing demask
+warnings, so raw-label refusal cannot make an invented reference repairable. Tool reads can discover authored
+former-member labels after admission; each admitted call therefore freezes its raw-member candidate
+set for replay. Placeholder validation uses the live context on every provider-controlled field.
+Validated catalog tool names are fixed vocabulary. `thoughtSignature` is opaque provider state:
+MEMBER-only raw-name matching does not interpret bytes such as `/Li+`, but placeholder and exposure checks remain
+mandatory. Provider-authored fields never establish exposure.
+
+Server-built tool-result segments are marked structurally: their keys are schema positions and their
+decoded scalar values remain member-bearing. This includes JSON-ReAct tool-result messages and
+native tool-role results; arbitrary JSON-shaped user messages retain full-text scanning. Successful `find_tools` results are
+server-static catalog declarations, revalidated against the closed catalog before budgeting. Their
+values keep fixed vocabulary on both protocols; refused loads retain ordinary result masking. The current
+result producers were audited, including nested projections: record/history/schedule reads, scope
+and work-brief reads, skill-plan evidence, tool discovery, and every write tool's `modelOutcome`.
+Their exported keys are server constants or closed schema fields. Record-id lookup maps remain
+internal; tenant labels, custom text and names are exported as values, never map keys.
+
+For raw-text provenance, `Bob_team` records `Bob`,
+while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
+and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
+precise member provenance, including through echoed write arguments, independently of these raw-text
+rules. At queue time, user references pass the existing reader-visibility boundary before the
+shared member-reference collector registers both authored and decoded labels. These labels are
+persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
+combined 20-identifier cap, without adding member resource handles. Blank and whitespace-only
+reference labels are excluded before candidate construction. Ordinary queued member provenance
+carries `matching:"mention"` and replays with the boundary-aware matcher, so `[Li](user:42)` does
+not enable containment inside an unrelated word such as `client`. Exact suggestion-click provenance
+retains containment; when the same label is also resolved as a mention, the exact demask provenance
+takes precedence. The optional matching field is ignored by older metadata readers.
+Recorded provenance protects its
+originating field after a rename and fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
+raw MEMBER provenance of each persisted follow-up suggestion separately at `/suggestions/N` in
+`memberIdentifiers` (answer text uses `/text`), using the original parsed paths even
+when filtering trims, removes or deduplicates suggestions. When the next user text exactly equals a
+persisted suggestion of the session's latest answer, queueing copies only that suggestion's own member provenance
+into that user message's `memberIdentifiers`, within the combined 20-identifier limit. This survives
+rename, offboarding, compaction and fresh-context replay without inferring a suggestion click from
+similar or edited text. The latest-answer read uses the existing authorized session mutex and exact
+workspace/session predicates, with no additional row lock or transaction boundary.
+
+Stage and tag names remain workspace vocabulary outside the masked identifier namespace by design.
+Their exemption adds no bypass: text colliding with a registered identifier still receives ordinary
+masking, screening and leak detection. The P1.1 hold on member-name string classes is lifted only
+when those labels enter the MEMBER boundary above; unrelated P1.1 scope is unchanged.
+
+`complete_task` and `reschedule_task` also declare every authored member-reference label in their
+stored description snapshots. The task delegates hydrate those descriptions through the existing
+reader-visibility boundary before storing the outcome. Fresh projection and replay register the
+labels as candidates before masking, including labels authored before a rename and references to
+pending members. MEMBER identifiers carried by tool results register as candidates without eager
+allocation; actual dispatch exposure remains required for demasking. This adds no directory lookup,
+mutation, outcome field or token kind.
+
+Answer, user-message and summary writers put raw MEMBER provenance only in the separate
+`memberIdentifiers` field, with the same `{kind:"member",value:...}` entry shape in all three forms.
+Unmasked turns retain directory labels only for boundary-aware raw-output provenance, without
+masking bindings or MEMBER leak-scan candidates. Their answer and summary metadata records matching
+raw labels without changing the output, so a later masked turn can protect replay after a rename
+or offboarding even when the directory no longer supplies the old label.
+The existing `identifiers` array never gains a `member` entry. New readers read both fields and
+retain old-shape conversation compatibility. Older releases ignore the additional field and replay
+without member masking, exactly their pre-#1822 behavior; automatic or manual rollback remains
+compatible. No writer flag, reader-first rollout, rollback floor, migration or historical rewrite is required.
+
 ## Image/media exception
 
 Pixels cannot be masked like text. Image-powered AI is an explicit policy exception and must use `AiInputImage` plus all of the following:
@@ -138,7 +384,11 @@ CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
 
 - **Run it with `./gradlew scriptedTrajectoryTest`, not `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache. `check` depends on the task. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the pattern — so a trajectory class CI would silently skip fails the build instead.
 - **A golden that writes must load its toolset first.** A turn starts holding only the `core` toolset, so every write tool sits behind a `find_tools` step; the fixtures spell that sequence out and the goldens assert the durable tool order, which is where a regression in toolset loading becomes visible.
-- **A journaled request has two authors, and a leak assertion may only read one of them.** The server authors the system prompt, its directives and every masked tool result; the model authors its tool-call arguments, which native replay carries back verbatim and never re-masks. Scanning both halves measures the fixture rather than the pipeline: a fixture that simply never quotes its own seeded record passes trivially, and a real leak in a server-authored field could hide behind it. Assert absence against the server-authored half, and say so in the assertion message. The rule for fixture authors follows from the same replay: `OutboundLeakScan` refuses any payload containing a registered raw identifier, so a fixture's search query must be a distinctive **fragment** of a record's name rather than the whole name. That is a constraint on writing fixtures, not evidence that no raw identifier travels.
+- **A journaled request has two authors, and a leak assertion may only read one of them.** The server authors the system prompt, its directives and every masked tool result; the model authors its tool-call arguments, which native replay carries back verbatim and never re-masks. Scanning both halves measures the fixture rather than the pipeline: a fixture that simply never quotes its own seeded record passes trivially, and a real leak in a server-authored field could hide behind it. Assert absence against the server-authored half, and say so in the assertion message. The rule for fixture authors follows from the same replay: `OutboundLeakScan` refuses any payload containing a registered raw identifier, so a fixture's search query must be a distinctive **fragment** of a record's name rather than the whole name. That is a constraint on writing fixtures, not evidence that no raw identifier travels. Raw member
+  names are model-authored incoming arguments, rather than an outbound leak at receipt. Native
+  calls must nevertheless be safe for verbatim replay: admission applies the strict replay screen
+  before any tool executes, and refuses raw member labels as malformed. A masked fixture assigning a member uses a MEMBER token actually exposed in its
+  user request, rather than inventing a token or replaying the complete raw label.
 - **Proposal freshness lives on the approval path only.** `AiAssistantWriteToolService.approve` refuses a CONFIRM proposal whose target was written in the proposal's own second. Proposing a write and executing an AUTO write never consult `AiAssistantProposalFreshness`, and the read service uses it only for a display-only staleness flag. The harness backdates seeded write targets so a future golden that *approves* is not silently converted into a staleness test — and a golden that means to pin that refusal must therefore not backdate its target.
 - **The harness is not transactional.** The loop runs on a worker thread that reloads the initiating identity from committed rows, so every fixture is committed and then deleted, in one fresh organization per test method. A turn that outruns the harness deadline is cancelled before teardown, because a worker still calling the provider would keep appending to the context-scoped request journal and fail the *next* golden's egress count.
 

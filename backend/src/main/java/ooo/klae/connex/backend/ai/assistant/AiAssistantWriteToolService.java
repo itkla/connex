@@ -123,7 +123,14 @@ public class AiAssistantWriteToolService {
             JsonNode args,
             AiChatResourceRegistry resources,
             long expectedRestrictionEpoch) {
-        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty());
+        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty(), Map.of());
+    }
+
+    /** Prepares a fresh write while retaining provenance recovered at exact argument JSON pointers. */
+    public AiAssistantPreparedWrite prepare(
+            String name, JsonNode args, AiChatResourceRegistry resources, long expectedRestrictionEpoch,
+            Map<String, List<String>> parsedMembers) {
+        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty(), parsedMembers);
     }
 
     /**
@@ -154,7 +161,7 @@ public class AiAssistantWriteToolService {
             String storedArgumentsJson) {
         return prepare(
                 name, args, resources, expectedRestrictionEpoch,
-                Optional.of(storedArgumentsJson));
+                Optional.of(storedArgumentsJson), Map.of());
     }
 
     private AiAssistantPreparedWrite prepare(
@@ -162,7 +169,8 @@ public class AiAssistantWriteToolService {
             JsonNode args,
             AiChatResourceRegistry resources,
             long expectedRestrictionEpoch,
-            Optional<String> storedArgumentsJson) {
+            Optional<String> storedArgumentsJson,
+            Map<String, List<String>> parsedMembers) {
         if (!toolCatalog.isWrite(name) || !toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed("unknown_write_tool");
         }
@@ -224,6 +232,12 @@ public class AiAssistantWriteToolService {
         durable.put("restrictionEpoch", expectedRestrictionEpoch);
         durable.put("target", targetData);
         durable.put("request", storedRequest);
+        List<AiAssistantToolResult.Identifier> memberIdentifiers = storedArgumentsJson.isPresent()
+                ? AiAssistantMemberIdentifiers.stored(objectMapper.readTree(storedArgumentsJson.get()))
+                : AiAssistantMemberIdentifiers.inRequest(storedRequest, resources.maskingContext(), parsedMembers);
+        if (!memberIdentifiers.isEmpty()) {
+            durable.put("memberIdentifiers", memberIdentifiers);
+        }
         if (tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
             String version;
             if (storedArgumentsJson.isPresent()) {
@@ -431,6 +445,7 @@ public class AiAssistantWriteToolService {
             toolCall.setToolName(write.toolName());
             toolCall.setStatus(proposal.status());
             toolCall.setResultJson(proposal.resultJson());
+            toolCall.setArgumentsJson(write.argumentsJson());
             return execution(toolCall, true).toolResult();
         }
         return modelResult(
@@ -1047,7 +1062,7 @@ public class AiAssistantWriteToolService {
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                             ? text(root, "targetVersion") : null,
-                    AiAssistantToolProposalPin.read(root));
+                    AiAssistantToolProposalPin.read(root), AiAssistantMemberIdentifiers.stored(root));
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
@@ -1077,6 +1092,9 @@ public class AiAssistantWriteToolService {
             envelope.put("approval", approval);
         }
         envelope.put("outcome", outcome.publicData());
+        if (!write.memberIdentifiers().isEmpty()) {
+            envelope.put("memberIdentifiers", write.memberIdentifiers());
+        }
         if (outcome.undo() != null) {
             envelope.put("undo", outcome.undo());
         }
@@ -1099,19 +1117,40 @@ public class AiAssistantWriteToolService {
 
     private WriteExecution execution(AiChatToolCall toolCall, boolean replayed) {
         AiAssistantToolCallDto dto = dto(toolCall);
+        var memberIdentifiers = new java.util.LinkedHashSet<AiAssistantToolResult.Identifier>();
+        if (toolCall.getArgumentsJson() != null && !toolCall.getArgumentsJson().isBlank()) {
+            memberIdentifiers.addAll(AiAssistantMemberIdentifiers.stored(objectMapper.readTree(toolCall.getArgumentsJson())));
+        }
+        if (toolCall.getResultJson() != null) {
+            memberIdentifiers.addAll(AiAssistantMemberIdentifiers.stored(resultObject(toolCall)));
+        }
         return new WriteExecution(dto, modelResult(
-                dto.id(), toolCall.getToolName(), dto.tier(), dto.status(), dto.result()), replayed);
+                dto.id(), toolCall.getToolName(), dto.tier(), dto.status(), dto.result(),
+                List.copyOf(memberIdentifiers)), replayed);
     }
 
     private AiAssistantToolResult modelResult(
             int toolCallId, String tool, String tier, String status, JsonNode outcome) {
+        return modelResult(toolCallId, tool, tier, status, outcome, List.of());
+    }
+
+    private AiAssistantToolResult modelResult(
+            int toolCallId, String tool, String tier, String status, JsonNode outcome,
+            List<AiAssistantToolResult.Identifier> memberIdentifiers) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("toolCallId", toolCallId);
         result.put("tool", tool);
         result.put("tier", tier);
         result.put("status", status);
         result.put("outcome", modelOutcome(tool, outcome));
-        return new AiAssistantToolResult(result, List.of());
+        List<AiAssistantToolResult.Identifier> identifiers = outcome != null && outcome.isObject()
+                ? writeToolRegistry.find(tool).map(declared -> declared.modelIdentifiers(outcome)).orElse(List.of())
+                : List.of();
+        var combined = new java.util.LinkedHashSet<>(identifiers);
+        combined.addAll(memberIdentifiers);
+        return new AiAssistantToolResult(result, combined.stream().map(identifier ->
+                identifier.path() == null ? identifier : new AiAssistantToolResult.Identifier(
+                        identifier.kind(), identifier.value(), "/outcome" + identifier.path())).toList());
     }
 
     /**
@@ -1290,7 +1329,8 @@ public class AiAssistantWriteToolService {
             AiAssistantWriteToolRequest typedRequest,
             AiAssistantProposalPins pins,
             String targetVersion,
-            Map<String, Object> pinned) {
+            Map<String, Object> pinned,
+            List<AiAssistantToolResult.Identifier> memberIdentifiers) {
     }
 
     private record PreparedMutation(

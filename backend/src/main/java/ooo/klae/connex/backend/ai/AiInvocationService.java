@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -496,6 +498,10 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     "unexpected_tool_call", "", false, false);
         }
+        if (containsUnexposedMemberInProviderText(result.text(), invocation.context())) {
+            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
+                    "invented_placeholder", "", false, false);
+        }
         CompletionNormalizer.CapturedCompletion captured =
                 CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
         if ((captured.ambiguous() && captured.answer().isBlank())
@@ -509,6 +515,11 @@ public class AiInvocationService {
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         ObjectNode object = AiJson.extractObject(stripped, objectMapper);
+        if (invocation.context().containsUnexposedMemberToken(stripped)
+                || object != null && invocation.context().containsUnexposedMemberToken(object.toString())) {
+            return malformed(raw, invocation, result, AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER,
+                    "invented_placeholder", "", object != null, false);
+        }
         if (object == null) {
             return malformed(
                     raw, invocation, result, truncationReason(result.stopReason()),
@@ -520,7 +531,11 @@ public class AiInvocationService {
                     raw, invocation, result, AiStructuredOutcome.REASON_MALFORMED,
                     rejectionReason, stripped, true, captureRepair);
         }
-        int warnings = demaskTree(object, invocation.context());
+        Map<String, Set<String>> memberReplacements = new LinkedHashMap<>();
+        int warnings = Demasker.demaskTree(object, invocation.context(), (path, member) ->
+                        memberReplacements.computeIfAbsent(path, ignored -> new LinkedHashSet<>()).add(member));
+        Map<String, List<String>> memberIdentifiers = new LinkedHashMap<>();
+        memberReplacements.forEach((path, members) -> memberIdentifiers.put(path, List.copyOf(members)));
         T value;
         try {
             value = objectMapper.treeToValue(object, type);
@@ -539,10 +554,48 @@ public class AiInvocationService {
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
         return new AiStructuredRepairAttempt<>(
                 new AiStructuredOutcome.Parsed<>(value, warnings,
-                        result.inputTokens(), result.outputTokens(), result.stopReason()),
+                        result.inputTokens(), result.outputTokens(), result.stopReason(), memberIdentifiers),
                 Optional.empty(), reasoning.rejectionReason() == null
                         ? reasoning.content()
                         : Optional.empty());
+    }
+
+    /**
+     * Checks complete provider-controlled text before parsing can discard a suffix or admit repair.
+     * Suffix reductions decode nested Unicode escapes in amortized linear time: each reduction
+     * removes five characters. Remaining backslashes cannot hide placeholder braces. This scan
+     * never changes retained output and never accepts an otherwise refused placeholder.
+     */
+    private static boolean containsUnexposedMemberInProviderText(String text, MaskingContext context) {
+        if (context.containsUnexposedMemberToken(text)) {
+            return true;
+        }
+        StringBuilder decoded = new StringBuilder(text.length());
+        for (int index = 0; index < text.length(); index++) {
+            decoded.append(text.charAt(index));
+            while (decoded.length() >= 6) {
+                int start = decoded.length() - 6;
+                if (decoded.charAt(start) != '\\' || decoded.charAt(start + 1) != 'u') {
+                    break;
+                }
+                int value = 0;
+                boolean valid = true;
+                for (int digitIndex = start + 2; digitIndex < start + 6; digitIndex++) {
+                    int digit = Character.digit(decoded.charAt(digitIndex), 16);
+                    if (digit < 0) {
+                        valid = false;
+                        break;
+                    }
+                    value = value * 16 + digit;
+                }
+                if (!valid) {
+                    break;
+                }
+                decoded.setLength(start);
+                decoded.append((char) value);
+            }
+        }
+        return context.containsUnexposedMemberToken(decoded.toString().replace("\\", ""));
     }
 
     private <T> AiNativeToolCompletion<T> parseNativeToolCall(
@@ -551,12 +604,34 @@ public class AiInvocationService {
             AiRawOutputGuard toolGuard,
             AiNativeToolRequest nativeTools) {
         AiCompletionResult result = raw.result();
+        if (containsUnexposedMemberInProviderText(result.text(), invocation.context())) {
+            return malformedNativeTool(raw, invocation, result,
+                    new ReasoningNormalization(Optional.empty(), null), "invented_placeholder", 1);
+        }
         CompletionNormalizer.CapturedCompletion captured =
                 CompletionNormalizer.captureReasoning(result.text(), result.reasoning());
         ReasoningNormalization reasoning = captured.ambiguous()
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
         List<AiToolCall> calls = result.toolCalls();
+        for (AiToolCall call : calls) {
+            if (containsUnexposedMemberInProviderText(call.id(), invocation.context())
+                    || containsUnexposedMemberInProviderText(call.name(), invocation.context())
+                    || call.thoughtSignature() != null
+                            && containsUnexposedMemberInProviderText(call.thoughtSignature(), invocation.context())
+                    || containsUnexposedMemberInProviderText(call.arguments(), invocation.context())) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", 1);
+            }
+            JsonNode decoded = null;
+            try {
+                decoded = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                decoded = null;
+            }
+            if (decoded != null && invocation.context().containsUnexposedMemberToken(decoded.toString())) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "invented_placeholder", 1);
+            }
+        }
         if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_multiple_calls",
@@ -615,6 +690,19 @@ public class AiInvocationService {
             warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
             callArguments.add(arguments);
         }
+        for (AiToolCall call : calls) {
+            try {
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        OutboundSegment.admittedProviderField(call.id(), invocation.context()),
+                        invocation.context(), objectMapper);
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        OutboundSegment.admittedProviderField(call.arguments(), invocation.context()),
+                        invocation.context(), objectMapper);
+            } catch (MaskingLeakException exception) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "native_member_leak", warnings);
+            }
+        }
+        calls.forEach(call -> invocation.context().recordProviderCallAdmission(call.id()));
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
@@ -876,9 +964,15 @@ public class AiInvocationService {
         registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
+        String memberExposurePayload;
         try {
             serializedPrompt = serializeProviderInput(
                     effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
+            memberExposurePayload = objectMapper.writeValueAsString(outboundSegments(
+                    effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()).stream()
+                    .filter(segment -> segment.origin() == OutboundSegment.Origin.TENANT_DATA
+                            || segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT)
+                    .map(OutboundSegment::text).toList());
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
@@ -895,7 +989,21 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            if (nativeTools != null) {
+                for (AiToolExchange exchange : nativeTools.exchanges()) {
+                    AiToolCall call = exchange.call();
+                    if (containsUnexposedMemberInProviderText(call.id(), effectiveInvocation.context())
+                            || containsUnexposedMemberInProviderText(call.name(), effectiveInvocation.context())
+                            || containsUnexposedMemberInProviderText(call.arguments(), effectiveInvocation.context())
+                            || call.thoughtSignature() != null && containsUnexposedMemberInProviderText(
+                                    call.thoughtSignature(), effectiveInvocation.context())) {
+                        throw new MaskingLeakException("Native replay contains an unexposed member placeholder");
+                    }
+                }
+            }
+            OutboundLeakScan.assertNoLeakInClassifiedEnvelope(serializedPrompt,
+                    outboundSegments(effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()),
+                    effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -926,7 +1034,7 @@ public class AiInvocationService {
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, budgetLease, outputTokensClamped,
+                serializedPrompt, memberExposurePayload, budgetLease, outputTokensClamped,
                 nativeTools == null ? 1 : nativeTools.maxParallelCalls());
         try {
             if (!effectiveInvocation.images().isEmpty()) {
@@ -1180,6 +1288,36 @@ public class AiInvocationService {
         }
     }
 
+    /**
+     * Classifies text before serialization: only tenant data can expose MEMBER bindings. Replayed
+     * opaque fields remain provider-authored; names are fixed vocabulary because the native request
+     * constructor requires every exchange name to belong to its declared definitions.
+     * System, schema and catalog text are entirely static and are absent from member-bearing parts.
+     */
+    private static List<OutboundSegment> outboundSegments(
+            MaskedPrompt prompt, AiNativeToolRequest nativeTools, MaskingContext context) {
+        List<OutboundSegment> segments = new ArrayList<>();
+        for (MaskedMessage message : prompt.getMessages()) {
+            segments.addAll(message.getSegments());
+        }
+        if (nativeTools != null) {
+            for (AiToolExchange exchange : nativeTools.exchanges()) {
+                AiToolCall call = exchange.call();
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.id(), context.providerCallAdmissionContext(call.id())));
+                segments.add(new OutboundSegment(call.name(), OutboundSegment.Origin.SERVER_STATIC));
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.arguments(), context.providerCallAdmissionContext(call.id())));
+                if (call.thoughtSignature() != null) {
+                    segments.add(new OutboundSegment(call.thoughtSignature(), OutboundSegment.Origin.PROVIDER_OPAQUE));
+                }
+                segments.addAll(exchange.resultSegments());
+            }
+            segments.addAll(nativeTools.repairSegments());
+        }
+        return List.copyOf(segments);
+    }
+
     private static String systemPrompt(MaskedPrompt prompt, AiReasoningMode reasoningMode) {
         return reasoningMode == AiReasoningMode.TAGGED
                 ? prompt.getSystemPrompt() + "\n\n" + TAGGED_REASONING_INSTRUCTION
@@ -1408,6 +1546,7 @@ public class AiInvocationService {
         private final Runnable initialCommitment;
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
+        private final String memberExposurePayload;
         private final boolean outputTokensClamped;
         private final int maxParallelCalls;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
@@ -1426,6 +1565,7 @@ public class AiInvocationService {
                 Runnable initialCommitment,
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
+                String memberExposurePayload,
                 AiOrganizationBudgetCoordinator.Lease budgetLease,
                 boolean outputTokensClamped,
                 int maxParallelCalls) {
@@ -1440,6 +1580,7 @@ public class AiInvocationService {
             this.providerAttemptGuard = providerAttemptGuard;
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
+            this.memberExposurePayload = Objects.requireNonNull(memberExposurePayload, "memberExposurePayload");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
             this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
@@ -1532,6 +1673,7 @@ public class AiInvocationService {
         public synchronized void beforeSend() {
             checkpoint();
             Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
+            invocation.context().exposeDispatchedPayload(memberExposurePayload);
         }
 
         @Override
@@ -1616,15 +1758,15 @@ public class AiInvocationService {
     }
 
     private static Demasker.DemaskResult demask(String text, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? new Demasker.DemaskResult(text == null ? "" : text, 0)
-                : Demasker.demask(text, context);
+        Demasker.DemaskResult demasked = Demasker.demask(text, context);
+        if (demasked.warnings() == 0 && containsUnexposedMemberInProviderText(text, context)) {
+            return new Demasker.DemaskResult("", 1);
+        }
+        return demasked;
     }
 
     private static int demaskTree(JsonNode node, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? 0
-                : Demasker.demaskTree(node, context);
+        return Demasker.demaskTree(node, context);
     }
 
     private record MalformedDiagnostic(
