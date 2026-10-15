@@ -991,7 +991,7 @@ describe("authoritative workspace selection adoption", () => {
         const leaving = section(panel, "const doLeave =", "return (");
 
         expect(acceptance).toMatch(/const accepted = await acceptWorkspace\(workspace\.id\);[\s\S]*publishWorkspace\(accepted\);[\s\S]*publishActiveWorkspace\(accepted\.id\);[\s\S]*router\.refresh\(\)/);
-        expect(leaving).toMatch(/const selection = await leaveWorkspace\(activeWorkspaceId\);[\s\S]*publishActiveWorkspace\(selection\.activeWorkspaceId\);[\s\S]*router\.replace\(selection\.activeWorkspaceId !== null \? "\/dashboard" : "\/onboarding"\);[\s\S]*router\.refresh\(\)/);
+        expect(leaving).toMatch(/const selection = await leaveWorkspace\(activeWorkspaceId\);[\s\S]*publishActiveWorkspace\(selection\.activeWorkspaceId\);[\s\S]*router\.replace\(selection\.activeWorkspaceId === null\s*\? "\/onboarding"\s*: privilegedMfaConfinementDestination\(\) \?\? "\/dashboard"\);[\s\S]*router\.refresh\(\)/);
     });
 
     it("disables accept and leave while another selection change is in progress", () => {

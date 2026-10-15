@@ -277,14 +277,60 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.currentPrivilegedMfaRequirements()).toBeNull();
     });
 
-    it("keeps confinement on a standing this client does not know", async () => {
+    it("treats a standing this client does not know as a failed read", async () => {
         stubBrowser(SECURITY, "?mfa=enroll");
-        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements("SOMETHING_NEW") : null));
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? requirements("PENDING_REVIEW") : null));
         const api = await import("@/app/lib/api");
 
-        await api.settlePrivilegedMfaStanding("ceremony");
+        await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBe("failed");
 
         expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+    });
+
+    it("reads the standing again after a confined account leaves a workspace", async () => {
+        stubBrowser(SECURITY, "?mfa=approve");
+        const requests = stubBackend((url, method) => {
+            if (method === "POST" && url.endsWith("/api/workspaces/5/leave")) return json({ activeWorkspaceId: 6 });
+            if (url.endsWith(REQUIREMENTS)) return requirements("UNPRIVILEGED");
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        expect(api.privilegedMfaConfinementDestination()).toBe(`${SECURITY}?mfa=approve`);
+
+        await expect(api.leaveWorkspace(5)).resolves.toMatchObject({ activeWorkspaceId: 6 });
+
+        expect(requests.some(({ url }) => url.endsWith(REQUIREMENTS))).toBe(true);
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        expect(api.privilegedMfaConfinementDestination()).toBeNull();
+    });
+
+    it("keeps a still-privileged account confined after leaving an organization", async () => {
+        stubBrowser(SECURITY, "?mfa=approve");
+        stubBackend((url, method) => {
+            if (method === "POST" && url.endsWith("/api/orgs/3/leave")) return new Response(null, { status: 204 });
+            if (url.endsWith(REQUIREMENTS)) return requirements("ATTESTATION_REQUIRED");
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+
+        await api.leaveOrganization(3);
+
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.privilegedMfaConfinementDestination()).toBe(`${SECURITY}?mfa=approve`);
+    });
+
+    it("leaves a workspace without reading the standing when the browser is not confined", async () => {
+        stubBrowser("/settings/personal/workspaces");
+        const requests = stubBackend((url, method) => {
+            if (method === "POST" && url.endsWith("/api/workspaces/5/leave")) return json({ activeWorkspaceId: 6 });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+
+        await api.leaveWorkspace(5);
+
+        expect(requests.some(({ url }) => url.endsWith(REQUIREMENTS))).toBe(false);
     });
 
     it("forgets the confinement when the account signs out, so signing in again is not refused locally", async () => {

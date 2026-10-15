@@ -455,6 +455,12 @@ const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason
 export type PrivilegedMfaSettleOutcome = "applied" | "superseded" | "failed";
 
 const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
+const PRIVILEGED_MFA_STANDINGS: ReadonlySet<unknown> = new Set<Types.PrivilegedMfaStanding>([
+    "UNPRIVILEGED",
+    "SATISFIED",
+    "ENROLLMENT_REQUIRED",
+    "ATTESTATION_REQUIRED",
+]);
 let privilegedMfaConfinement: PrivilegedMfaConfinementReason | null = null;
 let privilegedMfaConfinementReleased = false;
 let privilegedMfaAttestationObserved = false;
@@ -575,13 +581,16 @@ function resetPrivilegedMfaState() {
     notifyPrivilegedMfaListeners();
 }
 
-/** Whether a requirements body has the shape this client reads, so a malformed one counts as failed. */
+/**
+ * Whether a requirements body has the shape this client reads, with a standing it knows, so a
+ * malformed body or a standing introduced after this client counts as a failed read.
+ */
 function isPasskeyRegistrationRequirements(value: unknown): value is Types.PasskeyRegistrationRequirements {
     if (typeof value !== "object" || value === null) return false;
     if (!("currentPasswordRequired" in value) || typeof value.currentPasswordRequired !== "boolean") return false;
     if (!("emailConfirmationRequired" in value) || typeof value.emailConfirmationRequired !== "boolean") return false;
     if (!("emailConfirmationSatisfied" in value) || typeof value.emailConfirmationSatisfied !== "boolean") return false;
-    if ("standing" in value && value.standing !== undefined && typeof value.standing !== "string") return false;
+    if ("standing" in value && value.standing !== undefined && !PRIVILEGED_MFA_STANDINGS.has(value.standing)) return false;
     if (!("approvalGaps" in value) || value.approvalGaps === undefined) return true;
     return Array.isArray(value.approvalGaps) && value.approvalGaps.every((gap: unknown) =>
         typeof gap === "object" && gap !== null
@@ -618,8 +627,8 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
  * nothing, and one that a server refusal or an identity change overtook is read again, up to three
- * attempts before it is reported as failed. A failed or malformed read keeps any confinement, as
- * does a standing this client does not know. A backend too old to report standing releases only
+ * attempts before it is reported as failed. A failed or malformed read keeps any confinement, and a
+ * standing this client does not know counts as malformed. A backend too old to report standing releases only
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
  * been required in this page. The decisive requirements are available from
@@ -650,6 +659,21 @@ export async function settlePrivilegedMfaStanding(
         return "applied";
     }
     return "failed";
+}
+
+/**
+ * The Security step for the confinement in force, or null when the browser is not confined, so a
+ * caller about to navigate can send a still-confined account where it can act.
+ */
+export function privilegedMfaConfinementDestination(): string | null {
+    const reason = activePrivilegedMfaConfinement();
+    return reason === null ? null : `${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`;
+}
+
+/** Reads the standing again after a safe exit, only when the browser was confined. */
+async function settleAfterSafeExit(): Promise<void> {
+    if (activePrivilegedMfaConfinement() === null) return;
+    await settlePrivilegedMfaStanding("exit");
 }
 
 function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
@@ -5065,8 +5089,13 @@ export function removeOrgMember(orgId: number, userId: number) {
  * Leaves the organization, removing the caller's own org membership (#1534). It stays available
  * while privileged MFA confines the caller; the last owner cannot leave.
  */
-export function leaveOrganization(orgId: number) {
-    return postJson<void>(`/api/orgs/${orgId}/leave`);
+/**
+ * Leaves an organization (#1534). A confined account may always send it; once it succeeds, the
+ * account's standing is read again so a departure that ended the privilege also ends confinement.
+ */
+export async function leaveOrganization(orgId: number) {
+    await postJson<void>(`/api/orgs/${orgId}/leave`);
+    await settleAfterSafeExit();
 }
 
 /** Creates a passkey approval code for an organization administrator, replacing any open one (#1534). */
@@ -5294,8 +5323,13 @@ export function declineWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/decline`, {});
 }
 
-export function leaveWorkspace(id: number) {
-    return withClientRequestIdentityReset(
+/**
+ * Leaves a workspace and returns the server's new selection. A confined account may always send it;
+ * once it succeeds, the account's standing is read again so a departure that ended the privilege
+ * also ends confinement before the caller navigates.
+ */
+export async function leaveWorkspace(id: number) {
+    const selection = await withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
             () => postWorkspaceSelectionJson<Types.WorkspaceSelection>(`/api/workspaces/${id}/leave`, {}),
             (snapshot) => {
@@ -5307,6 +5341,8 @@ export function leaveWorkspace(id: number) {
         ),
         "workspace",
     );
+    await settleAfterSafeExit();
+    return selection;
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
