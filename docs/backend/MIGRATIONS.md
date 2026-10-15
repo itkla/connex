@@ -72,5 +72,6 @@ Before merge:
 - Tenant/workspace lifecycle/export/teardown obligations are registered.
 - Processing restrictions assessed where subject/person data is involved.
 - Composite FK string columns have compatible explicit collation where needed.
+- If earlier binaries cannot run against the migrated schema, `deploy/staging/rollback-floor` names this migration and `docs/UPGRADING.md` documents the rollback floor.
 - MyBatis mappings use parameter binding and tenant scoping.
 - Relevant migration, plane, tenancy, and lifecycle architecture tests pass locally through targeted selectors; exhaustive suite is CI-owned.

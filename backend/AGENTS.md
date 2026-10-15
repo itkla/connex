@@ -136,6 +136,7 @@ Minimum rules:
 - Place tenant/org-data and control-plane migrations in the correct lineage; no foreign key crosses the plane wall.
 - New tenant-owned tables are workspace-scoped from creation and enrolled in lifecycle/processing registries as required.
 - Composite foreign-key string columns must use compatible explicit charset/collation as documented.
+- A migration that earlier binaries cannot run against (a dropped or renamed column, a tightened constraint they still write) raises `../deploy/staging/rollback-floor` to that migration in the same PR, and documents its rollback floor in `../docs/UPGRADING.md`.
 - Mapper interfaces live under `mappers/`; XML lives under `src/main/resources/mappers/`. Keep SQL out of services/controllers.
 
 Architecture tests are enforcement, not obstacles. If a migration or mapper change requires weakening a tenancy/RBAC/plane test, stop and reconsider the design.
