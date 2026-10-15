@@ -52,13 +52,20 @@ migration-discipline part of #87 §9 / #102).
   migration that earlier binaries cannot survive. Keep the highest such migration as one path
   relative to `backend/src/main/resources/db/migration/`, such as
   `tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql`; blank lines and `#` comment lines
-  are allowed. Before stopping services or restoring artifacts, staging's rollback path reads the
-  pinned target commit's floor and requires that migration in both the target and previous backend
-  JARs. If the declaration cannot be read or validated, or either JAR lacks the migration, rollback
-  is refused: the target stays active, the recovery transaction is retained, and an
-  `ALERT gate=rollback_floor` with `rollback_state=refused_floor` calls for operator forward recovery.
-  Older target commits with no floor file retain the previous rollback behavior. This guard does
-  not reverse migrations or replace the coordinated-restart requirements below.
+  are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
+  The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
+  with **both** the live JAR and serving backend identified as the prior release, proves the target
+  backend never started, so restoring the prior pair is safe. Otherwise, before restoring artifacts,
+  staging reads the pinned target commit's floor and requires that migration in both the target and
+  previous backend JARs. An unreadable or invalid declaration, or a missing migration in either JAR,
+  refuses rollback and durably records `forward_only` before attempting recovery. That state never
+  retries the previous release: the same run and later timer runs activate and health-gate the target
+  backend, then activate its frontend, run smoke, and commit. Until commit, failures retain
+  `forward_only` and emit an `ALERT` with `gate=rollback_floor` and `rollback_state=refused_floor`.
+  An unhealthy target leaves its frontend stopped for operator forward recovery; the previous
+  frontend is never started alongside it. Older target commits with no floor file retain the
+  previous rollback behavior. This guard does not reverse migrations or replace the coordinated
+  restart requirements below.
 
 ### Malware-scanning cutover — start the sidecar before the backend
 
@@ -172,9 +179,10 @@ and previously generated export ZIPs are outside this remediation.
    suppression, consent, or recovery evidence during migration.
 
 **No previous-binary rollback is supported after V228.** Recovery must move forward with the new
-binary. Staging enforces the declared rollback floor above: after an activation failure it keeps
-the target active and alerts instead of restoring a backend whose JAR lacks V228. Such a backend
-cannot run campaign materialization, dispatch, or unsubscribe lookups against V228's schema.
+binary. Once its backend may have run, staging enforces the declared rollback floor above: after
+an activation failure it persists forward-only recovery and retries the target instead of restoring
+a backend whose JAR lacks V228. Such a backend cannot run campaign materialization, dispatch, or
+unsubscribe lookups against V228's schema.
 Operators must not keep a pre-V228 backend serving; close ingress and stop it, then restore service
 with a release containing V228 using forward recovery.
 

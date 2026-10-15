@@ -8,8 +8,10 @@
 # served together. An atomic transaction record plus the EXIT/signal handler covers
 # ordinary failures; the next timer run recovers SIGKILL, reboot, and power-loss windows.
 # The target commit's deploy/staging/rollback-floor declares a migration required in
-# both JARs before rollback; an invalid floor or incompatible prior JAR leaves the
-# target active and alerts the operator to recover forward.
+# both JARs before rollback once the target backend may have run. A pre-backend
+# phase plus prior identities in the live JAR and serving backend proves the safe
+# exception. Otherwise a floor refusal persists forward_only and retries target
+# backend/frontend activation, smoke, and commit now and on subsequent timer runs.
 
 set -euo pipefail
 
@@ -619,7 +621,7 @@ build_target_release() {
 write_transaction() {
     local phase="$1" temporary
     case "$phase" in
-        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
+        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|committed) ;;
         *) return 1 ;;
     esac
     is_git_sha "$DEPLOY_PREVIOUS" && is_git_sha "$DEPLOY_TARGET" \
@@ -663,15 +665,24 @@ read_transaction() {
     [ "$schema" = "2" ] && is_git_sha "$prior" && is_git_sha "$target" \
         && is_git_sha "$retained" || return 1
     case "$phase" in
-        prepared|frontend_stopped|backend_live|frontend_live|committed) ;;
+        prepared|frontend_stopped|backend_starting|backend_live|frontend_live|forward_only|committed) ;;
         *) return 1 ;;
     esac
     printf '%s\t%s\t%s\t%s\n' "$prior" "$target" "$retained" "$phase"
 }
 
 activate_backend() {
-    local sha="$1"
+    local sha="$1" record prior target retained phase
     verify_release_bundle "$sha" || return 1
+    record="$(read_transaction)" || return 1
+    IFS=$'\t' read -r prior target retained phase <<< "$record"
+    [ "$prior" = "$DEPLOY_PREVIOUS" ] && [ "$target" = "$DEPLOY_TARGET" ] \
+        && [ "$retained" = "$DEPLOY_RETAINED" ] && [ "$target" = "$sha" ] || return 1
+    # Persist before touching the live JAR, not after health passes. An interrupted
+    # copy or restart must never be mistaken for a backend that could not have run.
+    if [ "$phase" != forward_only ]; then
+        write_transaction backend_starting || return 1
+    fi
     if ! cp -f "$RELEASES_DIR/$sha/backend.jar" "$LIVE_JAR" \
         || ! sudo systemctl restart connex-staging-backend \
         || ! wait_for_backend_sha "$sha" "$BACKEND_HEALTH_TIMEOUT" \
@@ -774,14 +785,51 @@ quiesce_frontend_and_switch_checkout() {
     ensure_frontend_launcher "$target"
 }
 
+target_backend_never_started() {
+    local previous="$1" record prior target retained phase backend live_jar
+    record="$(read_transaction)" || return 1
+    IFS=$'\t' read -r prior target retained phase <<< "$record"
+    [ "$prior" = "$previous" ] && [ "$target" = "$DEPLOY_TARGET" ] \
+        && [ "$retained" = "$DEPLOY_RETAINED" ] || return 1
+    case "$phase" in
+        prepared|frontend_stopped) ;;
+        *) return 1 ;;
+    esac
+    live_jar="$(jar_git_sha "$LIVE_JAR")" || return 1
+    backend="$(served_git_sha)" || return 1
+    [ "$live_jar" = "$prior" ] && [ "$backend" = "$prior" ]
+}
+
+rollback_requires_forward_recovery() {
+    local previous="$1" record prior target retained phase
+    if record="$(read_transaction)"; then
+        IFS=$'\t' read -r prior target retained phase <<< "$record"
+        [ "$phase" != forward_only ] || return 0
+    fi
+    target_backend_never_started "$previous" && return 1
+    ! rollback_floor_allows_release "$previous"
+}
+
+recover_forward_only() {
+    ROLLBACK_IN_PROGRESS=1
+    ROLLBACK_STATE=refused_floor
+    set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; forward-only recovery must complete the target release"
+    write_transaction forward_only || return 1
+    log "Rollback refused; recovering target ${DEPLOY_TARGET:0:8} forward only..."
+    if ! recover_target_release; then
+        set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; forward-only recovery incomplete, the next timer run will retry the target release"
+        return 1
+    fi
+    set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; target release recovered forward and committed"
+}
+
 rollback_release() {
     local sha="$1" backend frontend
     ROLLBACK_IN_PROGRESS=1
     ROLLBACK_STATE=in_progress
-    if ! rollback_floor_allows_release "$sha"; then
-        ROLLBACK_STATE=refused_floor
-        set_failure_context rollback_floor backend "Rollback refused by the declared migration floor; keeping the target release active for forward recovery"
-        return 1
+    if rollback_requires_forward_recovery "$sha"; then
+        recover_forward_only
+        return $?
     fi
     if ! verify_release_bundle "$sha" || ! verify_release_bundle "$DEPLOY_RETAINED"; then
         log "Rollback FAILED: rollback or retained release bundle is invalid"
@@ -1254,9 +1302,8 @@ prune_releases() {
     [ "$blocked" -eq 0 ]
 }
 
-deployment_exit() {
-    local status="$1" cleanup_status=0
-    trap - EXIT INT TERM
+cleanup_smoke_on_exit() {
+    local cleanup_status=0
     if [ "$SMOKE_SESSION_ACTIVE" = "1" ]; then
         if ! logout_smoke_session; then
             log "Smoke session logout FAILED during exit; authenticated server-side session may remain"
@@ -1268,9 +1315,19 @@ deployment_exit() {
             cleanup_status=1
         fi
     fi
+    return "$cleanup_status"
+}
+
+deployment_exit() {
+    local status="$1" cleanup_status=0
+    trap - EXIT INT TERM
+    cleanup_smoke_on_exit || cleanup_status=1
     if [ "$status" -ne 0 ] && [ "$ROLLBACK_ARMED" = "1" ] && [ "$ROLLBACK_IN_PROGRESS" != "1" ] \
         && [ "$RELEASE_COMMITTED" != "1" ]; then
         rollback_release "$DEPLOY_PREVIOUS" || cleanup_status=1
+        # A refused rollback can run another smoke while EXIT is already handling
+        # the original failure; that smoke needs cleanup even if it also fails.
+        cleanup_smoke_on_exit || cleanup_status=1
     fi
     if [ "$status" -ne 0 ] && [ "$FAILURE_ACTIVE" = "1" ]; then
         [ -z "$FAILURE_MESSAGE" ] || log "$FAILURE_MESSAGE"
@@ -1300,6 +1357,32 @@ guard_wrapper_contract() {
     fi
     set_failure_context preflight release "Deploy refused: installed wrapper is stale; prior checkout restored and operator update required"
     return 1
+}
+
+recover_target_release() {
+    local prior="$DEPLOY_PREVIOUS" target="$DEPLOY_TARGET"
+    if ! validate_smoke_login_file; then
+        set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
+        ROLLBACK_ARMED=1
+        return 1
+    fi
+    ROLLBACK_ARMED=1
+    set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
+    sudo systemctl stop connex-staging-frontend || return 1
+    ensure_frontend_launcher "$target" || return 1
+    activate_backend "$target" || return 1
+    set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
+    activate_frontend "$target" || return 1
+    set_failure_context smoke_frontend release "Recovery smoke FAILED"
+    post_deploy_smoke "$target" || return 1
+    set_failure_context marker release "Recovery completed components but could not commit release markers"
+    commit_release_markers "$prior" "$target" || return 1
+    set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
+    ensure_prune_needed || return 1
+    rm -f "$TRANSACTION_FILE" || return 1
+    prune_releases || return 1
+    FAILURE_ACTIVE=0
+    log "Recovered and committed release ${target:0:8}"
 }
 
 recover_transaction() {
@@ -1347,31 +1430,16 @@ recover_transaction() {
         set_failure_context recovery release "Interrupted deploy had not activated anything; prior release stayed live and target will retry next cycle"
         return 1
     fi
-    if { [ "$phase" = "backend_live" ] || [ "$phase" = "frontend_live" ]; } \
-        && [ "$backend" = "$target" ]; then
-        if ! validate_smoke_login_file; then
-            set_failure_context preflight authentication "Recovery refused: smoke credential file is missing or unsafe"
-            ROLLBACK_ARMED=1
-            return 1
-        fi
-        ROLLBACK_ARMED=1
-        set_failure_context backend_restart backend "Recovery could not reinstall and health-gate the target backend"
-        sudo systemctl stop connex-staging-frontend || return 1
-        ensure_frontend_launcher "$target" || return 1
-        activate_backend "$target" || return 1
-        set_failure_context frontend_restart frontend "Recovery could not activate the target frontend"
-        activate_frontend "$target" || return 1
-        set_failure_context smoke_frontend release "Recovery smoke FAILED"
-        post_deploy_smoke "$target" || return 1
-        set_failure_context marker release "Recovery completed components but could not commit release markers"
-        commit_release_markers "$prior" "$target" || return 1
-        set_failure_context recovery release "Recovered release is live but its prune backlog could not be reconciled"
-        ensure_prune_needed || return 1
-        rm -f "$TRANSACTION_FILE" || return 1
-        prune_releases || return 1
+    if rollback_requires_forward_recovery "$prior"; then
+        recover_forward_only || return 1
+        deploy_failure_alert
         FAILURE_ACTIVE=0
-        log "Recovered and committed release ${target:0:8}"
         return 0
+    fi
+    if { [ "$phase" = "backend_starting" ] || [ "$phase" = "backend_live" ] || [ "$phase" = "frontend_live" ]; } \
+        && [ "$backend" = "$target" ]; then
+        recover_target_release
+        return $?
     fi
 
     ROLLBACK_ARMED=1
