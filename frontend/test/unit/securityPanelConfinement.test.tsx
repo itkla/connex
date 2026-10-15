@@ -243,6 +243,20 @@ describe("the Security page while a privileged account is confined", () => {
         )).toBe(false);
     });
 
+    it("lets a confined account check its standing again from the card", async () => {
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [
+            { credentialId: "cred-laptop", orgId: 1, orgName: "Acme" },
+        ]);
+        await renderPanel();
+        const recheck = [...(confinementCard()?.querySelectorAll("button") ?? [])]
+            .find((candidate) => candidate.textContent === enAccount.AccountSecurity.confinementRecheck);
+
+        await act(async () => recheck?.click());
+
+        expect(backend.refresh).toHaveBeenCalledWith("check");
+    });
+
     it("re-reads the standing as a ceremony once a code is redeemed", async () => {
         backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
         backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [

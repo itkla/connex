@@ -343,6 +343,7 @@ function MembersWorkspacePanel({
                 if (currentMember) {
                     setMembers((prev) => prev.map((m) => (m.id === userId ? currentMember : m)));
                 }
+                void refreshMembers();
                 ownershipOffers.remember(offer);
                 toastSuccess(t("ownershipOffered", { name }));
                 return;

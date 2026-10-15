@@ -28,7 +28,7 @@ describe("the passkey-not-approved badge on member rows", () => {
         const changeRole = panel.slice(panel.indexOf("const changeRole = async"), panel.indexOf("const withdrawOwnershipOffer = async"));
         const assignCustom = panel.slice(panel.indexOf("const assignCustom = async"), panel.indexOf("const confirmRemove = async"));
 
-        expect(changeRole).toContain("void refreshMembers();");
+        expect(changeRole.match(/void refreshMembers\(\);/g) ?? []).toHaveLength(2);
         expect(assignCustom).toContain("void refreshMembers();");
         expect(panel).toMatch(/if \(refreshId === membersRefresh\.current\) setMembers\(loaded\);/);
         const confirmRemove = panel.slice(panel.indexOf("const confirmRemove = async"), panel.indexOf("const copyInviteLink"));

@@ -115,7 +115,8 @@
         "exitRefusedSoleApprover": "あなたはこのワークスペースの文書承認で唯一の承認者です。退出する前に担当を変更してください。",
         "exitRefusedOrgNotMember": "あなたはすでにこの組織のメンバーではありません。",
         "exitRefusedOrgLastOwner": "あなたはこの組織の最後のオーナーです。退出する前に、別のメンバーをオーナーにしてください。",
-        "approvalRefreshFailed": "パスキーは承認されましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。"
+        "approvalRefreshFailed": "パスキーは承認されましたが、この画面を更新できませんでした。しばらくしてからもう一度確認してください。",
+        "confinementRecheck": "もう一度確認"
     },
     "AccountConnections": {
         "title": "連携アカウント",

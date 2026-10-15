@@ -291,6 +291,17 @@ export default function SecurityPanel() {
                         ) : undefined}
                         exits={exits}
                         canLeaveWorkspaces
+                        footer={(
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="inline"
+                                className="mt-3"
+                                onClick={() => void refreshStanding("check")}
+                            >
+                                {t("confinementRecheck")}
+                            </Button>
+                        )}
                     />
                 )}
 
