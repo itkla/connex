@@ -254,8 +254,11 @@ For raw-text provenance, `Bob_team` records `Bob`,
 while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
 and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
 precise member provenance, including through echoed write arguments, independently of these raw-text
-rules. At queue time, user references pass the existing reader-visibility boundary before the
-shared member-reference collector registers both authored and decoded labels. These labels are
+rules. At queue time, the shared member-reference collector reads labels and user targets from
+the original text. Each target must be an active or pending member of the current workspace before
+its authored and decoded labels are registered. An unrelated invisible target that collapses the
+reader-redacted body cannot suppress an authorized member label. Invisible user targets contribute
+no reference labels. These labels are
 persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
 combined 20-identifier cap, without adding member resource handles. Blank and whitespace-only
 reference labels are excluded before candidate construction. Ordinary queued member provenance

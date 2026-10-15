@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Objects;
@@ -98,10 +99,12 @@ public class AiAssistantIdentifierResolver {
         var memberLabels = new LinkedHashSet<String>();
         AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
                 .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
-        if (!ReferenceService.memberLabelsFromReaderVisibleContent(message).isEmpty()) {
-            String visible = referenceService.redactInvisibleTargets(workspaceId, List.of(
-                    new ReferenceService.ReaderVisibleContent(message, List.of()))).getFirst().content();
-            memberLabels.addAll(ReferenceService.memberLabelsFromReaderVisibleContent(visible));
+        var memberVisibility = new HashMap<Integer, Boolean>();
+        for (ReferenceService.MemberReference reference : ReferenceService.memberReferencesInContent(message)) {
+            if (memberVisibility.computeIfAbsent(reference.memberId(),
+                    id -> referenceService.isMemberTargetVisible(workspaceId, id))) {
+                memberLabels.add(reference.label());
+            }
         }
         for (String label : memberLabels) {
             identifiers.add(new Identifier(EntityKind.MEMBER, label));

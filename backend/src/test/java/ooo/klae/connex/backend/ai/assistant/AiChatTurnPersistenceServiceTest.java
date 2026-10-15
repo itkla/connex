@@ -1072,8 +1072,7 @@ class AiChatTurnPersistenceServiceTest {
 
     private ooo.klae.connex.backend.beans.AiChatMessage queueWithAuthorizedMemberReferences(String content) {
         var references = mock(ooo.klae.connex.backend.services.ReferenceService.class);
-        when(references.redactInvisibleTargets(eq(TURN.workspaceId()), org.mockito.ArgumentMatchers.anyList()))
-                .thenAnswer(call -> call.getArgument(1));
+        when(references.isMemberTargetVisible(TURN.workspaceId(), 42)).thenReturn(true);
         var scope = mock(ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess.class);
         when(scope.getForWorkspace(TURN.workspaceId())).thenReturn(
                 new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(

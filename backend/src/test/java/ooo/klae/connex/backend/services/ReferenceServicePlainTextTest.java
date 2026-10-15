@@ -161,6 +161,67 @@ class ReferenceServicePlainTextTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("memberReferenceReadings")
+    void memberReferenceReaderMatchesEveryCoveredLabelReadingAndRetainsItsId(MemberReferenceReadings.Reading reading) {
+        var references = ReferenceService.memberReferencesInContent(reading.content());
+        assertEquals(ReferenceService.memberLabelsFromReaderVisibleContent(reading.content()),
+                references.stream().map(ReferenceService.MemberReference::label).distinct().toList(), reading.name());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                references.contains(new ReferenceService.MemberReference(reading.label(), 42)), reading.name());
+    }
+
+    static java.util.stream.Stream<MemberReferenceReadings.Reading> memberReferenceReadings() {
+        return MemberReferenceReadings.all().stream();
+    }
+
+    @Test
+    void memberReferenceReaderRetainsEachTargetForAuthoredAndDecodedLabels() {
+        String content = "[Alice &amp; Bob](user:42) [Alice &amp; Bob](user&colon;43) "
+                + "[Pending &lt;Name&gt;][pending] [Again](user\\:42)\n\n> [pending]:\n> user:44";
+        assertEquals(java.util.List.of(
+                new ReferenceService.MemberReference("Alice & Bob", 42),
+                new ReferenceService.MemberReference("Alice & Bob", 43),
+                new ReferenceService.MemberReference("Pending <Name>", 44),
+                new ReferenceService.MemberReference("Again", 42),
+                new ReferenceService.MemberReference("Alice &amp; Bob", 42),
+                new ReferenceService.MemberReference("Alice &amp; Bob", 43),
+                new ReferenceService.MemberReference("Pending &lt;Name&gt;", 44)),
+                ReferenceService.memberReferencesInContent(content));
+    }
+
+    @Test
+    void memberReferenceReaderRetainsAllAmbiguousUserTargetsWithoutPromotingOtherTypes() {
+        String content = "[Alias][m]\n\n[m]: person:999\n[m]: user:99\n[m]: user:42\n[m]: user:43";
+        assertEquals(java.util.List.of(
+                new ReferenceService.MemberReference("Alias", 99),
+                new ReferenceService.MemberReference("Alias", 42),
+                new ReferenceService.MemberReference("Alias", 43)), ReferenceService.memberReferencesInContent(content));
+        for (String type : java.util.List.of("person", "company", "deal", "note", "file", "task", "activity")) {
+            for (String contentWithoutMembers : java.util.List.of("[Other](" + type + ":42)",
+                    "[Other][m]\n\n[m]: " + type + ":42", "[Other]\n\n[Other]: " + type + ":42")) {
+                assertEquals(java.util.List.of(), ReferenceService.memberReferencesInContent(contentWithoutMembers));
+            }
+        }
+        for (String invalid : java.util.List.of("[Alias](user:0)", "[Alias](user:2147483648)", "[ ](user:42)")) {
+            assertEquals(java.util.List.of(), ReferenceService.memberReferencesInContent(invalid));
+        }
+        assertEquals(java.util.List.of(), ReferenceService.memberReferencesInContent(null));
+    }
+
+    @Test
+    void repeatedMemberLabelsDoNotMultiplyDuplicateDefinitionTargetsDuringParsing() {
+        String content = "[m] ".repeat(1_400) + "\n\n" + java.util.stream.IntStream.range(100_000, 100_600)
+                .mapToObj(id -> "[m]: user:" + id).collect(java.util.stream.Collectors.joining("\n"));
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+            assertEquals(java.util.List.of("m"), ReferenceService.memberLabelsFromReaderVisibleContent(content));
+            var references = ReferenceService.memberReferencesInContent(content);
+            assertEquals(600, references.size());
+            assertEquals(java.util.stream.IntStream.range(100_000, 100_600)
+                    .mapToObj(id -> new ReferenceService.MemberReference("m", id)).toList(), references);
+        });
+    }
+
     @Test
     void escapedDelimitersRemainLiteralInEveryMemberReading() {
         for (String content : java.util.List.of("\\[Alice](user:42)", "[Alice\\](user:42)",

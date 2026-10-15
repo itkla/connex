@@ -26,11 +26,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.beans.AiAssistantIdentifierMention;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.ReferenceService;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 class AiAssistantIdentifierResolverTest {
     @Test
@@ -46,10 +58,8 @@ class AiAssistantIdentifierResolverTest {
         when(workspace.getMembers(7)).thenReturn(List.of(member));
         String authorized = "[Former Name](user:42) [Alice &amp; Bob](user:42) [Pending Alias](user:43)";
         String text = authorized + " [Foreign Alias](user:99)";
-        when(references.redactInvisibleTargets(7, List.of(
-                new ooo.klae.connex.backend.services.ReferenceService.ReaderVisibleContent(text, List.of()))))
-                .thenReturn(List.of(new ooo.klae.connex.backend.services.ReferenceService.ReaderVisibleContent(
-                        authorized + " [private]", List.of())));
+        when(references.isMemberTargetVisible(7, 42)).thenReturn(true);
+        when(references.isMemberTargetVisible(7, 43)).thenReturn(true);
         var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
         var result = resolver.resolve(text);
         assertTrue(result.resources().isEmpty());
@@ -60,8 +70,9 @@ class AiAssistantIdentifierResolverTest {
         resolver.seed(result, context);
         assertTrue(context.tokenBindings().isEmpty());
         assertFalse(context.identifierDictionary().contains("Foreign Alias"));
-        verify(references).redactInvisibleTargets(7, List.of(
-                new ooo.klae.connex.backend.services.ReferenceService.ReaderVisibleContent(text, List.of())));
+        verify(references).isMemberTargetVisible(7, 42);
+        verify(references).isMemberTargetVisible(7, 43);
+        verify(references).isMemberTargetVisible(7, 99);
     }
 
     @Test
@@ -72,8 +83,7 @@ class AiAssistantIdentifierResolverTest {
         var references = mock(ooo.klae.connex.backend.services.ReferenceService.class);
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
-        when(references.redactInvisibleTargets(eq(7), org.mockito.ArgumentMatchers.anyList()))
-                .thenAnswer(call -> call.getArgument(1));
+        when(references.isMemberTargetVisible(7, 42)).thenReturn(true);
         var member = new ooo.klae.connex.backend.beans.User();
         member.setDisplayName("Alice");
         when(workspace.getMembers(7)).thenReturn(List.of(member));
@@ -85,6 +95,72 @@ class AiAssistantIdentifierResolverTest {
         var refused = assertThrows(AiAssistantLoopException.class,
                 () -> resolver.resolve(twenty + " [Former 20](user:42)"));
         assertEquals("identifier_limit_exceeded", refused.detailReason());
+    }
+
+    @Test
+    void queuedFormerLabelSurvivesAnInvisibleTitledPersonReference() {
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        var member = new User();
+        member.setId(42);
+        member.setDisplayName("Current Name");
+        when(workspace.getMembers(7)).thenReturn(List.of(member));
+        when(workspace.isMemberIncludingPending(7, 42)).thenReturn(true);
+        var references = memberReferences(workspace);
+        String text = "[Former Name](user:42) [x](person:999 \"title\")";
+        assertEquals("(unavailable reference)", references.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(text, List.of()))).getFirst().content());
+
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+        var result = resolver.resolve(text);
+
+        assertEquals(List.of(new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former Name")),
+                result.identifiers());
+        var context = new MaskingContext();
+        resolver.seed(result, context);
+        assertTrue(context.tokenBindings().isEmpty());
+        assertTrue(context.identifierDictionary().contains("Former Name"));
+        assertFalse(MaskingEngine.maskConversationalFreeText(text, context).contains("Former Name"));
+    }
+
+    @Test
+    void queuedMixedReferencesAuthorizeEachMemberIndependently() {
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        when(workspace.isMemberIncludingPending(7, 42)).thenReturn(true);
+        when(workspace.isMemberIncludingPending(7, 43)).thenReturn(true);
+        var people = mock(PersonMapper.class);
+        when(people.getVisibleIdsIn(7, List.of(1))).thenReturn(List.of(1));
+        var references = new ReferenceService(mock(EntityReferenceMapper.class), workspace, people,
+                mock(DealMapper.class), mock(CompanyMapper.class), mock(NoteMapper.class),
+                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), mock(WorkspaceMapper.class));
+        String text = "[First Alias](user&colon;42) [Visible Contact](person:1) "
+                + "[Foreign Alias](user:99) [Hidden Contact](person:999 \"title\") "
+                + "[Second Alias][pending] [Third Alias](user\\:42)\n\n> [pending]:\n> user:43";
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+
+        var result = resolver.resolve(text);
+
+        assertEquals(List.of("First Alias", "Second Alias", "Third Alias"),
+                result.identifiers().stream().map(AiAssistantIdentifierResolver.Identifier::value).toList());
+        assertTrue(result.identifiers().stream().allMatch(identifier -> identifier.kind() == EntityKind.MEMBER));
+        assertTrue(result.resources().isEmpty());
+        verify(workspace).isMemberIncludingPending(7, 42);
+        verify(workspace).isMemberIncludingPending(7, 43);
+        verify(workspace).isMemberIncludingPending(7, 99);
+        verifyNoInteractions(people);
+    }
+
+    private static ReferenceService memberReferences(WorkspaceService workspace) {
+        return new ReferenceService(mock(EntityReferenceMapper.class), workspace, mock(PersonMapper.class),
+                mock(DealMapper.class), mock(CompanyMapper.class), mock(NoteMapper.class),
+                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), mock(WorkspaceMapper.class));
     }
 
     @Test
