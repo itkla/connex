@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -192,6 +194,14 @@ describe("onboarding ownership offers", () => {
         expect([...container.querySelectorAll("button")].some(
             (candidate) => candidate.textContent === "AccountInvites.accept",
         )).toBe(false);
+    });
+
+    it("draws onboarding in the light palette whatever the theme, so token-styled parts stay legible", async () => {
+        offers.state = selfOffers([]);
+        await renderOnboarding();
+
+        expect(container.firstElementChild?.classList.contains("light-surface")).toBe(true);
+        expect(readFileSync(path.resolve(process.cwd(), "app/globals.css"), "utf8")).toMatch(/:root,\s*\.light-surface \{/);
     });
 
     it("keeps workspace creation and joining for an account that is not confined", async () => {
