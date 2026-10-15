@@ -1352,7 +1352,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiAssistantToolResult replayed = service.proposalResult(write,
                 new AiAssistantToolProposal(29, "executed", resultJson, true));
         assertEquals(assignedOwnerId == null ? List.of()
-                        : List.of(new AiAssistantToolResult.Identifier("member", label)), replayed.identifiers());
+                        : List.of(new AiAssistantToolResult.Identifier("member", label, "/outcome/owner")), replayed.identifiers());
         assertFalse(resultJson.contains("verification"));
         verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),

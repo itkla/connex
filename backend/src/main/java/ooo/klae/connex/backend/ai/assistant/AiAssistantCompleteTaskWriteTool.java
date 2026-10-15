@@ -131,7 +131,9 @@ public class AiAssistantCompleteTaskWriteTool implements AiAssistantWriteTool {
 
     @Override
     public List<AiAssistantToolResult.Identifier> modelIdentifiers(JsonNode storedOutcome) {
-        return AiAssistantMemberIdentifiers.referenceIdentifiers(storedOutcome.path("description").asString());
+        return AiAssistantMemberIdentifiers.referenceIdentifiers(storedOutcome.path("description").asString()).stream()
+                .map(identifier -> new AiAssistantToolResult.Identifier(identifier.kind(), identifier.value(), "/description"))
+                .toList();
     }
 
     @Override

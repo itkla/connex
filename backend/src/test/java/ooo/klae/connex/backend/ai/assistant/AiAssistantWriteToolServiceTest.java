@@ -1862,12 +1862,12 @@ class AiAssistantWriteToolServiceTest {
         org.mockito.Mockito.clearInvocations(workspaceService);
         AiAssistantToolResult replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
                 "{\"tier\":\"confirm\",\"outcome\":{\"recordType\":\"person\",\"owner\":\"Former Label\"}}", true));
-        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Label")), replay.identifiers());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Label", "/outcome/owner")), replay.identifiers());
         assertTrue(objectMapper.writeValueAsString(replay.data()).contains("Former Label"));
         verify(workspaceService, never()).getMembers(anyInt());
         AiAssistantAssignOwnerWriteTool declared = new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService);
         assertEquals(List.of(), declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"unassigned\"}")));
-        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "fallback-username")),
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "fallback-username", "/owner")),
                 declared.modelIdentifiers(objectMapper.readTree("{\"owner\":\"fallback-username\"}")));
     }
 
@@ -1903,8 +1903,15 @@ class AiAssistantWriteToolServiceTest {
         var expectedLabels = Set.of("Bob", "Li", "Ed", "Tas");
         var storedLabels = new java.util.HashSet<String>();
         provenance.forEach(identifier -> storedLabels.add(identifier.path("value").asString()));
-        assertEquals(4, provenance.size());
+        assertEquals(task ? 4 : 5, provenance.size());
         assertEquals(expectedLabels, storedLabels);
+        var titlePaths = provenance.valueStream().filter(identifier -> !"/content".equals(identifier.path("path").asString())).toList();
+        assertEquals(4, titlePaths.size());
+        titlePaths.forEach(identifier -> assertEquals(task ? "/description" : "/title", identifier.path("path").asString()));
+        if (!task) {
+            assertEquals(1, provenance.valueStream().filter(identifier -> "/content".equals(identifier.path("path").asString())
+                    && "Ed".equals(identifier.path("value").asString())).count());
+        }
         assertFalse(write.argumentsJson().contains("{{M"));
         if (task) {
             doAnswer(invocation -> {
@@ -1936,7 +1943,7 @@ class AiAssistantWriteToolServiceTest {
         legacyResult.remove("memberIdentifiers");
         var replay = service.proposalResult(replayWrite, new AiAssistantToolProposal(
                 29, "executed", objectMapper.writeValueAsString(legacyResult), true));
-        assertEquals(4, replay.identifiers().size());
+        assertEquals(task ? 4 : 5, replay.identifiers().size());
         assertEquals(expectedLabels, replay.identifiers().stream().map(AiAssistantToolResult.Identifier::value)
                 .collect(java.util.stream.Collectors.toSet()));
         assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
@@ -1992,7 +1999,7 @@ class AiAssistantWriteToolServiceTest {
         clearInvocations(workspaceService);
         var replay = service.proposalResult(write, new AiAssistantToolProposal(29, "executed",
                 "{\"tier\":\"auto\",\"outcome\":{\"recordType\":\"task\",\"description\":\"Bob_team xBob\"}}", true));
-        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob")), replay.identifiers());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/outcome/description")), replay.identifiers());
         assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
         assertEquals("Bob_team xBob", ((Map<?, ?>) replay.data().get("outcome")).get("description"));
         verify(workspaceService, never()).getMembers(anyInt());

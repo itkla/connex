@@ -96,15 +96,34 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
         List<ScannedField> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
-        assertNoLeak(fields, ctx, providerAuthored);
+        assertNoLeak(fields, ctx, providerAuthored, false);
     }
 
     /** Checks one already-masked message while its recorded MEMBER containment scope is active. */
     static void assertNoLeakInReplay(String text, MaskingContext ctx) {
-        assertNoLeak(List.of(new ScannedField(text, true, false)), ctx, false);
+        assertNoLeak(List.of(new ScannedField(text, true, false)), ctx, false, false);
     }
 
-    private static void assertNoLeak(List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored) {
+    /**
+     * Screens one provider-authored native replay field without trusting sentinel, key or role
+     * positions. JSON arguments are decoded independently, including keys and escaped scalars.
+     * Existing non-member envelope policy remains owned by the complete server-envelope scan.
+     *
+     * @param field provider-authored field, serialized as JSON for a scalar or as its arguments object
+     * @param ctx request-local masking context
+     * @param objectMapper payload JSON decoder
+     * @throws MaskingLeakException when a raw member label is present
+     */
+    public static void assertNoMemberLeakInProviderReplay(
+            String field, MaskingContext ctx, ObjectMapper objectMapper) {
+        Objects.requireNonNull(field, "field");
+        Objects.requireNonNull(ctx, "ctx");
+        Objects.requireNonNull(objectMapper, "objectMapper");
+        assertNoLeak(decodedJsonFields(field, objectMapper), ctx, true, true);
+    }
+
+    private static void assertNoLeak(
+            List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored, boolean membersOnly) {
         boolean honorTrustedText = !providerAuthored;
         List<PreparedField> preparedFields = fields.stream()
                 .filter(field -> providerAuthored || field.tenantBearing())
@@ -119,6 +138,9 @@ public final class OutboundLeakScan {
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
             boolean member = ctx.isMemberIdentifier(entry.rawValue());
+            if (membersOnly && !member) {
+                continue;
+            }
             List<MaskingEngine.ScreenText> matchingFields = member ? memberFields : allFields;
             String identifier = entry.canonicalValue();
             boolean containment = member && ctx.requiresMemberContainment(entry.rawValue());

@@ -246,7 +246,7 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         JsonNode owner = storedOutcome == null ? null : storedOutcome.get(OWNER_FIELD);
         return owner != null && owner.isString() && !owner.asString().isBlank()
                 && !UNASSIGNED.equals(owner.asString())
-                ? List.of(new AiAssistantToolResult.Identifier("member", owner.asString())) : List.of();
+                ? List.of(new AiAssistantToolResult.Identifier("member", owner.asString(), "/owner")) : List.of();
     }
 
     @Override

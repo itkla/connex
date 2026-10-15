@@ -102,7 +102,6 @@ public class ReferenceService {
     private static final Pattern MEMBER_DEFINITION_DESTINATION = Pattern.compile("(?i)<?user:(\\d+)>?");
     private static final String MEMBER_LINE_PREFIX = "[ ]{0,3}+(?:(?:>[ \t]?|[-+*][ \t]++|[0-9]{1,9}[.)][ \t]++)[ ]{0,3}+)*+";
     private static final Pattern MEMBER_LINE_CONTENT = Pattern.compile(MEMBER_LINE_PREFIX);
-    private static final Pattern MEMBER_QUOTE_CONTENT = Pattern.compile("[ ]{0,3}+(?:>[ \t]?[ ]{0,3}+)*+");
     private static final Pattern MEMBER_CONTINUATION_PREFIX = Pattern.compile("(?m)^(?!\\A)" + MEMBER_LINE_PREFIX);
     private static final Pattern MEMBER_CODE_BLOCK_START = Pattern.compile(
         "(?:#{1,6}(?:[ \t]|$)|`{3,}+[^`]*+$|~{3,}+"
@@ -978,9 +977,6 @@ public class ReferenceService {
         return keys;
     }
 
-    private record MemberOrderedListContext(long quoteDepth, int indent, char delimiter) {
-    }
-
     private record MemberLabelSpan(int start, int end) {
     }
 
@@ -1000,88 +996,240 @@ public class ReferenceService {
         return starts;
     }
 
-    /**
-     * Definitions cannot interrupt an open paragraph, including lazy container continuations.
-     * Ambiguous continuations keep their usage reading; complete definitions leave the context open
-     * for another definition rather than starting a paragraph with their destination or title lines.
-     */
+    /** Definitions and code-span pairing share the same paragraph interruption decisions. */
     private static Set<Integer> memberDefinitionStartsOutsideParagraphs(
             String content, Map<Integer, Integer> definitionEnds) {
         Set<Integer> starts = new HashSet<>();
-        boolean paragraphOpen = false;
-        Map<MemberOrderedListContext, Integer> orderedLists = new HashMap<>();
-        long activeQuoteDepth = 0;
+        var paragraphs = new MemberParagraphState();
         int definitionEnd = -1;
         for (int lineStart = 0; lineStart < content.length();) {
-            int lineEnd = lineStart;
-            while (lineEnd < content.length() && !isDefinitionLineEnd(content, lineEnd)) {
-                lineEnd++;
-            }
-            int bodyStart = memberLineContentStart(content, lineStart);
-            Matcher quotePrefix = MEMBER_QUOTE_CONTENT.matcher(content).region(lineStart, lineEnd);
-            int ruleStart = quotePrefix.lookingAt() ? quotePrefix.end() : lineStart;
-            String prefix = content.substring(lineStart, bodyStart);
-            long quoteDepth = prefix.chars().filter(value -> value == '>').count();
-            String itemMarker = prefix.replace(">", "").strip();
-            boolean ordered = itemMarker.length() >= 2 && ".)".indexOf(itemMarker.charAt(itemMarker.length() - 1)) >= 0
-                    && itemMarker.substring(0, itemMarker.length() - 1).chars().allMatch(value -> value >= '0' && value <= '9');
-            int containerStart = prefix.lastIndexOf('>') + 1;
-            int indent = memberColumn(prefix, containerStart, prefix.indexOf(itemMarker));
-            var listContext = ordered ? new MemberOrderedListContext(quoteDepth, indent, itemMarker.charAt(itemMarker.length() - 1)) : null;
-            boolean itemStart = itemMarker.length() == 1 && "-+*".indexOf(itemMarker.charAt(0)) >= 0
-                    || ordered && (!paragraphOpen || Integer.parseInt(itemMarker.substring(0, itemMarker.length() - 1)) == 1
-                            || orderedLists.containsKey(listContext));
-            boolean blank = content.substring(bodyStart, lineEnd).chars().allMatch(value -> value == ' ' || value == '\t');
-            boolean boundary = memberDefinitionParagraphBoundary(content, ruleStart, lineEnd, paragraphOpen)
-                    || ruleStart != bodyStart && memberDefinitionParagraphBoundary(content, bodyStart, lineEnd, paragraphOpen)
-                    || MEMBER_CODE_BLOCK_START.matcher(content).region(bodyStart, lineEnd).lookingAt();
-            boolean newContainer = itemStart || quoteDepth > activeQuoteDepth;
+            int lineEnd = memberLineEnd(content, lineStart);
             if (lineStart > definitionEnd) {
-                if (!blank && (!paragraphOpen || boundary || quoteDepth > activeQuoteDepth)) {
-                    int whitespaceEnd = skipDefinitionSpaces(content, lineStart + containerStart);
-                    int continuationIndent = memberColumn(content, lineStart + containerStart, whitespaceEnd);
-                    orderedLists.entrySet().removeIf(entry -> !entry.getKey().equals(listContext)
-                            && (entry.getKey().quoteDepth() != quoteDepth || continuationIndent < entry.getValue()));
-                }
-                if (itemStart) {
-                    orderedLists.keySet().removeIf(context -> context.quoteDepth() == quoteDepth && context.indent() >= indent);
-                    if (ordered) {
-                        orderedLists.put(listContext, memberColumn(prefix, containerStart, prefix.length()));
-                    }
-                }
-                Integer end = definitionEnds.get(bodyStart);
-                if (end != null && (!paragraphOpen || newContainer)) {
-                    starts.add(bodyStart);
+                MemberParagraphLine line = paragraphs.readLine(content, lineStart, lineEnd);
+                Integer end = definitionEnds.get(line.bodyStart());
+                if (end != null && line.definitionAllowed()) {
+                    starts.add(line.bodyStart());
                     definitionEnd = end;
-                    paragraphOpen = false;
-                } else {
-                    paragraphOpen = !blank && !boundary;
+                    paragraphs.paragraphOpen = false;
                 }
             }
-            activeQuoteDepth = blank || boundary || itemStart ? quoteDepth : Math.max(activeQuoteDepth, quoteDepth);
             lineStart = lineEnd == content.length() ? lineEnd : afterDefinitionLineEnd(content, lineEnd);
         }
         return starts;
     }
 
+    private static int memberLineEnd(String content, int start) {
+        int end = start;
+        while (end < content.length() && !isDefinitionLineEnd(content, end)) {
+            end++;
+        }
+        return end;
+    }
+
+    private record MemberParagraphLine(int bodyStart, boolean definitionAllowed, boolean blockStart) {
+    }
+
+    private record MemberListContainer(int quoteDepth, char delimiter, int contentIndent) {
+    }
+
+    private record MemberListMarker(int end, int number, char delimiter) {
+    }
+
+    /**
+     * Classifies paragraph interruption using CommonMark 0.31.2
+     * <a href="https://spec.commonmark.org/0.31.2/#thematic-breaks">§§4.1–4.9</a> and
+     * <a href="https://spec.commonmark.org/0.31.2/#block-quotes">§§5.1–5.2</a>.
+     * Blank lines, ATX headings, fences, thematic breaks, block quotes, setext underlines and
+     * HTML blocks of types 1–6 end a paragraph. A new list item must be nonempty and an ordered
+     * item must start at 1; existing list siblings may start another item. Indented code and
+     * HTML type 7 cannot interrupt. Unrecognized and lazy container continuations retain their
+     * paragraph reading, so ambiguity cannot suppress a member shortcut. Container bodies can
+     * immediately open another paragraph rather than leaving subsequent lazy text outside one.
+     * <a href="https://spec.commonmark.org/0.31.2/#tabs">§2.2 tab expansion</a> retains indentation
+     * columns not consumed by a container's single optional whitespace column.
+     */
+    private static final class MemberParagraphState {
+        private final Map<Integer, MemberListContainer> lists = new HashMap<>();
+        private final Deque<Integer> listIndents = new ArrayDeque<>();
+        private boolean paragraphOpen;
+        private int activeQuoteDepth;
+
+        private MemberParagraphLine readLine(String content, int start, int end) {
+            int body = skipMemberLineSpaces(content, start, end);
+            int indent = memberColumn(content, start, body);
+            int quoteDepth = 0;
+            int parentIndent = listContentIndent(indent, quoteDepth);
+            boolean newContainer = false;
+            boolean boundary = false;
+            MemberLineRule rule = memberLineRule(content, start, end);
+            while (body < end && indent - parentIndent <= 3) {
+                if (content.charAt(body) == '>') {
+                    quoteDepth++;
+                    if (quoteDepth > activeQuoteDepth) {
+                        paragraphOpen = false;
+                        newContainer = true;
+                        discardListsFrom(indent);
+                    }
+                    int afterQuote = body + 1;
+                    if (afterQuote < end && (content.charAt(afterQuote) == ' ' || content.charAt(afterQuote) == '\t')) {
+                        afterQuote++;
+                    }
+                    int quoteIndent = indent + afterQuote - body;
+                    int afterQuoteColumn = memberColumn(content, body + 1, afterQuote, indent + 1);
+                    body = skipMemberLineSpaces(content, afterQuote, end);
+                    indent = memberColumn(content, afterQuote, body, afterQuoteColumn);
+                    parentIndent = Math.max(quoteIndent, listContentIndent(indent, quoteDepth));
+                    continue;
+                }
+                if (rule.interruptsAt(body, paragraphOpen)
+                        || MEMBER_CODE_BLOCK_START.matcher(content).region(body, end).lookingAt()) {
+                    boundary = true;
+                    break;
+                }
+                MemberListMarker marker = memberListMarker(content, body, end);
+                if (marker == null) {
+                    break;
+                }
+                int nonspace = skipMemberLineSpaces(content, marker.end(), end);
+                var sibling = lists.get(indent);
+                boolean sameList = sibling != null && sibling.quoteDepth() == quoteDepth
+                        && sibling.delimiter() == marker.delimiter();
+                if (paragraphOpen && !sameList && (nonspace == end
+                        || ".)".indexOf(marker.delimiter()) >= 0 && marker.number() != 1)) {
+                    break;
+                }
+                int markerColumn = indent + marker.end() - body;
+                int nonspaceColumn = memberColumn(content, marker.end(), nonspace, markerColumn);
+                int contentIndent = nonspaceColumn - markerColumn > 4
+                        ? memberColumn(content, marker.end(), marker.end() + 1, markerColumn) : nonspaceColumn;
+                discardListsFrom(indent);
+                lists.put(indent, new MemberListContainer(quoteDepth, marker.delimiter(), contentIndent));
+                listIndents.addLast(indent);
+                parentIndent = contentIndent;
+                paragraphOpen = false;
+                newContainer = true;
+                body = nonspace;
+                indent = nonspaceColumn;
+            }
+            boolean definitionAllowed = !paragraphOpen && indent - parentIndent <= 3;
+            boolean blank = body == end;
+            boolean indentedCode = !paragraphOpen && indent - parentIndent >= 4;
+            if (blank || boundary || !paragraphOpen) {
+                while (!listIndents.isEmpty()) {
+                    var container = lists.get(listIndents.getLast());
+                    if (container.quoteDepth() <= quoteDepth && (blank || container.contentIndent() <= indent)) {
+                        break;
+                    }
+                    lists.remove(listIndents.removeLast());
+                }
+            }
+            paragraphOpen = !blank && !boundary && !indentedCode;
+            activeQuoteDepth = blank || boundary || newContainer ? quoteDepth : Math.max(activeQuoteDepth, quoteDepth);
+            return new MemberParagraphLine(body, definitionAllowed, blank || boundary || newContainer || indentedCode);
+        }
+
+        private int listContentIndent(int indent, int quoteDepth) {
+            if (listIndents.isEmpty()) {
+                return 0;
+            }
+            for (int candidate = Math.min(indent, listIndents.getLast()); candidate >= 0; candidate--) {
+                var container = lists.get(candidate);
+                if (container != null && container.contentIndent() <= indent
+                        && (paragraphOpen || container.quoteDepth() <= quoteDepth)) {
+                    return container.contentIndent();
+                }
+            }
+            return 0;
+        }
+
+        private void discardListsFrom(int indent) {
+            while (!listIndents.isEmpty() && listIndents.getLast() >= indent) {
+                lists.remove(listIndents.removeLast());
+            }
+        }
+    }
+
+    private static int skipMemberLineSpaces(String content, int start, int end) {
+        int cursor = start;
+        while (cursor < end && (content.charAt(cursor) == ' ' || content.charAt(cursor) == '\t')) {
+            cursor++;
+        }
+        return cursor;
+    }
+
+    /** Parses only the marker; paragraph state decides whether it can open an item. */
+    private static MemberListMarker memberListMarker(String content, int start, int end) {
+        if (start == end) {
+            return null;
+        }
+        char first = content.charAt(start);
+        int cursor = start;
+        int number = 0;
+        if ("-+*".indexOf(first) >= 0) {
+            cursor++;
+        } else {
+            while (cursor < end && cursor - start < 9
+                    && content.charAt(cursor) >= '0' && content.charAt(cursor) <= '9') {
+                number = number * 10 + content.charAt(cursor++) - '0';
+            }
+            if (cursor == start || cursor == end || ".)".indexOf(content.charAt(cursor)) < 0) {
+                return null;
+            }
+            cursor++;
+        }
+        if (cursor < end && content.charAt(cursor) != ' ' && content.charAt(cursor) != '\t') {
+            return null;
+        }
+        return new MemberListMarker(cursor, number, content.charAt(cursor - 1));
+    }
+
     private static int memberColumn(String content, int start, int end) {
-        int column = 0;
+        return memberColumn(content, start, end, 0);
+    }
+
+    private static int memberColumn(String content, int start, int end, int initialColumn) {
+        int column = initialColumn;
         for (int index = start; index < end; index++) {
             column += content.charAt(index) == '\t' ? 4 - column % 4 : 1;
         }
         return column;
     }
 
-    /** A setext underline closes an existing paragraph; a thematic break can stand alone. */
-    private static boolean memberDefinitionParagraphBoundary(String content, int start, int end, boolean paragraphOpen) {
-        if (!memberRuleLine(content, start, end)) {
-            return false;
+    /** Prepares suffix coverage once so nested list markers cannot rescan the same thematic run. */
+    private static MemberLineRule memberLineRule(String content, int start, int end) {
+        int last = end - 1;
+        while (last >= start && (content.charAt(last) == ' ' || content.charAt(last) == '\t')) {
+            last--;
         }
-        if (paragraphOpen) {
-            return true;
+        if (last < start || "=-*_".indexOf(content.charAt(last)) < 0) {
+            return new MemberLineRule(end, -1, end, false);
         }
-        char marker = content.charAt(start);
-        return marker != '=' && content.substring(start, end).chars().filter(value -> value == marker).count() >= 3;
+        char marker = content.charAt(last);
+        int runStart = last;
+        while (runStart > start && content.charAt(runStart - 1) == marker) {
+            runStart--;
+        }
+        int cursor = last;
+        int count = 0;
+        int thirdLast = -1;
+        while (cursor >= start) {
+            char value = content.charAt(cursor);
+            if (value == marker) {
+                if (++count == 3) {
+                    thirdLast = cursor;
+                }
+            } else if (value != ' ' && value != '\t') {
+                break;
+            }
+            cursor--;
+        }
+        return new MemberLineRule(cursor + 1, marker == '=' ? -1 : thirdLast, runStart, marker == '=' || marker == '-');
+    }
+
+    private record MemberLineRule(int suffixStart, int thematicEnd, int setextStart, boolean setext) {
+        private boolean interruptsAt(int start, boolean paragraphOpen) {
+            return start >= suffixStart && (start <= thematicEnd || paragraphOpen && setext && start >= setextStart);
+        }
     }
 
     private static int memberLineContentStart(String content, int lineStart) {
@@ -1216,36 +1364,14 @@ public class ReferenceService {
         return closingRuns;
     }
 
-    /** Backticks cannot pair across blank lines or the start of another block. */
+    /** Backticks use the same paragraph and container boundaries as definition suppression. */
     private static boolean[] codeSpanBlockStarts(String content) {
         boolean[] starts = new boolean[content.length()];
-        long activeQuoteDepth = 0;
+        var paragraphs = new MemberParagraphState();
         for (int lineStart = 0; lineStart < content.length();) {
-            int lineEnd = lineStart;
-            while (lineEnd < content.length() && "\r\n".indexOf(content.charAt(lineEnd)) < 0) {
-                lineEnd++;
-            }
-            int bodyStart = memberLineContentStart(content, lineStart);
-            Matcher quotePrefix = MEMBER_QUOTE_CONTENT.matcher(content).region(lineStart, lineEnd);
-            int ruleStart = quotePrefix.lookingAt() ? quotePrefix.end() : lineStart;
-            String prefix = content.substring(lineStart, bodyStart);
-            long quoteDepth = prefix.chars().filter(value -> value == '>').count();
-            String itemMarker = prefix.replace(">", "").strip();
-            boolean itemStart = itemMarker.length() == 1 && "-+*".indexOf(itemMarker.charAt(0)) >= 0
-                    || "1.".equals(itemMarker) || "1)".equals(itemMarker);
-            boolean blank = content.substring(bodyStart, lineEnd).chars().allMatch(value -> value == ' ' || value == '\t');
-            boolean interrupt = itemStart || memberRuleLine(content, ruleStart, lineEnd)
-                    || ruleStart != bodyStart && memberRuleLine(content, bodyStart, lineEnd)
-                    || MEMBER_CODE_BLOCK_START.matcher(content).region(bodyStart, lineEnd).lookingAt();
-            starts[lineStart] = blank || quoteDepth > activeQuoteDepth || interrupt;
-            activeQuoteDepth = blank || interrupt ? quoteDepth : Math.max(activeQuoteDepth, quoteDepth);
-            lineStart = lineEnd;
-            if (lineStart < content.length() && content.charAt(lineStart) == '\r') {
-                lineStart++;
-            }
-            if (lineStart < content.length() && content.charAt(lineStart) == '\n') {
-                lineStart++;
-            }
+            int lineEnd = memberLineEnd(content, lineStart);
+            starts[lineStart] = paragraphs.readLine(content, lineStart, lineEnd).blockStart();
+            lineStart = lineEnd == content.length() ? lineEnd : afterDefinitionLineEnd(content, lineEnd);
         }
         return starts;
     }

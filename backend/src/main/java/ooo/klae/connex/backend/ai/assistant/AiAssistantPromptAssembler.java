@@ -1107,18 +1107,21 @@ public class AiAssistantPromptAssembler {
         JsonNode rendered = statesTheActiveSet
                 ? requireDeclaredVocabulary(payload)
                 : maskToolStrings(payload, context, turn.result().identifiers().stream()
-                        .filter(identifier -> "member".equals(identifier.kind()))
-                        .map(Identifier::value).toList(), false);
+                        .filter(identifier -> "member".equals(identifier.kind())).toList(), "", false);
         if (!(rendered instanceof ObjectNode object)) {
             throw new IllegalStateException("Assistant tool result payload is invalid");
         }
         return object;
     }
 
-    /** Scopes recorded containment to tenant values, retaining ordinary rules for fixed envelope values. */
-    private JsonNode maskToolStrings(JsonNode node, MaskingContext context, List<String> members, boolean fixedValue) {
+    /** Containment belongs only to a provenance field; unrelated siblings keep ordinary boundary rules. */
+    private JsonNode maskToolStrings(
+            JsonNode node, MaskingContext context, List<Identifier> identifiers, String path, boolean fixedValue) {
         if (node.isString()) {
-            return context.withReplayMemberValues(fixedValue ? List.of() : members, () -> {
+            List<String> members = fixedValue ? List.of() : identifiers.stream()
+                    .filter(identifier -> identifier.path() != null && path.equals("/result" + identifier.path()))
+                    .map(Identifier::value).toList();
+            return context.withReplayMemberValues(members, () -> {
                 String masked = MaskingEngine.maskTemporal(node.asString(), context);
                 OutboundLeakScan.assertNoLeakInServerEnvelope(objectMapper.writeValueAsString(masked), context, objectMapper);
                 return objectMapper.getNodeFactory().textNode(masked);
@@ -1127,13 +1130,14 @@ public class AiAssistantPromptAssembler {
         if (node instanceof ObjectNode object) {
             ObjectNode masked = objectMapper.createObjectNode();
             object.properties().forEach(entry -> masked.set(entry.getKey(), maskToolStrings(entry.getValue(), context,
-                    members, FIXED_TOOL_RESULT_FIELDS.contains(entry.getKey()))));
+                    identifiers, path + "/" + AiAssistantMemberIdentifiers.pointerSegment(entry.getKey()),
+                    FIXED_TOOL_RESULT_FIELDS.contains(entry.getKey()))));
             return masked;
         }
         if (node instanceof ArrayNode array) {
             ArrayNode masked = objectMapper.createArrayNode();
-            for (JsonNode child : array) {
-                masked.add(maskToolStrings(child, context, members, false));
+            for (int index = 0; index < array.size(); index++) {
+                masked.add(maskToolStrings(array.get(index), context, identifiers, path + "/" + index, false));
             }
             return masked;
         }

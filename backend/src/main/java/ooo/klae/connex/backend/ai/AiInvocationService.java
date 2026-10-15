@@ -926,6 +926,21 @@ public class AiInvocationService {
 
         try {
             OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            if (nativeTools != null) {
+                for (AiToolExchange exchange : nativeTools.exchanges()) {
+                    AiToolCall call = exchange.call();
+                    for (String field : List.of(call.id(), call.name(), call.arguments())) {
+                        OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                                objectMapper.writeValueAsString(field), effectiveInvocation.context(), objectMapper);
+                    }
+                    OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                            call.arguments(), effectiveInvocation.context(), objectMapper);
+                    if (call.thoughtSignature() != null) {
+                        OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                                objectMapper.writeValueAsString(call.thoughtSignature()), effectiveInvocation.context(), objectMapper);
+                    }
+                }
+            }
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,

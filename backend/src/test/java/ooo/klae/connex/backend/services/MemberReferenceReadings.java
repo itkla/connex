@@ -116,7 +116,43 @@ public final class MemberReferenceReadings {
         readings.add(new Reading("paragraph-context", "encoded titled definition in paragraph",
                 "[Alice &amp; Bob][m]\n[m]: user:42 \"a&#10;b\"\n"
                         + "[Pending &amp; Member][pending]\n[pending]: <user:43> (a&#13;b)", "Alice &amp; Bob"));
+        paragraphInterruptions().stream().filter(reading -> !reading.definitionAllowed()).forEach(reading ->
+                readings.add(new Reading("paragraph-interruption", reading.name(), reading.content(), "Alice Former")));
         return List.copyOf(readings);
+    }
+
+    /** Both sides of CommonMark's paragraph-interruption rules, including lazy containers. */
+    public static List<ParagraphInterruption> paragraphInterruptions() {
+        List<ParagraphInterruption> cases = new ArrayList<>();
+        for (String prefix : List.of("Hello\n\n", "Hello\n# Heading\n", "Hello\n   ###### Heading\n",
+                "Hello\n```java\n```\n", "Hello\n~~~\n~~~\n", "Hello\n***\n", "Hello\n- - -\n",
+                "Hello\n___\n", "Hello\n> ", "Hello\n---\n", "Hello\n===\n", "Hello\n- ",
+                "Hello\n* ", "Hello\n+ ", "Hello\n1. ", "Hello\n1) ", "Hello\n001. ",
+                "Hello\n<script></script>\n", "Hello\n<!-- comment -->\n", "Hello\n<?instruction?>\n",
+                "Hello\n<!DOCTYPE html>\n", "Hello\n<![CDATA[data]]>\n", "Hello\n<div></div>\n",
+                "> Hello\n> # Heading\n> ", "> Hello\n> * ", "> Hello\n> 1. ")) {
+            cases.add(new ParagraphInterruption("definition permitted after " + prefix,
+                    prefix + "[Alice Former]: welcome.\n\n[Alice Former]: user:42", true));
+        }
+        for (String prefix : List.of("Hello\n* \n", "Hello\n+ \n", "Hello\n1. \n", "Hello\n1)\n",
+                "Hello\n0. ", "Hello\n2. ", "Hello\n2) ", "Hello\n000. ",
+                "Hello\n<custom></custom>\n", "Hello\n<custom attr=\"value\">\n", "Hello\n</custom>\n",
+                "Hello\n    indented code\n", "Hello\n\tindented code\n", "Hello\n    # Heading\n",
+                "Hello\n    > quote\n", "Hello\n    * item\n", "Hello\n####### Heading\n",
+                "Hello\n#Heading\n", "Hello\n``java\n", "Hello\n```bad`info\n", "Hello\n~~\n",
+                "Hello\n* _ *\n", "Hello\n-=\n", "Hello\n=-\n", "Hello\nparagraph continuation\n",
+                "Hello\n* item\n", "Hello\n1. item\n", "Hello\n> paragraph\n", "> Hello\n> * \n> ",
+                "> Hello\n* \n", "* Hello\n  * \n  ", "1. Hello\n   2. ", "Hello\n2. # Heading\n",
+                "1. > Hello\n   > ", "* > Hello\n  > ", "> * > Hello\n>   > ",
+                "> Hello\n>\t  # Heading\n> ")) {
+            cases.add(new ParagraphInterruption("shortcut preserved after " + prefix,
+                    prefix + "[Alice Former]: welcome.\n\n[Alice Former]: user:42", false));
+        }
+        return List.copyOf(cases);
+    }
+
+    /** A valid definition is suppressed only when its block can begin outside a paragraph. */
+    public record ParagraphInterruption(String name, String content, boolean definitionAllowed) {
     }
 
     /** One recognition rule and its source-text witness. */

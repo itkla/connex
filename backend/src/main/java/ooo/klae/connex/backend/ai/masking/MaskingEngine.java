@@ -764,17 +764,37 @@ public final class MaskingEngine {
      * @return whether the text contains a mention this engine would have to mask
      */
     public static boolean containsIdentifierMention(MentionScanText scanText, String rawValue) {
+        return containsIdentifierMention(scanText, rawValue, false);
+    }
+
+    /**
+     * Uses ordinary mention boundaries with MEMBER eligibility, including irreversible non-ASCII
+     * symbol labels. ASCII punctuation retains the ordinary exclusion and no containment authority
+     * is granted by a coincidental substring.
+     * @param scanText user turn projected once for all authorized candidates
+     * @param rawValue authorized member label
+     * @return whether the user authored a member mention
+     */
+    public static boolean containsMemberMention(MentionScanText scanText, String rawValue) {
+        return containsIdentifierMention(scanText, rawValue, true);
+    }
+
+    private static boolean containsIdentifierMention(MentionScanText scanText, String rawValue, boolean member) {
         Objects.requireNonNull(scanText, "scanText");
         Objects.requireNonNull(rawValue, "rawValue");
-        if (!MaskingContext.isDictionaryEligible(rawValue)) {
+        if (rawValue.isBlank()) {
             return false;
         }
         String value = normalizeIdentifierValue(rawValue);
+        boolean memberSymbol = member && MaskingContext.isShortNonAsciiSymbol(rawValue, value);
+        if (!MaskingContext.isCanonicalDictionaryEligible(value) && !memberSymbol) {
+            return false;
+        }
         if (containsIdentifierMention(scanText.prepared, scanText.projection, value)) {
             return true;
         }
         String labelValue = CanonicalText.storedIdentifier(rawValue).label();
-        return MaskingContext.isCanonicalDictionaryEligible(labelValue)
+        return (MaskingContext.isCanonicalDictionaryEligible(labelValue) || memberSymbol && !labelValue.isEmpty())
                 && containsIdentifierMention(scanText.prepared, scanText.labels, labelValue);
     }
 

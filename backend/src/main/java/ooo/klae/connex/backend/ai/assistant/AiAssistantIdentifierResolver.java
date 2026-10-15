@@ -92,9 +92,10 @@ public class AiAssistantIdentifierResolver {
                 .map(mention -> new Identifier(
                         entityKind(mention.getKind()), identifierValue(mention)))
                 .toList());
-        MaskingContext members = new MaskingContext();
-        AiAssistantMemberIdentifiers.seed(workspaceService.getMembers(workspaceId), members);
-        for (String label : members.memberCandidatesIn(message)) {
+        for (String label : AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId))) {
+            if (!MaskingEngine.containsMemberMention(scanText, label)) {
+                continue;
+            }
             identifiers.add(new Identifier(EntityKind.MEMBER, label));
             if (identifiers.size() > MAX_IDENTIFIERS) {
                 throw AiAssistantLoopException.malformed("identifier_limit_exceeded");

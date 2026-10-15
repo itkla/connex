@@ -162,6 +162,15 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void paragraphInterruptionMatchesCommonMarkForEveryCoveredBlockType() {
+        for (var reading : MemberReferenceReadings.paragraphInterruptions()) {
+            assertEquals(!reading.definitionAllowed(),
+                    ReferenceService.memberLabelsFromReaderVisibleContent(reading.content()).contains("Alice Former"),
+                    reading.name());
+        }
+    }
+
+    @Test
     void validDefinitionsKeepTheirKeysOutOfMemberCandidates() {
         for (String remainder : java.util.List.of("user:42", "<user:42>", "<>", "<url with spaces>",
                 "url(with(nested)parentheses)", "url\\(with\\)escapes", "url \"title\"", "url 'title'", "url (title)",
@@ -191,6 +200,13 @@ class ReferenceServicePlainTextTest {
                 "[m\n n]: user:42\n[k]: user:43", "[m]: user:42 \"first\nsecond\"\n[n]: user:43")) {
             assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(definitions), definitions);
         }
+    }
+
+    @Test
+    void nestedContainersFollowedByBlankLinesRemainLinear() {
+        String content = "* ".repeat(25_000) + "paragraph\n" + "\n".repeat(25_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
+                assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(content)));
     }
 
     @Test

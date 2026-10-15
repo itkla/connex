@@ -140,7 +140,7 @@ public final class MaskingContext {
     }
 
     /** Short non-ASCII symbols carry member identity but cannot supply reversible placeholders. */
-    private static boolean isShortNonAsciiSymbol(String rawValue, String canonicalValue) {
+    static boolean isShortNonAsciiSymbol(String rawValue, String canonicalValue) {
         return !canonicalValue.isEmpty() && canonicalValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH
                 && canonicalValue.codePoints().noneMatch(Character::isLetterOrDigit)
                 && rawValue.codePoints().anyMatch(value -> value > 127

@@ -2811,6 +2811,34 @@ class AiInvocationServiceTest {
         verify(aiProvider, times(1)).complete(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "name", "arguments", "signature", "escapedValue", "escapedKey"})
+    void nativeReplayCannotExemptProviderAuthoredMaskingSentinels(String field) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(field.equals("name") ? "search_records" : "[redacted]");
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                .userTurn("Find the relationship").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
+                AiInvocationProtocol.NATIVE_TOOLS);
+        var acceptedCall = new AiToolCall("call-1", "search_records", "{\"query\":\"[redacted]\"}");
+        var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class,
+                completeMemberNative(invocation, List.of(), acceptedCall));
+        assertEquals(acceptedCall, accepted.providerCall());
+        String escaped = "\\u005bredacted\\u005d";
+        String arguments = switch (field) {
+            case "arguments" -> acceptedCall.arguments();
+            case "escapedValue" -> "{\"query\":\"" + escaped + "\"}";
+            case "escapedKey" -> "{\"" + escaped + "\":\"relationship\"}";
+            default -> "{\"query\":\"relationship\"}";
+        };
+        var replay = new AiToolCall(field.equals("id") ? "[redacted]" : "call-1",
+                "search_records", arguments,
+                field.equals("signature") ? "[redacted]" : null);
+        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
+        verify(aiProvider, times(1)).complete(any());
+    }
+
     /** Runs the actual dispatch callback with caller-owned member bindings and native replay. */
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completeMemberNative(
             AiInvocation invocation, List<AiToolExchange> exchanges, AiToolCall call) {
@@ -2818,6 +2846,11 @@ class AiInvocationServiceTest {
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
         providerReturns(new AiCompletionResult("", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA,
                 "", AiReasoningMode.NONE, List.of(call)));
+        return requestMemberNative(invocation, exchanges);
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> requestMemberNative(
+            AiInvocation invocation, List<AiToolExchange> exchanges) {
         var mapper = new ObjectMapper();
         var catalog = new AiAssistantToolCatalog();
         var guard = new AiAssistantStepGuard(catalog);

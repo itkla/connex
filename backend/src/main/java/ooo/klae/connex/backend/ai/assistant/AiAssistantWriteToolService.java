@@ -1140,7 +1140,9 @@ public class AiAssistantWriteToolService {
                 : List.of();
         var combined = new java.util.LinkedHashSet<>(identifiers);
         combined.addAll(memberIdentifiers);
-        return new AiAssistantToolResult(result, List.copyOf(combined));
+        return new AiAssistantToolResult(result, combined.stream().map(identifier ->
+                identifier.path() == null ? identifier : new AiAssistantToolResult.Identifier(
+                        identifier.kind(), identifier.value(), "/outcome" + identifier.path())).toList());
     }
 
     /**

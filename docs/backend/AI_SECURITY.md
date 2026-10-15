@@ -67,7 +67,7 @@ residual; it does not exempt non-ASCII symbol labels.
 Before memory preparation or compaction, the loop registers every active member label from the
 exact current workspace through `WorkspaceService.getMembers`. Directory labels are match
 candidates, not reversible bindings, and the directory is never serialized to a provider. Queue-time
-member provenance records every contained known label within the combined 20-identifier limit,
+member provenance records only boundary-aware mentions within the combined 20-identifier limit,
 without adding resources; record mentions retain their existing canonical mention gate. Directory read failures abort before provider dispatch; the
 candidate dictionary is never truncated and a failed masked request is never retried unmasked.
 Approved `UNMASKED` disclosure retains its existing posture.
@@ -91,6 +91,10 @@ continuations; blockquote and list-item definitions, including continued keys wi
 and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets
 inside paired code spans opaque and stop backtick pairing at paragraph and block boundaries.
 Definition keys are suppressed only at paragraph boundaries, container starts or after another definition.
+Paragraph interruption follows CommonMark 0.31.2: blank lines, ATX headings, fences, thematic
+breaks, block quotes, setext underlines and HTML types 1–6 can interrupt; empty new list items,
+ordered starts other than 1, HTML type 7 and indented code cannot. Accepted container bodies may
+open a new paragraph, whose lazy continuations remain usages.
 Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
 Every candidate source label, including canonical inline readings, is bounded to 999 Unicode
 characters before copying or normalization. Longer spans are outside this recognition contract.
@@ -154,8 +158,12 @@ inside opaque fields without altering those fields.
 Final server-authored masking markers `[redacted]` and `[omitted by policy]` are excluded by
 position from MEMBER leak matching. Genuine source occurrences are replaced before these markers
 are inserted; a member named “Redacted” receives no label-wide exemption. Strict provider-authored
-scanning keeps its existing checks. Field projections are built once per scanned segment and reused
-across the complete candidate dictionary. Provenance
+scanning keeps its existing checks. Native replay call ids, names, thought signatures and raw and
+JSON-decoded arguments receive an additional strict MEMBER scan without any sentinel exemption;
+server-created markers in tool results retain their positional exemption. Field projections are built once per scanned segment and reused
+across the complete candidate dictionary. Tool-result provenance retains the JSON pointer of each originating textual field; containment
+never extends to unrelated sibling fields. Unscoped legacy declarations retain ordinary
+boundary-aware matching. For persisted provider-authored text, provenance
 includes exact demask replacements independently of adjacency, supplemented by all matching raw
 candidates, so joined short labels such as `Bob_team` and `xBob` retain protection after a rename
 and a fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the

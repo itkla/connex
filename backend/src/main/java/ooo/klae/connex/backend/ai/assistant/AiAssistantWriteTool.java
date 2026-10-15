@@ -404,7 +404,10 @@ public interface AiAssistantWriteTool {
     /**
      * Declares masking provenance from the stored outcome without reads or side effects.
      * Fresh execution and replay use the same snapshot, including after a member rename.
-     * Member labels register as match candidates before tool-result text is masked.
+     * Member labels register as match candidates before tool-result text is masked. A member
+     * identifier's JSON pointer names its originating textual field relative to this outcome;
+     * containment is confined to that field. Legacy identifiers without a pointer retain ordinary
+     * boundary-aware matching.
      * @param storedOutcome stored outcome object
      * @return identifiers required by the model projection
      */

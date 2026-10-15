@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -303,6 +304,39 @@ class AiAssistantIdentifierResolverTest {
         mention.setValue(value);
         return mention;
     }
+    @Test
+    void shortMemberSubstringsNeitherCreateUserProvenanceNorConsumeTheMentionLimit() {
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        String message = "show the client pipeline";
+        List<String> labels = new ArrayList<>();
+        labels.add("Li");
+        IntStream.range(0, message.length() - 1).mapToObj(index -> message.substring(index, index + 2))
+                .filter(value -> value.chars().allMatch(Character::isLetter) && !value.equalsIgnoreCase("Li")).distinct().forEach(labels::add);
+        labels.addAll(List.of("cli", "ien", "ent", "pip", "ipe", "pel", "eli", "lin", "ine"));
+        List<ooo.klae.connex.backend.beans.User> members = labels.stream().map(label -> {
+            var member = new ooo.klae.connex.backend.beans.User();
+            member.setDisplayName(label);
+            return member;
+        }).toList();
+        when(workspace.getMembers(7)).thenReturn(members);
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope);
+        assertTrue(labels.stream().distinct().count() > 20);
+        var unrelated = resolver.resolve(message);
+        assertEquals(List.of(), unrelated.identifiers());
+        var context = new MaskingContext();
+        resolver.seed(unrelated, context);
+        assertEquals(message, MaskingEngine.maskConversationalFreeText(message, context));
+        var genuine = resolver.resolve("Ask Li to follow up");
+        assertEquals(List.of(new AiAssistantIdentifierResolver.Identifier(
+                ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Li")), genuine.identifiers());
+        resolver.seed(genuine, context);
+        assertEquals("Ask {{M1}} to follow up", MaskingEngine.maskConversationalFreeText("Ask Li to follow up", context));
+    }
+
     @Test
     void memberMentionsShareTheTwentyIdentifierLimitWithoutResourceHandles() {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);

@@ -714,6 +714,90 @@ class AiAssistantMemberExposureTest {
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void userMemberProvenanceAdmitsMentionsButLeavesUnrelatedShortSubstringsUnchanged(boolean nativeProtocol) throws Exception {
+        var directory = org.mockito.Mockito.mock(ooo.klae.connex.backend.services.WorkspaceService.class);
+        var scope = org.mockito.Mockito.mock(ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess.class);
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setDisplayName("Li");
+        org.mockito.Mockito.when(directory.getCurrentWorkspaceId()).thenReturn(7);
+        var emoji = new ooo.klae.connex.backend.beans.User();
+        emoji.setDisplayName("😀");
+        var punctuation = new ooo.klae.connex.backend.beans.User();
+        punctuation.setDisplayName(".");
+        org.mockito.Mockito.when(directory.getMembers(7)).thenReturn(List.of(member, emoji, punctuation));
+        org.mockito.Mockito.when(scope.getForWorkspace(7)).thenReturn(
+                new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(1, List.of(7), "[7]"));
+        var resolver = new AiAssistantIdentifierResolver(
+                org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper.class), directory, scope);
+        for (String text : List.of("show the client pipeline", "Ask Li to follow up", "Ask 😀 to follow up.")) {
+            var resolution = resolver.resolve(text);
+            assertEquals(text.startsWith("Ask") ? 1 : 0, resolution.identifiers().size());
+            var metadata = mapper.createObjectNode().put("kind", "user_message");
+            metadata.putArray("resources");
+            metadata.putArray("identifiers");
+            var provenance = metadata.putArray("memberIdentifiers");
+            resolution.identifiers().forEach(identifier -> provenance.addObject()
+                    .put("kind", "member").put("value", identifier.value()));
+            var user = new AiChatMessage();
+            user.setAuthorKind("user");
+            user.setContent(text);
+            user.setStructuredJson(mapper.writeValueAsString(metadata));
+            var context = new MaskingContext();
+            context.registerMemberCandidate("Renamed Member");
+            var resources = new AiChatResourceRegistry(context);
+            var empty = new AiAssistantToolResult(Map.of(), List.of());
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(),
+                            new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(user), empty, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages());
+            String expected = text.contains("😀") ? "Ask [redacted] to follow up."
+                    : text.startsWith("Ask") ? "Ask {{M1}} to follow up" : text;
+            assertTrue(payload.contains(expected));
+            assertFalse(payload.contains("😀"));
+            assertEquals(text.contains("Li") ? 1 : 0, context.tokenBindings().size());
+            assertEquals(0, capture.warnings());
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void toolMemberContainmentBelongsOnlyToItsOriginatingTextualField(boolean nativeProtocol) throws Exception {
+        var context = new MaskingContext();
+        var legacy = mapper.readTree("{\"request\":{\"description\":\"[Li](user:42) Li_team xLi\"},"
+                + "\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Li\"}]}");
+        var provenance = AiAssistantMemberIdentifiers.stored(legacy);
+        assertEquals(List.of(new Identifier("member", "Li", "/description")), provenance);
+        var result = new AiAssistantToolResult(Map.of("description", "[Li](user:42) Li_team xLi",
+                "company", "Little Co", "query", "client", "siblings", List.of("Little Co", "client")), provenance);
+        var turns = List.of(ToolTurn.soleCall(1, "get_record", result));
+        var resources = new AiChatResourceRegistry(context);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), empty, turns, context, resources, List.of(), budget, AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), empty, turns, context, resources, AiAssistantToolCatalog.ALL);
+        var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
+                Map.of(new AiAssistantToolCallRef(1, 0), new AiToolCall("get", "get_record", "{\"handle\":\"r1\"}")),
+                context, budget, null).exchanges() : List.<AiToolExchange>of();
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges,
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages())
+                + mapper.writeValueAsString(capture.request().nativeTools());
+        assertTrue(payload.contains("{{M1}}_team x{{M1}}"));
+        assertTrue(payload.contains("Little Co"));
+        assertTrue(payload.contains("client"));
+        assertFalse(payload.contains("Li_team"));
+        assertFalse(payload.contains("{{M1}}ttle"));
+        assertFalse(payload.contains("c{{M1}}ent"));
+        assertEquals(0, capture.warnings());
+        assertEquals("Li_team xLi", Demasker.demask("{{M1}}_team x{{M1}}", context).text());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void recordedContainmentPreservesFixedToolResultVocabularyByPosition(boolean nativeProtocol) throws Exception {
         var context = new MaskingContext();
         var result = new AiAssistantToolResult(Map.of("tool", "create_task", "tier", "auto", "status", "executed",

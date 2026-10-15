@@ -55,17 +55,29 @@ public final class AiAssistantMemberIdentifiers {
 
     /** Captures bounded raw provenance from all textual values in a durable write request. */
     public static List<AiAssistantToolResult.Identifier> inRequest(JsonNode request, MaskingContext context) {
-        var labels = new LinkedHashSet<String>();
-        collectRequestLabels(request, context, labels);
-        return checked(labels.stream().map(value -> new AiAssistantToolResult.Identifier("member", value)).toList());
+        var identifiers = new LinkedHashSet<AiAssistantToolResult.Identifier>();
+        collectRequestLabels(request, "", context, identifiers);
+        return checked(List.copyOf(identifiers));
     }
 
-    private static void collectRequestLabels(JsonNode node, MaskingContext context, LinkedHashSet<String> labels) {
+    private static void collectRequestLabels(JsonNode node, String path, MaskingContext context,
+            LinkedHashSet<AiAssistantToolResult.Identifier> identifiers) {
         if (node.isString()) {
-            labels.addAll(context.memberCandidatesIn(node.asString()));
-        } else if (node.isObject() || node.isArray()) {
-            node.forEach(child -> collectRequestLabels(child, context, labels));
+            context.memberCandidatesIn(node.asString()).forEach(value ->
+                    identifiers.add(new AiAssistantToolResult.Identifier("member", value, path)));
+        } else if (node.isObject()) {
+            node.properties().forEach(entry -> collectRequestLabels(entry.getValue(),
+                    path + "/" + pointerSegment(entry.getKey()), context, identifiers));
+        } else if (node.isArray()) {
+            for (int index = 0; index < node.size(); index++) {
+                collectRequestLabels(node.get(index), path + "/" + index, context, identifiers);
+            }
         }
+    }
+
+    /** Escapes a source field name without losing its JSON pointer position. */
+    static String pointerSegment(String field) {
+        return field.replace("~", "~0").replace("/", "~1");
     }
 
     /** Reads optional raw provenance from a server-authored durable envelope, including old rows. */
@@ -82,9 +94,24 @@ public final class AiAssistantMemberIdentifiers {
             if (!"member".equals(identifier.path("kind").asString()) || !identifier.path("value").isString()) {
                 throw new IllegalStateException("Assistant member provenance is invalid");
             }
-            identifiers.add(new AiAssistantToolResult.Identifier("member", identifier.get("value").asString()));
+            JsonNode path = identifier.get("path");
+            if (path != null && (!path.isString() || !path.asString().startsWith("/"))) {
+                throw new IllegalStateException("Assistant member provenance path is invalid");
+            }
+            identifiers.add(new AiAssistantToolResult.Identifier("member", identifier.get("value").asString(),
+                    path == null ? null : path.asString()));
         }
-        return checked(List.copyOf(identifiers));
+        List<AiAssistantToolResult.Identifier> bounded = checked(List.copyOf(identifiers));
+        if (!envelope.path("request").isObject()) {
+            return bounded;
+        }
+        var legacy = new MaskingContext();
+        bounded.stream().filter(identifier -> identifier.path() == null).forEach(identifier -> identifier.seed(legacy));
+        var byValue = inRequest(envelope.get("request"), legacy).stream().collect(java.util.stream.Collectors.groupingBy(
+                AiAssistantToolResult.Identifier::value));
+        return checked(bounded.stream().flatMap(identifier -> identifier.path() == null
+                ? byValue.getOrDefault(identifier.value(), List.of(identifier)).stream()
+                : java.util.stream.Stream.of(identifier)).distinct().toList());
     }
 
     /** Restores contained raw labels only for an exact click on a persisted suggestion. */
