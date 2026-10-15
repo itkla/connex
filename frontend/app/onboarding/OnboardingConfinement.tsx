@@ -1,0 +1,133 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
+import { Loader2Icon } from "lucide-react";
+
+import type { Passkey } from "@/app/lib/types";
+import { getPasskeys } from "@/app/lib/api";
+import type { PrivilegedMfaStandingState } from "@/app/hooks/usePrivilegedMfaStanding";
+import { useConfinementExits } from "@/app/hooks/useConfinementExits";
+import { usePasskeyEnrollment } from "@/app/hooks/usePasskeyEnrollment";
+import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
+import PasskeyEnrollmentPasswordDialog from "@/app/components/account/PasskeyEnrollmentPasswordDialog";
+import PrivilegedMfaConfinementCard from "@/app/components/account/PrivilegedMfaConfinementCard";
+import { Button } from "@/components/ui/button";
+
+/**
+ * Lets a confined privileged account with no workspace act from onboarding (#1534). The app's
+ * pages, Security among them, need a workspace, so an account privileged only through an
+ * organization would otherwise have nowhere to add its first passkey, redeem an approval code or
+ * leave the organization. It shows the same confinement card as Security, with the enrollment and
+ * redemption ceremonies and the organization exits, and a recheck for when another tab or another
+ * person changed the standing.
+ * @param props.standing the account's standing as onboarding reads it
+ */
+export default function OnboardingConfinement({ standing }: { standing: PrivilegedMfaStandingState }) {
+    const t = useTranslations("AccountSecurity");
+    const tOnboarding = useTranslations("Onboarding");
+    const supported = usePasskeySupport();
+    const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+    const [approvalOpen, setApprovalOpen] = useState(false);
+    const { requirements, reason, refresh } = standing;
+    const exits = useConfinementExits();
+
+    useEffect(() => {
+        let cancelled = false;
+        getPasskeys().then((loaded) => {
+            if (!cancelled) setPasskeys(loaded);
+        }, () => undefined);
+        return () => {
+            cancelled = true;
+        };
+    }, [requirements]);
+
+    const enrollment = usePasskeyEnrollment(
+        {
+            hasPasskeys: passkeys.length > 0,
+            currentPasswordRequired: requirements?.currentPasswordRequired ?? false,
+            emailConfirmationRequired: requirements?.emailConfirmationRequired ?? false,
+            emailConfirmationSatisfied: requirements?.emailConfirmationSatisfied ?? false,
+        },
+        {
+            onEnrolled: async () => {
+                const [loaded] = await Promise.all([getPasskeys(), refresh("ceremony")]);
+                setPasskeys(loaded);
+            },
+            onProofRejected: () => void refresh("check"),
+        },
+    );
+
+    const cardReason = reason
+        ?? (requirements?.standing === "ATTESTATION_REQUIRED" ? "attestation" : "enrollment");
+    const awaitingConfirmation = passkeys.length === 0
+        && (requirements?.emailConfirmationRequired ?? false)
+        && !(requirements?.emailConfirmationSatisfied ?? false);
+
+    const action = !supported ? (
+        <p className="text-sm text-muted-foreground">{t("unsupported")}</p>
+    ) : cardReason === "attestation" ? (
+        <Button type="button" variant="brand" size="inline" onClick={() => setApprovalOpen(true)}>
+            {t("approvalEnter")}
+        </Button>
+    ) : awaitingConfirmation ? (
+        <>
+            <p className="w-full max-w-prose text-sm text-muted-foreground">{t("confirmationDescription")}</p>
+            <Button
+                type="button"
+                variant="brand"
+                size="inline"
+                disabled={enrollment.sendingConfirmation}
+                onClick={() => void enrollment.sendConfirmation()}
+            >
+                {enrollment.sendingConfirmation ? <Loader2Icon className="size-4 animate-spin" /> : t("confirmationSend")}
+            </Button>
+        </>
+    ) : (
+        <Button
+            type="button"
+            variant="brand"
+            size="inline"
+            disabled={enrollment.adding}
+            aria-busy={enrollment.adding}
+            onClick={() => void enrollment.addPasskey()}
+        >
+            {enrollment.adding ? <Loader2Icon className="size-4 animate-spin" /> : t("add")}
+        </Button>
+    );
+
+    return (
+        <div className="mt-8">
+            <PrivilegedMfaConfinementCard
+                reason={cardReason}
+                requirements={requirements}
+                passkeys={passkeys}
+                action={action}
+                exits={exits}
+                canLeaveWorkspaces={false}
+                footer={(
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="inline"
+                        className="mt-3"
+                        onClick={() => void refresh("check")}
+                    >
+                        {tOnboarding("confinedRecheck")}
+                    </Button>
+                )}
+            />
+            <PasskeyEnrollmentPasswordDialog password={enrollment.password} />
+            <PasskeyApprovalDialog
+                open={approvalOpen}
+                onOpenChange={setApprovalOpen}
+                onApproved={() => {
+                    void Promise.all([getPasskeys(), refresh("ceremony")]).then(([loaded]) => {
+                        setPasskeys(loaded);
+                    }, () => undefined);
+                }}
+            />
+        </div>
+    );
+}

@@ -657,6 +657,15 @@ function MembersWorkspacePanel({
                                                         {t("ownershipPending")}
                                                     </Badge>
                                                 )}
+                                                {member.passkeyApprovalNeeded === true && (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="border-warning/40 bg-warning/10 text-warning-foreground"
+                                                        title={t("passkeyNotApprovedHint")}
+                                                    >
+                                                        {t("passkeyNotApproved")}
+                                                    </Badge>
+                                                )}
                                             </div>
                                             <p className="truncate text-xs text-muted-foreground">{member.email}</p>
                                         </div>

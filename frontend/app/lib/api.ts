@@ -591,12 +591,30 @@ function isPasskeyRegistrationRequirements(value: unknown): value is Types.Passk
     if (!("emailConfirmationRequired" in value) || typeof value.emailConfirmationRequired !== "boolean") return false;
     if (!("emailConfirmationSatisfied" in value) || typeof value.emailConfirmationSatisfied !== "boolean") return false;
     if ("standing" in value && value.standing !== undefined && !PRIVILEGED_MFA_STANDINGS.has(value.standing)) return false;
-    if (!("approvalGaps" in value) || value.approvalGaps === undefined) return true;
-    return Array.isArray(value.approvalGaps) && value.approvalGaps.every((gap: unknown) =>
-        typeof gap === "object" && gap !== null
-        && "credentialId" in gap && typeof gap.credentialId === "string"
-        && "orgId" in gap && typeof gap.orgId === "number"
-        && "orgName" in gap && typeof gap.orgName === "string");
+    if ("approvalGaps" in value && value.approvalGaps !== undefined && !(Array.isArray(value.approvalGaps)
+            && value.approvalGaps.every((gap: unknown) =>
+                typeof gap === "object" && gap !== null
+                && "credentialId" in gap && typeof gap.credentialId === "string"
+                && "orgId" in gap && typeof gap.orgId === "number"
+                && "orgName" in gap && typeof gap.orgName === "string"))) {
+        return false;
+    }
+    if (!("privilegedMemberships" in value) || value.privilegedMemberships === undefined) return true;
+    return Array.isArray(value.privilegedMemberships)
+        && value.privilegedMemberships.every(isPrivilegedMembership);
+}
+
+/** Whether one exit entry has the shape this client reads. */
+function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMembership {
+    return typeof value === "object" && value !== null
+        && "orgId" in value && typeof value.orgId === "number"
+        && "orgName" in value && typeof value.orgName === "string"
+        && "orgRole" in value && (value.orgRole === null || value.orgRole === "owner" || value.orgRole === "admin")
+        && "workspaces" in value && Array.isArray(value.workspaces)
+        && value.workspaces.every((workspace: unknown) =>
+            typeof workspace === "object" && workspace !== null
+            && "workspaceId" in workspace && typeof workspace.workspaceId === "number"
+            && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
 }
 
 function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number) {

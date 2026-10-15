@@ -45,7 +45,14 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
 }));
 vi.mock("@/app/hooks/usePasskeySupport", () => ({ usePasskeySupport: () => true }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
-vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ workspaces: [] }) }));
+vi.mock("@/app/hooks/useWorkspace", () => ({
+    useWorkspace: () => ({
+        workspaces: [],
+        runSelectionChange: async (change: (publish: (id: number | null) => void) => Promise<unknown>) =>
+            change(() => undefined),
+    }),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-14T00:00:00Z") }));
 vi.mock("@/app/components/motion/Rise", () => ({
     default: ({ children, className }: { children?: ReactNode; className?: string }) =>
@@ -105,6 +112,12 @@ function requirementsFor(
 }
 
 let container: HTMLDivElement;
+
+function confinementCard(): HTMLElement | null {
+    return [...container.querySelectorAll<HTMLElement>("section")].find((section) =>
+        section.textContent?.includes(enAccount.AccountSecurity.approvalNeededTitle)
+        || section.textContent?.includes(enAccount.AccountSecurity.enrollmentNeededTitle)) ?? null;
+}
 let root: Root;
 
 async function renderPanel() {
@@ -146,7 +159,7 @@ describe("the Security page while a privileged account is confined", () => {
         ]);
         await renderPanel();
 
-        const card = container.querySelector("section[aria-labelledby='passkey-approval-needed-title']");
+        const card = confinementCard();
         expect(card).not.toBeNull();
         expect(card?.textContent).toContain("Approve Laptop. It still needs approval in Beta.");
         expect(card?.textContent).toContain("Phone: needs approval in Acme and Beta");
@@ -163,7 +176,7 @@ describe("the Security page while a privileged account is confined", () => {
         ]);
         await renderPanel();
 
-        const card = container.querySelector("section[aria-labelledby='passkey-approval-needed-title']");
+        const card = confinementCard();
         expect(card?.textContent).toContain("Approve Laptop. It still needs approval in Acme.");
         expect(card?.querySelector("ul")).toBeNull();
     });
@@ -172,8 +185,11 @@ describe("the Security page while a privileged account is confined", () => {
         backend.requirements = requirementsFor("ENROLLMENT_REQUIRED");
         await renderPanel();
 
-        expect(container.textContent).toContain(enAccount.AccountSecurity.enrollmentNeededTitle);
-        expect(container.querySelector("section[aria-labelledby='passkey-approval-needed-title']")).toBeNull();
+        const card = confinementCard();
+        expect(card?.textContent).toContain(enAccount.AccountSecurity.enrollmentNeededTitle);
+        const buttons = [...(card?.querySelectorAll("button") ?? [])].map((button) => button.textContent);
+        expect(buttons).not.toContain(enAccount.AccountSecurity.approvalEnter);
+        expect(buttons).not.toContain(enAccount.AccountSecurity.add);
     });
 
     it("withdraws passkey management while approval is pending, since only redemption can succeed", async () => {
@@ -196,7 +212,7 @@ describe("the Security page while a privileged account is confined", () => {
 
         expect(container.textContent).toContain(enAccount.AccountSecurity.loadFailed);
         expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
-        expect(container.querySelector("section[aria-labelledby='passkey-approval-needed-title']")).not.toBeNull();
+        expect(confinementCard()).not.toBeNull();
     });
 
     it("offers no Add passkey while the standing cannot be read, whatever it turns out to be", async () => {

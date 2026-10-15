@@ -15,6 +15,7 @@ import {
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
 import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
+import OnboardingConfinement from "@/app/onboarding/OnboardingConfinement";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -109,22 +110,7 @@ export default function OnboardingForm() {
                         </p>
 
                         {standing.confined ? (
-                            <div
-                                role="status"
-                                className="mt-8 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3"
-                            >
-                                <p className="text-sm font-medium text-neutral-900">{t("confinedTitle")}</p>
-                                <p className="mt-1 text-sm text-neutral-600 text-pretty">{t("confinedBody")}</p>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="toolbar"
-                                    className="mt-3"
-                                    onClick={() => void standing.refresh("check")}
-                                >
-                                    {t("confinedRecheck")}
-                                </Button>
-                            </div>
+                            <OnboardingConfinement standing={standing} />
                         ) : standing.status === "failed" || (standing.status === "ready" && !standing.fresh) ? (
                             <div role="alert" className="mt-8 rounded-xl bg-neutral-100 px-4 py-3 ring-1 ring-black/5">
                                 <p className="text-sm font-medium text-neutral-900">{t("standingFailedTitle")}</p>

@@ -857,6 +857,17 @@ export type PasskeyApprovalGap = {
     orgName: string;
 };
 
+/**
+ * One organization where the signed-in account is privileged, with what makes it so (#1534): its
+ * org role, if any, and every workspace there whose role is privileged. These are its exits.
+ */
+export type PrivilegedMembership = {
+    orgId: number;
+    orgName: string;
+    orgRole: OrgRole | null;
+    workspaces: Array<{ workspaceId: number; workspaceName: string }>;
+};
+
 export type PasskeyRegistrationRequirements = {
     currentPasswordRequired: boolean;
     emailConfirmationRequired: boolean;
@@ -864,6 +875,8 @@ export type PasskeyRegistrationRequirements = {
     /** Absent from backends that predate standing; see `settlePrivilegedMfaStanding`. */
     standing?: PrivilegedMfaStanding;
     approvalGaps?: PasskeyApprovalGap[];
+    /** Absent from backends that predate it; an empty list for an unprivileged account. */
+    privilegedMemberships?: PrivilegedMembership[];
 };
 
 export type AuthResponse = {
@@ -4449,6 +4462,11 @@ export type OrgMember = {
     email: string;
     profilePictureUrl: string | null;
     orgRole: OrgRole;
+    /**
+     * Shown only to a caller who could issue this member a passkey approval code (#1534): whether
+     * the member is privileged in the organization with no passkey approved there.
+     */
+    passkeyApprovalNeeded?: boolean | null;
 };
 
 export type MyWorkspaces = {
@@ -4470,6 +4488,11 @@ export type WorkspaceMember = {
     builtInRole: WorkspaceRole;
     roleId?: number | null;
     status?: string;
+    /**
+     * Shown only to a caller who could issue this member a passkey approval code (#1534): whether
+     * the member is privileged in the workspace's organization with no passkey approved there.
+     */
+    passkeyApprovalNeeded?: boolean | null;
 };
 
 /** Lifecycle state of an ownership offer (#1534 decision 4). */

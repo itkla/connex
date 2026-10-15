@@ -53,6 +53,9 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
     }),
 }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => vi.fn() }));
+vi.mock("@/app/onboarding/OnboardingConfinement", () => ({
+    default: (): ReactNode => createElement("div", { "data-testid": "onboarding-confinement" }, "confinement"),
+}));
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({ default: () => null }));
 vi.mock("@/app/components/account/OwnershipConfinementDialog", () => ({
     default: ({ offers: state }: { offers: SelfOwnershipOffers }): ReactNode =>
@@ -142,7 +145,7 @@ describe("onboarding ownership offers", () => {
         standing.confined = true;
         await renderOnboarding();
 
-        expect(container.textContent).toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("[data-testid='onboarding-confinement']")).not.toBeNull();
         expect(container.querySelector("form")).toBeNull();
         expect(container.textContent).not.toContain("Onboarding.createButton");
         expect(container.textContent).not.toContain("Onboarding.joinButton");
@@ -153,9 +156,6 @@ describe("onboarding ownership offers", () => {
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
         expect(button("Onboarding.signOut")).toBeDefined();
-
-        await act(async () => button("Onboarding.confinedRecheck").click());
-        expect(standing.refresh).toHaveBeenCalledWith("check");
     });
 
     it("offers nothing that confinement could refuse until the standing is known", async () => {
@@ -198,7 +198,7 @@ describe("onboarding ownership offers", () => {
         offers.state = selfOffers([]);
         await renderOnboarding();
 
-        expect(container.textContent).not.toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("[data-testid='onboarding-confinement']")).toBeNull();
         expect(container.querySelectorAll("form")).toHaveLength(2);
     });
 

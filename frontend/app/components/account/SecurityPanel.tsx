@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import {
     DevicePhoneMobileIcon,
     EllipsisHorizontalIcon,
@@ -12,21 +13,17 @@ import {
     TrashIcon,
 } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
-import { startRegistration } from "@simplewebauthn/browser";
 
 import type { Passkey } from "@/app/lib/types";
 import {
-    ApiError,
-    beginPasskeyRegistration,
     deletePasskey,
-    finishPasskeyRegistration,
     getPasskeys,
-    MAIL_TRANSPORT_UNAVAILABLE_CODE,
+    leaveWorkspace,
     renamePasskey,
-    requestPasskeyBootstrapConfirmation,
 } from "@/app/lib/api";
-import { passkeyApprovalProgress } from "@/app/lib/passkeyApprovalProgress";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import { useConfinementExits } from "@/app/hooks/useConfinementExits";
+import { usePasskeyEnrollment } from "@/app/hooks/usePasskeyEnrollment";
 import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -55,6 +52,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
+import PrivilegedMfaConfinementCard from "@/app/components/account/PrivilegedMfaConfinementCard";
+import PasskeyEnrollmentPasswordDialog from "@/app/components/account/PasskeyEnrollmentPasswordDialog";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
@@ -77,40 +76,13 @@ function PasskeyIcon({ passkey }: { passkey: Passkey }) {
     );
 }
 
-function deviceLabel(): string {
-    if (typeof navigator === "undefined") return "Passkey";
-    const ua = navigator.userAgent;
-    const os = /Windows/.test(ua)
-        ? "Windows"
-        : /iPhone|iPad|iPod/.test(ua)
-          ? "iOS"
-          : /Mac/.test(ua)
-            ? "macOS"
-            : /Android/.test(ua)
-              ? "Android"
-              : /Linux/.test(ua)
-                ? "Linux"
-                : null;
-    const browser = /Edg\//.test(ua)
-        ? "Edge"
-        : /Firefox\//.test(ua)
-          ? "Firefox"
-          : /Chrome\//.test(ua)
-            ? "Chrome"
-            : /Safari\//.test(ua)
-              ? "Safari"
-              : null;
-    if (browser && os) return `${browser} on ${os}`;
-    return os ?? "Passkey";
-}
-
 export default function SecurityPanel() {
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
-    const format = useFormatter();
     const now = useLiveNow();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
-    const { workspaces } = useWorkspace();
+    const { workspaces, runSelectionChange } = useWorkspace();
+    const router = useRouter();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
     const [loadingPasskeys, setLoadingPasskeys] = useState(true);
@@ -123,12 +95,6 @@ export default function SecurityPanel() {
         reason: confinementReason,
         refresh: refreshStanding,
     } = usePrivilegedMfaStanding();
-    const [adding, setAdding] = useState(false);
-    const [passwordOpen, setPasswordOpen] = useState(false);
-    const [currentPassword, setCurrentPassword] = useState("");
-    const [passwordError, setPasswordError] = useState<string | null>(null);
-    const [confirmingPassword, setConfirmingPassword] = useState(false);
-    const [sendingConfirmation, setSendingConfirmation] = useState(false);
 
     const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
     const [renameValue, setRenameValue] = useState("");
@@ -187,89 +153,33 @@ export default function SecurityPanel() {
         void refreshStanding("check");
     };
 
-    const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
-        const credential = await startRegistration({ optionsJSON });
-        await finishPasskeyRegistration(deviceLabel(), credential);
-        const [loaded] = await Promise.all([getPasskeys(), refreshStanding("ceremony")]);
-        setPasskeys(loaded);
-        toastSuccess(t("added"));
-    };
+    const enrollment = usePasskeyEnrollment(
+        {
+            hasPasskeys: passkeys.length > 0,
+            currentPasswordRequired,
+            emailConfirmationRequired,
+            emailConfirmationSatisfied,
+        },
+        {
+            onEnrolled: async () => {
+                const [loaded] = await Promise.all([getPasskeys(), refreshStanding("ceremony")]);
+                setPasskeys(loaded);
+            },
+            onProofRejected: retryLoad,
+        },
+    );
 
-    const sendConfirmation = async () => {
-        if (sendingConfirmation) return;
-        setSendingConfirmation(true);
-        try {
-            await requestPasskeyBootstrapConfirmation();
-            toastSuccess(t("confirmationSent"));
-        } catch (err) {
-            toastError(
-                err instanceof ApiError && err.code === MAIL_TRANSPORT_UNAVAILABLE_CODE
-                    ? t("confirmationUnavailable")
-                    : t("confirmationFailed"),
-            );
-        } finally {
-            setSendingConfirmation(false);
-        }
-    };
-
-    const addPasskey = async () => {
-        if (passkeys.length === 0 && emailConfirmationRequired && !emailConfirmationSatisfied) {
-            toastError(t("confirmationRequired"));
-            return;
-        }
-        if (passkeys.length === 0 && currentPasswordRequired) {
-            setPasswordError(null);
-            setPasswordOpen(true);
-            return;
-        }
-        setAdding(true);
-        let registrationStarted = false;
-        try {
-            const optionsJSON = await beginPasskeyRegistration();
-            registrationStarted = true;
-            await finishRegistration(optionsJSON);
-        } catch (err) {
-            if (isWebAuthnCancellation(err)) {
-                toastInfo(t(registrationStarted ? "canceled" : "stepUpCanceled"));
-            } else if (handlePasskeyStepUpError(err)) {
-                return;
-            } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
-                toastError(emailConfirmationRequired ? t("confirmationRequired") : t("freshSignInRequired"));
-                retryLoad();
-            } else {
-                toastError(t("addFailed"));
-                if (passkeys.length === 0) {
-                    retryLoad();
-                }
+    const leaveWorkspaceFromSecurity = useCallback(async (workspaceId: number) => {
+        await runSelectionChange(async (publishActiveWorkspace) => {
+            const selection = await leaveWorkspace(workspaceId);
+            publishActiveWorkspace(selection.activeWorkspaceId);
+            if (selection.activeWorkspaceId === null) {
+                router.replace("/onboarding");
             }
-        } finally {
-            setAdding(false);
-        }
-    };
-
-    const confirmFirstPasskey = async () => {
-        if (!currentPassword || confirmingPassword) return;
-        setConfirmingPassword(true);
-        setPasswordError(null);
-        try {
-            const optionsJSON = await beginPasskeyRegistration(currentPassword);
-            setCurrentPassword("");
-            await finishRegistration(optionsJSON);
-            setPasswordOpen(false);
-        } catch (err) {
-            setCurrentPassword("");
-            if (isWebAuthnCancellation(err)) {
-                toastInfo(t("canceled"));
-                setPasswordOpen(false);
-            } else if (err instanceof ApiError && err.status === 401) {
-                setPasswordError(t("incorrectPassword"));
-            } else {
-                toastError(t("addFailed"));
-            }
-        } finally {
-            setConfirmingPassword(false);
-        }
-    };
+            router.refresh();
+        });
+    }, [router, runSelectionChange]);
+    const exits = useConfinementExits(leaveWorkspaceFromSecurity);
 
     const openRename = (passkey: Passkey) => {
         setRenameTarget(passkey);
@@ -337,19 +247,19 @@ export default function SecurityPanel() {
         }, () => undefined);
     };
 
-    const approvalProgress = approvalPending ? passkeyApprovalProgress(passkeys, approvalGaps) : [];
-    const recommended = approvalProgress[0];
-    const passkeyName = (label: string | null) => label ?? t("approvalUnnamedPasskey");
+    const cardReason = approvalPending
+        ? "attestation"
+        : standing === "ENROLLMENT_REQUIRED" || confinementReason === "enrollment" ? "enrollment" : null;
 
     const addButton = (
         <Button
-            onClick={addPasskey}
+            onClick={() => void enrollment.addPasskey()}
             variant="brand"
-            disabled={adding || !supported}
-            aria-busy={adding}
+            disabled={enrollment.adding || !supported}
+            aria-busy={enrollment.adding}
         >
-            {adding ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}
-            {adding ? t("adding") : t("add")}
+            {enrollment.adding ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}
+            {enrollment.adding ? t("adding") : t("add")}
         </Button>
     );
 
@@ -364,76 +274,24 @@ export default function SecurityPanel() {
                     <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
                 </div>
 
-                {standing === "ENROLLMENT_REQUIRED" && (
-                    <div className="rounded-2xl border border-warning/40 bg-warning/5 px-5 py-4" role="status">
-                        <h3 className="text-sm font-medium text-foreground">{t("enrollmentNeededTitle")}</h3>
-                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                            {t("enrollmentNeededDescription")}
-                        </p>
-                    </div>
-                )}
-
-                {approvalPending && (
-                    <section
-                        aria-labelledby="passkey-approval-needed-title"
-                        className="rounded-2xl border border-warning/40 bg-warning/5 px-5 py-4"
-                    >
-                        <h3 id="passkey-approval-needed-title" className="text-sm font-medium text-foreground">
-                            {t("approvalNeededTitle")}
-                        </h3>
-                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                            {t("approvalNeededDescription")}
-                        </p>
-                        {recommended && (
-                            <p className="mt-3 max-w-prose text-sm text-foreground">
-                                {t("approvalNeededUse", {
-                                    passkey: passkeyName(recommended.label),
-                                    organizations: format.list(
-                                        recommended.missingOrganizations.map((organization) => organization.orgName),
-                                        { type: "conjunction" },
-                                    ),
-                                })}
-                            </p>
-                        )}
-                        {recommended && approvalProgress.length > 1 && (
-                            <>
-                                <ul className="mt-2 space-y-1">
-                                    {approvalProgress.map((progress) => (
-                                        <li key={progress.credentialId} className="text-sm text-muted-foreground">
-                                            {t("approvalNeededPasskey", {
-                                                passkey: passkeyName(progress.label),
-                                                organizations: format.list(
-                                                    progress.missingOrganizations.map(
-                                                        (organization) => organization.orgName,
-                                                    ),
-                                                    { type: "conjunction" },
-                                                ),
-                                            })}
-                                            {progress.credentialId === recommended.credentialId && (
-                                                <span className="ml-2 text-xs font-medium text-foreground">
-                                                    {t("approvalNeededRecommended")}
-                                                </span>
-                                            )}
-                                        </li>
-                                    ))}
-                                </ul>
-                                <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-                                    {t("approvalNeededSamePasskey", { passkey: passkeyName(recommended.label) })}
-                                </p>
-                            </>
-                        )}
-                        {supported && (
+                {cardReason && (
+                    <PrivilegedMfaConfinementCard
+                        reason={cardReason}
+                        requirements={requirements}
+                        passkeys={passkeys}
+                        action={cardReason === "attestation" && supported ? (
                             <Button
                                 type="button"
                                 variant="brand"
                                 size="inline"
                                 onClick={() => setApprovalOpen(true)}
-                                className="mt-3"
                             >
                                 {t("approvalEnter")}
                             </Button>
-                        )}
-                    </section>
+                        ) : undefined}
+                        exits={exits}
+                        canLeaveWorkspaces
+                    />
                 )}
 
                 {!supported && (
@@ -457,11 +315,11 @@ export default function SecurityPanel() {
                                 type="button"
                                 variant="outline"
                                 size="inline"
-                                onClick={() => void sendConfirmation()}
-                                disabled={sendingConfirmation}
+                                onClick={() => void enrollment.sendConfirmation()}
+                                disabled={enrollment.sendingConfirmation}
                                 className="mt-3"
                             >
-                                {sendingConfirmation ? (
+                                {enrollment.sendingConfirmation ? (
                                     <Loader2Icon className="size-4 animate-spin" />
                                 ) : (
                                     t("confirmationSend")
@@ -572,69 +430,7 @@ export default function SecurityPanel() {
                 onApproved={announceApproval}
             />
 
-            <Dialog
-                open={passwordOpen}
-                onOpenChange={(open) => {
-                    if (confirmingPassword) return;
-                    setPasswordOpen(open);
-                    if (!open) {
-                        setCurrentPassword("");
-                        setPasswordError(null);
-                    }
-                }}
-            >
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{t("passwordTitle")}</DialogTitle>
-                        <DialogDescription>{t("passwordDescription")}</DialogDescription>
-                    </DialogHeader>
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            void confirmFirstPasskey();
-                        }}
-                        className="space-y-4"
-                    >
-                        <div className="space-y-2">
-                            <Label htmlFor="passkey-current-password">{t("passwordLabel")}</Label>
-                            <Input
-                                id="passkey-current-password"
-                                type="password"
-                                autoComplete="current-password"
-                                value={currentPassword}
-                                onChange={(e) => {
-                                    setCurrentPassword(e.target.value);
-                                    setPasswordError(null);
-                                }}
-                                maxLength={255}
-                                aria-invalid={passwordError !== null}
-                                aria-describedby={passwordError ? "passkey-current-password-error" : undefined}
-                                autoFocus
-                                required
-                            />
-                            {passwordError && (
-                                <p id="passkey-current-password-error" role="alert" className="text-sm text-destructive">
-                                    {passwordError}
-                                </p>
-                            )}
-                        </div>
-                        <DialogFooter>
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline" disabled={confirmingPassword}>
-                                    {t("cancel")}
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                disabled={confirmingPassword || !currentPassword}
-                                className="bg-brand text-white hover:bg-brand-hover"
-                            >
-                                {confirmingPassword ? <Loader2Icon className="size-4 animate-spin" /> : t("continue")}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
+            <PasskeyEnrollmentPasswordDialog password={enrollment.password} />
 
             <Dialog
                 open={renameTarget !== null}
