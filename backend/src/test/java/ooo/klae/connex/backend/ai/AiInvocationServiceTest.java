@@ -2931,6 +2931,55 @@ class AiInvocationServiceTest {
         assertEquals("native_member_leak", refused.repairRule());
     }
 
+    /** One JSON-field decoding pass is identical for admission and the classified replay segment. */
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> nativeMemberFieldRepresentations() {
+        var mapper = new ObjectMapper();
+        return java.util.stream.Stream.of(
+                Map.entry("{\"query\":\"Alice\"}", true),
+                Map.entry("{\"query\":\"\\u0041lice\"}", true),
+                Map.entry("{\"query\":\"\\u0041\\u006c\\u0069\\u0063\\u0065\"}", true),
+                Map.entry("{\"query\":\"\\\\u0041lice\"}", false),
+                Map.entry(mapper.writeValueAsString(Map.of("query", "{\"x\":\"Alice\"}")), true),
+                Map.entry(mapper.writeValueAsString(Map.of("query", "{\"x\":\"\\u0041lice\"}")), false),
+                Map.entry(mapper.writeValueAsString(Map.of("query", mapper.writeValueAsString("Alice"))), true),
+                Map.entry(mapper.writeValueAsString(Map.of("query", mapper.writeValueAsString("\\u0041lice"))), false),
+                Map.entry("{\"query\":\"Bob\"}", false),
+                Map.entry("{\"query\":\"call-1\"}", false))
+                .flatMap(example -> java.util.stream.Stream.of("id", "arguments").map(field ->
+                        org.junit.jupiter.params.provider.Arguments.of(field, example.getKey(), example.getValue())));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("nativeMemberFieldRepresentations")
+    void nativeFieldRepresentationsHaveIdenticalAdmissionAndReplayDecisions(
+            String field, String representation, boolean refused) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Alice");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? representation : "call-1", "search_records",
+                field.equals("arguments") ? representation : "{\"query\":\"relationship\"}");
+        var admitted = completeMemberNative(invocation, List.of(), call);
+        if (refused) {
+            var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class, admitted);
+            assertEquals("native_member_leak", malformed.repairRule());
+            assertEquals(0, malformed.demaskWarnings());
+            assertThrows(MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+            verify(aiProvider, times(1)).complete(any());
+        } else {
+            assertInstanceOf(AiNativeToolCompletion.Tool.class, admitted);
+            context.registerMemberCandidate("Bob");
+            providerReturns(new AiCompletionResult(
+                    "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+            var replayed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                    requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+            assertInstanceOf(AiStructuredOutcome.Parsed.class, replayed.attempt().outcome());
+            verify(aiProvider, times(2)).complete(any());
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"id,false", "signature,false", "arguments,false", "id,true", "signature,true", "arguments,true"})
     void sharedValueTokensInNativeProviderFieldsRequireExposure(String field, boolean exposed) {

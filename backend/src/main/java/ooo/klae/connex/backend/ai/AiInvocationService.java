@@ -693,9 +693,11 @@ public class AiInvocationService {
         for (AiToolCall call : calls) {
             try {
                 OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                        objectMapper.writeValueAsString(call.id()), invocation.context(), objectMapper);
+                        OutboundSegment.admittedProviderField(call.id(), invocation.context()),
+                        invocation.context(), objectMapper);
                 OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                        call.arguments(), invocation.context(), objectMapper);
+                        OutboundSegment.admittedProviderField(call.arguments(), invocation.context()),
+                        invocation.context(), objectMapper);
             } catch (MaskingLeakException exception) {
                 return malformedNativeTool(raw, invocation, result, reasoning, "native_member_leak", warnings);
             }

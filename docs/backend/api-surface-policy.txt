@@ -8,7 +8,7 @@ src/main/java/ooo/klae/connex/backend/ai/AiGenerationAdapterService.java	dcdccb9
 src/main/java/ooo/klae/connex/backend/ai/AiGenerationContextRunner.java	bb0a362893e3598bbd54a507322b04072417b8c44e0edc181fe1829073eae285
 src/main/java/ooo/klae/connex/backend/ai/AiGenerationService.java	787e6e43886a164434d718032938a0388a508f4cde54ec80ba51a7fd504d6658
 src/main/java/ooo/klae/connex/backend/ai/AiInvocationAdmissionService.java	360409aa8445dc8e5d1f95a732821ac5908481637063a1326bdc130b739f36cc
-src/main/java/ooo/klae/connex/backend/ai/AiInvocationService.java	39e24a45469e9cb8ea69351600fb9db9db39378a72f3808cad5543d2c3d46438
+src/main/java/ooo/klae/connex/backend/ai/AiInvocationService.java	f9d92a5028ab61ff2eefc8cc3b99371a2d142e2ac040734951dfc50650fec5b0
 src/main/java/ooo/klae/connex/backend/ai/AiOutputCacheStore.java	a7c73fdd32c19d9aed456ab39ef21373181d8a5502189531ee21b24858d45883
 src/main/java/ooo/klae/connex/backend/ai/AiProviderGateExceptions.java	cccb121a2c71fcc85c7a3611ec054fcddcb63e3a6522636faa11b37ffafc0b76
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantAddTagWriteTool.java	e8e524ea5b735d0c1c065f2425963006c05ae1c109b07853238d4580c7b34983

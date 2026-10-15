@@ -230,7 +230,9 @@ association; its opaque native fields remain subject to invented-placeholder ref
 legitimate exposure. Non-colliding existing kinds keep their existing demasking contract (#2056).
 
 Native call admission screens ids and arguments with the same strict raw-member predicate as replay,
-before any AUTO mutation can execute. A refused call is malformed and retains any existing demask
+using identical raw field values, without an extra JSON encoding of ids at admission. The shared
+segment screen checks raw text and decoded JSON fields with the segment's recorded insertion spans
+and candidate snapshot before any AUTO mutation can execute. A refused call is malformed and retains any existing demask
 warnings, so raw-label refusal cannot make an invented reference repairable. Tool reads can discover authored
 former-member labels after admission; each admitted call therefore freezes its raw-member candidate
 set for replay. Placeholder validation uses the live context on every provider-controlled field.

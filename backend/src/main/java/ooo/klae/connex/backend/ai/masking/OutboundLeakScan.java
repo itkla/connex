@@ -105,23 +105,29 @@ public final class OutboundLeakScan {
     }
 
     /**
-     * Screens one provider-authored native replay field without trusting sentinel, key or role
-     * positions. JSON arguments are decoded independently, including keys and escaped scalars.
+     * Screens a provider-authored segment identically at native admission and replay. Its raw text
+     * and decoded JSON fields are checked without an additional JSON encoding at either boundary.
+     * Only recorded masker insertions are exempt, and an admission snapshot owns replay's policy.
      * Shared member values retain their non-member protections here; unrelated non-member
      * envelope policy remains owned by the complete server-envelope scan.
      *
-     * @param field provider-authored field, serialized as JSON for a scalar or as its arguments object
-     * @param ctx request-local masking context
+     * @param segment provider-authored raw field with its insertion and candidate provenance
+     * @param ctx fallback request-local context when the segment has no admission snapshot
      * @param objectMapper payload JSON decoder
      * @throws MaskingLeakException when a raw member label is present
      */
     public static void assertNoMemberLeakInProviderReplay(
-            String field, MaskingContext ctx, ObjectMapper objectMapper) {
-        Objects.requireNonNull(field, "field");
+            OutboundSegment segment, MaskingContext ctx, ObjectMapper objectMapper) {
+        Objects.requireNonNull(segment, "segment");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
-        assertNoLeak(List.of(new ScannedField(field, true, false)), ctx, true, true);
-        assertNoLeak(decodedJsonFields(field, objectMapper), ctx, true, true);
+        if (segment.origin() != OutboundSegment.Origin.PROVIDER_AUTHORED) {
+            throw new IllegalArgumentException("Member replay screening requires provider-authored text");
+        }
+        MaskingContext candidates = segment.memberScanContext() == null ? ctx : segment.memberScanContext();
+        String field = segment.memberScanText();
+        assertNoLeak(List.of(new ScannedField(field, true, false)), candidates, true, true);
+        assertNoLeak(decodedJsonFields(field, objectMapper), candidates, true, true);
     }
 
     /**
@@ -139,8 +145,7 @@ public final class OutboundLeakScan {
                 continue;
             }
             if (segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED) {
-                assertNoMemberLeakInProviderReplay(segment.memberScanText(),
-                        segment.memberScanContext() == null ? ctx : segment.memberScanContext(), objectMapper);
+                assertNoMemberLeakInProviderReplay(segment, ctx, objectMapper);
             } else if (segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT) {
                 assertNoLeak(decodedJsonFields(segment.text(), objectMapper, true), ctx, false, true, false, true);
             } else {

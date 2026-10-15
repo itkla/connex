@@ -626,6 +626,43 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         }
     }
 
+    /** Encoded ids must be replay-safe before the real AUTO transaction can commit. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"{\"x\":\"\\u0041lice\"}", "\"\\u0041lice\""})
+    void encodedMemberCallIdsRefuseBeforeAnAutoTaskCanCommit(String id) throws Exception {
+        authenticate(firstActor);
+        AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
+        try {
+            var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+            jdbcTemplate.update("UPDATE app_user SET display_name = ? WHERE id = ?", "Alice", secondActor.getId());
+            AiAssistantMemberIdentifiers.seed(workspaceMapper.getMembers(workspace.getId()), context);
+            assertEquals(List.of("Alice"), context.memberCandidatesIn("Alice"));
+            var refused = support.completeNativeCall(context, objectMapper,
+                    new ooo.klae.connex.backend.ai.provider.AiToolCall(id, "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"Send proposal\"}"));
+            if (refused instanceof ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool<?> admitted) {
+                ToolFixture fixture = autoProposal(firstActor, "create_task", admitted.arguments().toString(), person.getId());
+                executeAuto(firstActor, fixture);
+            }
+            assertEquals(0, taskCount(), "Encoded member ids must be refused before the AUTO write commits");
+            var malformed = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Malformed.class, refused);
+            assertEquals("native_member_leak", malformed.repairRule());
+            var clean = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                    ooo.klae.connex.backend.ai.AiNativeToolCompletion.Tool.class,
+                    support.completeNativeCall(context, objectMapper,
+                            new ooo.klae.connex.backend.ai.provider.AiToolCall("call-clean", "create_task",
+                                    "{\"handle\":\"r1\",\"description\":\"Send proposal\"}")));
+            authenticate(firstActor);
+            ToolFixture fixture = autoProposal(firstActor, "create_task", clean.arguments().toString(), person.getId());
+            executeAuto(firstActor, fixture);
+            assertEquals(1, taskCount());
+        } finally {
+            support.releaseFixtureMocks();
+            clearAuthentication();
+        }
+    }
+
     private ToolFixture autoTagProposal(User actor, int personId) throws Exception {
         return autoProposal(
                 actor,

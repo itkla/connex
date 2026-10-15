@@ -36,9 +36,9 @@ class OutboundLeakScanTest {
                     payload, List.of(segment), context, objectMapper));
         }
         assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                objectMapper.writeValueAsString("AcmeCorp"), context, objectMapper));
+                OutboundSegment.admittedProviderField("AcmeCorp", context), context, objectMapper));
         assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                "{\"AcmeCorp\":\"safe\"}", context, objectMapper));
+                OutboundSegment.admittedProviderField("{\"AcmeCorp\":\"safe\"}", context), context, objectMapper));
         assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay("AcmeCorp", context));
     }
 
