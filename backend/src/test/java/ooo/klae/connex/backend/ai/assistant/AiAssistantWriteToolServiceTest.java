@@ -1964,6 +1964,15 @@ class AiAssistantWriteToolServiceTest {
             String bob = tokens.get("Bob");
             org.junit.jupiter.api.Assertions.assertNotNull(bob);
             replayArgs.put(task ? "description" : "title", maskedDescription);
+            if (nativeProtocol) {
+                var priorPrompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(fresh)
+                        .system("Use concise analysis").userTurn(maskedDescription).build();
+                var prior = support.captureAssistantPayload(priorPrompt, fresh, objectMapper, true, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(true, "Ready"), false, null);
+                assertEquals(0, prior.warnings());
+                assertTrue(objectMapper.writeValueAsString(prior.request().messages()).contains(bob));
+                assertEquals("Bob", ooo.klae.connex.backend.ai.masking.Demasker.demask(bob, fresh).text());
+            }
             var exchanges = nativeProtocol ? assembler.nativeReplay(turns,
                     Map.of(new AiAssistantToolCallRef(1, 0), new ooo.klae.connex.backend.ai.provider.AiToolCall(
                             "create", tool, objectMapper.writeValueAsString(replayArgs))),

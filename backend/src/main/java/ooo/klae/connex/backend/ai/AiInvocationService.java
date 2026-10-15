@@ -690,6 +690,17 @@ public class AiInvocationService {
             warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
             callArguments.add(arguments);
         }
+        for (AiToolCall call : calls) {
+            try {
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        objectMapper.writeValueAsString(call.id()), invocation.context(), objectMapper);
+                OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                        call.arguments(), invocation.context(), objectMapper);
+            } catch (MaskingLeakException exception) {
+                return malformedNativeTool(raw, invocation, result, reasoning, "native_member_leak", warnings);
+            }
+        }
+        calls.forEach(call -> invocation.context().recordProviderCallAdmission(call.id()));
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
@@ -956,8 +967,9 @@ public class AiInvocationService {
             serializedPrompt = serializeProviderInput(
                     effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
             memberExposurePayload = objectMapper.writeValueAsString(outboundSegments(
-                    effectiveInvocation.prompt(), nativeTools).stream()
-                    .filter(segment -> segment.origin() == OutboundSegment.Origin.TENANT_DATA)
+                    effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()).stream()
+                    .filter(segment -> segment.origin() == OutboundSegment.Origin.TENANT_DATA
+                            || segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT)
                     .map(OutboundSegment::text).toList());
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
@@ -975,8 +987,20 @@ public class AiInvocationService {
         }
 
         try {
+            if (nativeTools != null) {
+                for (AiToolExchange exchange : nativeTools.exchanges()) {
+                    AiToolCall call = exchange.call();
+                    if (containsUnexposedMemberInProviderText(call.id(), effectiveInvocation.context())
+                            || containsUnexposedMemberInProviderText(call.name(), effectiveInvocation.context())
+                            || containsUnexposedMemberInProviderText(call.arguments(), effectiveInvocation.context())
+                            || call.thoughtSignature() != null && containsUnexposedMemberInProviderText(
+                                    call.thoughtSignature(), effectiveInvocation.context())) {
+                        throw new MaskingLeakException("Native replay contains an unexposed member placeholder");
+                    }
+                }
+            }
             OutboundLeakScan.assertNoLeakInClassifiedEnvelope(serializedPrompt,
-                    outboundSegments(effectiveInvocation.prompt(), nativeTools),
+                    outboundSegments(effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()),
                     effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
@@ -1268,7 +1292,8 @@ public class AiInvocationService {
      * constructor requires every exchange name to belong to its declared definitions.
      * System, schema and catalog text are entirely static and are absent from member-bearing parts.
      */
-    private static List<OutboundSegment> outboundSegments(MaskedPrompt prompt, AiNativeToolRequest nativeTools) {
+    private static List<OutboundSegment> outboundSegments(
+            MaskedPrompt prompt, AiNativeToolRequest nativeTools, MaskingContext context) {
         List<OutboundSegment> segments = new ArrayList<>();
         for (MaskedMessage message : prompt.getMessages()) {
             segments.addAll(message.getSegments());
@@ -1276,13 +1301,15 @@ public class AiInvocationService {
         if (nativeTools != null) {
             for (AiToolExchange exchange : nativeTools.exchanges()) {
                 AiToolCall call = exchange.call();
-                segments.add(new OutboundSegment(call.id(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.id(), context.providerCallAdmissionContext(call.id())));
                 segments.add(new OutboundSegment(call.name(), OutboundSegment.Origin.SERVER_STATIC));
-                segments.add(new OutboundSegment(call.arguments(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                segments.add(OutboundSegment.admittedProviderField(
+                        call.arguments(), context.providerCallAdmissionContext(call.id())));
                 if (call.thoughtSignature() != null) {
-                    segments.add(new OutboundSegment(call.thoughtSignature(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                    segments.add(new OutboundSegment(call.thoughtSignature(), OutboundSegment.Origin.PROVIDER_OPAQUE));
                 }
-                segments.add(new OutboundSegment(exchange.maskedResult(), OutboundSegment.Origin.TENANT_DATA));
+                segments.addAll(exchange.resultSegments());
             }
             segments.addAll(nativeTools.repairSegments());
         }

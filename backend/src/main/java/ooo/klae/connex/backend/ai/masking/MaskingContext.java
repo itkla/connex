@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.masking;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,13 +28,14 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 public final class MaskingContext {
     private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
     private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
-    private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([Mm][1-9][0-9]*)\\s*}}");
+    private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z][1-9][0-9]*)\\s*}}");
     private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     private static final Pattern PLACEHOLDER_PREFIX = Pattern.compile("\\{\\{?\\s*+[A-Za-z]?[0-9]*+\\s*+}?");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
     private final Map<String, IdentifierEntry> rawIdentifierEntries = new LinkedHashMap<>();
+    private final Map<String, Set<EntityKind>> identifierKinds = new LinkedHashMap<>();
     private final Set<String> unsafeIdentifierValues = new LinkedHashSet<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
     private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
@@ -42,6 +44,7 @@ public final class MaskingContext {
     private final Set<String> exposedTokens = new LinkedHashSet<>();
     private final Set<String> reservedTokens = new LinkedHashSet<>();
     private final Set<String> memberIdentifierValues = new LinkedHashSet<>();
+    private final Map<String, MaskingContext> admittedProviderCalls = new LinkedHashMap<>();
     private Set<String> replayMemberValues = Set.of();
     private final AiPrivacyMode privacyMode;
 
@@ -105,6 +108,12 @@ public final class MaskingContext {
     }
 
     private void registerIdentifier(EntityKind kind, String rawValue, String token) {
+        Set<EntityKind> kinds = identifierKinds.get(rawValue);
+        if (kinds == null || !kinds.contains(kind)) {
+            EnumSet<EntityKind> combined = kinds == null ? EnumSet.of(kind) : EnumSet.copyOf(kinds);
+            combined.add(kind);
+            identifierKinds.put(rawValue, Set.copyOf(combined));
+        }
         IdentifierEntry existing = rawIdentifierEntries.get(rawValue);
         if (existing != null) {
             boolean memberSymbol = existing.irreversibleMemberSymbol()
@@ -166,6 +175,11 @@ public final class MaskingContext {
         return memberIdentifierValues.contains(rawValue);
     }
 
+    /** Keeps every non-member policy even when another kind owns this value's single token. */
+    boolean hasNonMemberIdentifier(String rawValue) {
+        return identifierKinds.getOrDefault(rawValue, Set.of()).stream().anyMatch(kind -> kind != EntityKind.MEMBER);
+    }
+
     boolean isExposedMemberToken(String token) {
         return exposedTokens.contains(token) && memberIdentifierValues.contains(originalValueForToken(token));
     }
@@ -185,6 +199,11 @@ public final class MaskingContext {
         var matcher = MEMBER_PLACEHOLDER.matcher(labels.value());
         List<PlaceholderSpan> refused = new ArrayList<>();
         while (matcher.find()) {
+            String canonicalToken = "{{" + matcher.group(1).toUpperCase(java.util.Locale.ROOT) + "}}";
+            if (Character.toUpperCase(matcher.group(1).charAt(0)) != 'M'
+                    && !memberIdentifierValues.contains(tokenToOriginalValue.get(canonicalToken))) {
+                continue;
+            }
             int start = labels.starts()[matcher.start()];
             int end = labels.ends()[matcher.end() - 1];
             var literal = DISPATCHED_TOKEN.matcher(text.substring(start, end));
@@ -260,8 +279,29 @@ public final class MaskingContext {
     }
 
     String demaskableValueForToken(String token) {
-        return tokenToKind.get(token) == EntityKind.MEMBER && !exposedTokens.contains(token)
+        return memberIdentifierValues.contains(tokenToOriginalValue.get(token)) && !exposedTokens.contains(token)
                 ? null : originalValueForToken(token);
+    }
+
+    /**
+     * Freezes the raw-member admission policy before a native tool can discover further labels.
+     * The snapshot is request-local, never persisted, and does not authorize token demasking.
+     */
+    public void recordProviderCallAdmission(String id) {
+        MaskingContext snapshot = new MaskingContext(privacyMode);
+        snapshot.tokenToOriginalValue.putAll(tokenToOriginalValue);
+        snapshot.tokenToKind.putAll(tokenToKind);
+        snapshot.originalValueToToken.putAll(originalValueToToken);
+        snapshot.rawIdentifierEntries.putAll(rawIdentifierEntries);
+        snapshot.identifierKinds.putAll(identifierKinds);
+        snapshot.memberIdentifierValues.addAll(memberIdentifierValues);
+        snapshot.identifierDictionary.addAll(identifierDictionary);
+        admittedProviderCalls.putIfAbsent(Objects.requireNonNull(id, "id"), snapshot);
+    }
+
+    /** Raw replay uses admission's candidate set; placeholder checks always use the live context. */
+    public MaskingContext providerCallAdmissionContext(String id) {
+        return admittedProviderCalls.getOrDefault(id, this);
     }
 
     /** Applies containment only while masking and scanning the one message owning this provenance. */
@@ -345,10 +385,12 @@ public final class MaskingContext {
      * @return true for a non-member identifier when the server text contains the value
      */
     public boolean isTrustedTextCollision(String rawValue) {
+        return !isMemberIdentifier(rawValue) && isTrustedNonMemberTextCollision(rawValue);
+    }
+
+    /** Applies the legacy static-text exemption only to the non-member side of a protection union. */
+    boolean isTrustedNonMemberTextCollision(String rawValue) {
         if (trustedStaticTexts.isEmpty()) {
-            return false;
-        }
-        if (isMemberIdentifier(rawValue)) {
             return false;
         }
         String candidate = OutboundLeakScan.normalizeForScan(rawValue);
@@ -438,7 +480,8 @@ public final class MaskingContext {
                 tokenToOriginalValue.size(),
                 rawIdentifierEntries.size(),
                 unsafeIdentifierValues.size(), new LinkedHashMap<>(rawIdentifierEntries),
-                new LinkedHashSet<>(memberIdentifierValues), new LinkedHashSet<>(reservedTokens));
+                new LinkedHashSet<>(memberIdentifierValues), new LinkedHashSet<>(reservedTokens),
+                new LinkedHashMap<>(identifierKinds));
     }
 
     /**
@@ -483,6 +526,8 @@ public final class MaskingContext {
         }
         rawIdentifierEntries.clear();
         rawIdentifierEntries.putAll(checkpoint.entries);
+        identifierKinds.clear();
+        identifierKinds.putAll(checkpoint.identifierKinds);
         memberIdentifierValues.clear();
         memberIdentifierValues.addAll(checkpoint.memberValues);
         reservedTokens.clear();
@@ -529,10 +574,12 @@ public final class MaskingContext {
         private final Map<String, IdentifierEntry> entries;
         private final Set<String> memberValues;
         private final Set<String> reservedTokens;
+        private final Map<String, Set<EntityKind>> identifierKinds;
 
         private Checkpoint(
                 MaskingContext context, int tokens, int identifiers, int unsafeIdentifiers,
-                Map<String, IdentifierEntry> entries, Set<String> memberValues, Set<String> reservedTokens) {
+                Map<String, IdentifierEntry> entries, Set<String> memberValues, Set<String> reservedTokens,
+                Map<String, Set<EntityKind>> identifierKinds) {
             this.context = context;
             this.tokens = tokens;
             this.identifiers = identifiers;
@@ -540,6 +587,7 @@ public final class MaskingContext {
             this.entries = entries;
             this.memberValues = memberValues;
             this.reservedTokens = reservedTokens;
+            this.identifierKinds = identifierKinds;
         }
     }
 

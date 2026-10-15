@@ -198,8 +198,9 @@ are inserted; a member named “Redacted” receives no label-wide exemption. St
 scanning keeps its existing checks. Outbound text retains its origin independently of serialization:
 server-static system directives, repair instructions, schema keys and validated catalog tool names
 never participate in MEMBER raw-name scanning. Tenant messages, stored content and masked tool results
-are scanned as tenant data. Replayed native ids, thought signatures, arguments and repair model output
-remain provider-authored, with a strict MEMBER scan of raw and JSON-decoded text. The masker
+are scanned as tenant data. Replayed native ids, arguments and repair model output remain provider-authored, with a strict
+MEMBER scan of raw and JSON-decoded text. Opaque thought signatures retain placeholder checks
+without MEMBER-only raw-name matching, as described below. The masker
 records exact UTF-16 spans only when it writes a replacement marker or placeholder; schema-repair
 segments carry those offsets through JSON escaping and message assembly. MEMBER scanning neutralizes
 only these recorded insertions while preserving JSON decoding. Provider-authored text that merely
@@ -216,8 +217,38 @@ matched with the same boundary-aware member matcher as user provenance. In space
 Unicode letters and digits are word characters; underscores and punctuation are separators.
 Han, Hiragana, Katakana, Hangul and Thai need no boundaries. MEMBER replacement and outbound leak
 scanning use this same boundary rule for labels of every length, so `Иван` matches `Иван пришёл`
-but leaves the distinct surname `Иванов` intact. Other identifier kinds retain their existing rules.
-Thus raw `Bob_team` records `Bob`,
+but leaves the distinct surname `Иванов` intact when that value is MEMBER-only. Values registered
+under several kinds retain the union of every applicable protection, independently of which kind
+issued their shared token first. A member named `Acme` cannot weaken COMPANY residual redaction or
+containment scanning of `AcmeCorp`. Recorded MEMBER provenance cannot promote another kind's
+residual-only match into a reversible token, including equal source spans beside accented letters. Checkpoints restore those kind registrations along with bindings.
+Legacy static-text exemptions apply only to non-member policies; MEMBER matching retains its
+origin-scoped rules. Other identifier kinds retain their existing rules. Exposure gating follows the raw value's MEMBER role too: a PERSON,
+COMPANY or DEAL token sharing that value requires dispatch exposure even if allocated before member
+registration. Invalidating a binding with a placeholder-shaped label does not erase that MEMBER
+association; its opaque native fields remain subject to invented-placeholder refusal. Dispatched tokens of every kind are remembered so later member registration preserves
+legitimate exposure. Non-colliding existing kinds keep their existing demasking contract (#2056).
+
+Native call admission screens ids and arguments with the same strict raw-member predicate as replay,
+before any AUTO mutation can execute. A refused call is malformed and retains any existing demask
+warnings, so raw-label refusal cannot make an invented reference repairable. Tool reads can discover authored
+former-member labels after admission; each admitted call therefore freezes its raw-member candidate
+set for replay. Placeholder validation uses the live context on every provider-controlled field.
+Validated catalog tool names are fixed vocabulary. `thoughtSignature` is opaque provider state:
+MEMBER-only raw-name matching does not interpret bytes such as `/Li+`, but placeholder and exposure checks remain
+mandatory. Provider-authored fields never establish exposure.
+
+Server-built tool-result segments are marked structurally: their keys are schema positions and their
+decoded scalar values remain member-bearing. This includes JSON-ReAct tool-result messages and
+native tool-role results; arbitrary JSON-shaped user messages retain full-text scanning. Successful `find_tools` results are
+server-static catalog declarations, revalidated against the closed catalog before budgeting. Their
+values keep fixed vocabulary on both protocols; refused loads retain ordinary result masking. The current
+result producers were audited, including nested projections: record/history/schedule reads, scope
+and work-brief reads, skill-plan evidence, tool discovery, and every write tool's `modelOutcome`.
+Their exported keys are server constants or closed schema fields. Record-id lookup maps remain
+internal; tenant labels, custom text and names are exported as values, never map keys.
+
+For raw-text provenance, `Bob_team` records `Bob`,
 while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
 and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
 precise member provenance, including through echoed write arguments, independently of these raw-text
@@ -352,8 +383,9 @@ CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
 - **Run it with `./gradlew scriptedTrajectoryTest`, not `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache. `check` depends on the task. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the pattern — so a trajectory class CI would silently skip fails the build instead.
 - **A golden that writes must load its toolset first.** A turn starts holding only the `core` toolset, so every write tool sits behind a `find_tools` step; the fixtures spell that sequence out and the goldens assert the durable tool order, which is where a regression in toolset loading becomes visible.
 - **A journaled request has two authors, and a leak assertion may only read one of them.** The server authors the system prompt, its directives and every masked tool result; the model authors its tool-call arguments, which native replay carries back verbatim and never re-masks. Scanning both halves measures the fixture rather than the pipeline: a fixture that simply never quotes its own seeded record passes trivially, and a real leak in a server-authored field could hide behind it. Assert absence against the server-authored half, and say so in the assertion message. The rule for fixture authors follows from the same replay: `OutboundLeakScan` refuses any payload containing a registered raw identifier, so a fixture's search query must be a distinctive **fragment** of a record's name rather than the whole name. That is a constraint on writing fixtures, not evidence that no raw identifier travels. Raw member
-  names remain valid incoming tool arguments; their verbatim native replay is subject to that same
-  outbound guard. A masked fixture assigning a member uses a MEMBER token actually exposed in its
+  names are model-authored incoming arguments, rather than an outbound leak at receipt. Native
+  calls must nevertheless be safe for verbatim replay: admission applies the strict replay screen
+  before any tool executes, and refuses raw member labels as malformed. A masked fixture assigning a member uses a MEMBER token actually exposed in its
   user request, rather than inventing a token or replaying the complete raw label.
 - **Proposal freshness lives on the approval path only.** `AiAssistantWriteToolService.approve` refuses a CONFIRM proposal whose target was written in the proposal's own second. Proposing a write and executing an AUTO write never consult `AiAssistantProposalFreshness`, and the read service uses it only for a display-only staleness flag. The harness backdates seeded write targets so a future golden that *approves* is not silently converted into a staleness test — and a golden that means to pin that refusal must therefore not backdate its target.
 - **The harness is not transactional.** The loop runs on a worker thread that reloads the initiating identity from committed rows, so every fixture is committed and then deleted, in one fresh organization per test method. A turn that outruns the harness deadline is cancelled before teardown, because a worker still calling the provider would keep appending to the context-scoped request journal and fail the *next* golden's egress count.

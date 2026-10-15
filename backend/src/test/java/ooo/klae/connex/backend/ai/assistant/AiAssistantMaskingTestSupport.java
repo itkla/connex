@@ -272,6 +272,40 @@ final class AiAssistantMaskingTestSupport {
         return new AssistantCapture(request.getValue(), warnings, refusalReason, repairPresent, memberIdentifiers);
     }
 
+    /** Exercises production native admission before a caller is allowed to execute an AUTO write. */
+    ooo.klae.connex.backend.ai.AiNativeToolCompletion<tools.jackson.databind.JsonNode> completeNativeCall(
+            MaskingContext context, ObjectMapper mapper, ooo.klae.connex.backend.ai.provider.AiToolCall call) {
+        var harness = providerHarness(mapper);
+        when(harness.provider().toolCallingCapability(any())).thenReturn(
+                ooo.klae.connex.backend.ai.provider.AiToolCallingMode.NATIVE_FUNCTIONS);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            AiCompletionRequest request = invocation.getArgument(0);
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                return "";
+            });
+            return new AiCompletionResult("", 1, 1, "tool_calls",
+                    ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                    "", ooo.klae.connex.backend.ai.provider.AiReasoningMode.NONE, List.of(call));
+        }).when(harness.provider()).complete(any());
+        var prompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Follow up on the record").build();
+        var invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context, prompt, List.of(), 256, 0.1,
+                false, null, ooo.klae.connex.backend.ai.provider.AiInvocationProtocol.NATIVE_TOOLS);
+        var catalog = new AiAssistantToolCatalog();
+        var guard = new AiAssistantStepGuard(catalog);
+        var issued = context.tokenBindings().stream().map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toSet());
+        var completed = harness.service().completeNativeToolsRepairable(invocation, tools.jackson.databind.JsonNode.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, issued), guard.finalAnswerForIssuedPlaceholders(issued),
+                new AiAssistantStepSchema(mapper, catalog).finalResponseSchema(),
+                new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
+                        catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), List.of()),
+                fixtureMock(AiInvocationAdmissionService.DirectAdmission.class), () -> { });
+        clearInvocations(harness.mocks().toArray());
+        return completed;
+    }
+
     private static int parsedWarnings(ooo.klae.connex.backend.ai.AiStructuredOutcome<?> outcome) {
         if (outcome instanceof ooo.klae.connex.backend.ai.AiStructuredOutcome.Malformed<?> malformed
                 && ooo.klae.connex.backend.ai.AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER.equals(malformed.reason())) {

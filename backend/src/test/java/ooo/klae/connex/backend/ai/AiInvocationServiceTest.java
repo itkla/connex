@@ -2880,13 +2880,13 @@ class AiInvocationServiceTest {
                 .userTurn("Find the relationship").build();
         var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 64, 0.2, false, null,
                 AiInvocationProtocol.NATIVE_TOOLS);
-        var acceptedCall = new AiToolCall("call-1", "search_records", "{\"query\":\"[redacted]\"}");
+        var acceptedCall = new AiToolCall("call-1", "search_records", "{\"query\":\"relationship\"}");
         var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class,
                 completeMemberNative(invocation, List.of(), acceptedCall));
         assertEquals(acceptedCall, accepted.providerCall());
         String escaped = "\\u005bredacted\\u005d";
         String arguments = switch (field) {
-            case "arguments" -> acceptedCall.arguments();
+            case "arguments" -> "{\"query\":\"[redacted]\"}";
             case "escapedValue" -> "{\"query\":\"" + escaped + "\"}";
             case "escapedKey" -> "{\"" + escaped + "\":\"relationship\"}";
             default -> "{\"query\":\"relationship\"}";
@@ -2894,7 +2894,7 @@ class AiInvocationServiceTest {
         var replay = new AiToolCall(field.equals("id") ? "[redacted]" : "call-1",
                 "search_records", arguments,
                 field.equals("signature") ? "[redacted]" : null);
-        if (field.equals("name")) {
+        if (field.equals("name") || field.equals("signature")) {
             providerReturns(new AiCompletionResult(
                     "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
             var completed = assertInstanceOf(AiNativeToolCompletion.Content.class,
@@ -2906,6 +2906,90 @@ class AiInvocationServiceTest {
                     () -> requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
             verify(aiProvider, times(1)).complete(any());
         }
+    }
+
+    @Test
+    void nativeAdmissionAndReplayUseTheSameFrozenRawMemberPolicyWhileSignaturesStayOpaque() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall("call-1", "search_records", "{\"query\":\"Former Name\"}", "/Li+");
+        var accepted = assertInstanceOf(AiNativeToolCompletion.Tool.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals(call, accepted.providerCall());
+        context.registerMemberCandidate("Former Name");
+        providerReturns(new AiCompletionResult(
+                "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+        var replayed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+        assertInstanceOf(AiStructuredOutcome.Parsed.class, replayed.attempt().outcome());
+        var newCall = new AiToolCall("call-2", "search_records", call.arguments(), "/Li+");
+        var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), newCall));
+        assertEquals("native_member_leak", refused.repairRule());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"id,false", "signature,false", "arguments,false", "id,true", "signature,true", "arguments,true"})
+    void sharedValueTokensInNativeProviderFieldsRequireExposure(String field, boolean exposed) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.PERSON, "Hidden Member");
+        context.registerMemberCandidate("Hidden Member");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn(exposed ? "Discuss {{P1}}" : "Find the relationship").build(),
+                List.of(), 64, 0.2, false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "call-{{P1}}" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"{{P1}}\"}" : "{\"query\":\"relationship\"}",
+                field.equals("signature") ? "{{P1}}" : "/Li+");
+        var completion = completeMemberNative(invocation, List.of(), call);
+        if (exposed) {
+            assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+        } else {
+            var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+            assertEquals("invented_placeholder", refused.repairRule());
+            assertEquals(1, refused.demaskWarnings());
+            assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(call, "{}", 1, 0))));
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "arguments", "signature"})
+    void invalidatedMemberAliasTokensAreRefusedBeforeNativeAdmission(String field) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.PERSON, "Hidden Member");
+        context.registerMemberCandidate("Hidden Member");
+        context.registerMemberCandidate("{{P1}}");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "{{P1}}" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"{{P1}}\"}" : "{\"query\":\"relationship\"}",
+                field.equals("signature") ? "{{P1}}" : null);
+        var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals("invented_placeholder", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings());
+        verify(aiProvider, times(1)).complete(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "arguments"})
+    void rawMemberAdmissionRefusalPreservesUnknownReferenceWarnings(String field) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Return");
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Find the relationship").build(), List.of(), 64, 0.2,
+                false, null, AiInvocationProtocol.NATIVE_TOOLS);
+        var call = new AiToolCall(field.equals("id") ? "Return" : "call-1", "search_records",
+                field.equals("arguments") ? "{\"query\":\"Return {{P99}}\"}" : "{\"query\":\"{{P99}}\"}");
+        var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
+                completeMemberNative(invocation, List.of(), call));
+        assertEquals("native_member_leak", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings(), "Admission refusal must retain the no-repair demask warning");
+        verify(aiProvider, times(1)).complete(any());
     }
 
     /** Runs the actual dispatch callback with caller-owned member bindings and native replay. */

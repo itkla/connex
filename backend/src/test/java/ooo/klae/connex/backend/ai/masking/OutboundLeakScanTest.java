@@ -22,6 +22,46 @@ class OutboundLeakScanTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = EntityKind.class, names = "MEMBER",
+            mode = org.junit.jupiter.params.provider.EnumSource.Mode.EXCLUDE)
+    void sharedKindsRetainContainmentAcrossClassifiedAndProviderReplayFields(EntityKind kind) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Acme");
+        context.tokenFor(kind, "Acme");
+        String payload = objectMapper.writeValueAsString(Map.of("content", "AcmeCorp"));
+        for (var origin : List.of(OutboundSegment.Origin.TENANT_DATA, OutboundSegment.Origin.PROVIDER_AUTHORED)) {
+            var segment = new OutboundSegment("AcmeCorp", origin);
+            assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                    payload, List.of(segment), context, objectMapper));
+        }
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                objectMapper.writeValueAsString("AcmeCorp"), context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoMemberLeakInProviderReplay(
+                "{\"AcmeCorp\":\"safe\"}", context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInReplay("AcmeCorp", context));
+    }
+
+    @Test
+    void sharedKindsKeepLegacyStaticExemptionsSeparateFromMemberChecks() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.COMPANY, "JSON");
+        context.addTrustedStaticText("Return JSON only.");
+        context.registerMemberCandidate("JSON");
+        assertTrue(context.isTrustedNonMemberTextCollision("JSON"));
+        assertEquals("Ask {{C1}}", MaskingEngine.maskFreeText("Ask JSON", context));
+        var staticSegment = new OutboundSegment("Return JSON only.", OutboundSegment.Origin.SERVER_STATIC);
+        var tenant = new OutboundSegment("Ask {{C1}}", OutboundSegment.Origin.TENANT_DATA);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", staticSegment.text() + tenant.text())),
+                List.of(staticSegment, tenant), context, objectMapper));
+        var raw = new OutboundSegment("Ask JSON", OutboundSegment.Origin.TENANT_DATA);
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInClassifiedEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", staticSegment.text() + raw.text())),
+                List.of(staticSegment, raw), context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("myJSONhelper", context, objectMapper));
+    }
+
     @Test
     void insertedMarkerExemptionDoesNotHideIdenticalProviderSourceInTheSameField() {
         var context = new MaskingContext();

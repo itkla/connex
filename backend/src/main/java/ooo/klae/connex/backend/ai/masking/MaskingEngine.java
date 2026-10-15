@@ -8,9 +8,11 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -1074,19 +1076,29 @@ public final class MaskingEngine {
         CanonicalText.Projection labels = input.labels();
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
             AiCancellation.throwIfInterrupted();
-            if (!entry.replacementEligible()
-                    || preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
+            if (!entry.replacementEligible()) {
                 continue;
             }
+            List<ReplacementSpan> memberMatches = new ArrayList<>();
             if (ctx.isMemberIdentifier(entry.rawValue())) {
                 boolean containment = ctx.requiresMemberContainment(entry.rawValue());
-                spans.addAll(memberReplacementSpans(text, projection, entry.canonicalValue(), entry, ctx,
+                memberMatches.addAll(memberReplacementSpans(text, projection, entry.canonicalValue(), entry, ctx,
                         tokenize, containment ? 4 : 2, containment));
                 if (entry.labelEligible()) {
-                    spans.addAll(memberReplacementSpans(text, labels, entry.labelValue(), entry, ctx,
+                    memberMatches.addAll(memberReplacementSpans(text, labels, entry.labelValue(), entry, ctx,
                             tokenize, containment ? 3 : 1, containment));
                 }
+            }
+            spans.addAll(memberMatches);
+            if (!ctx.hasNonMemberIdentifier(entry.rawValue())
+                    || preserveTrustedCollisions && ctx.isTrustedNonMemberTextCollision(entry.rawValue())) {
                 continue;
+            }
+            Set<TextSpan> memberTokens = new HashSet<>();
+            for (ReplacementSpan match : memberMatches) {
+                if (!REDACTED.equals(match.replacement())) {
+                    memberTokens.add(new TextSpan(match.start(), match.end()));
+                }
             }
             List<TextSpan> primary = coalesceIdentifierRuns(identifierSpans(text, projection, entry.canonicalValue()));
             List<TextSpan> aliases = entry.labelEligible()
@@ -1095,17 +1107,44 @@ public final class MaskingEngine {
                     ? ctx.tokenFor(entry.kind(), entry.rawValue()) : REDACTED;
             addReplacementSpans(spans, primary, replacement, false, 2, entry.rawValue());
             if (residualEligible(entry.canonicalValue())) {
-                addReplacementSpans(spans, identifierResidualSpans(text, projection, entry.canonicalValue()), REDACTED, false);
+                addIdentifierResidualSpans(spans, identifierResidualSpans(text, projection, entry.canonicalValue()),
+                        primary, aliases, memberTokens);
             }
             if (entry.labelEligible()) {
                 addReplacementSpans(spans,
                         aliases, replacement, false, 1, entry.rawValue());
                 if (residualEligible(entry.labelValue())) {
-                    addReplacementSpans(spans, identifierResidualSpans(text, labels, entry.labelValue()), REDACTED, false);
+                    addIdentifierResidualSpans(spans, identifierResidualSpans(text, labels, entry.labelValue()),
+                            primary, aliases, memberTokens);
                 }
             }
         }
         return mergeSensitiveSpans(spans);
+    }
+
+    /**
+     * An equal-span MEMBER token cannot promote another kind's residual redaction into a reversible
+     * token. Existing primary matches retain their own coverage, and regions without a competing
+     * member token retain their old precedence. Ordered coverage cursors and exact span membership
+     * keep this pass linear in the span count.
+     */
+    private static void addIdentifierResidualSpans(
+            List<ReplacementSpan> target, List<TextSpan> residuals, List<TextSpan> primary,
+            List<TextSpan> aliases, Set<TextSpan> memberTokens) {
+        int primaryIndex = 0;
+        int aliasIndex = 0;
+        for (TextSpan residual : residuals) {
+            while (primaryIndex < primary.size() && primary.get(primaryIndex).end() < residual.end()) {
+                primaryIndex++;
+            }
+            while (aliasIndex < aliases.size() && aliases.get(aliasIndex).end() < residual.end()) {
+                aliasIndex++;
+            }
+            boolean covered = primaryIndex < primary.size() && primary.get(primaryIndex).start() <= residual.start()
+                    || aliasIndex < aliases.size() && aliases.get(aliasIndex).start() <= residual.start();
+            target.add(new ReplacementSpan(residual.start(), residual.end(), REDACTED,
+                    memberTokens.contains(residual) && !covered, 0, ""));
+        }
     }
 
     /**

@@ -38,6 +38,43 @@ class MaskingContextTest {
     }
 
     @Test
+    void checkpointsRestoreAllProtectionKindsIndependentlyOfTokenIdentity() {
+        for (EntityKind kind : EntityKind.values()) {
+            if (kind == EntityKind.MEMBER) {
+                continue;
+            }
+            var context = new MaskingContext();
+            String memberToken = context.tokenFor(EntityKind.MEMBER, "Acme");
+            var memberOnly = context.checkpoint();
+            assertEquals(memberToken, context.tokenFor(kind, "Acme"));
+            assertTrue(context.hasNonMemberIdentifier("Acme"));
+            assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("AcmeCorp", context));
+            var combined = context.checkpoint();
+            context.registerMemberCandidate("Other Member");
+            context.restore(combined);
+            assertTrue(context.hasNonMemberIdentifier("Acme"));
+            context.restore(memberOnly);
+            assertFalse(context.hasNonMemberIdentifier("Acme"));
+            assertEquals("AcmeCorp", MaskingEngine.maskFreeText("AcmeCorp", context));
+            assertEquals(List.of(Map.entry(memberToken, "Acme")), context.tokenBindings());
+            assertEquals(1, Demasker.demask(memberToken, context).warnings());
+        }
+    }
+
+    @Test
+    void restoringBeforeMemberRegistrationRetainsTheEarlierNonMemberProtection() {
+        var context = new MaskingContext();
+        String company = context.tokenFor(EntityKind.COMPANY, "Acme");
+        var checkpoint = context.checkpoint();
+        context.registerMemberCandidate("Acme");
+        context.restore(checkpoint);
+        assertFalse(context.isMemberIdentifier("Acme"));
+        assertTrue(context.hasNonMemberIdentifier("Acme"));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("AcmeCorp", context));
+        assertEquals(List.of(Map.entry(company, "Acme")), context.tokenBindings());
+    }
+
+    @Test
     void aSymbolMemberCannotReuseAnEarlierOtherKindBindingAndCheckpointRestoresTheOldKind() {
         var context = new MaskingContext();
         String token = context.tokenFor(EntityKind.PERSON, "😀");
@@ -152,7 +189,8 @@ class MaskingContextTest {
         assertEquals("{{P1}}", context.tokenFor(EntityKind.PERSON, "Shared Label"));
         context.registerMemberCandidate("Shared Label");
         assertEquals("{{P1}}", context.tokenFor(EntityKind.MEMBER, "Shared Label"));
-        assertEquals(List.of("Shared Label"), demaskedMembers(context, "{{P1}} handled it"));
+        assertEquals(List.of(), demaskedMembers(context, "{{P1}} handled it"));
+        assertEquals(1, Demasker.demask("{{P1}}", context).warnings());
         context.exposeDispatchedPayload("{\"content\":\"{{P1}}\"}");
         assertEquals(List.of("Shared Label"), demaskedMembers(context, "{{P1}} handled it"));
         assertEquals(List.of(), demaskedMembers(context, "A different answer"));
@@ -213,6 +251,35 @@ class MaskingContextTest {
         assertEquals("First Member", Demasker.demask("{{M1}}", context).text());
         assertEquals("{{M4}}", context.tokenFor(EntityKind.MEMBER, "Third Member"));
         assertEquals(1, Demasker.demask("{{M3}}", context).warnings());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = EntityKind.class, names = {"PERSON", "COMPANY", "DEAL", "EMAIL", "PHONE"})
+    void rawMemberRoleRequiresExposureEvenWhenAnotherKindOwnsTheToken(EntityKind kind) {
+        var context = new MaskingContext();
+        String token = context.tokenFor(kind, "Shared Member");
+        assertEquals("Shared Member", Demasker.demask(token, context).text());
+        context.registerMemberCandidate("Shared Member");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        assertEquals("[unknown reference]", Demasker.demask(token, context).text());
+        assertTrue(context.containsUnexposedMemberToken(token));
+        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        context.exposeDispatchedPayload(token);
+        assertFalse(context.containsUnexposedMemberToken(token));
+        assertEquals("Shared Member", Demasker.demask(token, context).text());
+        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        var exposedFirst = new MaskingContext();
+        String earlier = exposedFirst.tokenFor(kind, "Earlier Member");
+        exposedFirst.exposeDispatchedPayload(earlier);
+        exposedFirst.registerMemberCandidate("Earlier Member");
+        assertEquals("Earlier Member", Demasker.demask(earlier, exposedFirst).text());
+        String unrelated = context.tokenFor(kind, "Unrelated Record");
+        assertEquals("Unrelated Record", Demasker.demask(unrelated, context).text());
+        context.registerMemberCandidate(token);
+        assertTrue(context.containsUnexposedMemberToken(token));
+        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        assertEquals("Unrelated Record", Demasker.demask(unrelated, context).text());
     }
 
 }

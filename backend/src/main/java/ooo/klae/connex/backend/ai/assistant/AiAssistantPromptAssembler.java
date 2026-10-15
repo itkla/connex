@@ -424,9 +424,10 @@ public class AiAssistantPromptAssembler {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
-        for (String toolResult : boundedToolResults(
-                toolTurns, context, budget, budget.toolResultBytes()).contents()) {
-            prompt.userTurn(toolResult);
+        List<String> toolResults = boundedToolResults(
+                toolTurns, context, budget, budget.toolResultBytes()).contents();
+        for (int index = 0; index < toolResults.size(); index++) {
+            prompt.segmentedUserTurn(toolResultSegments(toolResults.get(index), catalogToolResult(toolTurns.get(index))));
         }
         if (repairContent != null) {
             prompt.segmentedUserTurn(repairSegments);
@@ -671,7 +672,7 @@ public class AiAssistantPromptAssembler {
                             call.thoughtSignature()),
                     exchange.result(),
                     turn.seq(),
-                    turn.call()));
+                    turn.call(), toolResultSegments(exchange.result(), catalogToolResult(turn))));
         }
         return new NativeReplay(exchanges, repairContent, bounded.audit(), repairSegments);
     }
@@ -997,6 +998,34 @@ public class AiAssistantPromptAssembler {
         }
     }
 
+    /**
+     * Marks only server-constructed tool results, preserving the serializer's exact bytes and
+     * either ordering of its two schema fields. User text never enters this classification path.
+     */
+    private static List<OutboundSegment> toolResultSegments(String content, boolean catalog) {
+        String beginning = CRM_DATA_BEGIN + "\n{";
+        String ending = "}\n" + CRM_DATA_END;
+        String discriminator = "\"type\":\"tool_result\"";
+        int begin;
+        int end;
+        if (content.startsWith(beginning + discriminator + ",\"data\":") && content.endsWith(ending)) {
+            begin = beginning.length() + discriminator.length() + ",\"data\":".length();
+            end = content.length() - ending.length();
+        } else if (content.startsWith(beginning + "\"data\":")
+                && content.endsWith("," + discriminator + ending)) {
+            begin = beginning.length() + "\"data\":".length();
+            end = content.length() - ("," + discriminator + ending).length();
+        } else {
+            throw new IllegalStateException("Assistant tool result envelope is invalid");
+        }
+        if (catalog) {
+            return List.of(new OutboundSegment(content, OutboundSegment.Origin.SERVER_STATIC));
+        }
+        return List.of(new OutboundSegment(content.substring(0, begin), OutboundSegment.Origin.SERVER_STATIC),
+                new OutboundSegment(content.substring(begin, end), OutboundSegment.Origin.TENANT_TOOL_RESULT),
+                new OutboundSegment(content.substring(end), OutboundSegment.Origin.SERVER_STATIC));
+    }
+
     private String toolResultContent(ToolTurn turn, MaskingContext context) {
         return crmDataMasked("tool_result", maskedToolResult(turn, context));
     }
@@ -1110,8 +1139,7 @@ public class AiAssistantPromptAssembler {
         data.put("tool", turn.tool());
         data.put("result", turn.result().data());
         JsonNode payload = objectMapper.valueToTree(data);
-        boolean statesTheActiveSet = AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
-                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
+        boolean statesTheActiveSet = catalogToolResult(turn);
         JsonNode rendered = statesTheActiveSet
                 ? requireDeclaredVocabulary(payload)
                 : maskToolStrings(payload, context, turn.result().identifiers().stream()
@@ -1150,6 +1178,12 @@ public class AiAssistantPromptAssembler {
             return masked;
         }
         return node;
+    }
+
+    /** Successful catalog data is validated before budgeting; refused loads keep ordinary masking. */
+    private static boolean catalogToolResult(ToolTurn turn) {
+        return AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
+                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
     }
 
     private JsonNode requireDeclaredVocabulary(JsonNode node) {

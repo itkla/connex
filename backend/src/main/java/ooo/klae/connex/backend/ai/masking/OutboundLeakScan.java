@@ -107,7 +107,8 @@ public final class OutboundLeakScan {
     /**
      * Screens one provider-authored native replay field without trusting sentinel, key or role
      * positions. JSON arguments are decoded independently, including keys and escaped scalars.
-     * Existing non-member envelope policy remains owned by the complete server-envelope scan.
+     * Shared member values retain their non-member protections here; unrelated non-member
+     * envelope policy remains owned by the complete server-envelope scan.
      *
      * @param field provider-authored field, serialized as JSON for a scalar or as its arguments object
      * @param ctx request-local masking context
@@ -119,6 +120,7 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(field, "field");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
+        assertNoLeak(List.of(new ScannedField(field, true, false)), ctx, true, true);
         assertNoLeak(decodedJsonFields(field, objectMapper), ctx, true, true);
     }
 
@@ -132,14 +134,17 @@ public final class OutboundLeakScan {
             String payload, List<OutboundSegment> segments, MaskingContext ctx, ObjectMapper objectMapper) {
         assertNoLeak(decodedJsonFields(payload, objectMapper), ctx, false, false, true, false);
         for (OutboundSegment segment : segments) {
-            if (segment.origin() == OutboundSegment.Origin.SERVER_STATIC) {
+            if (segment.origin() == OutboundSegment.Origin.SERVER_STATIC
+                    || segment.origin() == OutboundSegment.Origin.PROVIDER_OPAQUE) {
                 continue;
             }
-            boolean provider = segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED;
-            String scanned = provider ? segment.memberScanText() : segment.text();
-            assertNoLeak(List.of(new ScannedField(scanned, true, false)), ctx, provider, true, false, true);
-            if (provider) {
-                assertNoLeak(decodedJsonFields(scanned, objectMapper), ctx, true, true, false, true);
+            if (segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED) {
+                assertNoMemberLeakInProviderReplay(segment.memberScanText(),
+                        segment.memberScanContext() == null ? ctx : segment.memberScanContext(), objectMapper);
+            } else if (segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT) {
+                assertNoLeak(decodedJsonFields(segment.text(), objectMapper, true), ctx, false, true, false, true);
+            } else {
+                assertNoLeak(List.of(new ScannedField(segment.text(), true, false)), ctx, false, true, false, true);
             }
         }
     }
@@ -166,25 +171,28 @@ public final class OutboundLeakScan {
         Set<String> leakedIdentifiers = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
-            boolean member = ctx.isMemberIdentifier(entry.rawValue());
-            if (membersOnly && !member || excludeMembers && member) {
+            boolean member = !excludeMembers && ctx.isMemberIdentifier(entry.rawValue());
+            boolean nonMember = (!membersOnly || member) && ctx.hasNonMemberIdentifier(entry.rawValue());
+            if (!member && !nonMember) {
                 continue;
             }
-            List<MaskingEngine.ScreenText> matchingFields = member ? memberFields : allFields;
+            List<MaskingEngine.ScreenText> nonMemberFields = membersOnly ? memberFields : allFields;
             String identifier = entry.canonicalValue();
-            boolean containment = member && ctx.requiresMemberContainment(entry.rawValue());
-            boolean canonicalLeak = !member && identifier.length() >= MIN_IDENTIFIER_LENGTH
+            boolean canonicalLeak = nonMember && identifier.length() >= MIN_IDENTIFIER_LENGTH
                     && !identifier.isEmpty()
-                    && matchingFields.stream().anyMatch(field -> field.literal().value().contains(identifier));
-            boolean labelLeak = !member && entry.labelEligible()
+                    && nonMemberFields.stream().anyMatch(field -> field.literal().value().contains(identifier));
+            boolean labelLeak = nonMember && entry.labelEligible()
                     && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && matchingFields.stream().anyMatch(field -> field.labels().value().contains(entry.labelValue()));
-            boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
-                    && matchingFields.stream().anyMatch(field -> field.original().contains(entry.rawValue()));
-            boolean memberLeak = member && matchingFields.stream().anyMatch(field ->
-                    MaskingEngine.containsMemberMatch(field, entry, containment));
-            if ((canonicalLeak || labelLeak || exactRawLeak || memberLeak)
-                    && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
+                    && nonMemberFields.stream().anyMatch(field -> field.labels().value().contains(entry.labelValue()));
+            boolean rawOnly = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH;
+            boolean exactRawLeak = nonMember && rawOnly
+                    && nonMemberFields.stream().anyMatch(field -> field.original().contains(entry.rawValue()));
+            boolean nonMemberLeak = (canonicalLeak || labelLeak || exactRawLeak)
+                    && !(honorTrustedText && ctx.isTrustedNonMemberTextCollision(entry.rawValue()));
+            boolean memberLeak = member && memberFields.stream().anyMatch(field ->
+                    MaskingEngine.containsMemberMatch(field, entry, ctx.requiresMemberContainment(entry.rawValue()))
+                            || rawOnly && field.original().contains(entry.rawValue()));
+            if (nonMemberLeak || memberLeak) {
                 leakedIdentifiers.add(entry.rawValue());
                 leakedKinds.add(entry.kind());
             }
@@ -215,6 +223,11 @@ public final class OutboundLeakScan {
 
     /** Visits every key and non-null scalar separately, including earlier values of duplicate keys. */
     private static List<ScannedField> decodedJsonFields(String payload, ObjectMapper objectMapper) {
+        return decodedJsonFields(payload, objectMapper, false);
+    }
+
+    private static List<ScannedField> decodedJsonFields(
+            String payload, ObjectMapper objectMapper, boolean includeRoleValues) {
         List<ScannedField> fields = new ArrayList<>();
         try (JsonParser parser = objectMapper.createParser(payload)) {
             int depth = 0;
@@ -231,7 +244,7 @@ public final class OutboundLeakScan {
                     fields.add(new ScannedField(parser.getString(), false, false));
                 } else if (token.isScalarValue() && token != JsonToken.VALUE_NULL) {
                     String value = parser.getString();
-                    fields.add(new ScannedField(value, !isRoleDiscriminator(parser.currentName(), value),
+                    fields.add(new ScannedField(value, includeRoleValues || !isRoleDiscriminator(parser.currentName(), value),
                             "system".equals(rootField) || "tools".equals(rootField) || "responseSchema".equals(rootField)));
                 }
             }

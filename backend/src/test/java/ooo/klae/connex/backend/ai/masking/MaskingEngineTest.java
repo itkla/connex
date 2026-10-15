@@ -22,11 +22,14 @@ import java.util.regex.Pattern;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 
@@ -129,6 +132,83 @@ class MaskingEngineTest {
         if (!mentioned) {
             assertTrue(context.tokenBindings().isEmpty());
         }
+    }
+
+    static Stream<Arguments> collidingMemberKinds() {
+        return Stream.of(EntityKind.values()).filter(kind -> kind != EntityKind.MEMBER)
+                .flatMap(kind -> Stream.of("generic_first", "candidate_first", "member_bound_first")
+                        .map(order -> Arguments.of(kind, order)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("collidingMemberKinds")
+    void memberCollisionsRetainEveryOtherKindsResidualProtection(EntityKind kind, String order) {
+        var context = new MaskingContext();
+        String token = registerMemberCollision(context, kind, order, "Acme");
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("AcmeCorp", context));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskConversationalFreeText("AcmeCorp", context));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.screenFreeTextBeforeTruncation("AcmeCorp", context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("AcmeCorp", context, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
+                objectMapper.writeValueAsString(Map.of("content", "AcmeCorp")), context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(MaskingEngine.REDACTED, context, objectMapper));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("Acme_team", context));
+        assertEquals("é[redacted]é", context.withReplayMemberValues(List.of("Acme"),
+                () -> MaskingEngine.maskFreeText("éAcmeé", context)));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakStrict("éAcmeé", context, objectMapper));
+        assertEquals(token, MaskingEngine.maskFreeText("Acme", context));
+        assertEquals(List.of(Map.entry(token, "Acme")), context.tokenBindings());
+        context.exposeDispatchedPayload(token);
+        assertEquals("Acme", Demasker.demask(token, context).text());
+    }
+
+    @ParameterizedTest
+    @MethodSource("collidingMemberKinds")
+    void memberCollisionsAlsoRetainMemberBoundaryMatches(EntityKind kind, String order) {
+        var context = new MaskingContext();
+        String token = registerMemberCollision(context, kind, order, "Li");
+        assertEquals(token + "_team", MaskingEngine.maskFreeText("Li_team", context));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakStrict("Li_team", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(token + "_team", context, objectMapper));
+        context.exposeDispatchedPayload(token);
+        assertEquals("Li_team", Demasker.demask(token + "_team", context).text());
+    }
+
+    @Test
+    void sharedMemberRolesPreserveAnExistingWholeIdentifierPrimaryWithoutAMemberMatch() {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.COMPANY, "Acme");
+        String person = context.tokenFor(EntityKind.PERSON, "AcmeCorp");
+        assertEquals(person, MaskingEngine.maskFreeText("AcmeCorp", context));
+        context.registerMemberCandidate("Acme");
+        assertEquals(person, MaskingEngine.maskFreeText("AcmeCorp", context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(person, context, objectMapper));
+    }
+
+    @Test
+    void memberOnlyNamesKeepMentionBoundariesWithoutGenericResidualMatching() {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("Li");
+        context.registerMemberCandidate("Acme");
+        String text = "client AcmeCorp";
+        assertEquals(text, MaskingEngine.maskFreeText(text, context));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict(text, context, objectMapper));
+        assertTrue(context.tokenBindings().isEmpty());
+    }
+
+    private static String registerMemberCollision(MaskingContext context, EntityKind kind, String order, String value) {
+        if (!order.equals("generic_first")) {
+            context.registerMemberCandidate(value);
+        }
+        if (order.equals("member_bound_first")) {
+            context.tokenFor(EntityKind.MEMBER, value);
+        }
+        String token = context.tokenFor(kind, value);
+        if (order.equals("generic_first")) {
+            context.registerMemberCandidate(value);
+        }
+        return token;
     }
 
     @ParameterizedTest

@@ -10,11 +10,14 @@ import tools.jackson.databind.ObjectMapper;
 /** Text and its source, retained independently of provider serialization for the egress boundary. */
 public record OutboundSegment(
         String text, Origin origin,
-        @com.fasterxml.jackson.annotation.JsonIgnore List<MaskingEngine.InsertedSpan> insertedSpans) {
+        @com.fasterxml.jackson.annotation.JsonIgnore List<MaskingEngine.InsertedSpan> insertedSpans,
+        @com.fasterxml.jackson.annotation.JsonIgnore MaskingContext memberScanContext) {
     /** Static vocabulary is never member data; provider text cannot authorize member exposure. */
     public enum Origin {
         SERVER_STATIC,
         TENANT_DATA,
+        TENANT_TOOL_RESULT,
+        PROVIDER_OPAQUE,
         PROVIDER_AUTHORED
     }
 
@@ -22,6 +25,16 @@ public record OutboundSegment(
         Objects.requireNonNull(text, "text");
         Objects.requireNonNull(origin, "origin");
         insertedSpans = new MaskingEngine.MaskedText(text, insertedSpans).insertedSpans();
+    }
+
+    /** Carries exact insertion provenance without changing the request's raw-member candidate set. */
+    public OutboundSegment(String text, Origin origin, List<MaskingEngine.InsertedSpan> insertedSpans) {
+        this(text, origin, insertedSpans, null);
+    }
+
+    /** Associates a native replay field with the raw-member policy captured before execution. */
+    public static OutboundSegment admittedProviderField(String text, MaskingContext admission) {
+        return new OutboundSegment(text, Origin.PROVIDER_AUTHORED, List.of(), admission);
     }
 
     /** Unannotated source text never gains insertion provenance from its spelling. */
