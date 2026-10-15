@@ -31,8 +31,8 @@ so an unenrolled privileged creator cannot bypass browser confinement with an ex
 An unenrolled privileged account may read its own account and workspace-membership snapshot, read
 the public capability posture, obtain a CSRF token, list and enroll passkeys, use the recovery
 ceremony, [leave a workspace or organization](#organization-tenancy-and-safe-exits), and log out. Every other API request is refused by the backend with
-`PRIVILEGED_MFA_ENROLLMENT_REQUIRED` until enrollment completes. Once
-[attestation is enforced](#standing-and-attestation-enforcement), an account that holds passkeys
+`PRIVILEGED_MFA_ENROLLMENT_REQUIRED` until enrollment completes. By default, with
+[attestation enforced](#standing-and-attestation-enforcement), an account that holds passkeys
 but none approved in every organization where it is privileged is confined the same way, with
 `PRIVILEGED_MFA_ATTESTATION_REQUIRED`, until a grantor's approval code covers one of them.
 
@@ -176,9 +176,12 @@ first-passkey confirmation values and the actor to the integrity-chained system 
 Disabling this flag is a staged-rollout exception, not an MFA recovery mechanism. It does not make
 password proof satisfy the existing high-risk service gates.
 
-`CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` defaults to `false` and switches
-[attestation enforcement](#standing-and-attestation-enforcement) on. Startup refuses any value other
-than `true` or `false` (case-insensitive), so a mistyped value cannot leave it silently off. The
+`CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` defaults to `true` and applies
+[attestation enforcement](#standing-and-attestation-enforcement). A staged-rollout or policy-rollback
+exception sets it to `false` with `CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR` naming the operator or approved
+change. Startup refuses that opt-out when the actor is absent, blank or still `configuration-default`,
+and refuses any value other than `true` or `false` (case-insensitive). Reads fail closed before
+validation, so a mistyped value cannot silently leave it off. The
 `auth.mfa.policy.configured` event records it as `configuredAttestationEnforcedValue` and
 `attestationEnforced`.
 
@@ -274,7 +277,11 @@ production.
 - **Mailbox unreachable, or mail never configured** — another organization or workspace
   administrator removes every privileged role the stuck account holds. Policy is read from current
   rows on every request, so the account stops being confined immediately, enrolls with its password
-  alone, and can be re-promoted afterwards. This needs no restart. Note that `isPrivilegedAccount`
+  alone, and can be re-promoted afterwards. Re-promotion with an uncovered passkey requires the
+  confinement acknowledgement (`409`); administrative access resumes only after a code from a
+  covered grantor approves the same passkey in every privileged organization. Use
+  [break-glass recovery](#break-glass-recovery) when there is no eligible grantor. This needs no
+  restart. Note that `isPrivilegedAccount`
   is an OR across organization membership, built-in workspace admin/owner roles, and custom roles
   carrying administrative permissions — every source must be removed.
 - **Sole organization or workspace owner, with mail unusable** — the last owner cannot be demoted,
@@ -301,7 +308,7 @@ password when the account is privileged. The request is refused unless the accou
 and the session carries a fresh WebAuthn step-up:
 
 - **No passkey:** the request fails with `400 PASSKEY_ENROLLMENT_REQUIRED`.
-- **Passkeys awaiting approval,** once attestation is enforced: the request fails with
+- **Passkeys awaiting approval,** under the default attestation enforcement: the request fails with
   `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`.
 - **Passkey but no fresh step-up:** the request fails with `403 RECENT_AUTHENTICATION_REQUIRED`.
   The web client runs the passkey step-up and retries automatically.
@@ -426,7 +433,8 @@ A passkey enrolled while an account held no privilege must not, on its own, sati
 a later promotion: an attacker holding only the password of an ordinary account could enroll one and
 wait. The remedy is grantor-mediated attestation per organization, delivered in slices. Provenance
 is recorded for every passkey, and [standing](#standing-and-attestation-enforcement) reads it.
-Standing confines accounts only once attestation is enforced, which is off by default.
+This release enforces attestation by default, so standing confines accounts whose passkeys still
+await approval.
 [Grantor vouching](#attestation-codes) applies whatever that switch from the release carrying V225.
 
 ### What a passkey can carry
@@ -548,11 +556,12 @@ Coverage split across passkeys does not count: one covering organization A and a
 leave the account `ATTESTATION_REQUIRED`. An organization or workspace being torn down confers no
 privilege, so it needs no coverage either.
 
-**While `CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED` is `false`** (the default), `ATTESTATION_REQUIRED`
-is enforced as `SATISFIED` everywhere. A privileged account with any passkey is not confined.
+**During an attributed staged-rollout or policy-rollback exception** with
+`CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED=false`, `ATTESTATION_REQUIRED` is enforced as `SATISFIED`
+everywhere. A privileged account with any passkey is not confined.
 Grantor vouching still applies to approval issuance, revocation and redemption, as described above.
 
-**Once it is `true`**, an `ATTESTATION_REQUIRED` account is refused wherever an unenrolled one is:
+**With the default `true`**, an `ATTESTATION_REQUIRED` account is refused wherever an unenrolled one is:
 - the browser API confines it with `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`, audited as
   `auth.mfa.policy.denied` with reason `attestation_required`, behind the same allowlist (including
   the two approval-code redemption routes);
@@ -562,7 +571,7 @@ Grantor vouching still applies to approval issuance, revocation and redemption, 
   because the removal would confine the account. The refusal is audited as
   `auth.passkey.delete_denied` with reason `last_sufficient_credential`.
 
-**Proofs must come from a sufficient passkey, too.** Once it is `true`, a privileged account's
+**Proofs must come from a sufficient passkey, too.** Under the default enforcement, a privileged account's
 step-up counts only when the session's stamp is bound to one of its own **sufficient** passkeys:
 - **Where it applies:** every recent-authentication gate (`requireRecentAuthentication`) and the
   export gate. Otherwise they answer `403 RECENT_AUTHENTICATION_REQUIRED`.
@@ -601,15 +610,17 @@ The startup event's inventory also records `attestationRequiredCount`: the privi
 holding passkeys of which none is sufficient. These are the accounts that enforcement confines.
 Beside it, `grandfatheredCoverageCount` counts the per-organization coverage rows whose source is
 `GRANDFATHERED`, recording how far the cutover reached. Both are counted whether or not enforcement
-is on, so the confined population can be drained before switching on.
+is on, so an attributed staged rollout can drain and freshly recheck the population before enabling.
 
 A workspace-only owner who is not an organization member and held no passkey at cutover gains no
 founder coverage by enrolling later. If no covered co-owner can approve that passkey through the
 workspace route, the approval path is [operator break-glass recovery](#break-glass-recovery): its
 replacement passkey carries `BREAK_GLASS` assurance and satisfies standing in every organization.
 
-**Do not switch it on yet.** Enforcement ships dark. It is switched on by its own release, after
-the cutover below, ownership offers, and the web client's approval flow have shipped.
+**This release switches enforcement on by default.** The cutover below, ownership offers and the
+web client's approval flow have shipped. Every upgraded control catalog needs a fresh
+[preflight and drain](UPGRADING.md#privileged-mfa-attestation-switch-on-1534) immediately before
+enabling; an old startup without a warning does not establish current readiness.
 
 ### Member approval badges
 
@@ -632,8 +643,8 @@ are ineligible. A caller without issuance authority sees no field on any row. Th
 locks, append no audit and perform no writes. They do not require a fresh step-up; issuing the code
 still requires a fresh assertion from a passkey approved here and revalidates authority under locks.
 
-Badges are available before `attestation-enforced` is enabled, for draining approval gaps before
-switch-on. Each nonempty authorized list uses two set queries for privilege and coverage, plus a
+Badges shipped before switch-on and now support ongoing approval and recovery under the default
+enforcement, as well as draining gaps during an attributed opt-out. Each nonempty authorized list uses two set queries for privilege and coverage, plus a
 constant number of authority reads. Workspace custom-role roots and permissions are read with one
 join, including roles with no permissions; the query count does not grow with members or roles.
 
@@ -762,9 +773,11 @@ grantor vouching while the switch is off, so it could write coverage that nothin
 the oldest ones change roles without clearing the founder flag. If one did serve, follow the
 reconciliation in [UPGRADING.md](UPGRADING.md) before reopening approvals.
 
-**Switching on** is a later release that only changes the default. Before it, drain the accounts the
-startup event counts in `attestationRequiredCount`: privileged after the cutover, or enrolled since,
-without a passkey approved where they are privileged.
+**Switching on** happens in this release: attestation enforcement defaults to `true`, and disabling
+it requires an accountable change actor. There is no schema change or second revocation. Immediately
+before enabling, run the fresh preflight for every upgraded control catalog and drain
+`attestationRequiredCount`, following [UPGRADING.md](UPGRADING.md#privileged-mfa-attestation-switch-on-1534).
+One passkey must be approved in every organization where the account is privileged.
 
 ## Ownership consent (#1534 slice 4o)
 

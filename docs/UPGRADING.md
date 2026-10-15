@@ -381,8 +381,9 @@ migration cannot append the Java-computed audit integrity chain.
 Treat this release as a **coordinated restart**, as for V185: close ingress, stop every old backend
 replica and other writers, then start the new backend and let Flyway finish before reopening.
 Do not serve an old binary while founder flags and coverage are reset. Grantor vouching applies
-with `attestation-enforced` either false or true in this release; enforcement itself still defaults
-to false. No second approval-code revocation is needed at switch-on. Before enabling enforcement,
+with `attestation-enforced` either false or true in the V225 release, which shipped enforcement
+with a `false` default. The [switch-on release](#privileged-mfa-attestation-switch-on-1534) changes
+that default. No second approval-code revocation is needed at switch-on. Before enabling enforcement,
 drain `attestationRequiredCount` for accounts promoted or enrolled after the cutover.
 
 **Rollback floor:** after V225, no backend older than this release may serve. Roll back only to a
@@ -633,6 +634,119 @@ COMMIT;
 Restart only a release at or above the rollback floor. Have affected accounts re-approve through a
 vouching grantor, or use operator break-glass recovery where that route is unavailable, before
 reopening the affected approval flows. No earlier binary may serve during reconciliation or afterwards.
+
+### Privileged-MFA attestation switch-on (#1534)
+
+This release makes `CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED=true` the default. Privileged accounts
+with passkeys but no single passkey approved in every privileged organization are now confined;
+privileged operations also require a step-up bound to a sufficient passkey. There is **no schema
+change**, no new grandfathering and no second approval-code revocation.
+
+**Fresh read-only preflight:** immediately before enabling, check **every upgraded control catalog**
+(SaaS, silo and on-prem), with membership and passkey changes quiesced until the switch takes effect.
+Run the query below against that catalog; it lists the affected account ids, so zero rows means
+`attestationRequiredCount = 0`. Its predicate is the expansion of
+[`UserMapper.countAttestationRequiredAccounts`](../backend/src/main/resources/mappers/UserMapper.xml),
+including `privilegedOrgBranches` and `sufficientPasskey`, used by
+`PrivilegedAccountService.attestationRequiredAccountCount`. Keep this query in step with that SQL.
+It reads no credential material and makes no changes.
+
+```sql
+WITH privileged AS (
+    SELECT om.user_id, o.id AS org_id
+    FROM org_member om
+    JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    WHERE wm.status = 'active'
+      AND wm.role_id IS NULL
+      AND wm.role IN ('admin', 'owner')
+    UNION ALL
+    SELECT wm.user_id, o.id AS org_id
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+    JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+    JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+    WHERE wm.status = 'active'
+      AND wrp.permission IN (
+        'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+        'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+        'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+        'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
+      )
+)
+SELECT u.id AS account_id
+FROM app_user u
+WHERE u.username != '__connex_system__'
+  AND EXISTS (SELECT 1 FROM privileged p WHERE p.user_id = u.id)
+  AND EXISTS (
+    SELECT 1
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = u.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    WHERE e.user_id = u.id
+      AND (c.privileged_assurance = 'BREAK_GLASS'
+        OR NOT EXISTS (
+          SELECT 1
+          FROM privileged p
+          WHERE p.user_id = u.id
+            AND NOT EXISTS (
+              SELECT 1
+              FROM privileged_credential_attestation pca
+              WHERE pca.credential_row_id = c.id AND pca.org_id = p.org_id
+            )
+        ))
+  )
+ORDER BY u.id;
+```
+
+Alternatively, start **this release** with the attributed staging opt-out below immediately before
+switching on, and read its `auth.mfa.policy.configured` system event for that catalog. Require a
+successful inventory with `attestationRequiredCount = 0`; record `unenrolledPrivilegedCount` as the
+separate enrollment workload, already subject to `CONNEX_PRIVILEGED_MFA_ENFORCED`. Inventory is
+sampled only at startup: an old event or silence in the WARN log is not a current preflight.
+A missing, `"unavailable"` or nonzero attestation count, or a failed query, means **keep the attributed
+opt-out until the population is drained and freshly rechecked**. Recheck if memberships or passkeys
+change between the inventory and enabling.
+
+**Drain:** have a covered grantor issue an approval code in each organization where the account is
+privileged, and redeem every code using the **same passkey**. Coverage split across different
+passkeys does not satisfy standing. The workspace route serves workspace-only owners when a covered
+co-owner is eligible. Where no eligible grantor exists, use
+[operator break-glass recovery](PRIVILEGED_MFA.md#break-glass-recovery); its replacement passkey carries
+account-wide assurance. Removing every source of privilege is the other exit. Re-promotion after
+enrolling still requires approval before administrative access resumes.
+
+**Staging opt-out:** before starting an upgrade whose population is unresolved, set:
+
+```dotenv
+CONNEX_PRIVILEGED_MFA_ATTESTATION_ENFORCED=false
+CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR=security-change-1534
+```
+
+Replace the actor with the accountable operator or approved change identifier. Startup refuses the
+opt-out with an absent, blank or `configuration-default` actor. Grantor vouching remains required
+during the exception. After draining and the fresh preflight, set attestation enforcement to `true`
+and restart all backend replicas with the attributed change.
+
+**Rollback:** policy rollback uses the same `false` plus accountable actor and a backend restart.
+It needs no schema rollback. The **V225 rollback floor is unchanged**: no binary older than the
+release carrying V225 and its switch-independent grantor checks may serve.
+
+**What confined users see:** Security and onboarding show the passkey-approval confinement card,
+with approval-code entry and the organizations still needing approval. A covered grantor can issue
+the code; users can also leave the listed privileged workspaces or organizations, or sign out.
+They remain confined until the same passkey covers every privileged organization or no privilege
+remains. The browser API answers `403 PRIVILEGED_MFA_ATTESTATION_REQUIRED`; public credentials answer
+`401 privileged_mfa_attestation_required` under the default policy.
 
 ### Ask Connex member masking (#1822): rollback compatibility
 
