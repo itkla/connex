@@ -188,6 +188,32 @@ describe("the privileged-MFA standing a surface sees", () => {
         expect(current().confined).toBe(false);
     });
 
+    it("never lets an older refresh's late success clear a newer failure", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("UNPRIVILEGED") }];
+        await mountHook();
+        let finishOlder: (outcome: "superseded") => void = () => undefined;
+        store.settle.mockImplementationOnce(() => new Promise((resolve) => {
+            finishOlder = resolve;
+        }));
+        store.outcomes = [{ outcome: "failed" }];
+
+        let older: Promise<unknown> = Promise.resolve();
+        await act(async () => {
+            older = current().refresh("check");
+        });
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().fresh).toBe(false);
+
+        await act(async () => {
+            finishOlder("superseded");
+            await older;
+        });
+
+        expect(current().fresh).toBe(false);
+    });
+
     it("stays loading, and so not cleared, before any read has decided", async () => {
         store.settle.mockImplementation(() => new Promise(() => undefined));
         await mountHook();

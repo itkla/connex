@@ -40,8 +40,9 @@ export type PrivilegedMfaStandingState = {
  * Keeps a surface's view of the account's own privileged-MFA standing current (#1534). The standing
  * is read when the surface mounts, when its tab becomes visible again and whenever the browser's
  * request identity changes, and every read settles browser-local confinement. Only the newest
- * decisive read reaches the view, so a slow, older read never replaces a newer answer, and a
- * failure from a read that a later successful one overtook is ignored.
+ * decisive read reaches the view, so a slow, older read never replaces a newer answer. Outcomes
+ * are ordered by when their refresh started: a failure only counts if no later refresh has since
+ * succeeded, and only a later success clears it.
  * @returns the decisive requirements, their status, whether the browser is confined, and a refresh
  */
 export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
@@ -58,6 +59,7 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
     const [lastFailure, setLastFailure] = useState<"none" | "read" | "ceremony">("none");
     const refreshCount = useRef(0);
     const lastSuccessfulRefresh = useRef(0);
+    const lastFailedRefresh = useRef(0);
 
     const refresh = useCallback(async (settlement: PrivilegedMfaSettlement = "check") => {
         refreshCount.current += 1;
@@ -65,8 +67,9 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         const outcome = await settlePrivilegedMfaStanding(settlement);
         if (outcome !== "failed") {
             lastSuccessfulRefresh.current = Math.max(lastSuccessfulRefresh.current, refreshId);
-            setLastFailure("none");
+            if (refreshId > lastFailedRefresh.current) setLastFailure("none");
         } else if (refreshId > lastSuccessfulRefresh.current) {
+            lastFailedRefresh.current = Math.max(lastFailedRefresh.current, refreshId);
             setLastFailure((previous) =>
                 settlement === "ceremony" || previous === "ceremony" ? "ceremony" : "read");
         }
