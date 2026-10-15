@@ -81,34 +81,48 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. Recognition deliberately
-over-includes the covered [CommonMark member-link readings](https://spec.commonmark.org/0.31.2/#link-reference-definitions):
-an independent canonical-token pass runs everywhere, and the structural collector considers every
-bracket without code-span suppression and unions code/HTML-aware readings. Covered readings include
-inline, full, collapsed and shortcut links; failed-inline and failed-definition shortcut fallbacks; prose shortcuts followed
-by a colon, including paragraph continuations inside containers and lazy continuations;
-entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
-continuations; blockquote and list-item definitions, including continued keys with container markers;
-and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets
-inside paired code spans opaque; backtick pairing resets at blank lines and the block starts
-implemented below. Raw HTML blocks are not modelled, so reference-style labels next to raw HTML
-remain part of the bounded residual tracked in #2072. Canonical inline tokens, including labels
-with backtick code spans containing closing brackets, are recovered regardless of surrounding block
-context by the independent canonical pass.
-Definition keys are suppressed only at paragraph boundaries, container starts or after another definition.
-Paragraph interruption follows CommonMark 0.31.2: blank lines, ATX headings, fences, thematic
-breaks, block quotes, setext underlines and HTML types 1–6 can interrupt; empty new list items,
-ordered starts other than 1, HTML type 7 and indented code cannot. Accepted container bodies may
-open a new paragraph, whose lazy continuations remain usages.
-Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
-Every candidate source label, including canonical inline readings, is bounded to 999 Unicode
-characters before copying or normalization. Member provenance writers and readers apply the same
-code-point bound, including supplementary Unicode characters. Longer spans are outside this recognition contract.
-The canonical scan and fixed-number reading merge stay linear in the stored prose length; nested
-brackets cannot cause unbounded label extraction before truncation.
-Rarer CommonMark constructs outside these covered readings are a bounded residual tracked in
-[#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser for both
-reference readers; the owner decision is pending.
+labels, including both authored HTML-entity spellings and decoded labels. The collector covers the
+following constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+
+| Covered construct | One-line example |
+| --- | --- |
+| Canonical inline tokens, including label code spans and backslash escapes | ``[Alice \` `]` Former](user:42)`` |
+| Canonical destination separators | `[Alice](user:42)`, `[Alice](user&colon;42)`, `[Alice](user\:42)` |
+| Authored and HTML-decoded label spellings | `[Alice &amp; Bob](user:42)` registers both `Alice &amp; Bob` and `Alice & Bob` |
+| Full reference links | `[Alice][m]\n\n[m]: user:42` |
+| Collapsed reference links | `[Alice][]\n\n[Alice]: user:42` |
+| Shortcut reference links | `[Alice]\n\n[Alice]: user:42` |
+| Failed-inline and failed-definition shortcut fallbacks | `[Alice](not a link)\n\n[Alice]: user:42`; `[Alice]: welcome back.\n\n[Alice]: user:42` |
+| Prose and paragraph-continuation shortcuts followed by a colon | `Hello\n[Alice]: welcome.\n\n[Alice]: user:42` |
+| Definitions at document start, after a blank line, or after another definition | `[m]: user:42\n[n]: user:43\n\n[Alice][m]`; `Hello\n\n[m]: user:42\n\n[Alice][m]` |
+| Blockquote and list-container definitions | `[Alice][m]\n\n> [m]: <user:42>`; `[Alice][m]\n\n- [m]: user:42` |
+| Continued definition keys and destinations, with LF, CR or CRLF | `[Alice][m n]\n\n> [m\n> n]:\r> <user:42>` |
+| Titled definitions, without decoding the title for member detection | `[Alice][m]\n\n[m]: user:42 "a&#10;b"` |
+| Unicode case-folded and whitespace-collapsed keys | `[Alice][SS]\n\n[ß]: user:42`; `[Alice][m n]\n\n[M\tN]: user:42` |
+| The shared 999-code-point label bound, checked before copying or normalization | `"[" + "😀".repeat(999) + "](user:42)"` is accepted; 1,000 code points are outside the bound |
+
+The implemented paragraph-interruption rules determine when a following definition may start:
+
+| Paragraph rule | One-line example |
+| --- | --- |
+| Blank lines end paragraphs | `Hello\n\n[m]: user:42` |
+| ATX headings, fenced code openers, thematic breaks, block quotes and setext underlines can interrupt | `Hello\n# Heading`, ``Hello\n```java``, `Hello\n***`, `Hello\n> quote`, `Hello\n===` |
+| A new list item can interrupt only if nonempty; an ordered item must start at 1 | `Hello\n* item` and `Hello\n1. item` interrupt; `Hello\n* ` and `Hello\n2. item` continue the paragraph |
+| HTML block starts of types 1–6 can interrupt; type 7 cannot | `Hello\n<script>`, `Hello\n<!--`, `Hello\n<?pi?>`, `Hello\n<!DOCTYPE html>`, `Hello\n<![CDATA[`, `Hello\n<div>` interrupt; `Hello\n<custom>` does not |
+| Indented code cannot interrupt | `Hello\n    code` continues the paragraph |
+| Container paragraphs retain lazy continuations | `> Hello\n[Alice]: welcome.\n\n[Alice]: user:42` keeps the first bracket as a shortcut usage |
+
+Code-aware readings keep brackets inside paired code spans opaque, and reset backtick pairing at
+blank lines and the block starts listed above. The independent canonical pass handles the listed
+inline-token syntax without depending on that block state. Unambiguous explicit reference keys
+remain keys; ambiguous bracket readings stay independent. The scans and fixed-number reading merge
+remain linear in stored prose length, with the label bound applied before extraction. Member
+provenance writers and readers use the same code-point bound, including supplementary characters.
+
+Full CommonMark parity is **not claimed**. Any construct not listed above is a bounded residual
+tracked in [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser
+for both reference readers; the owner decision is pending. In particular, raw HTML block state is
+not modelled, and reference-style labels adjacent to raw HTML remain in that residual.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

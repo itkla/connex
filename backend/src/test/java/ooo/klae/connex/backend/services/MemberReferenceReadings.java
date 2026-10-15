@@ -16,7 +16,7 @@ public final class MemberReferenceReadings {
                     "[Known](user:42)\n\n[ignored] [Alice Former](user" + separator + "42)", "Alice Former"));
         }
         readings.add(new Reading("a", "canonical with escaped closing delimiter",
-                "[Alice Former\\](user:42)", "Alice Former\\"));
+                "[Alice Former\\]](user:42)", "Alice Former\\]"));
         for (String title : List.of("\"`\"", "'`'", "(`)")) {
             readings.add(new Reading("b", "backtick title " + title,
                     "[m]: user:42 " + title + "\n\n[Alice Former][m]\n\nparagraph `", "Alice Former"));
@@ -25,6 +25,19 @@ public final class MemberReferenceReadings {
                 "[Alice `]` Former](user:42)", "Alice `]` Former"));
         readings.add(new Reading("canonical-code-span", "HTML type 1 then canonical link",
                 "<script>\n` stray\n</script>\n[Alice `]` Former](user:42)", "Alice `]` Former"));
+        readings.add(new Reading("canonical-escapes", "escaped tick before bracket-containing code",
+                "<script>\n` stray\n</script>\n[Alice \\` `]` Former](user:42)", "Alice \\` `]` Former"));
+        for (String escape : List.of("\\[", "\\]", "\\(", "\\)", "\\`")) {
+            for (String label : List.of(escape + "Alice `]` Former", "Alice " + escape + " `]` Former",
+                    "Alice `]` Former" + escape)) {
+                readings.add(new Reading("canonical-escapes", "escaped delimiter " + label,
+                        "<script>\n` stray\n</script>\n[" + label + "](user:42)", label));
+            }
+        }
+        for (String label : List.of("Alice \\\\`]` Former", "Alice \\``]` Former", "Alice \\` \\] `]` Former")) {
+            readings.add(new Reading("canonical-escapes", "slash parity and adjacent ticks " + label,
+                    "<script>\n` stray\n</script>\n[" + label + "](user:42)", label));
+        }
         for (String html : List.of("<script>\n` stray\n</script>", "<!--\n` stray\n-->", "<div>\n` stray\n</div>")) {
             for (String ticks : List.of("`", "``")) {
                 for (String separator : List.of(":", "&colon;", "\\:")) {

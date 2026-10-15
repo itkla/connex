@@ -162,6 +162,24 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void escapedDelimitersRemainLiteralInEveryMemberReading() {
+        for (String content : java.util.List.of("\\[Alice](user:42)", "[Alice\\](user:42)",
+                "[Alice]\\(user:42)", "[Alice][m]\n\n\\[m]: user:42")) {
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(content), content);
+        }
+        for (String escape : java.util.List.of("\\[", "\\]", "\\(", "\\)", "\\`")) {
+            for (String label : java.util.List.of(escape + "Alice", "Alice " + escape + " Former", "Alice" + escape)) {
+                for (String reading : java.util.List.of("[" + label + "](user:42)",
+                        "[" + label + "][m]\n\n[m]: user:42", "[" + label + "][]\n\n[" + label + "]: user:42",
+                        "[" + label + "]\n\n[" + label + "]: user:42")) {
+                    org.junit.jupiter.api.Assertions.assertTrue(
+                            ReferenceService.memberLabelsFromReaderVisibleContent(reading).contains(label), reading);
+                }
+            }
+        }
+    }
+
+    @Test
     void paragraphInterruptionMatchesCommonMarkForEveryCoveredBlockType() {
         for (var reading : MemberReferenceReadings.paragraphInterruptions()) {
             assertEquals(!reading.definitionAllowed(),
@@ -222,7 +240,8 @@ class ReferenceServicePlainTextTest {
     @Test
     void canonicalCodeSpanLabelsStayLinearOnAdversarialBackticksAndBrackets() {
         for (String attack : java.util.List.of("[`]`".repeat(25_000), "[".repeat(50_000) + "`".repeat(50_000),
-                "`[".repeat(50_000), "[".repeat(50_000) + "]".repeat(50_000))) {
+                "`[".repeat(50_000), "[".repeat(50_000) + "]".repeat(50_000),
+                "\\`[\\]".repeat(20_000), "\\".repeat(100_000))) {
             String content = attack + "\n<script>\n` stray\n</script>\n[Alice `]` Former](user:42)";
             assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
                     org.junit.jupiter.api.Assertions.assertTrue(ReferenceService.memberLabelsFromReaderVisibleContent(content)

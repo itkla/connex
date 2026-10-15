@@ -671,12 +671,14 @@ public class ReferenceService {
         String content = readerVisibleContent;
         List<MemberLabelSpan> labels = new ArrayList<>();
         Set<String> memberDefinitions = new HashSet<>();
-        collectCanonicalMemberLabels(content, labels);
+        boolean[] escaped = referenceEscapedCharacters(content);
+        collectCanonicalMemberLabels(content, labels, escaped);
         Set<Integer> definitionLineStarts = memberDefinitionLineStarts(content);
         Map<Integer, Integer> definitionEnds = new HashMap<>();
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
-            if (!memberLabelWithinLimit(content, definitions.start(1), definitions.end(1))) {
+            if (escaped[definitions.start()]
+                    || !memberLabelWithinLimit(content, definitions.start(1), definitions.end(1))) {
                 continue;
             }
             if (definitionLineStarts.contains(definitions.start())) {
@@ -692,7 +694,7 @@ public class ReferenceService {
         Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
         List<List<MemberLabelSpan>> readings = new ArrayList<>();
         readings.add(labels);
-        readings.add(canonicalMemberLabelsWithCodeSpans(content));
+        readings.add(canonicalMemberLabelsWithCodeSpans(content, escaped));
         for (int mode = 0; mode < 3; mode++) {
             List<MemberLabelSpan> spans = new ArrayList<>();
             collectMemberLabels(content, memberDefinitions, validDefinitionStarts, spans,
@@ -707,16 +709,21 @@ public class ReferenceService {
     }
 
     /** Scans canonical destinations once, retaining only bounded source-label windows. */
-    private static void collectCanonicalMemberLabels(String content, List<MemberLabelSpan> labels) {
+    private static void collectCanonicalMemberLabels(
+            String content, List<MemberLabelSpan> labels, boolean[] escaped) {
         Matcher destination = MEMBER_CANONICAL_DESTINATION.matcher(content);
         int precedingClose = -1;
         for (int end = content.indexOf(']'); end >= 0; end = content.indexOf(']', end + 1)) {
+            if (escaped[end]) {
+                continue;
+            }
             if (destination.region(end, content.length()).lookingAt()
                     && TYPE_USER.equals(destination.group(1))
                     && parseReferenceTarget(TYPE_USER, destination.group(2)).isPresent()) {
                 int first = Math.max(precedingClose + 1, end - MAX_MEMBER_LABEL_CHARACTERS * 2 - 1);
                 for (int start = first; start < end - 1; start++) {
-                    if (content.charAt(start) == '[' && memberLabelWithinLimit(content, start + 1, end)) {
+                    if (content.charAt(start) == '[' && !escaped[start]
+                            && memberLabelWithinLimit(content, start + 1, end)) {
                         labels.add(new MemberLabelSpan(start + 1, end));
                     }
                 }
@@ -726,36 +733,36 @@ public class ReferenceService {
     }
 
     /**
-     * Recovers canonical labels independently of surrounding block or code state. A backward table
-     * finds each opener's first closing bracket while jumping locally paired backtick runs; nested
+     * Recovers canonical labels with literal escapes and locally paired code spans. A backward table
+     * finds each unescaped opener's first unescaped closing bracket while jumping paired backticks; nested
      * openers share that work. Destination checks are cached, and spans stay source ordered and
      * bounded before copying or normalization. The plain canonical reading retains unmatched ticks.
      */
-    private static List<MemberLabelSpan> canonicalMemberLabelsWithCodeSpans(String content) {
+    private static List<MemberLabelSpan> canonicalMemberLabelsWithCodeSpans(String content, boolean[] escaped) {
         if (content.indexOf('`') < 0) {
             return List.of();
         }
-        int[] closingRuns = closingBacktickRuns(content, false);
+        int[] closingRuns = closingBacktickRuns(content, false, escaped);
         int[] nextClose = new int[content.length() + 1];
         nextClose[content.length()] = -1;
         for (int index = content.length() - 1; index >= 0; index--) {
             char value = content.charAt(index);
-            if (value == '`') {
+            if (value == '`' && !escaped[index]) {
                 int end = index + 1;
-                while (index > 0 && content.charAt(index - 1) == '`') {
+                while (index > 0 && content.charAt(index - 1) == '`' && !escaped[index - 1]) {
                     index--;
                 }
                 int closing = closingRuns[index];
                 nextClose[index] = nextClose[closing < 0 ? end : closing + end - index];
             } else {
-                nextClose[index] = value == ']' ? index : nextClose[index + 1];
+                nextClose[index] = value == ']' && !escaped[index] ? index : nextClose[index + 1];
             }
         }
         byte[] destinations = new byte[content.length()];
         Matcher destination = MEMBER_CANONICAL_DESTINATION.matcher(content);
         List<MemberLabelSpan> labels = new ArrayList<>();
         for (int index = 0; index < content.length(); index++) {
-            if (content.charAt(index) != '[') {
+            if (content.charAt(index) != '[' || escaped[index]) {
                 continue;
             }
             int start = index + 1;
@@ -1310,20 +1317,14 @@ public class ReferenceService {
             String content, boolean skipCodeSpans, boolean skipOpaqueInlines, boolean boundCodeSpans) {
         int[] labelEnds = new int[content.length()];
         Arrays.fill(labelEnds, -1);
-        int[] closingBacktickRuns = closingBacktickRuns(content, boundCodeSpans);
+        boolean[] escaped = referenceEscapedCharacters(content);
+        int[] closingBacktickRuns = closingBacktickRuns(content, boundCodeSpans, escaped);
         Matcher opaque = MEMBER_OPAQUE_INLINE.matcher(content);
         Map<String, Integer> terminators = new HashMap<>();
         Deque<Integer> labelStarts = new ArrayDeque<>();
-        int precedingBackslashes = 0;
         for (int index = 0; index < content.length(); index++) {
             char value = content.charAt(index);
-            if (value == '\\') {
-                precedingBackslashes++;
-                continue;
-            }
-            boolean escaped = precedingBackslashes % 2 == 1;
-            precedingBackslashes = 0;
-            if (escaped) {
+            if (escaped[index]) {
                 continue;
             }
             if (skipOpaqueInlines && value == '<') {
@@ -1396,7 +1397,7 @@ public class ReferenceService {
         return end - start;
     }
 
-    private static int[] closingBacktickRuns(String content, boolean boundCodeSpans) {
+    private static int[] closingBacktickRuns(String content, boolean boundCodeSpans, boolean[] escaped) {
         int[] closingRuns = new int[content.length()];
         Arrays.fill(closingRuns, -1);
         Map<Integer, Integer> nextRunByLength = new HashMap<>();
@@ -1405,12 +1406,12 @@ public class ReferenceService {
             if (end + 1 < content.length() && blockStarts[end + 1]) {
                 nextRunByLength.clear();
             }
-            if (content.charAt(end) != '`') {
+            if (content.charAt(end) != '`' || escaped[end]) {
                 end--;
                 continue;
             }
             int start = end;
-            while (start > 0 && content.charAt(start - 1) == '`') {
+            while (start > 0 && content.charAt(start - 1) == '`' && !escaped[start - 1]) {
                 start--;
             }
             int delimiterLength = end - start + 1;
@@ -1459,6 +1460,17 @@ public class ReferenceService {
             }
         }
         return setext || marker != '=' && count >= 3;
+    }
+
+    /** Marks punctuation escaped by an unescaped backslash once, retaining odd/even slash parity. */
+    private static boolean[] referenceEscapedCharacters(String content) {
+        boolean[] escaped = new boolean[content.length()];
+        for (int index = 0; index < content.length(); index++) {
+            if (isReferenceEscape(content, index)) {
+                escaped[++index] = true;
+            }
+        }
+        return escaped;
     }
 
     private static boolean isEscaped(String content, int index) {
