@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -99,11 +101,23 @@ public class AiAssistantIdentifierResolver {
         var memberLabels = new LinkedHashSet<String>();
         AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
                 .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
-        var memberVisibility = new HashMap<Integer, Boolean>();
-        for (ReferenceService.MemberReference reference : ReferenceService.memberReferencesInContent(message)) {
-            if (memberVisibility.computeIfAbsent(reference.memberId(),
-                    id -> referenceService.isMemberTargetVisible(workspaceId, id))) {
+        List<ReferenceService.MemberReference> memberReferences = ReferenceService.memberReferencesInContent(message);
+        Set<Set<Integer>> targetGroups = Collections.newSetFromMap(new IdentityHashMap<>());
+        var memberIds = new LinkedHashSet<Integer>();
+        for (ReferenceService.MemberReference reference : memberReferences) {
+            if (targetGroups.add(reference.memberIds())) {
+                memberIds.addAll(reference.memberIds());
+            }
+        }
+        Set<Integer> visibleMembers = referenceService.visibleMemberIds(workspaceId, memberIds);
+        var memberVisibility = new IdentityHashMap<Set<Integer>, Boolean>();
+        for (ReferenceService.MemberReference reference : memberReferences) {
+            if (memberVisibility.computeIfAbsent(reference.memberIds(),
+                    ids -> ids.stream().anyMatch(visibleMembers::contains))) {
                 memberLabels.add(reference.label());
+                if (identifiers.size() + memberLabels.size() > MAX_IDENTIFIERS) {
+                    throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
+                }
             }
         }
         for (String label : memberLabels) {

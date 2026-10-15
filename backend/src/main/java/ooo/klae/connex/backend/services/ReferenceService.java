@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -135,8 +137,11 @@ public class ReferenceService {
         }
     }
 
-    /** One authored or decoded member label and the user target of that reading, without authorization. */
-    public record MemberReference(String label, int memberId) {
+    /**
+     * One authored or decoded member label and its possible user targets, without authorization.
+     * Reader-produced target sets are unmodifiable and shared across labels using the same target group.
+     */
+    public record MemberReference(String label, Set<Integer> memberIds) {
     }
 
     private record ReferenceTarget(String type, int id) {
@@ -457,7 +462,7 @@ public class ReferenceService {
 
     private boolean isVisible(int workspaceId, String type, int refId, int currentUserId) {
         return switch (type) {
-            case TYPE_USER -> isMemberTargetVisible(workspaceId, refId);
+            case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
@@ -470,9 +475,18 @@ public class ReferenceService {
         };
     }
 
-    /** Applies the user-reference visibility rule, including active and pending workspace members. */
-    public boolean isMemberTargetVisible(int workspaceId, int memberId) {
-        return workspaceService.isMemberIncludingPending(workspaceId, memberId);
+    /** Resolves distinct active or pending member ids in bounded, workspace-scoped batches. */
+    public Set<Integer> visibleMemberIds(int workspaceId, Collection<Integer> memberIds) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Integer> ids = memberIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        Set<Integer> visible = new HashSet<>();
+        for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
+            visible.addAll(workspaceMapper.getMemberIdsIncludingPending(
+                    workspaceId, ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()))));
+        }
+        return Set.copyOf(visible);
     }
 
     /**
@@ -683,13 +697,13 @@ public class ReferenceService {
     }
 
     /**
-     * Extracts member labels and target ids from original prose using every member-label reading.
-     * Authored and decoded spellings retain each possible user target, including ambiguous definitions.
-     * This pure parser grants no visibility; callers must authorize each target before using its label.
+     * Extracts member labels and shared target sets from original prose using every member-label reading.
+     * Ambiguous definitions never expand into label/id pairs; target sets remain shared and unmodifiable.
+     * This pure parser grants no visibility; callers must authorize at least one target before using its label.
      */
     public static List<MemberReference> memberReferencesInContent(String content) {
         List<MemberLabelSpan> labels = memberLabelSpans(content);
-        var candidates = new java.util.LinkedHashSet<MemberReference>();
+        List<MemberReference> candidates = new ArrayList<>();
         Map<MemberTargets, Set<String>> collected = new HashMap<>();
         labels.forEach(span -> collectMemberReferences(candidates, collected, span.targets(),
                 normalizeReferenceSyntax(content.substring(span.start(), span.end()))));
@@ -698,14 +712,12 @@ public class ReferenceService {
         return List.copyOf(candidates);
     }
 
-    /** Expands shared definition targets only once per distinct label, after source-span collection. */
+    /** Retains each label/group once without copying or hashing its shared target set per label. */
     private static void collectMemberReferences(
-            Set<MemberReference> references, Map<MemberTargets, Set<String>> collected,
+            List<MemberReference> references, Map<MemberTargets, Set<String>> collected,
             MemberTargets targets, String label) {
         if (!label.isBlank() && collected.computeIfAbsent(targets, ignored -> new HashSet<>()).add(label)) {
-            for (int id : targets.ids) {
-                references.add(new MemberReference(label, id));
-            }
+            references.add(new MemberReference(label, targets.readOnlyIds));
         }
     }
 
@@ -733,13 +745,16 @@ public class ReferenceService {
                     memberReferenceKeys(definitions.group(1)).forEach(key ->
                             memberDefinitions.computeIfAbsent(key, ignored -> new MemberTargets()).ids.add(id)));
         }
+        Map<Integer, MemberTargets> singletonTargets = new HashMap<>();
+        memberDefinitions.replaceAll((key, targets) -> targets.ids.size() == 1
+                ? singletonTargets.computeIfAbsent(targets.ids.iterator().next(), MemberTargets::new) : targets);
         Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
         List<List<MemberLabelSpan>> readings = new ArrayList<>();
-        readings.add(canonicalMemberLabels(content, delimiters, false));
-        readings.add(canonicalMemberLabels(content, delimiters, true));
+        readings.add(canonicalMemberLabels(content, delimiters, false, singletonTargets));
+        readings.add(canonicalMemberLabels(content, delimiters, true, singletonTargets));
         for (int mode = 0; mode < 3; mode++) {
             List<MemberLabelSpan> spans = new ArrayList<>();
-            collectMemberLabels(content, memberDefinitions, validDefinitionStarts, spans,
+            collectMemberLabels(content, memberDefinitions, singletonTargets, validDefinitionStarts, spans,
                     matchingLabelEnds(content, mode != 0, mode == 2, true, delimiters));
             readings.add(spans);
         }
@@ -753,7 +768,8 @@ public class ReferenceService {
      * Destinations are cached and the 999-code-point bound precedes every source-label extraction.
      */
     private static List<MemberLabelSpan> canonicalMemberLabels(
-            String content, ReferenceDelimiters delimiters, boolean codeSpans) {
+            String content, ReferenceDelimiters delimiters, boolean codeSpans,
+            Map<Integer, MemberTargets> singletonTargets) {
         int[] nextClose = new int[content.length() + 1];
         nextClose[content.length()] = -1;
         for (int index = content.length() - 1; index >= 0; index--) {
@@ -780,7 +796,9 @@ public class ReferenceService {
                         : -1;
             }
             if (destinations[end] > 0) {
-                labels.add(new MemberLabelSpan(start, end, new MemberTargets(destinations[end])));
+                int id = destinations[end];
+                labels.add(new MemberLabelSpan(start, end,
+                        singletonTargets.computeIfAbsent(id, MemberTargets::new)));
             }
         }
         return labels;
@@ -827,7 +845,8 @@ public class ReferenceService {
      * its following bracket an unambiguous key role; nested, opaque and block readings keep shortcuts.
      */
     private static void collectMemberLabels(
-            String content, Map<String, MemberTargets> memberDefinitions, Set<Integer> validDefinitionStarts,
+            String content, Map<String, MemberTargets> memberDefinitions,
+            Map<Integer, MemberTargets> singletonTargets, Set<Integer> validDefinitionStarts,
             List<MemberLabelSpan> labels, int[] labelEnds) {
         Set<Integer> referenceKeys = new HashSet<>();
         for (int index = 0; index < content.length(); index++) {
@@ -847,7 +866,8 @@ public class ReferenceService {
                 }
                 int start = index + 1;
                 memberReferenceId(content.substring(destinationStart, destinationEnd), false)
-                        .ifPresent(id -> labels.add(new MemberLabelSpan(start, end, new MemberTargets(id))));
+                        .ifPresent(id -> labels.add(new MemberLabelSpan(start, end,
+                                singletonTargets.computeIfAbsent(id, MemberTargets::new))));
             }
             if (next == end + 1 && next < content.length() && content.charAt(next) == ':'
                     && validDefinitionStarts.contains(index)) {
@@ -1060,6 +1080,7 @@ public class ReferenceService {
     /** Shares targets by definition key without multiplying spans or comparing whole id sets. */
     private static final class MemberTargets {
         private final Set<Integer> ids = new java.util.LinkedHashSet<>();
+        private final Set<Integer> readOnlyIds = Collections.unmodifiableSet(ids);
 
         private MemberTargets() {
         }

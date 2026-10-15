@@ -4,7 +4,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -124,9 +123,11 @@ class ReferenceServiceTest extends AbstractServiceTest {
 
     @Test
     void memberTargetVisibilityIncludesPendingMembersAndExcludesNonMembers() {
-        assertTrue(referenceService.isMemberTargetVisible(workspace.getId(), newUser().getId()));
-        assertTrue(referenceService.isMemberTargetVisible(workspace.getId(), newPendingMember().getId()));
-        assertFalse(referenceService.isMemberTargetVisible(workspace.getId(), newNonMember().getId()));
+        int active = newUser().getId();
+        int pending = newPendingMember().getId();
+        int outsider = newNonMember().getId();
+        assertEquals(java.util.Set.of(active, pending),
+                referenceService.visibleMemberIds(workspace.getId(), List.of(active, pending, outsider, active)));
     }
 
     @Test

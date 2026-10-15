@@ -123,6 +123,9 @@ without depending on preceding block state; the extra no-code reading remains co
 Unambiguous explicit reference keys
 remain keys; ambiguous bracket readings stay independent. The scans and fixed-number reading merge
 remain linear in stored prose length, with the label bound applied before extraction. Member
+references retain shared, unmodifiable target sets; ambiguous definitions never expand into a
+Cartesian product of labels and ids. Group deduplication and visibility matching use identity so
+each shared target set is traversed once per phase rather than once per label. Member
 provenance writers and readers use the same code-point bound, including supplementary characters.
 
 Full CommonMark parity is **not claimed**. Any construct not listed above is a bounded residual
@@ -255,10 +258,12 @@ while raw `xBob` and `client` (for `Li`) record nothing: the provider already au
 and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
 precise member provenance, including through echoed write arguments, independently of these raw-text
 rules. At queue time, the shared member-reference collector reads labels and user targets from
-the original text. Each target must be an active or pending member of the current workspace before
-its authored and decoded labels are registered. An unrelated invisible target that collapses the
-reader-redacted body cannot suppress an authorized member label. Invisible user targets contribute
-no reference labels. These labels are
+the original text. Distinct target ids are checked in workspace-scoped batches of at most 500 against
+active or pending membership. An authored or decoded label is registered when any of its possible
+targets is visible, preserving conservative masking for ambiguous keys. The combined identifier
+budget still refuses excess labels with `identifier_limit_exceeded`. An unrelated invisible target
+that collapses the reader-redacted body cannot suppress an authorized member label. Invisible user
+targets contribute no reference labels. These labels are
 persisted in user-message `memberIdentifiers`, deduplicated with directory mentions within the
 combined 20-identifier cap, without adding member resource handles. Blank and whitespace-only
 reference labels are excluded before candidate construction. Ordinary queued member provenance
