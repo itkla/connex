@@ -2,16 +2,22 @@ package ooo.klae.connex.backend.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.FirewalledRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
@@ -91,6 +97,66 @@ class ClientIpResolverTest {
 
         assertEquals("172.31.0.2", resolved.address());
         assertFalse(resolved.forwardedByTrustedProxy());
+    }
+
+    @Test
+    void existingResolutionMethodsPropagateFirewallRejectedForwardedHeaders() {
+        ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
+        MockHttpServletRequest request =
+            request("172.31.0.2", "198.51.100.19\u0085, 172.30.0.2");
+        FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+        assertThrows(RequestRejectedException.class, () -> firewalled.getHeader("X-Forwarded-For"));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolve(firewalled));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolveWithProvenance(firewalled));
+    }
+
+    @Test
+    void denialAuditResolutionFallsBackToThePeerWhenTheFirewallRejectsTheForwardedHeader() {
+        ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
+        MockHttpServletRequest request =
+            request("172.31.0.2", "198.51.100.19\u0085, 172.30.0.2");
+        FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+        assertThrows(RequestRejectedException.class, () -> firewalled.getHeader("X-Forwarded-For"));
+        assertEquals("172.31.0.2", resolver.resolveForDenialAudit(firewalled));
+        assertThrows(RequestRejectedException.class, () -> resolver.resolve(firewalled));
+    }
+
+    @Test
+    void resolvesAValidChainThroughTheFirewall() {
+        ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
+        MockHttpServletRequest request =
+            request("172.31.0.2", "198.51.100.19, 172.30.0.2");
+        FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+        assertEquals("198.51.100.19", resolver.resolve(firewalled));
+        assertEquals(new ResolvedClientIp("198.51.100.19", true), resolver.resolveWithProvenance(firewalled));
+        assertEquals("198.51.100.19", resolver.resolveForDenialAudit(firewalled));
+    }
+
+    @Test
+    void propagatesOtherHeaderReadFailures() {
+        ClientIpResolver resolver = new ClientIpResolver(PUBLISHED_FORWARDERS);
+        for (RuntimeException failure : List.of(
+                new IllegalArgumentException("Header read failed"),
+                new IllegalStateException("Header read failed"))) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/") {
+                @Override
+                public String getHeader(String name) {
+                    if ("X-Forwarded-For".equals(name)) {
+                        throw failure;
+                    }
+                    return super.getHeader(name);
+                }
+            };
+            request.setRemoteAddr("172.31.0.2");
+            FirewalledRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+            assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolve(firewalled)));
+            assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolveWithProvenance(firewalled)));
+            assertSame(failure, assertThrows(failure.getClass(), () -> resolver.resolveForDenialAudit(firewalled)));
+        }
     }
 
     @Test
@@ -194,7 +260,7 @@ class ClientIpResolverTest {
     }
 
     private static MockHttpServletRequest request(String remoteAddress, String forwardedAddress) {
-        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
         request.setRemoteAddr(remoteAddress);
         request.addHeader("X-Forwarded-For", forwardedAddress);
         return request;

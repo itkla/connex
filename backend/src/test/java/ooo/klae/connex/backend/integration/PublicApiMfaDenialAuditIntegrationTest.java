@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -61,6 +62,7 @@ import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -92,6 +94,7 @@ class PublicApiMfaDenialAuditIntegrationTest {
     @Autowired private PrivilegedAccountService privilegedAccountService;
     @MockitoSpyBean private AuditIntegrityService auditIntegrityService;
     @MockitoSpyBean private DenialAuditRateLimiter denialAuditRateLimiter;
+    @MockitoSpyBean private ClientIpResolver clientIpResolver;
 
     private PublicApiFixtureSupport fixtures;
     private MockMvc mockMvc;
@@ -176,6 +179,47 @@ class PublicApiMfaDenialAuditIntegrationTest {
         }
 
         assertAccountAudits(fixture, "enrollment_required", List.of(ADDRESS, "192.0.2.43"));
+    }
+
+    /**
+     * Isolates the already-decided denial by allowing its earlier pre-authentication resolution.
+     * Subsequent resolution uses the real firewall-wrapped request and rejection. The separate
+     * admission regression verifies that an ordinary rejected header never reaches this phase.
+     */
+    @ParameterizedTest
+    @EnumSource(value = PrivilegedMfaStanding.class, names = {"ENROLLMENT_REQUIRED", "ATTESTATION_REQUIRED"})
+    void firewallRejectedForwardedHeadersStillWriteOneAuditKeyedOnThePeer(PrivilegedMfaStanding standing)
+            throws Exception {
+        Confined fixture = confined(standing);
+
+        doReturn("10.0.0.1").doCallRealMethod().when(clientIpResolver).resolve(any());
+        refuse(fixture, standing, "10.0.0.1", "198.51.100.1\u0085");
+        assertAccountAudits(fixture, reason(standing), List.of("10.0.0.1"));
+
+        doReturn("10.0.0.1").doCallRealMethod().when(clientIpResolver).resolve(any());
+        refuse(fixture, standing, "10.0.0.1", "198.51.100.2\u0085");
+        refuse(fixture, standing, "10.0.0.1", null);
+
+        assertAccountAudits(fixture, reason(standing), List.of("10.0.0.1"));
+        verify(clientIpResolver, times(3)).resolveForDenialAudit(any());
+    }
+
+    @Test
+    void firewallRejectedForwardedHeaderIsRefusedBeforePublicApiAuthentication() throws Exception {
+        Confined fixture = confined(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
+
+        mockMvc.perform(get("/api/v1/me")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + fixture.token())
+                .header("X-Forwarded-For", "198.51.100.19\u0085")
+                .with(request -> {
+                    request.setRemoteAddr("10.0.0.1");
+                    return request;
+                }))
+            .andExpect(status().isBadRequest());
+
+        assertAccountAudits(fixture, "enrollment_required", List.of());
+        assertFalse(tenantContext.isResolved());
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
     }
 
     @Test

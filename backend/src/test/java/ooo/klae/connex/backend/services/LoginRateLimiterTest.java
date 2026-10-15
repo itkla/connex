@@ -1,10 +1,18 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
+import org.springframework.security.web.firewall.RequestRejectedException;
 
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 /**
@@ -13,6 +21,23 @@ import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
  * never attributes failures to null/blank keys.
  */
 class LoginRateLimiterTest {
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = "alice")
+    void firewallRejectedChainsCannotBecomeUnthrottledPrivatePeers(String username) {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 5000, 900);
+        ClientIpResolver resolver = new ClientIpResolver("10.0.0.1");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login");
+        request.setRemoteAddr("10.0.0.1");
+        request.addHeader("X-Forwarded-For", "198.51.100.19\u0085");
+        var firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+
+        assertThrows(RequestRejectedException.class, () ->
+            limiter.isBlockedForClient(resolver.resolveWithProvenance(firewalled), username, 1_000L));
+        assertThrows(RequestRejectedException.class, () ->
+            limiter.recordFailureForClient(resolver.resolveWithProvenance(firewalled), username, 1_000L));
+    }
 
     @Test
     void blocksAfterPerIpCap() {

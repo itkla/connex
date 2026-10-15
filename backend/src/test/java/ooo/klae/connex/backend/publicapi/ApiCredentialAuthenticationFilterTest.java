@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
@@ -37,6 +39,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -295,6 +299,25 @@ class ApiCredentialAuthenticationFilterTest {
             "A passkey must be approved before this privileged account can continue");
     }
 
+    @Test
+    void firewallRejectedForwardedHeaderStillRejectsPreAuthenticationAdmission() throws Exception {
+        AuditService auditService = mock(AuditService.class);
+        StandingFixture fixture = standingFixture("true", PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+            RouteTransactionMode.READ, auditService, new ClientIpResolver("10.0.0.1"));
+        MockHttpServletRequest request = authenticatedRequest("GET");
+        request.setRemoteAddr("10.0.0.1");
+        request.addHeader("X-Forwarded-For", "198.51.100.19\u0085");
+        var firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+        MockFilterChain chain = new MockFilterChain();
+
+        assertThrows(RequestRejectedException.class, () ->
+            fixture.filter().doFilter(firewalled, new MockHttpServletResponse(), chain));
+
+        verifyNoInteractions(fixture.limiter(), fixture.privilegedAccountService(), auditService);
+        assertNull(chain.getRequest());
+        assertFalse(fixture.tenantContext().isResolved());
+    }
+
     @ParameterizedTest
     @EnumSource(RouteTransactionMode.class)
     void denialAuditRunsAfterTheReadTransactionAndTenantBindingEnd(RouteTransactionMode mode)
@@ -313,7 +336,7 @@ class ApiCredentialAuthenticationFilterTest {
             return null;
         }).when(auditService).recordStrictFailureIndependentScoped(
             "auth.mfa.policy.denied", "user", fixture.binding().userId(), null, null, null,
-            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request);
+            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request, "192.0.2.10");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         fixture.filter().doFilter(request, response, new MockFilterChain());
@@ -321,7 +344,7 @@ class ApiCredentialAuthenticationFilterTest {
         assertEquals(401, response.getStatus());
         verify(auditService).recordStrictFailureIndependentScoped(
             "auth.mfa.policy.denied", "user", fixture.binding().userId(), null, null, null,
-            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request);
+            "Public API privileged account confined pending MFA enrollment", "enrollment_required", request, "192.0.2.10");
         assertNull(SecurityContextHolder.getContext().getAuthentication());
     }
 
@@ -670,6 +693,16 @@ class ApiCredentialAuthenticationFilterTest {
 
     private static StandingFixture standingFixture(String enforced, PrivilegedMfaStanding standing,
             RouteTransactionMode transactionMode, AuditService auditService) {
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
+            .thenReturn("192.0.2.10");
+        when(clientIpResolver.resolveForDenialAudit(org.mockito.ArgumentMatchers.any()))
+            .thenReturn("192.0.2.10");
+        return standingFixture(enforced, standing, transactionMode, auditService, clientIpResolver);
+    }
+
+    private static StandingFixture standingFixture(String enforced, PrivilegedMfaStanding standing,
+            RouteTransactionMode transactionMode, AuditService auditService, ClientIpResolver clientIpResolver) {
         String token = token();
         RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
         User user = new User();
@@ -685,13 +718,10 @@ class ApiCredentialAuthenticationFilterTest {
             LocalDateTime.now().plusDays(1));
         ApiCredentialService service = mock(ApiCredentialService.class);
         ApiRateLimiter limiter = mock(ApiRateLimiter.class);
-        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
         TenantCatalogResolver tenantCatalogResolver = mock(TenantCatalogResolver.class);
         PrivilegedAccountService privilegedAccountService = mock(PrivilegedAccountService.class);
         PrivilegedMfaProperties mfaProperties = new PrivilegedMfaProperties();
         mfaProperties.setEnforced(enforced);
-        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
-            .thenReturn("192.0.2.10");
         when(limiter.acquireBeforeAuthentication("192.0.2.10", token))
             .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
         when(service.resolveRoutingBinding(token)).thenReturn(Optional.of(binding));

@@ -83,6 +83,9 @@ that field is dropped and the row is still written. Server-rendered reads that f
 session cookie consequently have no fetch-metadata fields
 ([#1936](https://github.com/itkla/connex/issues/1936)).
 
+The denial-audit writer also omits a `User-Agent` value rejected by the request firewall, retaining
+the row with a null user agent. Other audit writers keep their existing strict header handling.
+
 Anyone reading or alerting on this trail should expect:
 
 - **one row per window, not one per request**, for a user who keeps hitting the same wall from the
@@ -97,6 +100,12 @@ Anyone reading or alerting on this trail should expect:
   action, and a second address inside the hour is not recorded separately. Requests the frontend
   server makes for a user while rendering a page forward only the session cookie, so all of a user's
   server-rendered refusals share the frontend service's single address, whichever session made them.
+  Once a refusal is decided, the two filters use `ClientIpResolver.resolveForDenialAudit`: a
+  forwarding-header read rejected by the firewall falls back to the direct peer for the denial
+  limiter key and audit row. The audit writer receives that resolved address without reading the
+  forwarding header again, and the filter writes the refusal response without continuing the chain.
+  Existing resolver methods still propagate firewall rejection, preserving request admission and
+  authentication throttling. The denial-only method must never be used for those decisions.
 
 The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
 
@@ -111,6 +120,10 @@ An append failure is logged and releases its admission for the next refusal, exa
 browser filter. The public response remains `401 privileged_mfa_enrollment_required` or
 `401 privileged_mfa_attestation_required` in the existing public error envelope, whether the audit
 is written, suppressed or fails.
+
+The public API resolves the address for its pre-authentication throttle before deciding MFA
+confinement. A firewall-rejected forwarding header at that earlier boundary is still refused with
+400; only a request that has already reached a confinement decision uses the denial-only fallback.
 
 Refusals at service boundaries (reason `service_boundary`) are not admitted through this bound. They
 sit behind state-changing routes that CSRF protection shields from cross-site triggering, or behind
