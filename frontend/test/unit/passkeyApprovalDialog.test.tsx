@@ -17,14 +17,14 @@ const CREDENTIAL = { id: "credential-id", type: "public-key" };
 
 const {
     beginMfaAttestationMock,
-    completePrivilegedMfaEnrollmentMock,
+    settlePrivilegedMfaStandingMock,
     redeemMfaAttestationMock,
     startAuthenticationMock,
     toastErrorMock,
     toastInfoMock,
 } = vi.hoisted(() => ({
     beginMfaAttestationMock: vi.fn<() => Promise<unknown>>(),
-    completePrivilegedMfaEnrollmentMock: vi.fn(),
+    settlePrivilegedMfaStandingMock: vi.fn(),
     redeemMfaAttestationMock: vi.fn<(code: string, credential: unknown) => Promise<{ orgId: number }>>(),
     startAuthenticationMock: vi.fn<() => Promise<unknown>>(),
     toastErrorMock: vi.fn(),
@@ -34,7 +34,7 @@ const {
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     beginMfaAttestation: beginMfaAttestationMock,
-    completePrivilegedMfaEnrollment: completePrivilegedMfaEnrollmentMock,
+    settlePrivilegedMfaStanding: settlePrivilegedMfaStandingMock,
     redeemMfaAttestation: redeemMfaAttestationMock,
 }));
 
@@ -113,7 +113,7 @@ describe.each([
         const { onApproved, onOpenChange, alertText } = await redeemWith("abcd efgh jkmn pqrs");
 
         expect(redeemMfaAttestationMock).toHaveBeenCalledWith("ABCD-EFGH-JKMN-PQRS", CREDENTIAL);
-        expect(completePrivilegedMfaEnrollmentMock).toHaveBeenCalledOnce();
+        expect(settlePrivilegedMfaStandingMock).not.toHaveBeenCalled();
         expect(onApproved).toHaveBeenCalledWith(3);
         expect(onOpenChange).toHaveBeenCalledWith(false);
         expect(alertText).toBeNull();
@@ -131,7 +131,7 @@ describe.each([
 
         expect(alertText).toBe(messages.AccountSecurity.approvalRefused);
         expect(input.getAttribute("aria-invalid")).toBe("true");
-        expect(completePrivilegedMfaEnrollmentMock).not.toHaveBeenCalled();
+        expect(settlePrivilegedMfaStandingMock).not.toHaveBeenCalled();
         expect(onApproved).not.toHaveBeenCalled();
         expect(toastErrorMock).not.toHaveBeenCalled();
     });
@@ -160,7 +160,7 @@ describe.each([
 
         expect(toastErrorMock).toHaveBeenCalledOnce();
         expect(toastErrorMock).toHaveBeenCalledWith(messages.PasskeyStepUp.failed);
-        expect(completePrivilegedMfaEnrollmentMock).not.toHaveBeenCalled();
+        expect(settlePrivilegedMfaStandingMock).not.toHaveBeenCalled();
         expect(onApproved).not.toHaveBeenCalled();
         expect(onOpenChange).not.toHaveBeenCalled();
         expect(alertText).toBeNull();

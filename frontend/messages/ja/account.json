@@ -92,7 +92,16 @@
     "approvalFailed": "パスキーを承認できませんでした",
     "approvalDone": "パスキーを承認しました",
     "approvalDoneDescription": "{organization} の管理者アクセスに使えるようになりました。",
-    "approvalDoneDescriptionGeneric": "その組織の管理者アクセスに使えるようになりました。"
+    "approvalDoneDescriptionGeneric": "その組織の管理者アクセスに使えるようになりました。",
+    "enrollmentNeededTitle": "続けるには、パスキーを追加してください",
+    "enrollmentNeededDescription": "このアカウントにパスキーを追加するまで、管理者アクセスは一時停止されています。",
+    "approvalNeededTitle": "続けるには、パスキーの承認が必要です",
+    "approvalNeededDescription": "管理者がパスキー承認コードであなたのパスキーを承認するまで、管理者アクセスは一時停止されています。",
+    "approvalNeededUse": "{passkey} を承認してください。{organizations} での承認がまだ必要です。",
+    "approvalNeededPasskey": "{passkey}：{organizations} での承認が必要です",
+    "approvalNeededRecommended": "おすすめ",
+    "approvalNeededSamePasskey": "承認はすべて同じパスキーに対して行う必要があります。コードを入力したら、{passkey} で確認してください。",
+    "approvalUnnamedPasskey": "一覧にないパスキー"
   },
   "AccountConnections": {
     "title": "連携アカウント",

@@ -9,6 +9,7 @@ import type { OwnershipOffer } from "@/app/lib/types";
 const offers = vi.hoisted(() => ({
     state: null as SelfOwnershipOffers | null,
 }));
+const standing = vi.hoisted(() => ({ confined: false }));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -35,6 +36,9 @@ vi.mock("@/app/hooks/useSelfOwnershipOffers", () => ({
         if (offers.state === null) throw new Error("self offers state not configured");
         return offers.state;
     },
+}));
+vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
+    usePrivilegedMfaStanding: () => ({ requirements: null, confined: standing.confined, refresh: vi.fn() }),
 }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => vi.fn() }));
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({ default: () => null }));
@@ -98,6 +102,7 @@ afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     offers.state = null;
+    standing.confined = false;
 });
 
 describe("onboarding ownership offers", () => {
@@ -114,6 +119,33 @@ describe("onboarding ownership offers", () => {
 
         await act(async () => button("AccountInvites.decline").click());
         expect(state.decline).toHaveBeenCalledWith(offer);
+    });
+
+    it("offers a confined account only what it may still do", async () => {
+        const state = selfOffers([offer]);
+        offers.state = state;
+        standing.confined = true;
+        await renderOnboarding();
+
+        expect(container.textContent).toContain("Onboarding.confinedTitle");
+        expect(container.querySelector("form")).toBeNull();
+        expect(container.textContent).not.toContain("Onboarding.createButton");
+        expect(container.textContent).not.toContain("Onboarding.joinButton");
+        expect([...container.querySelectorAll("button")].some(
+            (candidate) => candidate.textContent === "AccountInvites.accept",
+        )).toBe(false);
+
+        await act(async () => button("AccountInvites.decline").click());
+        expect(state.decline).toHaveBeenCalledWith(offer);
+        expect(button("Onboarding.signOut")).toBeDefined();
+    });
+
+    it("keeps workspace creation and joining for an account that is not confined", async () => {
+        offers.state = selfOffers([]);
+        await renderOnboarding();
+
+        expect(container.textContent).not.toContain("Onboarding.confinedTitle");
+        expect(container.querySelectorAll("form")).toHaveLength(2);
     });
 
     it("renders no offers section when nothing is pending", async () => {

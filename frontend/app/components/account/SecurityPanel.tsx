@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import {
     DevicePhoneMobileIcon,
     EllipsisHorizontalIcon,
@@ -14,19 +14,25 @@ import {
 import { Loader2Icon } from "lucide-react";
 import { startRegistration } from "@simplewebauthn/browser";
 
-import type { Passkey } from "@/app/lib/types";
+import type {
+    Passkey,
+    PasskeyApprovalGap,
+    PasskeyRegistrationRequirements,
+    PrivilegedMfaStanding,
+} from "@/app/lib/types";
 import {
     ApiError,
     beginPasskeyRegistration,
-    completePrivilegedMfaEnrollment,
     deletePasskey,
     finishPasskeyRegistration,
-    getPasskeyRegistrationRequirements,
     getPasskeys,
     MAIL_TRANSPORT_UNAVAILABLE_CODE,
     renamePasskey,
     requestPasskeyBootstrapConfirmation,
+    settlePrivilegedMfaStanding,
+    subscribeClientRequestIdentityInvalidation,
 } from "@/app/lib/api";
+import { passkeyApprovalProgress } from "@/app/lib/passkeyApprovalProgress";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -107,6 +113,7 @@ function deviceLabel(): string {
 export default function SecurityPanel() {
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
+    const format = useFormatter();
     const now = useLiveNow();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { workspaces } = useWorkspace();
@@ -132,6 +139,16 @@ export default function SecurityPanel() {
     const [removeTarget, setRemoveTarget] = useState<Passkey | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
     const [approvalOpen, setApprovalOpen] = useState(false);
+    const [standing, setStanding] = useState<PrivilegedMfaStanding | null>(null);
+    const [approvalGaps, setApprovalGaps] = useState<PasskeyApprovalGap[]>([]);
+
+    const applyRequirements = useCallback((requirements: PasskeyRegistrationRequirements) => {
+        setCurrentPasswordRequired(requirements.currentPasswordRequired);
+        setEmailConfirmationRequired(requirements.emailConfirmationRequired);
+        setEmailConfirmationSatisfied(requirements.emailConfirmationSatisfied);
+        setStanding(requirements.standing ?? null);
+        setApprovalGaps(requirements.approvalGaps ?? []);
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -141,13 +158,12 @@ export default function SecurityPanel() {
             try {
                 const [loaded, requirements] = await Promise.all([
                     getPasskeys(),
-                    getPasskeyRegistrationRequirements(),
+                    settlePrivilegedMfaStanding("check"),
                 ]);
+                if (!requirements) throw new Error("Passkey requirements are unavailable");
                 if (!cancelled) {
                     setPasskeys(loaded);
-                    setCurrentPasswordRequired(requirements.currentPasswordRequired);
-                    setEmailConfirmationRequired(requirements.emailConfirmationRequired);
-                    setEmailConfirmationSatisfied(requirements.emailConfirmationSatisfied);
+                    applyRequirements(requirements);
                 }
             } catch {
                 if (!cancelled) {
@@ -161,16 +177,42 @@ export default function SecurityPanel() {
         return () => {
             cancelled = true;
         };
-    }, [t, reloadKey]);
+    }, [t, reloadKey, applyRequirements]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const recheck = () => {
+            if (document.visibilityState !== "visible") return;
+            void Promise.all([getPasskeys(), settlePrivilegedMfaStanding("check")]).then(([loaded, requirements]) => {
+                if (cancelled || !requirements) return;
+                setPasskeys(loaded);
+                applyRequirements(requirements);
+            }, () => {});
+        };
+        document.addEventListener("visibilitychange", recheck);
+        const unsubscribe = subscribeClientRequestIdentityInvalidation(recheck);
+        return () => {
+            cancelled = true;
+            document.removeEventListener("visibilitychange", recheck);
+            unsubscribe();
+        };
+    }, [applyRequirements]);
 
     const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
         const credential = await startRegistration({ optionsJSON });
         await finishPasskeyRegistration(deviceLabel(), credential);
-        completePrivilegedMfaEnrollment();
-        setPasskeys(await getPasskeys());
-        setCurrentPasswordRequired(false);
-        setEmailConfirmationRequired(false);
-        setEmailConfirmationSatisfied(false);
+        const [loaded, requirements] = await Promise.all([
+            getPasskeys(),
+            settlePrivilegedMfaStanding("ceremony"),
+        ]);
+        setPasskeys(loaded);
+        if (requirements) {
+            applyRequirements(requirements);
+        } else {
+            setCurrentPasswordRequired(false);
+            setEmailConfirmationRequired(false);
+            setEmailConfirmationSatisfied(false);
+        }
         toastSuccess(t("added"));
     };
 
@@ -304,13 +346,24 @@ export default function SecurityPanel() {
     };
 
     const announceApproval = (orgId: number) => {
-        const organization = workspaces.find((workspace) => workspace.orgId === orgId)?.orgName;
+        const organization = workspaces.find((workspace) => workspace.orgId === orgId)?.orgName
+            ?? approvalGaps.find((gap) => gap.orgId === orgId)?.orgName;
         toastSuccess(t("approvalDone"), {
             description: organization
                 ? t("approvalDoneDescription", { organization })
                 : t("approvalDoneDescriptionGeneric"),
         });
+        void Promise.all([getPasskeys(), settlePrivilegedMfaStanding("ceremony")]).then(([loaded, requirements]) => {
+            setPasskeys(loaded);
+            if (requirements) applyRequirements(requirements);
+        }, () => {});
     };
+
+    const approvalProgress = standing === "ATTESTATION_REQUIRED"
+        ? passkeyApprovalProgress(passkeys, approvalGaps)
+        : [];
+    const recommended = approvalProgress[0];
+    const passkeyName = (label: string | null) => label ?? t("approvalUnnamedPasskey");
 
     const addButton = (
         <Button
@@ -331,6 +384,78 @@ export default function SecurityPanel() {
                     <SectionHeader title={t("title")} action={!loading && supported ? addButton : undefined} />
                     <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
                 </div>
+
+                {standing === "ENROLLMENT_REQUIRED" && (
+                    <div className="rounded-2xl border border-warning/40 bg-warning/5 px-5 py-4" role="status">
+                        <h3 className="text-sm font-medium text-foreground">{t("enrollmentNeededTitle")}</h3>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                            {t("enrollmentNeededDescription")}
+                        </p>
+                    </div>
+                )}
+
+                {standing === "ATTESTATION_REQUIRED" && (
+                    <section
+                        aria-labelledby="passkey-approval-needed-title"
+                        className="rounded-2xl border border-warning/40 bg-warning/5 px-5 py-4"
+                    >
+                        <h3 id="passkey-approval-needed-title" className="text-sm font-medium text-foreground">
+                            {t("approvalNeededTitle")}
+                        </h3>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                            {t("approvalNeededDescription")}
+                        </p>
+                        {recommended && (
+                            <p className="mt-3 max-w-prose text-sm text-foreground">
+                                {t("approvalNeededUse", {
+                                    passkey: passkeyName(recommended.label),
+                                    organizations: format.list(
+                                        recommended.missingOrganizations.map((organization) => organization.orgName),
+                                        { type: "conjunction" },
+                                    ),
+                                })}
+                            </p>
+                        )}
+                        {recommended && approvalProgress.length > 1 && (
+                            <>
+                                <ul className="mt-2 space-y-1">
+                                    {approvalProgress.map((progress) => (
+                                        <li key={progress.credentialId} className="text-sm text-muted-foreground">
+                                            {t("approvalNeededPasskey", {
+                                                passkey: passkeyName(progress.label),
+                                                organizations: format.list(
+                                                    progress.missingOrganizations.map(
+                                                        (organization) => organization.orgName,
+                                                    ),
+                                                    { type: "conjunction" },
+                                                ),
+                                            })}
+                                            {progress.credentialId === recommended.credentialId && (
+                                                <span className="ml-2 text-xs font-medium text-foreground">
+                                                    {t("approvalNeededRecommended")}
+                                                </span>
+                                            )}
+                                        </li>
+                                    ))}
+                                </ul>
+                                <p className="mt-2 max-w-prose text-sm text-muted-foreground">
+                                    {t("approvalNeededSamePasskey", { passkey: passkeyName(recommended.label) })}
+                                </p>
+                            </>
+                        )}
+                        {supported && (
+                            <Button
+                                type="button"
+                                variant="brand"
+                                size="inline"
+                                onClick={() => setApprovalOpen(true)}
+                                className="mt-3"
+                            >
+                                {t("approvalEnter")}
+                            </Button>
+                        )}
+                    </section>
+                )}
 
                 {!supported && (
                     <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
@@ -441,7 +566,7 @@ export default function SecurityPanel() {
                         </ul>
                     ))}
 
-                {supported && !loading && !error && passkeys.length > 0 && (
+                {supported && !loading && !error && passkeys.length > 0 && standing !== "ATTESTATION_REQUIRED" && (
                     <div className="rounded-2xl border border-border bg-card px-5 py-4">
                         <h3 className="text-sm font-medium text-foreground">{t("approvalTitle")}</h3>
                         <p className="mt-1 max-w-prose text-sm text-muted-foreground">

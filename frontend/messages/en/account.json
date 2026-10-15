@@ -92,7 +92,16 @@
     "approvalFailed": "Couldn't approve the passkey",
     "approvalDone": "Passkey approved",
     "approvalDoneDescription": "It now counts for administrator access in {organization}.",
-    "approvalDoneDescriptionGeneric": "It now counts for administrator access in that organization."
+    "approvalDoneDescriptionGeneric": "It now counts for administrator access in that organization.",
+    "enrollmentNeededTitle": "Add a passkey to continue",
+    "enrollmentNeededDescription": "Your administrator access is paused until you add a passkey to this account.",
+    "approvalNeededTitle": "Get a passkey approved to continue",
+    "approvalNeededDescription": "Your administrator access is paused until an administrator approves one of your passkeys with a passkey approval code.",
+    "approvalNeededUse": "Approve {passkey}. It still needs approval in {organizations}.",
+    "approvalNeededPasskey": "{passkey}: needs approval in {organizations}",
+    "approvalNeededRecommended": "Recommended",
+    "approvalNeededSamePasskey": "Every approval has to go to the same passkey, so when you enter a code, confirm with {passkey}.",
+    "approvalUnnamedPasskey": "an unlisted passkey"
   },
   "AccountConnections": {
     "title": "Connected accounts",

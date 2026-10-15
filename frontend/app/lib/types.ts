@@ -847,10 +847,23 @@ export type RegisterPayload = {
 };
 
 /** Proof requirements for beginning passkey registration in the current account. */
+/** A privileged account's MFA standing under the current attestation policy (#1534). */
+export type PrivilegedMfaStanding = "UNPRIVILEGED" | "SATISFIED" | "ENROLLMENT_REQUIRED" | "ATTESTATION_REQUIRED";
+
+/** One organization where one of the account's own passkeys is not yet approved (#1534). */
+export type PasskeyApprovalGap = {
+    credentialId: string;
+    orgId: number;
+    orgName: string;
+};
+
 export type PasskeyRegistrationRequirements = {
     currentPasswordRequired: boolean;
     emailConfirmationRequired: boolean;
     emailConfirmationSatisfied: boolean;
+    /** Absent from backends that predate standing; see `settlePrivilegedMfaStanding`. */
+    standing?: PrivilegedMfaStanding;
+    approvalGaps?: PasskeyApprovalGap[];
 };
 
 export type AuthResponse = {

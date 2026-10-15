@@ -30,7 +30,9 @@
         "joinTitle": "Have an invite link?",
         "joinPlaceholder": "Paste your invite link",
         "joinButton": "Continue",
-        "joinInvalid": "That doesn't look like a valid invite link."
+        "joinInvalid": "That doesn't look like a valid invite link.",
+        "confinedTitle": "Your administrator access is paused",
+        "confinedBody": "This account has administrator access in an organization, and its passkey still needs to be set up or approved. Until then, you can't create or join a workspace here. You can still decline ownership offers or sign out."
     },
     "InviteAccept": {
         "metaTitle": "Accept your invitation",

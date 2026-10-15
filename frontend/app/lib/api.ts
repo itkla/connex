@@ -160,6 +160,7 @@ export async function csrfHeader(forceRefresh = false): Promise<Record<string, s
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
     clientRequestIdentityEpoch += 1;
+    privilegedMfaConfinementGeneration += 1;
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -385,13 +386,20 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
 const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
 export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
 export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+/** A privileged account that holds passkeys, none of them approved where it is privileged (#1534). */
+export const PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE = "PRIVILEGED_MFA_ATTESTATION_REQUIRED";
 export const MAIL_TRANSPORT_UNAVAILABLE_CODE = "MAIL_TRANSPORT_UNAVAILABLE";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
 /** The one refusal for every reason a passkey approval code cannot be used (#1534). */
 export const MFA_ATTESTATION_REFUSED_CODE = "MFA_ATTESTATION_REFUSED";
-const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
-const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = `${PRIVILEGED_MFA_ENROLLMENT_ROUTE}?mfa=enroll`;
+/**
+ * A role change that would leave members privileged in an organization without a passkey approved
+ * there (#1534). The `409` carries how many; resending with `acknowledgeConfinement` proceeds.
+ */
+export const PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE = "PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED";
+const PRIVILEGED_MFA_ROUTE = settingsDestination("personal.security").href;
+const ONBOARDING_ROUTE = "/onboarding";
 const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/me",
     "/api/auth/csrf",
@@ -422,71 +430,185 @@ const PASSKEY_STEP_UP_PATHS = new Set([
 ]);
 let passkeyStepUpPromise: Promise<void> | null = null;
 let passkeyStepUpGeneration = 0;
-let privilegedMfaEnrollmentRequired = false;
-let privilegedMfaEnrollmentCompleted = false;
-const privilegedMfaEnrollmentListeners = new Set<(active: boolean) => void>();
+/** Why a privileged account is confined (#1534): it holds no passkey yet, or none approved yet. */
+export type PrivilegedMfaConfinementReason = "enrollment" | "attestation";
 
-/** Returns whether the browser is on the privileged-account passkey enrolment destination. */
-export function isPrivilegedMfaEnrollmentDestination(): boolean {
-    if (typeof window === "undefined") return false;
-    return window.location.pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
-        && new URLSearchParams(window.location.search).get("mfa") === "enroll";
+/** What prompted a standing check. Only a ceremony the server accepted may use the legacy release. */
+export type PrivilegedMfaSettlement = "ceremony" | "exit" | "check";
+
+const PRIVILEGED_MFA_STEP_PARAMS: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: "enroll",
+    attestation: "approve",
+};
+const PRIVILEGED_MFA_CONFINEMENT_CODES: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+    attestation: PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE,
+};
+const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason, string> = {
+    enrollment: "A passkey must be enrolled before this privileged account can continue",
+    attestation: "A passkey must be approved before this privileged account can continue",
+};
+let privilegedMfaConfinement: PrivilegedMfaConfinementReason | null = null;
+let privilegedMfaConfinementReleased = false;
+let privilegedMfaAttestationObserved = false;
+let privilegedMfaConfinementGeneration = 0;
+const privilegedMfaConfinementListeners = new Set<(active: boolean) => void>();
+
+function privilegedMfaReasonForStep(mfaParam: string | null): PrivilegedMfaConfinementReason | null {
+    if (mfaParam === PRIVILEGED_MFA_STEP_PARAMS.enrollment) return "enrollment";
+    if (mfaParam === PRIVILEGED_MFA_STEP_PARAMS.attestation) return "attestation";
+    return null;
 }
 
-/** Returns whether the browser must suppress requests outside the privileged MFA enrolment flow. */
-export function isPrivilegedMfaEnrollmentConfinementActive(): boolean {
-    return typeof window !== "undefined"
-        && (privilegedMfaEnrollmentRequired
-            || (!privilegedMfaEnrollmentCompleted && isPrivilegedMfaEnrollmentDestination()));
+function privilegedMfaDestinationReason(): PrivilegedMfaConfinementReason | null {
+    if (typeof window === "undefined" || window.location.pathname !== PRIVILEGED_MFA_ROUTE) return null;
+    return privilegedMfaReasonForStep(new URLSearchParams(window.location.search).get("mfa"));
+}
+
+function activePrivilegedMfaConfinement(): PrivilegedMfaConfinementReason | null {
+    if (typeof window === "undefined") return null;
+    return privilegedMfaConfinement
+        ?? (privilegedMfaConfinementReleased ? null : privilegedMfaDestinationReason());
+}
+
+/** Returns whether the browser is on a privileged-MFA step of Security: `?mfa=enroll` or `?mfa=approve`. */
+export function isPrivilegedMfaConfinementDestination(): boolean {
+    return privilegedMfaDestinationReason() !== null;
 }
 
 /**
- * The same answer as {@link isPrivilegedMfaEnrollmentConfinementActive}, for a route the caller
- * observed rather than the one `window.location` currently holds.
+ * Returns why the browser must suppress requests outside the privileged-MFA allowlist, or null when
+ * it need not. The server's refusal decides; a step URL implies the same until a check releases it.
+ */
+export function privilegedMfaConfinementReason(): PrivilegedMfaConfinementReason | null {
+    return activePrivilegedMfaConfinement();
+}
+
+/**
+ * Whether privileged-MFA confinement is in force, for a route the caller observed rather than the
+ * one `window.location` currently holds.
  *
  * A React surface that lives in a persistent layout re-renders on client navigation but does not
  * re-read `window.location`, so reading the live URL would strand confinement inferred from a
- * bookmarked `?mfa=enroll` link long after the reader navigated away. Passing the rendered route
- * makes the answer change when the route does.
+ * bookmarked step link long after the reader navigated away. Passing the rendered route makes the
+ * answer change when the route does.
  *
  * @param pathname the route currently rendered
  * @param mfaParam the value of the `mfa` search parameter, or null when absent
  */
-export function privilegedMfaEnrollmentConfinementFor(
-    pathname: string,
-    mfaParam: string | null,
-): boolean {
-    return privilegedMfaEnrollmentRequired
-        || (!privilegedMfaEnrollmentCompleted
-            && pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
-            && mfaParam === "enroll");
+export function privilegedMfaConfinementFor(pathname: string, mfaParam: string | null): boolean {
+    return privilegedMfaConfinement !== null
+        || (!privilegedMfaConfinementReleased
+            && pathname === PRIVILEGED_MFA_ROUTE
+            && privilegedMfaReasonForStep(mfaParam) !== null);
 }
 
 /** Subscribes to browser-local privileged MFA confinement state changes. */
-export function subscribePrivilegedMfaEnrollmentConfinement(
-    listener: (active: boolean) => void,
-): () => void {
-    privilegedMfaEnrollmentListeners.add(listener);
-    return () => privilegedMfaEnrollmentListeners.delete(listener);
+export function subscribePrivilegedMfaConfinement(listener: (active: boolean) => void): () => void {
+    privilegedMfaConfinementListeners.add(listener);
+    return () => privilegedMfaConfinementListeners.delete(listener);
 }
 
-/** Releases browser-local confinement after the server accepts passkey enrolment. */
-export function completePrivilegedMfaEnrollment(): void {
-    if (isPrivilegedMfaEnrollmentDestination()) {
-        window.history.replaceState(null, "", PRIVILEGED_MFA_ENROLLMENT_ROUTE);
+function notifyPrivilegedMfaConfinement(active: boolean) {
+    for (const listener of [...privilegedMfaConfinementListeners]) listener(active);
+}
+
+/** Moves the Security step parameter to the reason in force, without navigating. */
+function showPrivilegedMfaStep(reason: PrivilegedMfaConfinementReason) {
+    if (window.location.pathname !== PRIVILEGED_MFA_ROUTE) return;
+    const step = PRIVILEGED_MFA_STEP_PARAMS[reason];
+    if (new URLSearchParams(window.location.search).get("mfa") === step) return;
+    window.history.replaceState(null, "", `${PRIVILEGED_MFA_ROUTE}?mfa=${step}`);
+}
+
+function confinePrivilegedMfa(reason: PrivilegedMfaConfinementReason) {
+    privilegedMfaConfinement = reason;
+    privilegedMfaConfinementReleased = false;
+    if (reason === "attestation") privilegedMfaAttestationObserved = true;
+    privilegedMfaConfinementGeneration += 1;
+    notifyPrivilegedMfaConfinement(true);
+}
+
+function releasePrivilegedMfaConfinement() {
+    if (isPrivilegedMfaConfinementDestination()) {
+        window.history.replaceState(null, "", PRIVILEGED_MFA_ROUTE);
     }
-    privilegedMfaEnrollmentRequired = false;
-    privilegedMfaEnrollmentCompleted = true;
-    for (const listener of privilegedMfaEnrollmentListeners) listener(false);
+    privilegedMfaConfinement = null;
+    privilegedMfaConfinementReleased = true;
+    notifyPrivilegedMfaConfinement(false);
 }
 
-function shouldSuppressDuringPrivilegedMfaEnrollment(path: string, method?: string): boolean {
-    if (!isPrivilegedMfaEnrollmentConfinementActive()) return false;
+/**
+ * Re-reads the account's own standing from the allowlisted requirements endpoint and settles
+ * browser-local confinement on it (#1534). SATISFIED and UNPRIVILEGED release it; ENROLLMENT_REQUIRED
+ * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
+ *
+ * A failed read settles nothing and keeps any confinement, as does a read that a newer refusal or
+ * identity change overtook while it was in flight, or one reporting a standing this client does not
+ * know. A backend too old to report standing releases only after a ceremony the server accepted —
+ * an enrollment or a redemption — and never once passkey approval has been required in this page.
+ *
+ * @param settlement what prompted the check
+ * @returns the requirements read, whether or not they settled anything, or null when the read failed
+ */
+export async function settlePrivilegedMfaStanding(
+    settlement: PrivilegedMfaSettlement,
+): Promise<Types.PasskeyRegistrationRequirements | null> {
+    const generation = privilegedMfaConfinementGeneration;
+    let requirements: Types.PasskeyRegistrationRequirements;
+    try {
+        requirements = await getPasskeyRegistrationRequirements();
+    } catch {
+        return null;
+    }
+    if (generation !== privilegedMfaConfinementGeneration || typeof window === "undefined") return requirements;
+    switch (requirements.standing) {
+        case "SATISFIED":
+        case "UNPRIVILEGED":
+            releasePrivilegedMfaConfinement();
+            break;
+        case "ENROLLMENT_REQUIRED":
+            confinePrivilegedMfa("enrollment");
+            showPrivilegedMfaStep("enrollment");
+            break;
+        case "ATTESTATION_REQUIRED":
+            confinePrivilegedMfa("attestation");
+            showPrivilegedMfaStep("attestation");
+            break;
+        case undefined:
+            if (settlement === "ceremony"
+                    && !privilegedMfaAttestationObserved
+                    && privilegedMfaDestinationReason() !== "attestation") {
+                releasePrivilegedMfaConfinement();
+            }
+            break;
+    }
+    return requirements;
+}
+
+function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaConfinementReason | null {
+    const reason = activePrivilegedMfaConfinement();
+    if (reason === null) return null;
     const pathname = path.split("?")[0];
     const normalizedMethod = (method ?? "GET").toUpperCase();
-    return !(normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
-        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname))
-        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_SAFE_EXIT_POST_PATH.test(pathname));
+    const allowed = (normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
+        || (normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname))
+        || (normalizedMethod === "POST" && PRIVILEGED_MFA_SAFE_EXIT_POST_PATH.test(pathname));
+    return allowed ? null : reason;
+}
+
+/** The refusal a confined browser raises itself instead of sending a request the server would refuse. */
+function privilegedMfaConfinementError(reason: PrivilegedMfaConfinementReason): ApiError {
+    return new ApiError(
+        PRIVILEGED_MFA_CONFINEMENT_MESSAGES[reason],
+        403,
+        PRIVILEGED_MFA_CONFINEMENT_CODES[reason],
+    );
+}
+
+/** Adds the confinement acknowledgement to a role-change body only once the actor has confirmed it. */
+function withConfinementAcknowledgement<T extends object>(body: T, acknowledgeConfinement: boolean) {
+    return acknowledgeConfinement ? { ...body, acknowledgeConfinement: true } : body;
 }
 
 function isCsrfRetryExemptMutation(path: string): boolean {
@@ -500,12 +622,9 @@ async function requestJson<T>(
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
 ): Promise<T> {
-    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, init.method)) {
-        throw new ApiError(
-            "A passkey must be enrolled before this privileged account can continue",
-            403,
-            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
-        );
+    const suppression = privilegedMfaSuppression(path, init.method);
+    if (suppression !== null) {
+        throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
@@ -633,12 +752,9 @@ async function requestMultipart<T>(
     body: FormData,
     init: RequestInit = {},
 ): Promise<T> {
-    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, method)) {
-        throw new ApiError(
-            "A passkey must be enrolled before this privileged account can continue",
-            403,
-            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
-        );
+    const suppression = privilegedMfaSuppression(path, method);
+    if (suppression !== null) {
+        throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
@@ -1170,6 +1286,11 @@ export class ApiError extends Error {
     fieldErrors?: ApiFieldErrors;
     correlationId?: string;
     /**
+     * For {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} only: how many members the
+     * change would leave without a passkey approved in the organization.
+     */
+    affectedCount?: number;
+    /**
      * True when the response carried no body. A bodyless 401/403 is how Spring Security signals an
      * unauthenticated caller (expired or missing session), as opposed to a genuine authorization
      * denial, which the backend answers with an explanatory body.
@@ -1303,20 +1424,27 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isErrorRecord(data)) {
-            const { message, error, code, correlationId, fieldErrors, ...rest } = data;
+            const { message, error, code, correlationId, fieldErrors, affectedCount, ...rest } = data;
             const flat = Object.fromEntries(
                 Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
             );
             const enveloped = isStringRecord(fieldErrors) ? fieldErrors : undefined;
             const fields = enveloped ?? (Object.keys(flat).length > 0 ? flat : undefined);
 
-            return new ApiError(
+            const apiError = new ApiError(
                 asString(message) ?? asString(error) ?? "Please fix the highlighted fields.",
                 res.status,
                 asString(code),
                 fields,
                 asString(correlationId),
             );
+            if (apiError.code === PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE
+                    && typeof affectedCount === "number"
+                    && Number.isSafeInteger(affectedCount)
+                    && affectedCount >= 0) {
+                apiError.affectedCount = affectedCount;
+            }
+            return apiError;
         }
 
         return new ApiError(text, res.status);
@@ -1327,15 +1455,18 @@ async function getApiError(res: Response): Promise<ApiError> {
 
 async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
     const error = await getApiError(res);
-    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
-            && typeof window !== "undefined") {
-        const shouldNavigate = !privilegedMfaEnrollmentRequired
-            && !isPrivilegedMfaEnrollmentDestination();
-        privilegedMfaEnrollmentRequired = true;
-        privilegedMfaEnrollmentCompleted = false;
-        for (const listener of privilegedMfaEnrollmentListeners) listener(true);
+    const reason = error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
+        ? "enrollment"
+        : error.code === PRIVILEGED_MFA_ATTESTATION_REQUIRED_CODE ? "attestation" : null;
+    if (reason !== null && typeof window !== "undefined") {
+        const shouldNavigate = privilegedMfaConfinement === null
+            && !isPrivilegedMfaConfinementDestination()
+            && window.location.pathname !== ONBOARDING_ROUTE;
+        confinePrivilegedMfa(reason);
         if (shouldNavigate) {
-            window.location.replace(PRIVILEGED_MFA_ENROLLMENT_DESTINATION);
+            window.location.replace(`${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`);
+        } else {
+            showPrivilegedMfaStep(reason);
         }
     }
     return error;
@@ -4830,23 +4961,35 @@ export function teardownOrganization(orgId: number, confirmation: string) {
 
 /**
  * Adds an organization member by email. Making someone an owner returns an ownership offer they must
- * accept (202) instead of changing their role; any other role returns nothing (204).
+ * accept (202) instead of changing their role; any other role returns nothing (204). A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
  */
-export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
+export function addOrgMemberByEmail(
+    orgId: number,
+    email: string,
+    orgRole: Types.OrgRole,
+    acknowledgeConfinement = false,
+) {
     return postJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
         `/api/orgs/${orgId}/members`,
-        { email, orgRole },
+        withConfinementAcknowledgement({ email, orgRole }, acknowledgeConfinement),
     );
 }
 
 /**
  * Changes an organization member's role. Promoting to owner returns an ownership offer they must
- * accept (202) instead of changing their role; any other change returns nothing (204).
+ * accept (202) instead of changing their role; any other change returns nothing (204). A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
  */
-export function setOrgMemberRole(orgId: number, userId: number, orgRole: Types.OrgRole) {
+export function setOrgMemberRole(
+    orgId: number,
+    userId: number,
+    orgRole: Types.OrgRole,
+    acknowledgeConfinement = false,
+) {
     return putJson<Types.OwnershipOfferCreated<Types.OrgMember> | undefined>(
         `/api/orgs/${orgId}/members/${userId}`,
-        { orgRole },
+        withConfinementAcknowledgement({ orgRole }, acknowledgeConfinement),
     );
 }
 
@@ -5137,12 +5280,18 @@ export function addWorkspaceMember(workspaceId: number, email: string, role: Typ
 
 /**
  * Changes a workspace member's built-in role. Promoting to owner returns an ownership offer the
- * member must accept (202) and leaves their role unchanged; any other change returns the member.
+ * member must accept (202) and leaves their role unchanged; any other change returns the member. A
+ * `409` {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
  */
-export function updateMemberRole(workspaceId: number, userId: number, role: Types.WorkspaceRole) {
+export function updateMemberRole(
+    workspaceId: number,
+    userId: number,
+    role: Types.WorkspaceRole,
+    acknowledgeConfinement = false,
+) {
     return patchJson<Types.WorkspaceMember | Types.OwnershipOfferCreated<Types.WorkspaceMember>>(
         `/api/workspaces/${workspaceId}/members/${userId}`,
-        { role },
+        withConfinementAcknowledgement({ role }, acknowledgeConfinement),
     );
 }
 
@@ -5197,8 +5346,20 @@ export function revokeOrgOwnershipOffer(orgId: number, offerId: string) {
     return deleteJson<void>(`/api/orgs/${orgId}/ownership-offers/${encodeURIComponent(offerId)}`);
 }
 
-export function assignMemberCustomRole(workspaceId: number, userId: number, roleId: number) {
-    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { roleId });
+/**
+ * Assigns a workspace member a custom role. A `409`
+ * {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function assignMemberCustomRole(
+    workspaceId: number,
+    userId: number,
+    roleId: number,
+    acknowledgeConfinement = false,
+) {
+    return patchJson<Types.WorkspaceMember>(
+        `/api/workspaces/${workspaceId}/members/${userId}`,
+        withConfinementAcknowledgement({ roleId }, acknowledgeConfinement),
+    );
 }
 
 /** Creates a passkey approval code for a workspace member, replacing any open one (#1534). */
@@ -5225,8 +5386,21 @@ export function createWorkspaceRole(workspaceId: number, name: string, permissio
     return postJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles`, { name, permissions });
 }
 
-export function updateWorkspaceRole(workspaceId: number, roleId: number, name: string, permissions: string[]) {
-    return putJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles/${roleId}`, { name, permissions });
+/**
+ * Updates a custom role. Granting management permissions can make its assignees privileged, so a
+ * `409` {@link PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE} asks for `acknowledgeConfinement`.
+ */
+export function updateWorkspaceRole(
+    workspaceId: number,
+    roleId: number,
+    name: string,
+    permissions: string[],
+    acknowledgeConfinement = false,
+) {
+    return putJson<Types.CustomRole>(
+        `/api/workspaces/${workspaceId}/roles/${roleId}`,
+        withConfinementAcknowledgement({ name, permissions }, acknowledgeConfinement),
+    );
 }
 
 export function deleteWorkspaceRole(workspaceId: number, roleId: number) {

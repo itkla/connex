@@ -23,8 +23,8 @@ import {
 } from "@/app/components/notifications/notificationEvents";
 import {
     getNotificationCounts,
-    privilegedMfaEnrollmentConfinementFor,
-    subscribePrivilegedMfaEnrollmentConfinement,
+    privilegedMfaConfinementFor,
+    subscribePrivilegedMfaConfinement,
 } from "@/app/lib/api";
 import {
     createNotificationSocket,
@@ -84,8 +84,8 @@ export function NotificationProvider({
     const { openNotification } = useNotificationWorkspaceActions();
 
     const privilegedMfaConfinementActive = useSyncExternalStore(
-        subscribePrivilegedMfaEnrollmentConfinement,
-        () => privilegedMfaEnrollmentConfinementFor(pathname, searchParams.get("mfa")),
+        subscribePrivilegedMfaConfinement,
+        () => privilegedMfaConfinementFor(pathname, searchParams.get("mfa")),
         () => false,
     );
 
