@@ -97,6 +97,9 @@ Anyone reading or alerting on this trail should expect:
   action, and a second address inside the hour is not recorded separately. Requests the frontend
   server makes for a user while rendering a page forward only the session cookie, so all of a user's
   server-rendered refusals share the frontend service's single address, whichever session made them.
+  Missing or malformed forwarded chains, including a header value rejected on read by the request
+  firewall, fall back to the direct peer for every resolver caller. Denial admission and the audit
+  row use that peer address; a rejected forwarding header cannot bypass the denial audit.
 
 The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
 

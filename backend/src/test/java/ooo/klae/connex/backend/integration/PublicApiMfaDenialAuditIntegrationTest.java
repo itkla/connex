@@ -178,6 +178,21 @@ class PublicApiMfaDenialAuditIntegrationTest {
         assertAccountAudits(fixture, "enrollment_required", List.of(ADDRESS, "192.0.2.43"));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = PrivilegedMfaStanding.class, names = {"ENROLLMENT_REQUIRED", "ATTESTATION_REQUIRED"})
+    void firewallRejectedForwardedHeadersStillWriteOneAuditKeyedOnThePeer(PrivilegedMfaStanding standing)
+            throws Exception {
+        Confined fixture = confined(standing);
+
+        refuse(fixture, standing, "10.0.0.1", "198.51.100.1\u0085");
+        assertAccountAudits(fixture, reason(standing), List.of("10.0.0.1"));
+
+        refuse(fixture, standing, "10.0.0.1", "198.51.100.2\u0085");
+        refuse(fixture, standing, "10.0.0.1", null);
+
+        assertAccountAudits(fixture, reason(standing), List.of("10.0.0.1"));
+    }
+
     @Test
     void untrustedForwardingHeadersCannotReopenTheAddressWindow() throws Exception {
         Confined fixture = confined(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);

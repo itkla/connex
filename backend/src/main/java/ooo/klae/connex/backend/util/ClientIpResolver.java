@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +27,8 @@ import jakarta.servlet.http.HttpServletRequest;
  * right-to-left until it reaches the first untrusted address. Every hop must be an IP
  * literal; missing or malformed chains fall back to the direct peer. With no trusted
  * proxies configured (the default), the client-supplied header is never trusted.
+ * A header read rejected by the request firewall with {@link RequestRejectedException}
+ * is treated as a malformed chain; other header-read exceptions propagate.
  */
 @Component
 public class ClientIpResolver {
@@ -89,6 +92,8 @@ public class ClientIpResolver {
 
     /**
      * Resolves the client address together with the provenance needed by per-IP throttles.
+     * Missing, malformed or firewall-rejected forwarding headers return the direct peer
+     * with {@code forwardedByTrustedProxy=false}.
      *
      * @param request the inbound request
      * @return the resolved address and whether it came from a trusted sanitizing proxy
@@ -99,7 +104,12 @@ public class ClientIpResolver {
                 || !isTrusted(remoteAddr)) {
             return new ResolvedClientIp(remoteAddr, false);
         }
-        String forwarded = request.getHeader("X-Forwarded-For");
+        String forwarded;
+        try {
+            forwarded = request.getHeader("X-Forwarded-For");
+        } catch (RequestRejectedException ignored) {
+            return new ResolvedClientIp(remoteAddr, false);
+        }
         if (forwarded == null || forwarded.isBlank()) {
             return new ResolvedClientIp(remoteAddr, false);
         }

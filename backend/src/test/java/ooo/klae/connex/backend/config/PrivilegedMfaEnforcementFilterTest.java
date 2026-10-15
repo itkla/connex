@@ -35,6 +35,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -236,6 +237,39 @@ class PrivilegedMfaEnforcementFilterTest {
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
                 eq("enrollment_required"), any(HttpServletRequest.class));
+    }
+
+    @Test
+    void firewallRejectedForwardedHeadersStillAuditConfinementKeyedOnThePeer() throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ENROLLMENT_REQUIRED);
+        DenialAuditRateLimiter limiter = spy(
+                new DenialAuditRateLimiter(3_600, Clock.systemUTC(), new SimpleMeterRegistry()));
+        PrivilegedMfaEnforcementFilter proxied = new PrivilegedMfaEnforcementFilter(
+                properties, privilegedAccountService, sessionSecurityService, auditService,
+                limiter, new ClientIpResolver("10.0.0.0/8"));
+
+        int attempt = 0;
+        for (String peer : List.of("10.0.0.2", "10.0.0.2", "10.0.0.3")) {
+            MockHttpServletRequest request = request("GET", "/api/companies");
+            request.setRemoteAddr(peer);
+            request.addHeader("X-Forwarded-For", "198.51.100." + ++attempt + "\u0085");
+            HttpServletRequest firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            proxied.doFilter(firewalled, response, filterChain);
+
+            assertEquals(403, response.getStatus());
+            assertTrue(response.getContentAsString().contains(
+                    PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE));
+        }
+
+        verify(limiter, times(2)).acquire(7, "auth.mfa.policy.denied", "enrollment_required", "10.0.0.2");
+        verify(limiter).acquire(7, "auth.mfa.policy.denied", "enrollment_required", "10.0.0.3");
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("Admin"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"), any(HttpServletRequest.class));
+        verify(filterChain, never()).doFilter(any(), any());
     }
 
     /**
