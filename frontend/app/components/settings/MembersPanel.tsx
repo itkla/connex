@@ -407,6 +407,7 @@ function MembersWorkspacePanel({
         setIsRemoving(true);
         try {
             await removeWorkspaceMember(workspaceId, removeTarget.id);
+            membersRefresh.current += 1;
             setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
             ownershipOffers.refresh();
             toastSuccess(t("removed"));
@@ -442,6 +443,7 @@ function MembersWorkspacePanel({
             setInviteEmail("");
             if (result.member) {
                 const member = result.member;
+                membersRefresh.current += 1;
                 setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
                 ownershipOffers.refresh();
                 toastSuccess(t("memberInvited"));

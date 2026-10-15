@@ -201,6 +201,7 @@ describe("onboarding ownership offers", () => {
         await renderOnboarding();
 
         expect(container.firstElementChild?.classList.contains("light-surface")).toBe(true);
+        expect(container.firstElementChild?.classList.contains("text-foreground")).toBe(true);
         expect(readFileSync(path.resolve(process.cwd(), "app/globals.css"), "utf8")).toMatch(/:root,\s*\.light-surface \{/);
     });
 

@@ -90,7 +90,7 @@ export default function OnboardingForm() {
     }
 
     return (
-        <div className="light-surface min-h-dvh w-full bg-white lg:grid lg:h-dvh lg:grid-cols-[1fr_1.05fr] lg:overflow-hidden">
+        <div className="light-surface min-h-dvh w-full bg-white text-foreground lg:grid lg:h-dvh lg:grid-cols-[1fr_1.05fr] lg:overflow-hidden">
             <div className="relative flex min-h-dvh flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <button
                     type="button"

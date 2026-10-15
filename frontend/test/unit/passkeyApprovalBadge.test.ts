@@ -31,6 +31,12 @@ describe("the passkey-not-approved badge on member rows", () => {
         expect(changeRole).toContain("void refreshMembers();");
         expect(assignCustom).toContain("void refreshMembers();");
         expect(panel).toMatch(/if \(refreshId === membersRefresh\.current\) setMembers\(loaded\);/);
+        const confirmRemove = panel.slice(panel.indexOf("const confirmRemove = async"), panel.indexOf("const copyInviteLink"));
+        const sendInvite = panel.slice(panel.indexOf("const sendInvite = async"));
+        expect(confirmRemove.indexOf("membersRefresh.current += 1;"))
+            .toBeLessThan(confirmRemove.indexOf("setMembers((prev) => prev.filter"));
+        expect(confirmRemove).toContain("membersRefresh.current += 1;");
+        expect(sendInvite).toMatch(/membersRefresh\.current \+= 1;\s+setMembers\(\(prev\) => \[\.\.\.prev\.filter/);
     });
 
     it("has its copy in both languages for both lists", () => {
