@@ -1881,4 +1881,47 @@ class AiAssistantPromptAssemblerTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void supplementaryMemberLabelsRoundTripThroughFinalMetadataAndFreshReplay(boolean nativeProtocol) throws Exception {
+        String member = "😀".repeat(600);
+        var context = new MaskingContext();
+        String token = context.tokenFor(EntityKind.MEMBER, member);
+        context.exposeDispatchedPayload(token);
+        var answer = objectMapper.createObjectNode().put("text", token);
+        var provenance = new java.util.LinkedHashMap<String, List<String>>();
+        assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(answer, context,
+                (path, value) -> provenance.put(path, List.of(value))));
+        assertEquals(member, answer.path("text").asString());
+        String metadata = assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), provenance);
+        assertEquals(member, AiAssistantMemberIdentifiers.stored(objectMapper.readTree(metadata)).getFirst().value());
+        var message = new AiChatMessage();
+        message.setAuthorKind("assistant");
+        message.setContent(answer.path("text").asString());
+        message.setStructuredJson(metadata);
+        var fresh = new MaskingContext();
+        var resources = new AiChatResourceRegistry(fresh);
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(message), empty, List.of(), fresh, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(message), empty, List.of(), fresh, resources, AiAssistantToolCatalog.ALL);
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertFalse(payload.contains(member));
+        assertTrue(payload.contains("{{M1}}"));
+        fresh.exposeDispatchedPayload(payload);
+        assertEquals(member, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", fresh).text());
+    }
+
+    @Test
+    void answerMemberProvenanceLimitCountsEntriesBeforeDeduplication() {
+        var excessive = java.util.Collections.nCopies(201, "Member");
+        assertThrows(IllegalStateException.class, () -> assembler.finalMetadata(1, List.of(), List.of(), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), excessive));
+        assertThrows(IllegalStateException.class, () -> assembler.finalMetadata(1, List.of(), List.of("Ask Member"), Map.of(), Map.of(),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE, null, List.of(), List.of(), Map.of(
+                        "/text", excessive.subList(0, 101), "/suggestions/0", excessive.subList(0, 100))));
+    }
+
 }

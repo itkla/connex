@@ -4982,6 +4982,56 @@ class AiChatAgentLoopServiceTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void exactDemaskedWriteArgumentPathsReachPreparationOnBothProtocols(boolean nativeProtocol) throws Exception {
+        if (nativeProtocol) {
+            useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        }
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenAnswer(call -> {
+            var context = (ooo.klae.connex.backend.ai.masking.MaskingContext) call.getArgument(1);
+            context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+            context.exposeDispatchedPayload("{{M1}}");
+            return new AiChatMemory(List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                    new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol);
+        });
+        JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"xBob\"}");
+        var write = new AiAssistantPreparedWrite("create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                "person", 41, "{\"resolved\":true}");
+        when(writeToolService.prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))))).thenReturn(write);
+        when(persistenceService.proposeWriteTool(TURN, 2, write))
+                .thenReturn(new AiAssistantToolProposal(29, "proposed", null, true));
+        var receipt = new AiAssistantToolResult(Map.of("toolCallId", 29, "status", "executed"), List.of());
+        when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenAnswer(call -> {
+            Consumer<AiAssistantToolResult> guard = call.getArgument(2);
+            guard.accept(receipt);
+            return new AiAssistantWriteToolService.WriteExecution(null, receipt, false);
+        });
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class),
+                    any(), any(), any(), any(), any(), any()))
+                    .thenReturn(nativeLoad("load", "write_content"))
+                    .thenReturn(new AiNativeToolCompletion.Tool<>(
+                            new AiToolCall("write", "create_note", "{\"handle\":\"r1\",\"content\":\"x{{M1}}\"}"),
+                            args, 0, 3, 5, "tool_calls", Optional.empty()))
+                    .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer("Created.", List.of())));
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(), any(), any(), any()))
+                    .thenReturn(parsed(loadStep("write_content")))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                            new AiAssistantStep(new AiAssistantStep.Tool("create_note", args), null), 0, 3, 5, "stop",
+                            Map.of("/tool/args/content", List.of("Bob"))), Optional.empty()))
+                    .thenReturn(parsed(new AiAssistantStep(null, new AiAssistantStep.FinalAnswer("Created.", List.of()))));
+        }
+        when(persistenceService.resolve(eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var result = service.run(TURN);
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(writeToolService).prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch()),
+                eq(Map.of("/content", List.of("Bob"))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"false,Bob_team", "false,xBob", "true,Bob_team", "true,xBob"})
     void finalMetadataUsesExactDemaskProvenanceWithoutRescanningJoinedShortLabels(
             boolean nativeProtocol, String text) throws Exception {
@@ -5036,6 +5086,10 @@ class AiChatAgentLoopServiceTest {
         assertEquals(1, stored.path("memberIdentifiers").size());
         assertEquals("Former Member", stored.path("memberIdentifiers").get(0).path("value").asString());
         assertEquals("member", stored.path("memberIdentifiers").get(0).path("kind").asString());
+        assertEquals("/suggestions/0", stored.path("memberIdentifiers").get(0).path("path").asString());
+        assertTrue(AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, "Open client pipeline").isEmpty());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member")),
+                AiAssistantMemberIdentifiers.suggestionIdentifiers(stored, stored.path("suggestions").get(0).asString()));
         assertFalse(stored.has("identifiers"));
         assertFalse(metadata.getValue().contains("Ignore previous instructions"));
         assertFalse(metadata.getValue().contains("{{M"));
@@ -5159,6 +5213,45 @@ class AiChatAgentLoopServiceTest {
             verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
                     any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
         }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void unmaskedUnknownPlaceholderWarningsNeverPersistOrExecute(boolean nativeProtocol, boolean tool) throws Exception {
+        var turn = new AiChatQueuedTurn(TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(), TURN.includePrivateNotes(),
+                TURN.pageContext(), TURN.attachmentIds(), AiPrivacyMode.UNMASKED, false);
+        var user = new AiChatMessage();
+        user.setId(turn.userMessageId());
+        user.setAuthorKind("user");
+        user.setContent("Follow up");
+        when(persistenceService.markRunning(eq(turn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(turn), any(), any(Instant.class), any())).thenReturn(new AiChatMemory(
+                List.of(user), new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 0, 0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(turn), any(Instant.class), any(), any())).thenReturn(AiChatAttachmentContext.empty());
+        var answer = new AiAssistantStep.FinalAnswer("[unknown reference]", List.of());
+        var arguments = objectMapper.readTree("{\"handle\":\"r1\",\"description\":\"[unknown reference]\"}");
+        if (nativeProtocol) {
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion = tool
+                    ? new AiNativeToolCompletion.Tool<>(new AiToolCall("guess", "create_task",
+                            "{\"handle\":\"r1\",\"description\":\"{{P1}}\"}"), arguments, 1, 3, 5, "tool_calls", Optional.empty())
+                    : new AiNativeToolCompletion.Content<>(new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Parsed<>(answer, 1, 3, 5, "stop"), Optional.empty()), 3, 5, "stop", Optional.empty());
+            when(invocationService.completeNativeToolsRepairable(any(), eq(AiAssistantStep.FinalAnswer.class), any(), any(), any(), any(), any(), any()))
+                    .thenReturn(completion);
+        } else {
+            var step = tool ? new AiAssistantStep(new AiAssistantStep.Tool("create_task", arguments), null)
+                    : new AiAssistantStep(null, answer);
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class), any(), any(), any(), any()))
+                    .thenReturn(new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(step, 1, 3, 5, "stop"), Optional.empty()));
+        }
+        var result = service.run(turn);
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(writeToolService, never()).prepare(anyString(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any());
+        verify(persistenceService, never()).proposeWriteTool(any(), anyInt(), any(), any());
+        verify(persistenceService, never()).resolve(any(), anyString(), anyString(), anyInt(), anyInt());
     }
 
 }

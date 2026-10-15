@@ -220,6 +220,17 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
+    void canonicalCodeSpanLabelsStayLinearOnAdversarialBackticksAndBrackets() {
+        for (String attack : java.util.List.of("[`]`".repeat(25_000), "[".repeat(50_000) + "`".repeat(50_000),
+                "`[".repeat(50_000), "[".repeat(50_000) + "]".repeat(50_000))) {
+            String content = attack + "\n<script>\n` stray\n</script>\n[Alice `]` Former](user:42)";
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
+                    org.junit.jupiter.api.Assertions.assertTrue(ReferenceService.memberLabelsFromReaderVisibleContent(content)
+                            .contains("Alice `]` Former")));
+        }
+    }
+
+    @Test
     void memberLabelLimitCountsUnicodeCharactersAcrossEveryReading() {
         for (String character : java.util.List.of("a", "😀")) {
             String accepted = character.repeat(999);
@@ -232,6 +243,12 @@ class ReferenceServicePlainTextTest {
                     "[" + accepted + "][m]\n\n[m]: user:42"));
             assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
                     "[Public Label][" + rejected + "]\n\n[" + rejected + "]: user:42"));
+            String canonicalPrefix = "<script>\n` stray\n</script>\n[";
+            String codeLabel = "`]`" + character.repeat(996);
+            assertEquals(java.util.List.of(codeLabel), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    canonicalPrefix + codeLabel + "](user:42)"));
+            assertEquals(java.util.List.of(), ReferenceService.memberLabelsFromReaderVisibleContent(
+                    canonicalPrefix + codeLabel + character + "](user:42)"));
         }
     }
 
@@ -243,7 +260,7 @@ class ReferenceServicePlainTextTest {
                 String content = "` stray\n" + line + "\n[Alice `]` Former](user:42)";
                 assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
                     assertEquals(suffix.isEmpty(), ReferenceService.memberRuleLine(line, 0, line.length()));
-                    assertEquals(suffix.isEmpty(),
+                    org.junit.jupiter.api.Assertions.assertTrue(
                             ReferenceService.memberLabelsFromReaderVisibleContent(content).contains("Alice `]` Former"));
                 }, marker + suffix);
             }

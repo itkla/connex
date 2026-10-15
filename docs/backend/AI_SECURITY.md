@@ -70,7 +70,8 @@ candidates, not reversible bindings, and the directory is never serialized to a 
 member provenance records only boundary-aware mentions within the combined 20-identifier limit,
 without adding resources; record mentions retain their existing canonical mention gate. Directory read failures abort before provider dispatch; the
 candidate dictionary is never truncated and a failed masked request is never retried unmasked.
-Approved `UNMASKED` disclosure retains its existing posture.
+Approved `UNMASKED` disclosure retains its existing posture. Unknown provider placeholders still
+produce demasking warnings and fail closed in every disclosure mode.
 History and compaction register MEMBER provenance through the same privacy-aware candidate path,
 including legacy metadata. They do not issue tokens merely to read provenance. The per-message
 masked replay leak check runs only in masked disclosure; universal contact and special-care screens
@@ -89,7 +90,11 @@ by a colon, including paragraph continuations inside containers and lazy continu
 entity-encoded and escaped labels/destinations; titled definitions; LF, CR and CRLF
 continuations; blockquote and list-item definitions, including continued keys with container markers;
 and Unicode case-folded, whitespace-collapsed reference keys. Code-aware readings keep brackets
-inside paired code spans opaque and stop backtick pairing at paragraph and block boundaries.
+inside paired code spans opaque; backtick pairing resets at blank lines and the block starts
+implemented below. Raw HTML blocks are not modelled, so reference-style labels next to raw HTML
+remain part of the bounded residual tracked in #2072. Canonical inline tokens, including labels
+with backtick code spans containing closing brackets, are recovered regardless of surrounding block
+context by the independent canonical pass.
 Definition keys are suppressed only at paragraph boundaries, container starts or after another definition.
 Paragraph interruption follows CommonMark 0.31.2: blank lines, ATX headings, fences, thematic
 breaks, block quotes, setext underlines and HTML types 1–6 can interrupt; empty new list items,
@@ -97,7 +102,8 @@ ordered starts other than 1, HTML type 7 and indented code cannot. Accepted cont
 open a new paragraph, whose lazy continuations remain usages.
 Unambiguous explicit reference keys remain keys; ambiguous bracket readings stay independent.
 Every candidate source label, including canonical inline readings, is bounded to 999 Unicode
-characters before copying or normalization. Longer spans are outside this recognition contract.
+characters before copying or normalization. Member provenance writers and readers apply the same
+code-point bound, including supplementary Unicode characters. Longer spans are outside this recognition contract.
 The canonical scan and fixed-number reading merge stay linear in the stored prose length; nested
 brackets cannot cause unbounded label extraction before truncation.
 Rarer CommonMark constructs outside these covered readings are a bounded residual tracked in
@@ -164,12 +170,18 @@ server-created markers in tool results retain their positional exemption. Field 
 across the complete candidate dictionary. Tool-result provenance retains the JSON pointer of each originating textual field; containment
 never extends to unrelated sibling fields. Unscoped legacy declarations retain ordinary
 boundary-aware matching. For persisted provider-authored text, provenance
-includes exact demask replacements independently of adjacency, supplemented by all matching raw
-candidates, so joined short labels such as `Bob_team` and `xBob` retain protection after a rename
-and a fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
-raw MEMBER provenance of persisted follow-up suggestions, using their original parsed paths even
+includes exact demask replacements independently of adjacency, supplemented by raw candidates
+matched with the same boundary-aware member matcher as user provenance. In space-delimited scripts,
+Unicode letters and digits are word characters; underscores and punctuation are separators.
+Han, Hiragana, Katakana, Hangul and Thai need no boundaries. Thus raw `Bob_team` records `Bob`,
+while raw `xBob` and `client` (for `Li`) record nothing: the provider already authored that text,
+and short names must not corrupt ordinary words. Exact replacements such as `x{{M1}}` retain their
+precise member provenance, including through echoed write arguments, independently of these raw-text
+rules. Recorded provenance protects its originating field after a rename and fresh-context replay. Exposure controls demasking only, never replay provenance. Final answer metadata also retains the
+raw MEMBER provenance of each persisted follow-up suggestion separately at `/suggestions/N` in
+`memberIdentifiers` (answer text uses `/text`), using the original parsed paths even
 when filtering trims, removes or deduplicates suggestions. When the next user text exactly equals a
-persisted suggestion of the session's latest answer, queueing copies its contained member provenance
+persisted suggestion of the session's latest answer, queueing copies only that suggestion's own member provenance
 into that user message's `memberIdentifiers`, within the combined 20-identifier limit. This survives
 rename, offboarding, compaction and fresh-context replay without inferring a suggestion click from
 similar or edited text. The latest-answer read uses the existing authorized session mutex and exact

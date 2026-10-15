@@ -1903,13 +1903,13 @@ class AiAssistantWriteToolServiceTest {
         var expectedLabels = Set.of("Bob", "Li", "Ed", "Tas");
         var storedLabels = new java.util.HashSet<String>();
         provenance.forEach(identifier -> storedLabels.add(identifier.path("value").asString()));
-        assertEquals(task ? 4 : 5, provenance.size());
+        assertEquals(4, provenance.size());
         assertEquals(expectedLabels, storedLabels);
         var titlePaths = provenance.valueStream().filter(identifier -> !"/content".equals(identifier.path("path").asString())).toList();
         assertEquals(4, titlePaths.size());
         titlePaths.forEach(identifier -> assertEquals(task ? "/description" : "/title", identifier.path("path").asString()));
         if (!task) {
-            assertEquals(1, provenance.valueStream().filter(identifier -> "/content".equals(identifier.path("path").asString())
+            assertEquals(0, provenance.valueStream().filter(identifier -> "/content".equals(identifier.path("path").asString())
                     && "Ed".equals(identifier.path("value").asString())).count());
         }
         assertFalse(write.argumentsJson().contains("{{M"));
@@ -1943,7 +1943,7 @@ class AiAssistantWriteToolServiceTest {
         legacyResult.remove("memberIdentifiers");
         var replay = service.proposalResult(replayWrite, new AiAssistantToolProposal(
                 29, "executed", objectMapper.writeValueAsString(legacyResult), true));
-        assertEquals(task ? 4 : 5, replay.identifiers().size());
+        assertEquals(4, replay.identifiers().size());
         assertEquals(expectedLabels, replay.identifiers().stream().map(AiAssistantToolResult.Identifier::value)
                 .collect(java.util.stream.Collectors.toSet()));
         assertFalse(objectMapper.writeValueAsString(replay.data()).contains("memberIdentifiers"));
@@ -1987,6 +1987,35 @@ class AiAssistantWriteToolServiceTest {
         verify(noteService, times(task ? 0 : 1)).create(any(Note.class));
     }
 
+
+    @Test
+    void exactDemaskedArgumentProvenanceSurvivesWithoutWideningRawSiblingFields() throws Exception {
+        var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        context.registerMemberCandidate("Bob");
+        context.registerMemberCandidate("Li");
+        var token = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, "Bob");
+        context.exposeDispatchedPayload(token);
+        var args = objectMapper.createObjectNode().put("handle", "r1")
+                .put("title", "x" + token).put("content", "client xBob").put("visibility", "workspace");
+        var exact = new java.util.LinkedHashMap<String, List<String>>();
+        assertEquals(0, ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(args, context,
+                (path, member) -> exact.put(path, List.of(member))));
+        assertEquals(Map.of("/title", List.of("Bob")), exact);
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("person", 31);
+        var write = service.prepare("create_note", args, resources, TURN.restrictionEpoch(), exact);
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/title")),
+                AiAssistantMemberIdentifiers.stored(objectMapper.readTree(write.argumentsJson())));
+        var raw = service.prepare("create_note", args, resources, TURN.restrictionEpoch());
+        assertEquals(List.of(), AiAssistantMemberIdentifiers.stored(objectMapper.readTree(raw.argumentsJson())));
+        var fresh = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+        var freshResources = new AiChatResourceRegistry(fresh);
+        freshResources.register("person", 31);
+        var replay = service.prepareReplay("create_note", args, freshResources, TURN.restrictionEpoch(), write.argumentsJson());
+        assertEquals(write.argumentsJson(), replay.argumentsJson());
+        assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/title")),
+                AiAssistantMemberIdentifiers.stored(objectMapper.readTree(replay.argumentsJson())));
+    }
 
     @Test
     void legacyResultRetainsProposalMemberProvenance() throws Exception {

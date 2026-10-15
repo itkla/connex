@@ -207,8 +207,8 @@ class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
             for (int replay = 0; replay < 2; replay++) {
                 var result = service.proposalResult(write, new AiAssistantToolProposal(
                         TOOL_CALL_ID, "executed", stored, true));
-                assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member"),
-                        new AiAssistantToolResult.Identifier("member", "Pending Member")), result.identifiers());
+                assertEquals(List.of(new AiAssistantToolResult.Identifier("member", "Former Member", "/outcome/description"),
+                        new AiAssistantToolResult.Identifier("member", "Pending Member", "/outcome/description")), result.identifiers());
                 var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
                 context.registerMemberCandidate("Renamed Member");
                 result.identifiers().forEach(identifier -> identifier.seed(context));

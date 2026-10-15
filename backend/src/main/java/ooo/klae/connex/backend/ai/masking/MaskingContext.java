@@ -212,20 +212,28 @@ public final class MaskingContext {
     record PlaceholderSpan(int start, int end) {
     }
 
-    /**
-     * Captures every known member label contained in persisted raw text, including unissued
-     * candidates. Exposure controls re-identification, never protection of future replay.
-     */
+    /** Captures known raw member mentions using the same script-aware boundary gate as user text. */
     public List<String> memberCandidatesIn(String text) {
+        return memberCandidatesIn(text, List.of());
+    }
+
+    /**
+     * Adds precise demask provenance only at the originating textual field. Raw candidates still
+     * require mention boundaries; token-derived values must remain contained after typed normalization.
+     * Input projections are built once and reused across the complete candidate set.
+     */
+    public List<String> memberCandidatesIn(String text, List<String> demaskedValues) {
         Objects.requireNonNull(text, "text");
+        Set<String> recorded = Set.copyOf(demaskedValues);
         if (memberIdentifierValues.isEmpty() || text.isBlank()) {
             return List.of();
         }
-        var input = MaskingEngine.screenText(text);
+        var input = MaskingEngine.mentionScanText(text);
         return rawIdentifierEntries.values().stream()
                 .filter(entry -> isMemberIdentifier(entry.rawValue()))
-                .filter(entry -> entry.replacementEligible() && input.literal().value().contains(entry.canonicalValue())
-                        || entry.labelEligible() && input.labels().value().contains(entry.labelValue()))
+                .filter(entry -> MaskingEngine.containsMemberMention(input, entry.rawValue())
+                        || recorded.contains(entry.rawValue())
+                            && MaskingEngine.containsRecordedMemberValue(input, entry.rawValue()))
                 .map(IdentifierEntry::rawValue).toList();
     }
 

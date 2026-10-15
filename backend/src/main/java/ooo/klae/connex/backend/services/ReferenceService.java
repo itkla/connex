@@ -692,6 +692,7 @@ public class ReferenceService {
         Set<Integer> validDefinitionStarts = memberDefinitionStartsOutsideParagraphs(content, definitionEnds);
         List<List<MemberLabelSpan>> readings = new ArrayList<>();
         readings.add(labels);
+        readings.add(canonicalMemberLabelsWithCodeSpans(content));
         for (int mode = 0; mode < 3; mode++) {
             List<MemberLabelSpan> spans = new ArrayList<>();
             collectMemberLabels(content, memberDefinitions, validDefinitionStarts, spans,
@@ -722,6 +723,62 @@ public class ReferenceService {
             }
             precedingClose = end;
         }
+    }
+
+    /**
+     * Recovers canonical labels independently of surrounding block or code state. A backward table
+     * finds each opener's first closing bracket while jumping locally paired backtick runs; nested
+     * openers share that work. Destination checks are cached, and spans stay source ordered and
+     * bounded before copying or normalization. The plain canonical reading retains unmatched ticks.
+     */
+    private static List<MemberLabelSpan> canonicalMemberLabelsWithCodeSpans(String content) {
+        if (content.indexOf('`') < 0) {
+            return List.of();
+        }
+        int[] closingRuns = closingBacktickRuns(content, false);
+        int[] nextClose = new int[content.length() + 1];
+        nextClose[content.length()] = -1;
+        for (int index = content.length() - 1; index >= 0; index--) {
+            char value = content.charAt(index);
+            if (value == '`') {
+                int end = index + 1;
+                while (index > 0 && content.charAt(index - 1) == '`') {
+                    index--;
+                }
+                int closing = closingRuns[index];
+                nextClose[index] = nextClose[closing < 0 ? end : closing + end - index];
+            } else {
+                nextClose[index] = value == ']' ? index : nextClose[index + 1];
+            }
+        }
+        byte[] destinations = new byte[content.length()];
+        Matcher destination = MEMBER_CANONICAL_DESTINATION.matcher(content);
+        List<MemberLabelSpan> labels = new ArrayList<>();
+        for (int index = 0; index < content.length(); index++) {
+            if (content.charAt(index) != '[') {
+                continue;
+            }
+            int start = index + 1;
+            int end = nextClose[start];
+            if (end <= start || !memberLabelWithinLimit(content, start, end)) {
+                continue;
+            }
+            if (destinations[end] == 0) {
+                boolean member = destination.region(end, content.length()).lookingAt()
+                        && TYPE_USER.equals(destination.group(1))
+                        && parseReferenceTarget(TYPE_USER, destination.group(2)).isPresent();
+                destinations[end] = (byte) (member ? 2 : 1);
+            }
+            if (destinations[end] == 2) {
+                labels.add(new MemberLabelSpan(start, end));
+            }
+        }
+        return labels;
+    }
+
+    /** Tests the shared 999-code-point bound for raw member provenance without copying the label. */
+    public static boolean memberLabelWithinLimit(String label) {
+        return label != null && memberLabelWithinLimit(label, 0, label.length());
     }
 
     /** Rejects oversized spans before allocation; the UTF-16 gate bounds code-point counting too. */

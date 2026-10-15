@@ -1078,8 +1078,8 @@ class AiChatTurnPersistenceServiceTest {
         String suggestion = "Ask Former Member to follow up.";
         var answer = new ooo.klae.connex.backend.beans.AiChatMessage();
         answer.setStructuredJson("{\"suggestions\":[\"" + suggestion
-                + "\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"},"
-                + "{\"kind\":\"member\",\"value\":\"Unrelated Member\"}]}");
+                + "\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\",\"path\":\"/suggestions/0\"},"
+                + "{\"kind\":\"member\",\"value\":\"Unrelated Member\",\"path\":\"/text\"}]}");
         when(chatMapper.getLatestAnswer(TURN.workspaceId(), TURN.sessionId())).thenReturn(answer);
         when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
         service.queue(TURN.sessionId(), new AiChatTurnCreateRequest(content, List.of()), TURN.restrictionEpoch());
@@ -1103,7 +1103,7 @@ class AiChatTurnPersistenceServiceTest {
         var answer = new ooo.klae.connex.backend.beans.AiChatMessage();
         String text = "Ask Former Member";
         answer.setStructuredJson("{\"suggestions\":[\"Ask Former Member\"],\"memberIdentifiers\":["
-                + "{\"kind\":\"member\",\"value\":\"Former Member\"}]}");
+                + "{\"kind\":\"member\",\"value\":\"Former Member\",\"path\":\"/suggestions/0\"}]}");
         when(chatMapper.getLatestAnswer(TURN.workspaceId(), TURN.sessionId())).thenReturn(answer);
         var identifiers = java.util.stream.IntStream.range(0, 20).mapToObj(index ->
                 new AiAssistantIdentifierResolver.Identifier(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER,

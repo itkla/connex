@@ -527,8 +527,7 @@ public class AiInvocationService {
                     rejectionReason, stripped, true, captureRepair);
         }
         Map<String, Set<String>> memberReplacements = new LinkedHashMap<>();
-        int warnings = invocation.context().privacyMode() == AiPrivacyMode.UNMASKED ? 0
-                : Demasker.demaskTree(object, invocation.context(), (path, member) ->
+        int warnings = Demasker.demaskTree(object, invocation.context(), (path, member) ->
                         memberReplacements.computeIfAbsent(path, ignored -> new LinkedHashSet<>()).add(member));
         Map<String, List<String>> memberIdentifiers = new LinkedHashMap<>();
         memberReplacements.forEach((path, members) -> memberIdentifiers.put(path, List.copyOf(members)));
@@ -1676,15 +1675,11 @@ public class AiInvocationService {
     }
 
     private static Demasker.DemaskResult demask(String text, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? new Demasker.DemaskResult(text == null ? "" : text, 0)
-                : Demasker.demask(text, context);
+        return Demasker.demask(text, context);
     }
 
     private static int demaskTree(JsonNode node, MaskingContext context) {
-        return context.privacyMode() == AiPrivacyMode.UNMASKED
-                ? 0
-                : Demasker.demaskTree(node, context);
+        return Demasker.demaskTree(node, context);
     }
 
     private record MalformedDiagnostic(

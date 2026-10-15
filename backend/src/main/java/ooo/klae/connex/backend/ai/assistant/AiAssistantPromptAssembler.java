@@ -1408,9 +1408,36 @@ public class AiAssistantPromptAssembler {
             List<AiChatNarration> narration,
             List<AiChatTodo> todos,
             List<String> memberIdentifiers) {
+        return finalMetadata(turnId, citations, suggestions, resources, observations, toolBudgetAudit,
+                skill, narration, todos, Map.of("/text", memberIdentifiers));
+    }
+
+    /** Persists raw member provenance at its retained answer-text or suggestion JSON pointer. */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
+            ToolBudgetAudit toolBudgetAudit,
+            SkillReference skill,
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos,
+            Map<String, List<String>> memberIdentifiersByPath) {
+        if (memberIdentifiersByPath.values().stream().mapToLong(List::size).sum() > MAX_SUMMARY_IDENTIFIERS) {
+            throw new IllegalStateException("Assistant answer identifier metadata is invalid");
+        }
+        var memberIdentifiers = new LinkedHashSet<Identifier>();
+        memberIdentifiersByPath.forEach((path, values) -> {
+            if (!"/text".equals(path) && !java.util.stream.IntStream.range(0, suggestions.size())
+                    .anyMatch(index -> ("/suggestions/" + index).equals(path))) {
+                throw new IllegalStateException("Assistant answer identifier path is invalid");
+            }
+            values.forEach(value -> memberIdentifiers.add(new Identifier("member", value, path)));
+        });
         if (memberIdentifiers.size() > MAX_SUMMARY_IDENTIFIERS
-                || memberIdentifiers.stream().anyMatch(value -> value == null || value.isBlank()
-                        || value.length() > MAX_SUMMARY_IDENTIFIER_CHARS)) {
+                || memberIdentifiers.stream().anyMatch(identifier -> identifier.value() == null || identifier.value().isBlank()
+                        || !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(identifier.value()))) {
             throw new IllegalStateException("Assistant answer identifier metadata is invalid");
         }
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
@@ -1443,8 +1470,7 @@ public class AiAssistantPromptAssembler {
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
             if (!memberIdentifiers.isEmpty()) {
-                metadata.put("memberIdentifiers", memberIdentifiers.stream()
-                        .map(value -> Map.of("kind", "member", "value", value)).toList());
+                metadata.put("memberIdentifiers", List.copyOf(memberIdentifiers));
             }
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
@@ -1945,7 +1971,9 @@ public class AiAssistantPromptAssembler {
                 if (identifiers != null && identifiers.isArray()) {
                     for (JsonNode identifier : identifiers) {
                         StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
-                        if (stored.kind() == EntityKind.MEMBER) {
+                        JsonNode path = identifier.get("path");
+                        if (stored.kind() == EntityKind.MEMBER
+                                && (path == null || !path.asString().startsWith("/suggestions/"))) {
                             members.add(stored.value());
                         }
                     }
@@ -2012,7 +2040,9 @@ public class AiAssistantPromptAssembler {
         JsonNode value = identifier.get("value");
         if (kind == null || !kind.isString()
                 || value == null || !value.isString() || value.asString().isBlank()
-                || value.asString().length() > MAX_SUMMARY_IDENTIFIER_CHARS) {
+                || ("member".equals(kind.asString())
+                        ? !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(value.asString())
+                        : value.asString().length() > MAX_SUMMARY_IDENTIFIER_CHARS)) {
             throw new IllegalStateException("Assistant summary identifier metadata is invalid");
         }
         EntityKind entityKind = switch (kind.asString()) {

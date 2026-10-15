@@ -400,7 +400,8 @@ public class AiChatMemoryService {
             var memberIdentifiers = demaskedMembers.stream()
                     .map(value -> java.util.Map.of("kind", "member", "value", value)).toList();
             if (storedIdentifiers.size() + memberIdentifiers.size() > 200
-                    || memberIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)
+                    || memberIdentifiers.stream().anyMatch(identifier ->
+                            !ooo.klae.connex.backend.services.ReferenceService.memberLabelWithinLimit(identifier.get("value")))
                     || storedIdentifiers.stream().anyMatch(identifier -> identifier.get("value").length() > 1_000)) {
                 throw new IllegalStateException("Assistant summary identifier metadata is invalid");
             }

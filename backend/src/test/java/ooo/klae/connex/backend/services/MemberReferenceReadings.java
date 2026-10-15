@@ -23,6 +23,17 @@ public final class MemberReferenceReadings {
         }
         readings.add(new Reading("b", "closing bracket inside link-text code",
                 "[Alice `]` Former](user:42)", "Alice `]` Former"));
+        readings.add(new Reading("canonical-code-span", "HTML type 1 then canonical link",
+                "<script>\n` stray\n</script>\n[Alice `]` Former](user:42)", "Alice `]` Former"));
+        for (String html : List.of("<script>\n` stray\n</script>", "<!--\n` stray\n-->", "<div>\n` stray\n</div>")) {
+            for (String ticks : List.of("`", "``")) {
+                for (String separator : List.of(":", "&colon;", "\\:")) {
+                    String label = "Alice " + ticks + "]" + ticks + " Former &amp; Member";
+                    readings.add(new Reading("canonical-code-span", "HTML then local code " + html + ticks + separator,
+                            html + "\n[" + label + "](user" + separator + "42)", label));
+                }
+            }
+        }
         for (String opaque : List.of("<!-- ] -->", "<span title=\"]\">", "<span title=']'>",
                 "<span title=]>", "<? ] ?>", "<!DECL ]>", "<![CDATA[ ] ]]>", "<x attr=\"`]\">")) {
             String label = "Alice " + opaque + " Former";

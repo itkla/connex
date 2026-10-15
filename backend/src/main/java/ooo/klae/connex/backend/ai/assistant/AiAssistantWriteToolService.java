@@ -123,7 +123,14 @@ public class AiAssistantWriteToolService {
             JsonNode args,
             AiChatResourceRegistry resources,
             long expectedRestrictionEpoch) {
-        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty());
+        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty(), Map.of());
+    }
+
+    /** Prepares a fresh write while retaining provenance recovered at exact argument JSON pointers. */
+    public AiAssistantPreparedWrite prepare(
+            String name, JsonNode args, AiChatResourceRegistry resources, long expectedRestrictionEpoch,
+            Map<String, List<String>> parsedMembers) {
+        return prepare(name, args, resources, expectedRestrictionEpoch, Optional.empty(), parsedMembers);
     }
 
     /**
@@ -154,7 +161,7 @@ public class AiAssistantWriteToolService {
             String storedArgumentsJson) {
         return prepare(
                 name, args, resources, expectedRestrictionEpoch,
-                Optional.of(storedArgumentsJson));
+                Optional.of(storedArgumentsJson), Map.of());
     }
 
     private AiAssistantPreparedWrite prepare(
@@ -162,7 +169,8 @@ public class AiAssistantWriteToolService {
             JsonNode args,
             AiChatResourceRegistry resources,
             long expectedRestrictionEpoch,
-            Optional<String> storedArgumentsJson) {
+            Optional<String> storedArgumentsJson,
+            Map<String, List<String>> parsedMembers) {
         if (!toolCatalog.isWrite(name) || !toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed("unknown_write_tool");
         }
@@ -226,7 +234,7 @@ public class AiAssistantWriteToolService {
         durable.put("request", storedRequest);
         List<AiAssistantToolResult.Identifier> memberIdentifiers = storedArgumentsJson.isPresent()
                 ? AiAssistantMemberIdentifiers.stored(objectMapper.readTree(storedArgumentsJson.get()))
-                : AiAssistantMemberIdentifiers.inRequest(storedRequest, resources.maskingContext());
+                : AiAssistantMemberIdentifiers.inRequest(storedRequest, resources.maskingContext(), parsedMembers);
         if (!memberIdentifiers.isEmpty()) {
             durable.put("memberIdentifiers", memberIdentifiers);
         }

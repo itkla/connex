@@ -118,11 +118,11 @@ class DemaskerTest {
     }
 
     @Test
-    void rawUnissuedCandidatesProtectSummaryAndNestedArgumentProvenance() {
+    void rawMentionsProtectProvenanceButLetterAdjacentLatinContainmentIsNotAMention() {
         var context = new MaskingContext();
         context.registerMemberCandidate("Bob");
         context.registerMemberCandidate("Li");
-        var tree = mapper.readTree("{\"summary\":\"xBob Bob_team\",\"args\":{\"description\":\"Ask Li\"}}");
+        var tree = mapper.readTree("{\"summary\":\"Bob_team\",\"notMention\":\"xBob client\",\"args\":{\"description\":\"Ask Li\"}}");
         var provenance = new java.util.LinkedHashMap<String, java.util.List<String>>();
         assertEquals(0, Demasker.demaskTree(tree, context, (path, member) ->
                 provenance.computeIfAbsent(path, ignored -> new java.util.ArrayList<>()).add(member)));

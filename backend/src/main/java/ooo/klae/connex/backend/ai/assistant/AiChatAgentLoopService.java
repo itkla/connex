@@ -8,6 +8,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -491,7 +493,7 @@ public class AiChatAgentLoopService {
                                             stepSchema.finalResponseSchema(),
                                             nativeRequest,
                                             admission,
-                                            providerGuard));
+                                            providerGuard), maskingContext);
                             attempt = nativeAttempt.attempt();
                             nativeStepCalls = nativeAttempt.stepCalls();
                             nativeMalformed = nativeAttempt.malformed();
@@ -614,6 +616,9 @@ public class AiChatAgentLoopService {
                 repair = null;
                 consumedSteps++;
                 if (step.tool() != null) {
+                    state.argumentMembers = parsed.memberIdentifiers().entrySet().stream()
+                            .filter(entry -> entry.getKey().startsWith("/tool/args/"))
+                            .collect(Collectors.toMap(entry -> entry.getKey().substring("/tool/args".length()), Map.Entry::getValue));
                     AiAssistantStepCalls stepCalls = nativeStepCalls.orElseGet(
                             () -> AiAssistantStepCalls.of(step.tool(), Optional.empty()));
                     for (AiAssistantStepCalls.Call stepCall : stepCalls.calls()) {
@@ -707,7 +712,7 @@ public class AiChatAgentLoopService {
                         skillReference,
                         omitted ? List.of() : List.copyOf(narration),
                         omitted ? List.of() : List.copyOf(state.todos),
-                        omitted ? List.of() : retainedMemberIdentifiers(
+                        omitted ? Map.<String, List<String>>of() : retainedMemberIdentifiers(
                                 parsed.memberIdentifiers(), nativeTools, finalAnswer.suggestions(), suggestions));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
@@ -766,20 +771,25 @@ public class AiChatAgentLoopService {
         }
     }
 
-    /** Retains original parsed paths after suggestion filtering changes their indexes or spelling. */
-    private static List<String> retainedMemberIdentifiers(
+    /** Remaps provenance to each retained suggestion after filtering and deduplication. */
+    private static Map<String, List<String>> retainedMemberIdentifiers(
             Map<String, List<String>> provenance, boolean nativeTools, List<String> supplied, List<String> retained) {
         String prefix = nativeTools ? "" : "/final";
-        var members = new java.util.LinkedHashSet<>(provenance.getOrDefault(prefix + "/text", List.of()));
+        var members = new LinkedHashMap<String, List<String>>();
+        members.put("/text", provenance.getOrDefault(prefix + "/text", List.of()));
         if (supplied != null) {
             for (int index = 0; index < supplied.size(); index++) {
                 String suggestion = supplied.get(index);
-                if (suggestion != null && retained.contains(suggestion.strip())) {
-                    members.addAll(provenance.getOrDefault(prefix + "/suggestions/" + index, List.of()));
+                int retainedIndex = suggestion == null ? -1 : retained.indexOf(suggestion.strip());
+                if (retainedIndex >= 0) {
+                    String path = "/suggestions/" + retainedIndex;
+                    var values = new java.util.LinkedHashSet<>(members.getOrDefault(path, List.of()));
+                    values.addAll(provenance.getOrDefault(prefix + "/suggestions/" + index, List.of()));
+                    members.put(path, List.copyOf(values));
                 }
             }
         }
-        return List.copyOf(members);
+        return Collections.unmodifiableMap(members);
     }
 
     /**
@@ -1129,9 +1139,10 @@ public class AiChatAgentLoopService {
                         ? writeToolService.prepareReplay(
                                 toolName, call.tool().args(), context.resources(),
                                 turn.restrictionEpoch(), storedArguments.get())
-                        : writeToolService.prepare(
-                                toolName, call.tool().args(), context.resources(),
-                                turn.restrictionEpoch());
+                        : state.argumentMembers.isEmpty()
+                                ? writeToolService.prepare(toolName, call.tool().args(), context.resources(), turn.restrictionEpoch())
+                                : writeToolService.prepare(toolName, call.tool().args(), context.resources(),
+                                        turn.restrictionEpoch(), state.argumentMembers);
             } catch (AiAssistantLoopException exception) {
                 if (!exception.recoverable()) {
                     throw exception;
@@ -1933,8 +1944,8 @@ public class AiChatAgentLoopService {
      * non-zero count settles here exactly as a demasked batch does — as malformed output with no
      * repair — whichever repair rule the envelope broke.
      */
-    private static NativeStepAttempt nativeStepAttempt(
-            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion) {
+    private NativeStepAttempt nativeStepAttempt(
+            AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion, MaskingContext maskingContext) {
         return switch (completion) {
             case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool
                     when tool.providerCalls().size() > 1 && tool.demaskWarnings() != 0 ->
@@ -1956,13 +1967,26 @@ public class AiChatAgentLoopService {
                         tool.providerCalls(), tool.callArguments());
                 AiAssistantStep step = new AiAssistantStep(
                         stepCalls.calls().getFirst().tool(), null);
+                Map<String, List<String>> members = new LinkedHashMap<>();
+                if (tool.providerCalls().size() == 1 && tool.demaskWarnings() == 0) {
+                    JsonNode originalArgs = objectMapper.readTree(tool.providerCall().arguments());
+                    int warnings = Demasker.demaskTree(originalArgs, maskingContext, (path, value) -> {
+                        String key = "/tool/args" + path;
+                        var values = new LinkedHashSet<>(members.getOrDefault(key, List.of()));
+                        values.add(value);
+                        members.put(key, List.copyOf(values));
+                    });
+                    if (warnings != 0) {
+                        throw AiAssistantLoopException.malformed("invented_placeholder");
+                    }
+                }
                 AiStructuredOutcome<AiAssistantStep> outcome =
                         new AiStructuredOutcome.Parsed<>(
                                 step,
                                 tool.demaskWarnings(),
                                 tool.inputTokens(),
                                 tool.outputTokens(),
-                                tool.stopReason());
+                                tool.stopReason(), members);
                 yield new NativeStepAttempt(
                         new AiStructuredRepairAttempt<>(
                                 outcome, Optional.empty(), tool.reasoning()),
@@ -2082,6 +2106,7 @@ public class AiChatAgentLoopService {
                 new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
         private Set<Toolset> offeredToolsets = offeredToolsets(null);
         private final List<AiChatTodo> todos = new ArrayList<>();
+        private Map<String, List<String>> argumentMembers = Map.of();
         private int noProgressSteps;
         private int planPublications;
         private ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;

@@ -55,22 +55,38 @@ public final class AiAssistantMemberIdentifiers {
 
     /** Captures bounded raw provenance from all textual values in a durable write request. */
     public static List<AiAssistantToolResult.Identifier> inRequest(JsonNode request, MaskingContext context) {
+        return inRequest(request, context, java.util.Map.of());
+    }
+
+    /** Merges raw mentions with exact parsed provenance at each unchanged stored-request field. */
+    public static List<AiAssistantToolResult.Identifier> inRequest(JsonNode request, MaskingContext context,
+            java.util.Map<String, List<String>> parsedMembers) {
+        parsedMembers.forEach((path, values) -> {
+            if (!request.at(path).isString()) {
+                throw new IllegalStateException("Assistant member provenance field changed during preparation");
+            }
+        });
         var identifiers = new LinkedHashSet<AiAssistantToolResult.Identifier>();
-        collectRequestLabels(request, "", context, identifiers);
+        collectRequestLabels(request, "", context, parsedMembers, identifiers);
         return checked(List.copyOf(identifiers));
     }
 
     private static void collectRequestLabels(JsonNode node, String path, MaskingContext context,
+            java.util.Map<String, List<String>> parsedMembers,
             LinkedHashSet<AiAssistantToolResult.Identifier> identifiers) {
         if (node.isString()) {
-            context.memberCandidatesIn(node.asString()).forEach(value ->
-                    identifiers.add(new AiAssistantToolResult.Identifier("member", value, path)));
+            var recorded = parsedMembers.getOrDefault(path, List.of());
+            var matches = context.memberCandidatesIn(node.asString(), recorded);
+            if (!matches.containsAll(recorded)) {
+                throw new IllegalStateException("Assistant member provenance value changed during preparation");
+            }
+            matches.forEach(value -> identifiers.add(new AiAssistantToolResult.Identifier("member", value, path)));
         } else if (node.isObject()) {
             node.properties().forEach(entry -> collectRequestLabels(entry.getValue(),
-                    path + "/" + pointerSegment(entry.getKey()), context, identifiers));
+                    path + "/" + pointerSegment(entry.getKey()), context, parsedMembers, identifiers));
         } else if (node.isArray()) {
             for (int index = 0; index < node.size(); index++) {
-                collectRequestLabels(node.get(index), path + "/" + index, context, identifiers);
+                collectRequestLabels(node.get(index), path + "/" + index, context, parsedMembers, identifiers);
             }
         }
     }
@@ -114,22 +130,28 @@ public final class AiAssistantMemberIdentifiers {
                 : java.util.stream.Stream.of(identifier)).distinct().toList());
     }
 
-    /** Restores contained raw labels only for an exact click on a persisted suggestion. */
+    /** Restores only the originating suggestion's provenance after an exact persisted-text click. */
     public static List<AiAssistantToolResult.Identifier> suggestionIdentifiers(JsonNode answer, String message) {
         JsonNode suggestions = answer.get("suggestions");
-        if (suggestions == null || !suggestions.isArray() || suggestions.valueStream().noneMatch(
-                suggestion -> suggestion.isString() && message.equals(suggestion.asString()))) {
+        if (suggestions == null || !suggestions.isArray()) {
             return List.of();
         }
-        MaskingContext context = new MaskingContext();
-        stored(answer).forEach(identifier -> identifier.seed(context));
-        return context.memberCandidatesIn(message).stream()
-                .map(value -> new AiAssistantToolResult.Identifier("member", value)).toList();
+        var members = new LinkedHashSet<AiAssistantToolResult.Identifier>();
+        for (int index = 0; index < suggestions.size(); index++) {
+            JsonNode suggestion = suggestions.get(index);
+            if (suggestion.isString() && message.equals(suggestion.asString())) {
+                String path = "/suggestions/" + index;
+                stored(answer).stream().filter(identifier -> path.equals(identifier.path()))
+                        .map(identifier -> new AiAssistantToolResult.Identifier("member", identifier.value()))
+                        .forEach(members::add);
+            }
+        }
+        return checked(List.copyOf(members));
     }
 
     private static List<AiAssistantToolResult.Identifier> checked(List<AiAssistantToolResult.Identifier> identifiers) {
         if (identifiers.size() > 200 || identifiers.stream().anyMatch(identifier ->
-                identifier.value().isBlank() || identifier.value().length() > 1_000)) {
+                identifier.value().isBlank() || !ReferenceService.memberLabelWithinLimit(identifier.value()))) {
             throw new IllegalStateException("Assistant member provenance exceeds its bounds");
         }
         return identifiers;

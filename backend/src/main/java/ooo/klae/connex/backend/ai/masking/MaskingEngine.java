@@ -768,9 +768,10 @@ public final class MaskingEngine {
     }
 
     /**
-     * Uses ordinary mention boundaries with MEMBER eligibility, including irreversible non-ASCII
-     * symbol labels. ASCII punctuation retains the ordinary exclusion and no containment authority
-     * is granted by a coincidental substring.
+     * Uses Unicode letter/digit boundaries for space-delimited member names. Underscores and
+     * punctuation separate names; Han, Hiragana, Katakana, Hangul and Thai need no word boundaries.
+     * MEMBER eligibility includes irreversible non-ASCII symbols but excludes ASCII punctuation.
+     * Coincidental letter-adjacent substrings grant no raw-provenance authority.
      * @param scanText user turn projected once for all authorized candidates
      * @param rawValue authorized member label
      * @return whether the user authored a member mention
@@ -790,30 +791,50 @@ public final class MaskingEngine {
         if (!MaskingContext.isCanonicalDictionaryEligible(value) && !memberSymbol) {
             return false;
         }
-        if (containsIdentifierMention(scanText.prepared, scanText.projection, value)) {
+        if (containsIdentifierMention(scanText.prepared, scanText.projection, value, member)) {
             return true;
         }
         String labelValue = CanonicalText.storedIdentifier(rawValue).label();
         return (MaskingContext.isCanonicalDictionaryEligible(labelValue) || memberSymbol && !labelValue.isEmpty())
-                && containsIdentifierMention(scanText.prepared, scanText.labels, labelValue);
+                && containsIdentifierMention(scanText.prepared, scanText.labels, labelValue, member);
     }
 
     private static boolean containsIdentifierMention(
-            String prepared, CanonicalText.Projection projection, String value) {
-        boolean bounded = usesAsciiWordBoundary(value);
+            String prepared, CanonicalText.Projection projection, String value, boolean member) {
+        boolean leftBoundary = member ? requiresMemberBoundary(value.codePointAt(0)) : usesAsciiWordBoundary(value);
+        boolean rightBoundary = member ? requiresMemberBoundary(value.codePointBefore(value.length())) : leftBoundary;
         String canonical = projection.value();
         for (int start = canonical.indexOf(value); start >= 0;
                 start = canonical.indexOf(value, start + 1)) {
             int sourceStart = projection.sourceStart(start);
             int sourceEnd = projection.sourceEnd(start + value.length());
-            if (!bounded
-                    || (sourceStart == 0 || !isIdentifierWord(prepared.codePointBefore(sourceStart)))
-                    && (sourceEnd == prepared.length()
-                            || !isIdentifierWord(prepared.codePointAt(sourceEnd)))) {
+            boolean left = sourceStart == 0 || !(member
+                    ? Character.isLetterOrDigit(prepared.codePointBefore(sourceStart)) : isIdentifierWord(prepared.codePointBefore(sourceStart)));
+            boolean right = sourceEnd == prepared.length() || !(member
+                    ? Character.isLetterOrDigit(prepared.codePointAt(sourceEnd)) : isIdentifierWord(prepared.codePointAt(sourceEnd)));
+            if ((!leftBoundary || left) && (!rightBoundary || right)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Only space-delimited candidate endpoints require Unicode letter/digit boundaries. */
+    private static boolean requiresMemberBoundary(int codePoint) {
+        if (!Character.isLetterOrDigit(codePoint)) {
+            return false;
+        }
+        return switch (Character.UnicodeScript.of(codePoint)) {
+            case HAN, HIRAGANA, KATAKANA, HANGUL, THAI -> false;
+            default -> true;
+        };
+    }
+
+    /** Validates only a value already recovered at this field's exact demask pointer. */
+    static boolean containsRecordedMemberValue(MentionScanText scanText, String rawValue) {
+        var stored = CanonicalText.storedIdentifier(rawValue);
+        return !stored.literal().isEmpty() && scanText.projection.value().contains(stored.literal())
+                || !stored.label().isEmpty() && scanText.labels.value().contains(stored.label());
     }
 
     /** Prepares one canonical turn and its source-offset map for the whole candidate page. */

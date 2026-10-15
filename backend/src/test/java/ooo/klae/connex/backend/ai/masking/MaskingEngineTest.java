@@ -54,6 +54,22 @@ class MaskingEngineTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @ParameterizedTest
+    @CsvSource({
+            "Bob,Bob_team,true", "Bob,_Bob_,true", "Bob,xBob,false", "Bob,Bobx,false",
+            "Li,show the client pipeline,false", "Li,Ask Li.,true", "Bob,éBob,false",
+            "Bob,BobЖ,false", "Bob,Bob٢,false", "Bob,中Bob,false", "Bob,Bobก,false", "李,x李y,true", "Bob,२Bob,false", "Иван,Иванов,false",
+            "Иван,позови Иван.,true", "李,联系李处理,true", "あき,連絡あき確認,true",
+            "アキ,連絡アキ確認,true", "김,지금김에게,true", "ไทย,คนไทยครับ,true"})
+    void rawMemberMentionsRespectUnicodeWordBoundariesAndUnspacedScripts(
+            String member, String text, boolean expected) {
+        assertEquals(expected, MaskingEngine.containsMemberMention(MaskingEngine.mentionScanText(text), member));
+        var context = new MaskingContext();
+        context.registerMemberCandidate(member);
+        assertEquals(expected ? List.of(member) : List.of(), context.memberCandidatesIn(text));
+        assertTrue(context.tokenBindings().isEmpty());
+    }
+
+    @ParameterizedTest
     @CsvSource({"abcdxxxx, {{M1}}, 0", "12345678, [redacted], 1"})
     void memberOutcomeContactRedactionIsIndependentOfCandidateRegistrationOrder(
             String suffix, String expected, int warnings) {

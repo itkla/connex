@@ -1205,7 +1205,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             assertEquals(originalLabel, objectMapper.readTree(stored.getResultJson()).path("outcome").path("owner").asString());
             AiAssistantToolResult result = writeToolService.proposalResult(prepared, new AiAssistantToolProposal(
                     fixture.toolCallId(), "executed", stored.getResultJson(), true));
-            assertEquals(List.of(new AiAssistantToolResult.Identifier("member", originalLabel)), result.identifiers());
+            assertEquals(List.of(new AiAssistantToolResult.Identifier("member", originalLabel, "/outcome/owner")), result.identifiers());
             AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(workspace.getId(), organization.getId());
             try {
                 var assembler = new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog());

@@ -244,7 +244,7 @@ class AiInvocationServiceTest {
     }
 
     @Test
-    void completeStreamingUnmaskedSkipsDemaskingAndAuditsDisclosurePosture() {
+    void completeStreamingUnmaskedValidatesUnknownPlaceholdersAndAuditsDisclosurePosture() {
         ResolvedAiProvider unmasked = unmaskedResolved();
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
         when(aiProvider.supportsStreaming(unmasked.target())).thenReturn(true);
@@ -261,8 +261,8 @@ class AiInvocationServiceTest {
 
         AiCompletionOutcome outcome = service.complete(invocation);
 
-        assertEquals("{{P1}}", outcome.text());
-        assertEquals(0, outcome.demaskWarnings());
+        assertEquals("[unknown reference]", outcome.text());
+        assertEquals(1, outcome.demaskWarnings());
         assertTrue(auditMetadata().stream()
                 .allMatch(metadata -> Boolean.TRUE.equals(metadata.get("streamed"))));
         verify(aiProvider, never()).complete(any());
@@ -2862,6 +2862,60 @@ class AiInvocationServiceTest {
                 schema.finalResponseSchema(), new AiNativeToolRequest(
                         catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), exchanges),
                 directAdmission, providerAttemptGuard);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void unmaskedUnknownPlaceholdersStillProduceFailClosedWarnings(boolean nativeProtocol, boolean tool) throws Exception {
+        when(aiProvider.contextWindowTokens(any())).thenReturn(128_000);
+        var unmasked = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID)).thenReturn(unmasked);
+        if (nativeProtocol) {
+            when(aiProvider.toolCallingCapability(any())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        }
+        var context = new MaskingContext(AiPrivacyMode.UNMASKED);
+        var prompt = PromptAssembly.builder(context).system("Use concise analysis").userTurn("Follow up").build();
+        var invocation = new AiInvocation(FEATURE, context, prompt, List.of(), 256, 0.1, false, null,
+                nativeProtocol ? AiInvocationProtocol.NATIVE_TOOLS : AiInvocationProtocol.JSON_REACT);
+        var mapper = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var guard = new AiAssistantStepGuard(catalog);
+        var schema = new AiAssistantStepSchema(mapper, catalog);
+        String arguments = "{\"handle\":\"r1\",\"description\":\"{{P1}}\"}";
+        String answer = "{\"text\":\"{{P1}}\",\"citations\":[],\"suggestions\":[],\"title\":null}";
+        String output = nativeProtocol ? (tool ? "" : answer)
+                : tool ? "{\"tool\":{\"name\":\"create_task\",\"args\":" + arguments + "},\"final\":null}"
+                : "{\"tool\":null,\"final\":" + answer + "}";
+        providerReturns(new AiCompletionResult(output, 3, 5, tool ? "tool_calls" : "stop",
+                AiStructuredOutputEnforcement.JSON_SCHEMA, "", AiReasoningMode.NONE,
+                nativeProtocol && tool ? List.of(new AiToolCall("call-1", "create_task", arguments)) : List.of()));
+        if (nativeProtocol) {
+            var result = service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                    guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), guard.finalAnswerForIssuedPlaceholders(Set.of()),
+                    schema.finalResponseSchema(), new AiNativeToolRequest(catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), List.of()),
+                    directAdmission, providerAttemptGuard);
+            if (tool) {
+                var parsed = assertInstanceOf(AiNativeToolCompletion.Tool.class, result);
+                assertEquals(1, parsed.demaskWarnings());
+                assertEquals("[unknown reference]", parsed.arguments().path("description").asString());
+            } else {
+                var content = assertInstanceOf(AiNativeToolCompletion.Content.class, result);
+                var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, content.attempt().outcome());
+                assertEquals(1, parsed.demaskWarnings());
+                assertEquals("[unknown reference]", ((AiAssistantStep.FinalAnswer) parsed.value()).text());
+                assertTrue(content.attempt().repair().isEmpty());
+            }
+        } else {
+            var result = service.completeStructuredRepairable(invocation, AiAssistantStep.class,
+                    guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), schema.responseSchema(AiAssistantToolCatalog.ALL),
+                    directAdmission, providerAttemptGuard);
+            var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, result.outcome());
+            assertEquals(1, parsed.demaskWarnings());
+            var step = (AiAssistantStep) parsed.value();
+            assertEquals("[unknown reference]", tool ? step.tool().args().path("description").asString() : step.finalAnswer().text());
+            assertTrue(result.repair().isEmpty());
+        }
+        verify(aiProvider, times(1)).complete(any());
     }
 
 }
