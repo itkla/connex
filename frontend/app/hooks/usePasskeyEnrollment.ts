@@ -80,7 +80,9 @@ export function usePasskeyEnrollment(
         const standing = await callbacks.onEnrolled().catch(() => "unloaded" as const);
         toastSuccess(t("added"));
         if (standing === "unloaded") toastError(t("loadFailed"));
-        else if (standing === "failed") toastError(t("addedRefreshFailed"));
+        else if (standing === "failed") {
+            toastError(t("addedRefreshFailed"), { description: t("addedRefreshFailedDescription") });
+        }
     };
 
     const sendConfirmation = async () => {

@@ -188,7 +188,9 @@ describe("enrolling a passkey", () => {
 
         expect(mocks.finish).toHaveBeenCalledOnce();
         expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.added);
-        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.addedRefreshFailed);
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.addedRefreshFailed, {
+            description: enAccount.AccountSecurity.addedRefreshFailedDescription,
+        });
         expect(mocks.toastError).not.toHaveBeenCalledWith(enAccount.AccountSecurity.loadFailed);
     });
 

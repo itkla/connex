@@ -650,7 +650,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
  * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
- * read again, up to three attempts before it is reported as failed. A failed or malformed read keeps any confinement, and a
+ * read again, up to three attempts before it is reported as failed. A read that fails after a newer
+ * one has already decided the standing ends superseded too, since the newer read is the fresher
+ * answer. A failed or malformed read keeps any confinement, and a
  * standing this client does not know counts as malformed. A backend too old to report standing releases only
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
@@ -668,23 +670,26 @@ export async function settlePrivilegedMfaStanding(
         privilegedMfaEventEpoch += 1;
         privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
     }
+    const failedUnlessOvertaken = (sequence: number): PrivilegedMfaSettleOutcome =>
+        sequence < privilegedMfaAppliedSequence ? "superseded" : "failed";
+    let sequence = privilegedMfaReadSequence;
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
-        const sequence = privilegedMfaReadSequence;
+        sequence = privilegedMfaReadSequence;
         let response: unknown;
         try {
             response = await getPasskeyRegistrationRequirements();
         } catch {
-            return "failed";
+            return failedUnlessOvertaken(sequence);
         }
-        if (!isPasskeyRegistrationRequirements(response)) return "failed";
+        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence);
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
         applyPrivilegedMfaStanding(response, sequence);
         return "applied";
     }
-    return "failed";
+    return failedUnlessOvertaken(sequence);
 }
 
 /**

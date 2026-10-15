@@ -98,7 +98,9 @@ export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): C
                 delete next[key];
                 return next;
             });
-            if (outcome === "failed") toastError(t("exitRefreshFailed"));
+            if (outcome === "failed") {
+                toastError(t("exitRefreshFailed"), { description: t("exitRefreshFailedDescription") });
+            }
             return true;
         };
         setLeavingKey(key);

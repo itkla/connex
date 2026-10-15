@@ -145,7 +145,9 @@ describe("leaving what confines a privileged account", () => {
 
         expect(left).toBe(true);
         expect(api.refresh).toHaveBeenCalledOnce();
-        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed);
+        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed, {
+            description: enAccount.AccountSecurity.exitRefreshFailedDescription,
+        });
         expect(current().refusals["organization:3"]).toBeUndefined();
     });
 
@@ -160,7 +162,9 @@ describe("leaving what confines a privileged account", () => {
         });
 
         expect(left).toBe(true);
-        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed);
+        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed, {
+            description: enAccount.AccountSecurity.exitRefreshFailedDescription,
+        });
     });
 
     it("leaves a workspace through the surface without a note when the standing settles", async () => {
@@ -186,7 +190,9 @@ describe("leaving what confines a privileged account", () => {
         });
 
         expect(left).toBe(true);
-        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed);
+        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed, {
+            description: enAccount.AccountSecurity.exitRefreshFailedDescription,
+        });
     });
 
     it("catches up with a workspace the account no longer belongs to instead of refusing", async () => {
@@ -226,7 +232,9 @@ describe("leaving what confines a privileged account", () => {
 
         expect(left).toBe(true);
         expect(current().refusals["workspace:7"]).toBeUndefined();
-        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed);
+        expect(api.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.exitRefreshFailed, {
+            description: enAccount.AccountSecurity.exitRefreshFailedDescription,
+        });
     });
 
     it("explains anything the server did not name generically", async () => {

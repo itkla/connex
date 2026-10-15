@@ -282,10 +282,19 @@ function MembersWorkspacePanel({
         try {
             const loaded = await getWorkspaceMembers(workspaceId);
             if (refreshId === membersRefresh.current) setMembers(loaded);
-        } catch {
-            if (refreshId === membersRefresh.current) toastError(t("membersRefreshFailed"));
+        } catch (err) {
+            if (refreshId === membersRefresh.current) {
+                showApiError(err, "membersRefreshFailed", "membersRefreshFailedDescription");
+            }
         }
-    }, [t, workspaceId]);
+    }, [showApiError, workspaceId]);
+
+    useEffect(() => {
+        const generation = membersRefresh;
+        return () => {
+            generation.current += 1;
+        };
+    }, [workspaceId]);
 
     useEffect(() => {
         if (!workspaceId || (!canManageMembers && !canManageRoles)) return;

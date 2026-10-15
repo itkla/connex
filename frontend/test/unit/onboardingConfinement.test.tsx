@@ -194,7 +194,9 @@ describe("confinement on onboarding, for an account with no workspace", () => {
         expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.approvalDone, {
             description: "It now counts for administrator access in Acme.",
         });
-        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.approvalRefreshFailed);
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.approvalRefreshFailed, {
+            description: enAccount.AccountSecurity.approvalRefreshFailedDescription,
+        });
     });
 
     it("lets the account leave the organization that confines it", async () => {
