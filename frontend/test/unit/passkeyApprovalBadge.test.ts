@@ -23,6 +23,16 @@ describe("the passkey-not-approved badge on member rows", () => {
         expect(panel).toContain('title={t("passkeyNotApprovedHint")}');
     });
 
+    it("re-reads the roster after a role change so the badge follows the new role", () => {
+        const panel = source("app/components/settings/MembersPanel.tsx");
+        const changeRole = panel.slice(panel.indexOf("const changeRole = async"), panel.indexOf("const withdrawOwnershipOffer = async"));
+        const assignCustom = panel.slice(panel.indexOf("const assignCustom = async"), panel.indexOf("const confirmRemove = async"));
+
+        expect(changeRole).toContain("void refreshMembers();");
+        expect(assignCustom).toContain("void refreshMembers();");
+        expect(panel).toMatch(/if \(refreshId === membersRefresh\.current\) setMembers\(loaded\);/);
+    });
+
     it("has its copy in both languages for both lists", () => {
         for (const messages of [enWorkspace.WorkspaceMembers, jaWorkspace.WorkspaceMembers,
             enOrganization.OrgMembers, jaOrganization.OrgMembers]) {

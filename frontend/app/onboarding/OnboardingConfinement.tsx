@@ -13,6 +13,7 @@ import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
 import PasskeyEnrollmentPasswordDialog from "@/app/components/account/PasskeyEnrollmentPasswordDialog";
 import PrivilegedMfaConfinementCard from "@/app/components/account/PrivilegedMfaConfinementCard";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -151,10 +152,19 @@ export default function OnboardingConfinement({ standing }: { standing: Privileg
             <PasskeyApprovalDialog
                 open={approvalOpen}
                 onOpenChange={setApprovalOpen}
-                onApproved={() => {
-                    void Promise.all([getPasskeys(), refresh("ceremony")]).then(([loaded]) => {
-                        setPasskeys(loaded);
-                    }, () => undefined);
+                onApproved={(orgId) => {
+                    const organization = requirements?.approvalGaps?.find((gap) => gap.orgId === orgId)?.orgName;
+                    toastSuccess(t("approvalDone"), {
+                        description: organization
+                            ? t("approvalDoneDescription", { organization })
+                            : t("approvalDoneDescriptionGeneric"),
+                    });
+                    void Promise.allSettled([getPasskeys(), refresh("ceremony")]).then(([loaded, settled]) => {
+                        if (loaded.status === "fulfilled") setPasskeys(loaded.value);
+                        if (loaded.status === "rejected" || settled.status === "rejected" || settled.value === "failed") {
+                            toastError(t("approvalRefreshFailed"));
+                        }
+                    });
                 }}
             />
         </div>

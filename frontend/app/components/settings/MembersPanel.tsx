@@ -274,6 +274,19 @@ function MembersWorkspacePanel({
         };
     }, [workspaceId, canManageMembers, canManageRoles, t]);
 
+    const membersRefresh = useRef(0);
+    const refreshMembers = useCallback(async () => {
+        if (!workspaceId) return;
+        membersRefresh.current += 1;
+        const refreshId = membersRefresh.current;
+        try {
+            const loaded = await getWorkspaceMembers(workspaceId);
+            if (refreshId === membersRefresh.current) setMembers(loaded);
+        } catch {
+            return;
+        }
+    }, [workspaceId]);
+
     useEffect(() => {
         if (!workspaceId || (!canManageMembers && !canManageRoles)) return;
         let cancelled = false;
@@ -335,6 +348,7 @@ function MembersWorkspacePanel({
                 return;
             }
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
             ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));
@@ -375,6 +389,7 @@ function MembersWorkspacePanel({
             );
             if (updated === null) return;
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            void refreshMembers();
             ownershipOffers.refresh();
             router.refresh();
             toastSuccess(t("roleChanged"));

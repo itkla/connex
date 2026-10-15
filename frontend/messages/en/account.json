@@ -114,7 +114,8 @@
         "exitRefusedWorkspaceRecoveryOwner": "This workspace needs an owner with the built-in owner role. Give that role to another owner before you leave.",
         "exitRefusedSoleApprover": "You're the only approver on a document approval here. Reassign it before you leave.",
         "exitRefusedOrgNotMember": "You're no longer a member of this organization.",
-        "exitRefusedOrgLastOwner": "You're this organization's last owner. Make someone else an owner before you leave."
+        "exitRefusedOrgLastOwner": "You're this organization's last owner. Make someone else an owner before you leave.",
+        "approvalRefreshFailed": "Your passkey was approved, but this page couldn't update. Check again in a moment."
     },
     "AccountConnections": {
         "title": "Connected accounts",

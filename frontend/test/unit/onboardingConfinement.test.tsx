@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
     finishRegistration: vi.fn(async () => undefined),
     startRegistration: vi.fn(async () => ({ id: "credential" })),
     approval: { open: false, onApproved: null as ((orgId: number) => void) | null },
+    toastError: vi.fn(),
+    toastSuccess: vi.fn(),
 }));
 
 vi.mock("@/app/lib/api", async (importOriginal) => ({
@@ -35,7 +37,7 @@ vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
 vi.mock("@/app/hooks/usePasskeySupport", () => ({ usePasskeySupport: () => true }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/app/hooks/usePasskeyStepUpError", () => ({ usePasskeyStepUpErrorHandler: () => () => false }));
-vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn() }));
+vi.mock("@/app/lib/toast", () => ({ toastError: mocks.toastError, toastInfo: vi.fn(), toastSuccess: mocks.toastSuccess }));
 vi.mock("@/app/components/account/PasskeyApprovalDialog", () => ({
     default: ({ open, onApproved }: { open: boolean; onApproved: (orgId: number) => void }) => {
         mocks.approval.open = open;
@@ -177,6 +179,22 @@ describe("confinement on onboarding, for an account with no workspace", () => {
         await act(async () => mocks.approval.onApproved?.(3));
 
         expect(standing.refresh).toHaveBeenCalledWith("ceremony");
+    });
+
+    it("announces a redeemed code and reports a status refresh that could not complete", async () => {
+        const standing = standingFor("ATTESTATION_REQUIRED", {
+            approvalGaps: [{ credentialId: "cred-laptop", orgId: 3, orgName: "Acme" }],
+        });
+        standing.refresh = vi.fn(async () => "failed" as const);
+        await renderConfinement(standing);
+
+        await act(async () => button(enAccount.AccountSecurity.approvalEnter).click());
+        await act(async () => mocks.approval.onApproved?.(3));
+
+        expect(mocks.toastSuccess).toHaveBeenCalledWith(enAccount.AccountSecurity.approvalDone, {
+            description: "It now counts for administrator access in Acme.",
+        });
+        expect(mocks.toastError).toHaveBeenCalledWith(enAccount.AccountSecurity.approvalRefreshFailed);
     });
 
     it("lets the account leave the organization that confines it", async () => {
