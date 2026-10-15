@@ -2,8 +2,9 @@
 #
 # Staging-aware frontend launcher. Local and ordinary production `pnpm start`
 # retain the normal Next start behavior when no sealed staging release is active.
-# A sealed release must match the backend authorized by the deploy transaction,
-# including after a reboot; malformed transactions refuse startup.
+# Every startup validates the deploy transaction, including after a reboot.
+# Legacy startup requires no transaction or a safe pre-backend phase; sealed
+# releases must match the backend authorized by the transaction.
 
 set -euo pipefail
 
@@ -34,25 +35,38 @@ read_transaction() {
     ' "$manifest"
 }
 
+phase=none
+if [ -e "$TRANSACTION_FILE" ] || [ -L "$TRANSACTION_FILE" ]; then
+    if ! transaction="$(read_transaction)"; then
+        echo "[connex-staging-frontend] Refusing startup: deploy transaction is malformed or unreadable" >&2
+        exit 1
+    fi
+    IFS=$'\t' read -r prior target _ phase <<< "$transaction"
+    case "$phase" in
+        prepared|frontend_stopped) ;;
+        rollback_starting)
+            echo "[connex-staging-frontend] Refusing startup: rollback backend activation is incomplete" >&2
+            exit 1
+            ;;
+        *)
+            if [ ! -r "$ACTIVE_RELEASE" ]; then
+                echo "[connex-staging-frontend] Refusing legacy startup: deploy transaction requires a sealed frontend release marker" >&2
+                exit 1
+            fi
+            ;;
+    esac
+fi
+
 if [ -r "$ACTIVE_RELEASE" ]; then
     sha="$(sed -n '1p' "$ACTIVE_RELEASE")"
     if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
         echo "[connex-staging-frontend] Refusing invalid active release identity" >&2
         exit 1
     fi
-    if [ -e "$TRANSACTION_FILE" ] || [ -L "$TRANSACTION_FILE" ]; then
-        if ! transaction="$(read_transaction)"; then
-            echo "[connex-staging-frontend] Refusing sealed startup: deploy transaction is malformed or unreadable" >&2
-            exit 1
-        fi
-        IFS=$'\t' read -r prior target _ phase <<< "$transaction"
+    if [ "$phase" != none ]; then
         expected="$target"
         case "$phase" in
             prepared|frontend_stopped) expected="$sha" ;;
-            rollback_starting)
-                echo "[connex-staging-frontend] Refusing sealed startup: rollback backend activation is incomplete" >&2
-                exit 1
-                ;;
             rollback_live) expected="$prior" ;;
         esac
         if [ "$sha" != "$expected" ]; then

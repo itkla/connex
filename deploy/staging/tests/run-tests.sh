@@ -2311,11 +2311,52 @@ case_frontend_launcher_gates_transaction_phases() (
                 assert_equals allowed_runtime "$RELEASES_DIR/$sha/frontend" "$(sed -n '1p' "$root/started.log")" || return 1
                 assert_equals allowed_running_identity "$sha" "$(cut -f1 "$FRONTEND_RUNNING_MARKER")" || return 1
             else
-                assert_contains denied_startup_is_clear '[connex-staging-frontend] Refusing sealed startup' "$root/startup.log" || return 1
+                assert_contains denied_startup_is_clear '[connex-staging-frontend] Refusing' "$root/startup.log" || return 1
                 assert_file_missing denied_runtime_not_started "$root/started.log" || return 1
                 assert_file_missing denied_runtime_not_attested "$FRONTEND_RUNNING_MARKER" || return 1
             fi
         done
+    done
+)
+
+case_frontend_launcher_gates_missing_marker_legacy_fallback() (
+    local root="$SANDBOX/launcher-legacy" repo phase expected status
+    setup_floor_recovery_fixture "$root" || return 1
+    repo="$root/repo"
+    mkdir -p "$repo/deploy/staging" "$repo/frontend/node_modules/.bin"
+    cp "$STAGING_DEPLOY_DIR/connex-frontend-start.sh" "$repo/deploy/staging/connex-frontend-start.sh"
+    printf '#!/bin/bash\nprintf "%%s\\n" "$PWD" "$*" > "$CONNEX_LAUNCH_TEST_LOG"\n' > "$repo/frontend/node_modules/.bin/next"
+    chmod 0755 "$repo/frontend/node_modules/.bin/next"
+    rm "$FRONTEND_RELEASE_MARKER"
+    for phase in none prepared frontend_stopped backend_starting backend_live frontend_live forward_only committed rollback_starting rollback_live malformed unreadable; do
+        rm -f "$TRANSACTION_FILE" "$root/started.log"
+        case "$phase" in
+            none) ;;
+            malformed)
+                write_transaction forward_only || return 1
+                printf 'unexpected\tinvalid\n' >> "$TRANSACTION_FILE"
+                ;;
+            unreadable) ln -s "$root/missing-transaction" "$TRANSACTION_FILE" ;;
+            *) write_transaction "$phase" || return 1 ;;
+        esac
+        printf 'stale-running-record\n' > "$FRONTEND_RUNNING_MARKER"
+        expected=1
+        case "$phase" in
+            none|prepared|frontend_stopped) expected=0 ;;
+        esac
+        status=0
+        CONNEX_STAGING_STATE_DIR="$STATE_DIR" CONNEX_LAUNCH_TEST_LOG="$root/started.log" \
+            bash "$repo/deploy/staging/connex-frontend-start.sh" > "$root/startup.log" 2>&1 || status=$?
+        assert_status "${phase}_missing_marker_startup" "$expected" "$status" || return 1
+        if [ "$expected" = 0 ]; then
+            assert_equals legacy_frontend_directory "$repo/frontend" "$(sed -n '1p' "$root/started.log")" || return 1
+            assert_equals legacy_next_start start "$(sed -n '2p' "$root/started.log")" || return 1
+            assert_file_missing legacy_clears_running_record "$FRONTEND_RUNNING_MARKER" || return 1
+        else
+            assert_contains legacy_refusal_is_clear '[connex-staging-frontend] Refusing' "$root/startup.log" || return 1
+            assert_file_missing unsafe_legacy_runtime_not_started "$root/started.log" || return 1
+            assert_equals refusal_preserves_running_record stale-running-record "$(cat "$FRONTEND_RUNNING_MARKER")" || return 1
+        fi
     done
 )
 
@@ -3015,6 +3056,7 @@ run_case case_floor_timer_alerts_after_immediate_forward_recovery
 run_case case_forward_only_unhealthy_target_never_retries_previous
 run_case case_forward_only_smoke_and_commit_failures_remain_recoverable
 run_case case_frontend_launcher_gates_transaction_phases
+run_case case_frontend_launcher_gates_missing_marker_legacy_fallback
 run_case case_frontend_launcher_and_deploy_reject_malformed_transactions
 run_case case_recovery_stops_frontend_before_credential_or_record_refusal
 run_case case_authorized_rollback_recovers_before_frontend_start

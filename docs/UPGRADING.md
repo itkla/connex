@@ -65,7 +65,9 @@ migration-discipline part of #87 §9 / #102).
   An unhealthy target leaves its frontend stopped for operator forward recovery; the previous
   frontend is never started alongside it. Recovery stops the frontend before credential checks,
   and reboot startup validates the transaction: once the target backend may have run, only its
-  frontend can start, while malformed or unreadable transactions block sealed startup.
+  frontend can start, while malformed or unreadable transactions block all startup.
+  Without a frontend marker, legacy startup requires no transaction or a valid `prepared` or
+  `frontend_stopped` phase; even `rollback_live` requires the verified prior release's marker.
   Authorized rollback records `rollback_starting` to block startup until the previous backend is
   healthy, then `rollback_live` to allow its frontend, retaining the transaction until both are
   restored. Older target commits with no floor file retain the
