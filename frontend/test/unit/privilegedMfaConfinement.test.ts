@@ -353,6 +353,44 @@ describe("privileged MFA confinement in the browser", () => {
         expect(requests.some(({ url }) => url.endsWith("/api/auth/login"))).toBe(true);
     });
 
+    it("never refuses signing in locally, and forgets a signed-out session's confinement", async () => {
+        const { location } = stubBrowser("/dashboard");
+        const requests = stubBackend((url) => {
+            if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
+            if (url.endsWith("/api/auth/login")) return json({ message: "Signed in" });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
+
+        await api.login({ username: "dana", password: "correct horse" });
+        expect(requests.some(({ url }) => url.endsWith("/api/auth/login"))).toBe(true);
+
+        location.pathname = "/auth/login";
+        location.search = "";
+        api.forgetPrivilegedMfaStanding();
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+    });
+
+    it("reads the standing again once an ownership offer is accepted", async () => {
+        stubBrowser("/onboarding");
+        stubBackend((url, method) => {
+            if (method === "POST" && url.endsWith("/api/ownership-offers/41/accept")) {
+                return json({ offer: {}, membership: null, standing: "ATTESTATION_REQUIRED", enforcedStanding: "ATTESTATION_REQUIRED" });
+            }
+            if (url.endsWith(REQUIREMENTS)) return requirements("ATTESTATION_REQUIRED");
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+
+        await api.acceptOwnershipOffer("41");
+
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("ATTESTATION_REQUIRED");
+    });
+
     describe("against a backend that reports no standing", () => {
         it("releases after an accepted enrollment", async () => {
             stubBrowser(SECURITY, "?mfa=enroll");

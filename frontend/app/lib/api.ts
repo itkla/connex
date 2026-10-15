@@ -670,6 +670,14 @@ export function privilegedMfaConfinementDestination(): string | null {
     return reason === null ? null : `${PRIVILEGED_MFA_ROUTE}?mfa=${PRIVILEGED_MFA_STEP_PARAMS[reason]}`;
 }
 
+/**
+ * Forgets the browser's privileged-MFA state where the server has confirmed there is no session, so
+ * an expired session's confinement never blocks signing in again. Call it only on such a surface.
+ */
+export function forgetPrivilegedMfaStanding(): void {
+    resetPrivilegedMfaState();
+}
+
 /** Reads the standing again after a safe exit, only when the browser was confined. */
 async function settleAfterSafeExit(): Promise<void> {
     if (activePrivilegedMfaConfinement() === null) return;
@@ -681,6 +689,7 @@ function privilegedMfaSuppression(path: string, method?: string): PrivilegedMfaC
     if (reason === null) return null;
     const pathname = path.split("?")[0];
     const normalizedMethod = (method ?? "GET").toUpperCase();
+    if (normalizedMethod === "POST" && isCsrfRetryExemptMutation(pathname)) return null;
     const allowed = (normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
         || (normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname))
         || (normalizedMethod === "POST" && PRIVILEGED_MFA_SAFE_EXIT_POST_PATH.test(pathname));
@@ -5422,13 +5431,16 @@ export function getOrgOwnershipOffers(orgId: number, init: RequestInit = {}) {
  * Accepts an ownership offer. Acceptance needs recent passkey authentication, which the shared
  * request path obtains. When accepting would confine the account until another owner approves its
  * passkey, the server answers 409 `PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED`; the caller
- * explains that and retries with `acknowledgeConfinement`.
+ * explains that and retries with `acknowledgeConfinement`. Ownership can newly confine the account,
+ * so the standing is read again once the server accepts.
  */
-export function acceptOwnershipOffer(offerId: string, acknowledgeConfinement = false) {
-    return postJson<Types.OwnershipOfferAcceptance>(
+export async function acceptOwnershipOffer(offerId: string, acknowledgeConfinement = false) {
+    const acceptance = await postJson<Types.OwnershipOfferAcceptance>(
         `/api/ownership-offers/${encodeURIComponent(offerId)}/accept`,
         acknowledgeConfinement ? { acknowledgeConfinement: true } : {},
     );
+    await settlePrivilegedMfaStanding("check");
+    return acceptance;
 }
 
 /** Declines an ownership offer. Reachable while confined, because declining grants nothing. */

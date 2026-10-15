@@ -121,6 +121,45 @@ describe("the privileged-MFA standing a surface sees", () => {
         expect(current().confined).toBe(true);
     });
 
+    it("surfaces a failed read after a ceremony even while an older standing is cached", async () => {
+        store.outcomes = [
+            { outcome: "applied", requirements: requirements("ATTESTATION_REQUIRED") },
+            { outcome: "failed" },
+            { outcome: "failed" },
+            { outcome: "applied", requirements: requirements("SATISFIED") },
+        ];
+        await mountHook();
+        expect(current().status).toBe("ready");
+
+        await act(async () => {
+            await current().refresh("ceremony");
+        });
+        expect(current().status).toBe("failed");
+        expect(current().confined).toBe(true);
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().status).toBe("failed");
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+        expect(current().status).toBe("ready");
+        expect(current().confined).toBe(false);
+    });
+
+    it("keeps showing the cached standing when only a background check fails", async () => {
+        store.outcomes = [{ outcome: "applied", requirements: requirements("SATISFIED") }, { outcome: "failed" }];
+        await mountHook();
+
+        await act(async () => {
+            await current().refresh("check");
+        });
+
+        expect(current().status).toBe("ready");
+    });
+
     it("stays loading, and so not cleared, before any read has decided", async () => {
         store.settle.mockImplementation(() => new Promise(() => undefined));
         await mountHook();

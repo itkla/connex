@@ -18,7 +18,10 @@ import {
 export type PrivilegedMfaStandingState = {
     /** The newest decisive read, shared by every surface in the page, or null before one. */
     requirements: PasskeyRegistrationRequirements | null;
-    /** `loading` until a decisive read exists; `failed` when this surface's reads could not provide one. */
+    /**
+     * `loading` until a decisive read exists; `failed` when this surface's reads could not provide
+     * one, or when the read right after a ceremony failed, so the ceremony's outcome can be retried.
+     */
     status: "loading" | "ready" | "failed";
     /** Whether the browser is confined, from the server's refusal, a step URL or the newest read. */
     confined: boolean;
@@ -46,11 +49,14 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         privilegedMfaConfinementReason,
         () => null,
     );
-    const [readFailed, setReadFailed] = useState(false);
+    const [lastFailure, setLastFailure] = useState<"none" | "read" | "ceremony">("none");
 
     const refresh = useCallback(async (settlement: PrivilegedMfaSettlement = "check") => {
         const outcome = await settlePrivilegedMfaStanding(settlement);
-        setReadFailed(outcome === "failed");
+        setLastFailure((previous) => {
+            if (outcome !== "failed") return "none";
+            return settlement === "ceremony" || previous === "ceremony" ? "ceremony" : "read";
+        });
         return outcome;
     }, []);
 
@@ -71,7 +77,9 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
     const standing = requirements?.standing;
     return {
         requirements,
-        status: requirements !== null ? "ready" : readFailed ? "failed" : "loading",
+        status: requirements === null
+            ? lastFailure === "none" ? "loading" : "failed"
+            : lastFailure === "ceremony" ? "failed" : "ready",
         confined: reason !== null || standing === "ENROLLMENT_REQUIRED" || standing === "ATTESTATION_REQUIRED",
         reason,
         refresh,
