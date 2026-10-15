@@ -6,6 +6,7 @@ none ran the script. This one does: it pulls the exact `run:` block from the wor
 recording `gh` stub on PATH, and asserts what the step actually does.
 """
 
+import json
 import os
 import pathlib
 import stat
@@ -43,7 +44,11 @@ GH_STUB = textwrap.dedent(
         exit 0 ;;
       "api repos/"*"/issues/"*)
         if [ "${GH_ISSUE_READ_FAILS:-0}" = "1" ]; then exit 1; fi
-        number="${2##*/}"; state=closed; labels='[{"name":"ci-main-red"}]'
+        number="${2##*/}"; state=closed
+        labels="$(printf '[{"name":"%s"}]' "$GH_LABEL_NAME")"
+        for failing in ${GH_ISSUE_READ_FAILS_ON:-}; do
+          [ "$failing" = "$number" ] && exit 1
+        done
         for open in $(cat "$GH_CREATED") ${GH_OPEN_ISSUES:-}; do
           [ "$open" = "$number" ] && state=open
         done
@@ -73,12 +78,20 @@ GH_STUB = textwrap.dedent(
         for failing in ${GH_COMMENT_FAILS_ON:-}; do
           [ "$failing" = "$3" ] && exit 1
         done
+        body=""; prev=""
+        for a in "$@"; do [ "$prev" = "--body" ] && body="$a"; prev="$a"; done
+        if [ -n "$GH_COMMENT_LOG" ]; then
+          jq -cn --arg number "$3" --arg body "$body" '{number: $number, body: $body}' >> "$GH_COMMENT_LOG"
+        fi
         log "comment ${3}"; exit 0 ;;
       "issue create"*)
         log "create"
         number=$(( $(wc -l < "$GH_CREATED") + 31 )); echo "$number" >> "$GH_CREATED"
         printf 'https://github.com/o/r/issues/%s\n' "$number"; exit 0 ;;
-      "issue close"*) log "close ${3}"; exit 0 ;;
+      "issue close"*)
+        comment=""; prev=""
+        for a in "$@"; do [ "$prev" = "--comment" ] && comment="$a"; prev="$a"; done
+        log "close ${3} $comment"; exit 0 ;;
       "label create"*) exit 0 ;;
       *) exit 0 ;;
     esac
@@ -117,8 +130,11 @@ def run_step(env_overrides, gh_env):
             "GH_OPEN_ISSUES": "",
             "GH_UNLABELED_ISSUES": "",
             "GH_COMMENT_FAILS_ON": "",
+            "GH_COMMENT_LOG": "",
+            "GH_LABEL_NAME": "ci-main-red",
             "SWEEP_RELIST_DELAY_SECONDS": "0",
             "GH_ISSUE_READ_FAILS": "0",
+            "GH_ISSUE_READ_FAILS_ON": "",
             "GH_RUN_STATUS": "completed",
             "GH_RUN_CONCLUSION": '"failure"',
             "GH_ISSUE_LIST_2": "",
@@ -268,7 +284,7 @@ class RedMainAlertBehavior(unittest.TestCase):
                  "GH_ISSUE_LIST_3": '[{"number": 9}, {"number": 31}]', "GH_OPEN_ISSUES": "9"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"), actions)
-        self.assertIn("close 31", actions)
+        self.assertIn("close 31 Duplicate of #9.", actions)
 
     def test_a_partial_list_that_lags_the_create_still_deduplicates(self):
         # #9 was already open but the first lookup lagged it, so this run created #31; the sweep's
@@ -277,9 +293,9 @@ class RedMainAlertBehavior(unittest.TestCase):
             {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]', "GH_OPEN_ISSUES": "9"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"), actions)
-        self.assertIn("close 31", actions)
+        self.assertIn("close 31 Duplicate of #9.", actions)
         self.assertIn("comment 9", actions)
-        self.assertLess(actions.index("comment 9"), actions.index("close 31"), actions)
+        self.assertLess(actions.index("comment 9"), actions.index("close 31 Duplicate of #9."), actions)
 
     def test_a_stale_keeper_never_closes_the_live_alert(self):
         # The list still shows #9, which was closed moments ago, and misses #31, which this run
@@ -288,7 +304,87 @@ class RedMainAlertBehavior(unittest.TestCase):
             {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]'})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"), actions)
-        self.assertNotIn("close 31", actions)
+        self.assertFalse(any(action.startswith("close 31 ") for action in actions), actions)
+
+    def test_a_closed_lowest_keeper_is_skipped_before_closing_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            comment_log = pathlib.Path(tmp) / "comments.jsonl"
+            result, actions = run_step(
+                {}, {"GH_ISSUE_LIST": '[{"number": 9}]',
+                     "GH_ISSUE_LIST_2": '[{"number": 20}, {"number": 9}, {"number": 11}]',
+                     "GH_OPEN_ISSUES": "11 20", "GH_COMMENT_LOG": str(comment_log)})
+            comments = [json.loads(line) for line in comment_log.read_text().splitlines()]
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["comment 9", "comment 11", "close 20 Duplicate of #11."], actions)
+        self.assertEqual(["9", "11"], [comment["number"] for comment in comments])
+        self.assertEqual(comments[0]["body"], comments[1]["body"])
+        self.assertIn("`CI` concluded `failure` on `main` at `aaaaaaaaa`.", comments[1]["body"])
+        self.assertIn("https://run", comments[1]["body"])
+
+    def test_an_unlabeled_lowest_keeper_is_skipped_before_closing_duplicates(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]',
+                 "GH_ISSUE_LIST_2": '[{"number": 20}, {"number": 9}, {"number": 11}]',
+                 "GH_OPEN_ISSUES": "9 11 20", "GH_UNLABELED_ISSUES": "9"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["comment 9", "comment 11", "close 20 Duplicate of #11."], actions)
+
+    def test_an_unreadable_lowest_keeper_is_skipped_before_closing_duplicates(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]',
+                 "GH_ISSUE_LIST_2": '[{"number": 20}, {"number": 9}, {"number": 11}]',
+                 "GH_OPEN_ISSUES": "9 11 20", "GH_ISSUE_READ_FAILS_ON": "9"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["comment 9", "comment 11", "close 20 Duplicate of #11."], actions)
+
+    def test_a_failed_repost_to_replace_an_invalid_target_does_not_close_duplicates(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]',
+                 "GH_ISSUE_LIST_2": '[{"number": 9}, {"number": 11}, {"number": 20}]',
+                 "GH_OPEN_ISSUES": "11 20", "GH_COMMENT_FAILS_ON": "11"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["comment 9"], actions)
+
+    def test_an_uppercase_label_does_not_create_duplicate_alerts(self):
+        for sweep_list in ('[{"number": 9}]', "[]"):
+            with self.subTest(sweep_list=sweep_list):
+                result, actions = run_step(
+                    {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_ISSUE_LIST_2": sweep_list,
+                         "GH_OPEN_ISSUES": "9", "GH_LABEL_NAME": "CI-MAIN-RED"})
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(["comment 9"], actions)
+
+    def test_an_uppercase_keeper_receives_the_report_before_closing_the_touched_issue(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]',
+                 "GH_OPEN_ISSUES": "9", "GH_LABEL_NAME": "CI-MAIN-RED"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"), actions)
+        self.assertIn("comment 9", actions)
+        self.assertIn("close 31 Duplicate of #9.", actions)
+        self.assertLess(actions.index("comment 9"), actions.index("close 31 Duplicate of #9."), actions)
+
+    def test_no_verified_listed_keeper_preserves_the_created_alert(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}, {"number": 20}]'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["create"], actions, "the newly created #31 must remain open")
+
+    def test_no_verified_listed_keeper_recreates_the_invalid_reported_alert(self):
+        for issue_state in ({}, {"GH_OPEN_ISSUES": "9 20", "GH_UNLABELED_ISSUES": "9 20"}):
+            with self.subTest(issue_state=issue_state):
+                result, actions = run_step(
+                    {}, {"GH_ISSUE_LIST": '[{"number": 9}]',
+                         "GH_ISSUE_LIST_2": '[{"number": 9}, {"number": 20}]', **issue_state})
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(["comment 9", "create"], actions, "the replacement #31 must remain open")
+
+    def test_unreadable_listed_keepers_do_not_close_any_alert(self):
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}, {"number": 20}]',
+                 "GH_ISSUE_READ_FAILS": "1"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(["create"], actions)
 
     def test_a_failed_report_repost_keeps_the_touched_alert_open(self):
         # #9 is a valid keeper, but re-posting this run's report there fails; closing #31 would
@@ -297,7 +393,21 @@ class RedMainAlertBehavior(unittest.TestCase):
             {}, {"GH_ISSUE_LIST": "[]", "GH_ISSUE_LIST_2": '[{"number": 9}]', "GH_OPEN_ISSUES": "9",
                  "GH_COMMENT_FAILS_ON": "9"})
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertNotIn("close 31", actions)
+        self.assertFalse(any(action.startswith("close 31 ") for action in actions), actions)
+
+    def test_a_failed_repost_only_closes_duplicates_for_a_verified_fallback(self):
+        for target_open, label in ((False, "ci-main-red"), (True, "ci-main-red"), (True, "CI-MAIN-RED")):
+            with self.subTest(target_open=target_open, label=label):
+                result, actions = run_step(
+                    {}, {"GH_ISSUE_LIST": '[{"number": 31}]',
+                         "GH_ISSUE_LIST_2": '[{"number": 9}, {"number": 20}, {"number": 31}]',
+                         "GH_OPEN_ISSUES": "9 20 31" if target_open else "9 20",
+                         "GH_COMMENT_FAILS_ON": "9", "GH_LABEL_NAME": label})
+                self.assertEqual(0, result.returncode, result.stderr)
+                expected = ["comment 31"]
+                if target_open:
+                    expected.extend(["close 9 Duplicate of #31.", "close 20 Duplicate of #31."])
+                self.assertEqual(expected, actions)
 
     def test_an_open_issue_that_lost_its_label_is_recreated(self):
         # A maintainer stripped ci-main-red from #9; it is open but no longer a visible alert.
@@ -332,7 +442,7 @@ class RedMainAlertBehavior(unittest.TestCase):
                  "GH_ISSUE_LIST_3": '[{"number": 31}, {"number": 32}]'})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(1, actions.count("create"))
-        self.assertIn("close 32", actions)
+        self.assertIn("close 32 Duplicate of #31.", actions)
 
     def test_the_comment_targets_the_issue_the_sweep_keeps(self):
         # Two open issues, in gh's default newest-first order (highest number first). The sweep
@@ -340,10 +450,10 @@ class RedMainAlertBehavior(unittest.TestCase):
         # then gets closed as a duplicate. The order matters: with an ascending fixture a take-first
         # bug would be invisible.
         result, actions = run_step(
-            {}, {"GH_ISSUE_LIST": '[{"number": 20}, {"number": 11}]'})
+            {}, {"GH_ISSUE_LIST": '[{"number": 20}, {"number": 11}]', "GH_OPEN_ISSUES": "11 20"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("comment 11", actions)
-        self.assertIn("close 20", actions)
+        self.assertIn("close 20 Duplicate of #11.", actions)
         self.assertNotIn("comment 20", actions)
 
 
