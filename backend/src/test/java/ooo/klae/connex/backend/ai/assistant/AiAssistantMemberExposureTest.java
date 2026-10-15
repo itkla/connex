@@ -41,6 +41,73 @@ class AiAssistantMemberExposureTest {
         support.releaseFixtureMocks();
     }
 
+    static Stream<Arguments> staticRepairCollisions() {
+        return Stream.of("Return", "Output", "JSON").flatMap(label -> Stream.of(
+                Arguments.of(false, false, label), Arguments.of(true, false, label), Arguments.of(true, true, label)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("staticRepairCollisions")
+    void repairOriginsExcludeStaticInstructionsAndKeysButMaskTenantText(
+            boolean nativeProtocol, boolean toolRepair, String label) throws Exception {
+        var context = new MaskingContext();
+        context.registerMemberCandidate(label);
+        var user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Ask " + label + " to follow up");
+        var empty = new AiAssistantToolResult(Map.of(), List.of());
+        var resources = new AiChatResourceRegistry(context);
+        var budget = new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000);
+        var repair = ooo.klae.connex.backend.ai.AiStructuredRepair.from(
+                toolRepair ? "native_invalid_arguments" : "final_citations", "Ask " + label + " again");
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(user), empty, List.of(), context, resources, List.of(), budget,
+                        AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(user), empty, List.of(), context, resources, List.of(), budget, repair,
+                        AiAssistantToolCatalog.ALL);
+        var replay = assembler.nativeReplay(List.of(), Map.of(), context, budget, repair);
+        var nativeRequest = new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
+                assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), replay.exchanges(), replay.repairMessage(),
+                false, 1, replay.repairSegments());
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null, nativeRequest);
+        assertEquals(0, capture.warnings());
+        assertTrue(mapper.writeValueAsString(capture.request().messages()).contains("Ask {{M1}} to follow up"));
+        String repairText = nativeProtocol ? capture.request().nativeTools().repairMessage()
+                : capture.request().messages().getLast().content();
+        assertTrue(repairText.contains("Return"));
+        if (!toolRepair) {
+            assertTrue(repairText.contains("JSON"));
+            assertTrue(repairText.contains("\"output\""));
+            assertFalse(repairText.contains("Ask " + label + " again"));
+            assertTrue(repairText.contains("Ask {{M1}} again"));
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void validatedNativeToolNamesAreStaticButTheSameMemberNameInArgumentsIsProviderText(boolean rawArgument) {
+        var context = new MaskingContext();
+        context.registerMemberCandidate("search_records");
+        String masked = MaskingEngine.maskFreeText("Ask search_records to follow up", context);
+        var prompt = ooo.klae.connex.backend.ai.masking.PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn(masked).build();
+        var exchange = new AiToolExchange(new AiToolCall("call-1", "search_records",
+                rawArgument ? "{\"query\":\"search_records\"}" : "{\"query\":\"relationships\"}"),
+                "{\"records\":[]}", 1, 0);
+        if (rawArgument) {
+            org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> support.captureAssistantPayload(prompt, context, mapper, true, List.of(exchange),
+                            AiAssistantMaskingTestSupport.finalOutput(true, "Ready"), false, null));
+        } else {
+            var capture = support.captureAssistantPayload(prompt, context, mapper, true, List.of(exchange),
+                    AiAssistantMaskingTestSupport.finalOutput(true, "Ready"), false, null);
+            assertEquals(0, capture.warnings());
+            assertEquals("search_records", capture.request().nativeTools().exchanges().getFirst().call().name());
+            assertTrue(mapper.writeValueAsString(capture.request().messages()).contains("Ask {{M1}} to follow up"));
+        }
+    }
+
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"id,false", "signature,false", "arguments,false", "id,true", "signature,true", "arguments,true"})
     void providerCallReplayNeverGrantsMemberExposureButServerResultsDo(String field, boolean inResult) throws Exception {

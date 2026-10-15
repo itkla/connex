@@ -180,6 +180,15 @@ final class AiAssistantMaskingTestSupport {
             ObjectMapper mapper, boolean nativeProtocol,
             List<ooo.klae.connex.backend.ai.provider.AiToolExchange> exchanges,
             String output, boolean assignment, AiChatStreamingProgress.Observer observer) {
+        return captureAssistantPayload(prompt, context, mapper, nativeProtocol, exchanges, output, assignment, observer, null);
+    }
+
+    AssistantCapture captureAssistantPayload(
+            ooo.klae.connex.backend.ai.masking.MaskedPrompt prompt, MaskingContext context,
+            ObjectMapper mapper, boolean nativeProtocol,
+            List<ooo.klae.connex.backend.ai.provider.AiToolExchange> exchanges,
+            String output, boolean assignment, AiChatStreamingProgress.Observer observer,
+            ooo.klae.connex.backend.ai.provider.AiNativeToolRequest nativeRequest) {
         ProviderHarness harness = providerHarness(mapper);
         AiProvider provider = harness.provider();
         when(provider.toolCallingCapability(any())).thenReturn(
@@ -222,8 +231,8 @@ final class AiAssistantMaskingTestSupport {
                     stepGuard.forStep(AiAssistantToolCatalog.ALL, issued),
                     stepGuard.finalAnswerForIssuedPlaceholders(issued),
                     schema.finalResponseSchema(),
-                    new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
-                            assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), exchanges),
+                    nativeRequest == null ? new ooo.klae.connex.backend.ai.provider.AiNativeToolRequest(
+                            assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), exchanges) : nativeRequest,
                     admission, () -> { });
             if (outcome instanceof ooo.klae.connex.backend.ai.AiNativeToolCompletion.Content<?> content) {
                 repairPresent = content.attempt().repair().isPresent();

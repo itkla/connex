@@ -38,6 +38,13 @@ public final class MemberReferenceReadings {
             readings.add(new Reading("canonical-escapes", "slash parity and adjacent ticks " + label,
                     "<script>\n` stray\n</script>\n[" + label + "](user:42)", label));
         }
+        readings.add(new Reading("sequential-code", "backslash does not escape a code closer",
+                "[Alice `]\\` Former](user:42)", "Alice `]\\` Former"));
+        commonMarkInlineExamples().forEach(example -> {
+            String label = "Alice " + example.markdown() + " Former";
+            readings.add(new Reading("commonmark-" + example.section(), "spec example " + example.number(),
+                    "[" + label + "](user:42)", label));
+        });
         for (String html : List.of("<script>\n` stray\n</script>", "<!--\n` stray\n-->", "<div>\n` stray\n</div>")) {
             for (String ticks : List.of("`", "``")) {
                 for (String separator : List.of(":", "&colon;", "\\:")) {
@@ -143,6 +150,48 @@ public final class MemberReferenceReadings {
         paragraphInterruptions().stream().filter(reading -> !reading.definitionAllowed()).forEach(reading ->
                 readings.add(new Reading("paragraph-interruption", reading.name(), reading.content(), "Alice Former")));
         return List.copyOf(readings);
+    }
+
+    /**
+     * Inline-compatible witnesses from CommonMark 0.31.2
+     * <a href="https://spec.commonmark.org/0.31.2/#backslash-escapes">§2.4</a> and
+     * <a href="https://spec.commonmark.org/0.31.2/#code-spans">§6.1</a> (John MacFarlane).
+     * Block-only examples and nested link/autolink examples are excluded because their constructs
+     * cannot be wrapped unchanged in a member link label. Example 14 uses its compatible lines.
+     */
+    public static List<InlineExample> commonMarkInlineExamples() {
+        return List.of(
+                new InlineExample(12, "2.4", "\\!\\\"\\#\\$\\%\\&\\'\\(\\)\\*\\+\\,\\-\\.\\/\\:\\;\\<\\=\\>\\?\\@\\[\\\\\\]\\^\\_\\`\\{\\|\\}\\~"),
+                new InlineExample(13, "2.4", "\\\t\\A\\a\\ \\3\\\u03c6\\\u00ab"),
+                new InlineExample(14, "2.4", "\\*not emphasized*\n\\<br/> not a tag\n\\`not code`\n1\\. not a list\n\\* not a list\n\\# not a heading\n\\&ouml; not a character entity"),
+                new InlineExample(15, "2.4", "\\\\*emphasis*"),
+                new InlineExample(16, "2.4", "foo\\\nbar"),
+                new InlineExample(17, "2.4", "`` \\[\\` ``"),
+                new InlineExample(21, "2.4", "<a href=\"/bar\\/)\">"),
+                new InlineExample(328, "6.1", "`foo`"),
+                new InlineExample(329, "6.1", "`` foo ` bar ``"),
+                new InlineExample(330, "6.1", "` `` `"),
+                new InlineExample(331, "6.1", "`  ``  `"),
+                new InlineExample(332, "6.1", "` a`"),
+                new InlineExample(333, "6.1", "`\u00a0b\u00a0`"),
+                new InlineExample(334, "6.1", "`\u00a0`\n`  `"),
+                new InlineExample(335, "6.1", "``\nfoo\nbar  \nbaz\n``"),
+                new InlineExample(336, "6.1", "``\nfoo \n``"),
+                new InlineExample(337, "6.1", "`foo   bar \nbaz`"),
+                new InlineExample(338, "6.1", "`foo\\`bar`"),
+                new InlineExample(339, "6.1", "``foo`bar``"),
+                new InlineExample(340, "6.1", "` foo `` bar `"),
+                new InlineExample(341, "6.1", "*foo`*`"),
+                new InlineExample(343, "6.1", "`<a href=\"`\">`"),
+                new InlineExample(344, "6.1", "<a href=\"`\">`"),
+                new InlineExample(345, "6.1", "`<https://foo.bar.`baz>`"),
+                new InlineExample(347, "6.1", "```foo``"),
+                new InlineExample(348, "6.1", "`foo"),
+                new InlineExample(349, "6.1", "`foo``bar``"));
+    }
+
+    /** The spec example and its unchanged inline source, excluding its final document newline. */
+    public record InlineExample(int number, String section, String markdown) {
     }
 
     /** Both sides of CommonMark's paragraph-interruption rules, including lazy containers. */

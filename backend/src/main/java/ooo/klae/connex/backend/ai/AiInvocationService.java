@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -906,8 +907,10 @@ public class AiInvocationService {
         try {
             serializedPrompt = serializeProviderInput(
                     effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
-            memberExposurePayload = nativeTools == null ? serializedPrompt : serializeProviderInput(
-                    effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools, false);
+            memberExposurePayload = objectMapper.writeValueAsString(outboundSegments(
+                    effectiveInvocation.prompt(), nativeTools).stream()
+                    .filter(segment -> segment.origin() == OutboundSegment.Origin.TENANT_DATA)
+                    .map(OutboundSegment::text).toList());
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
@@ -924,22 +927,9 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
-            if (nativeTools != null) {
-                for (AiToolExchange exchange : nativeTools.exchanges()) {
-                    AiToolCall call = exchange.call();
-                    for (String field : List.of(call.id(), call.name(), call.arguments())) {
-                        OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                                objectMapper.writeValueAsString(field), effectiveInvocation.context(), objectMapper);
-                    }
-                    OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                            call.arguments(), effectiveInvocation.context(), objectMapper);
-                    if (call.thoughtSignature() != null) {
-                        OutboundLeakScan.assertNoMemberLeakInProviderReplay(
-                                objectMapper.writeValueAsString(call.thoughtSignature()), effectiveInvocation.context(), objectMapper);
-                    }
-                }
-            }
+            OutboundLeakScan.assertNoLeakInClassifiedEnvelope(serializedPrompt,
+                    outboundSegments(effectiveInvocation.prompt(), nativeTools),
+                    effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -1198,16 +1188,6 @@ public class AiInvocationService {
             AiResponseSchema responseSchema,
             AiReasoningMode reasoningMode,
             AiNativeToolRequest nativeTools) {
-        return serializeProviderInput(prompt, responseSchema, reasoningMode, nativeTools, true);
-    }
-
-    /** Provider-authored call fields are replayed verbatim but cannot authorize member demasking. */
-    private String serializeProviderInput(
-            MaskedPrompt prompt,
-            AiResponseSchema responseSchema,
-            AiReasoningMode reasoningMode,
-            AiNativeToolRequest nativeTools,
-            boolean includeProviderCalls) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", systemPrompt(prompt, reasoningMode));
         payload.put("messages", prompt.getMessages().stream()
@@ -1221,8 +1201,7 @@ public class AiInvocationService {
                     .map(AiInvocationService::toolDefinitionPayload)
                     .toList());
             payload.put("toolExchanges", nativeTools.exchanges().stream()
-                    .map(exchange -> includeProviderCalls ? toolExchangePayload(exchange)
-                            : Map.of("result", exchange.maskedResult()))
+                    .map(AiInvocationService::toolExchangePayload)
                     .toList());
             if (nativeTools.repairMessage() != null) {
                 payload.put("repairMessage", nativeTools.repairMessage());
@@ -1233,6 +1212,33 @@ public class AiInvocationService {
         } catch (Exception exception) {
             throw new AiProviderException("AI prompt serialization failed");
         }
+    }
+
+    /**
+     * Classifies text before serialization: only tenant data can expose MEMBER bindings. Replayed
+     * opaque fields remain provider-authored; names are fixed vocabulary because the native request
+     * constructor requires every exchange name to belong to its declared definitions.
+     * System, schema and catalog text are entirely static and are absent from member-bearing parts.
+     */
+    private static List<OutboundSegment> outboundSegments(MaskedPrompt prompt, AiNativeToolRequest nativeTools) {
+        List<OutboundSegment> segments = new ArrayList<>();
+        for (MaskedMessage message : prompt.getMessages()) {
+            segments.addAll(message.getSegments());
+        }
+        if (nativeTools != null) {
+            for (AiToolExchange exchange : nativeTools.exchanges()) {
+                AiToolCall call = exchange.call();
+                segments.add(new OutboundSegment(call.id(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                segments.add(new OutboundSegment(call.name(), OutboundSegment.Origin.SERVER_STATIC));
+                segments.add(new OutboundSegment(call.arguments(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                if (call.thoughtSignature() != null) {
+                    segments.add(new OutboundSegment(call.thoughtSignature(), OutboundSegment.Origin.PROVIDER_AUTHORED));
+                }
+                segments.add(new OutboundSegment(exchange.maskedResult(), OutboundSegment.Origin.TENANT_DATA));
+            }
+            segments.addAll(nativeTools.repairSegments());
+        }
+        return List.copyOf(segments);
     }
 
     private static String systemPrompt(MaskedPrompt prompt, AiReasoningMode reasoningMode) {

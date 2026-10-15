@@ -29,6 +29,7 @@ public final class MaskingContext {
     private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
     private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([Mm][1-9][0-9]*)\\s*}}");
     private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
+    private static final Pattern PLACEHOLDER_PREFIX = Pattern.compile("\\{\\{?\\s*+[A-Za-z]?[0-9]*+\\s*+}?");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
     private final Map<String, EntityKind> tokenToKind = new LinkedHashMap<>();
     private final Map<String, String> originalValueToToken = new LinkedHashMap<>();
@@ -180,21 +181,7 @@ public final class MaskingContext {
     /** Source spans whose spelling or exposure cannot be demasked by the canonical token parser. */
     List<PlaceholderSpan> refusedMemberPlaceholders(String text) {
         Objects.requireNonNull(text, "text");
-        StringBuilder normalized = new StringBuilder();
-        List<Integer> starts = new ArrayList<>();
-        List<Integer> ends = new ArrayList<>();
-        var units = SOURCE_GRAPHEME.matcher(text);
-        while (units.find()) {
-            String unit = java.text.Normalizer.normalize(units.group(), java.text.Normalizer.Form.NFKC);
-            normalized.append(unit);
-            for (int index = 0; index < unit.length(); index++) {
-                starts.add(units.start());
-                ends.add(units.end());
-            }
-        }
-        var labels = ConversationText.projectLabels(new CanonicalText.Projection(normalized.toString(),
-                starts.stream().mapToInt(Integer::intValue).toArray(),
-                ends.stream().mapToInt(Integer::intValue).toArray()));
+        var labels = placeholderProjection(text);
         var matcher = MEMBER_PLACEHOLDER.matcher(labels.value());
         List<PlaceholderSpan> refused = new ArrayList<>();
         while (matcher.find()) {
@@ -207,6 +194,41 @@ public final class MaskingContext {
             }
         }
         return List.copyOf(refused);
+    }
+
+    /**
+     * Withholds every incomplete spelling recognized by member validation, preserving its original
+     * offset through the same NFKC and label projection. A flush cannot publish a refused prefix.
+     */
+    public static int withheldPlaceholderStart(String text, int safeLength) {
+        var labels = placeholderProjection(text.substring(0, safeLength));
+        int start = labels.value().lastIndexOf('{');
+        if (start < 0) {
+            return safeLength;
+        }
+        if (start > 0 && labels.value().charAt(start - 1) == '{') {
+            start--;
+        }
+        return PLACEHOLDER_PREFIX.matcher(labels.value().substring(start)).matches()
+                ? labels.starts()[start] : safeLength;
+    }
+
+    private static CanonicalText.Projection placeholderProjection(String text) {
+        StringBuilder normalized = new StringBuilder();
+        List<Integer> starts = new ArrayList<>();
+        List<Integer> ends = new ArrayList<>();
+        var units = SOURCE_GRAPHEME.matcher(text);
+        while (units.find()) {
+            String unit = java.text.Normalizer.normalize(units.group(), java.text.Normalizer.Form.NFKC);
+            normalized.append(unit);
+            for (int index = 0; index < unit.length(); index++) {
+                starts.add(units.start());
+                ends.add(units.end());
+            }
+        }
+        return ConversationText.projectLabels(new CanonicalText.Projection(normalized.toString(),
+                starts.stream().mapToInt(Integer::intValue).toArray(),
+                ends.stream().mapToInt(Integer::intValue).toArray()));
     }
 
     record PlaceholderSpan(int start, int end) {

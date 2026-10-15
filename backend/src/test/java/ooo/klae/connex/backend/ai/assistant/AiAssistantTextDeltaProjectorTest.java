@@ -47,6 +47,15 @@ class AiAssistantTextDeltaProjectorTest {
         assertEquals("Call {{P1}} today", String.join("", deltas));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"{{m", "｛｛ｍ", "﹛﹛Ｍ"})
+    void refusedMemberSpellingsUseTheSameProjectedPrefixGrammar(String prefix) {
+        List<String> deltas = new ArrayList<>();
+        var projector = new AiAssistantTextDeltaProjector(AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Call " + prefix);
+        assertEquals("Call ", String.join("", deltas));
+    }
+
     /**
      * A placeholder may carry any run of inner whitespace, so a fixed hold-back window would
      * release its opening braces and then demask the pieces differently than the whole answer

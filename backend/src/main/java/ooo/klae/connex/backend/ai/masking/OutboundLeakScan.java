@@ -122,14 +122,41 @@ public final class OutboundLeakScan {
         assertNoLeak(decodedJsonFields(field, objectMapper), ctx, true, true);
     }
 
+    /**
+     * Checks the complete serialized envelope for existing kinds and its classified text for MEMBER.
+     * Static text carries no member identity. Provider text receives neither static nor sentinel
+     * exemptions; tenant text has already passed replacement before server sentinels were inserted.
+     */
+    public static void assertNoLeakInClassifiedEnvelope(
+            String payload, List<OutboundSegment> segments, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(decodedJsonFields(payload, objectMapper), ctx, false, false, true, false);
+        for (OutboundSegment segment : segments) {
+            if (segment.origin() == OutboundSegment.Origin.SERVER_STATIC) {
+                continue;
+            }
+            boolean provider = segment.origin() == OutboundSegment.Origin.PROVIDER_AUTHORED;
+            assertNoLeak(List.of(new ScannedField(segment.text(), true, false)), ctx, provider, true, false, true);
+            if (provider) {
+                assertNoLeak(decodedJsonFields(segment.text(), objectMapper), ctx, true, true, false, true);
+            }
+        }
+    }
+
     private static void assertNoLeak(
             List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored, boolean membersOnly) {
+        assertNoLeak(fields, ctx, providerAuthored, membersOnly, false, false);
+    }
+
+    private static void assertNoLeak(
+            List<ScannedField> fields, MaskingContext ctx, boolean providerAuthored, boolean membersOnly,
+            boolean excludeMembers, boolean classified) {
         boolean honorTrustedText = !providerAuthored;
         List<PreparedField> preparedFields = fields.stream()
                 .filter(field -> providerAuthored || field.tenantBearing())
                 .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream()
                         .map(text -> new PreparedField(MaskingEngine.screenText(text),
-                                providerAuthored || !field.staticPosition() && !ctx.isTrustedStaticField(field.text()))))
+                                classified || providerAuthored
+                                        || !field.staticPosition() && !ctx.isTrustedStaticField(field.text()))))
                 .toList();
         List<MaskingEngine.ScreenText> allFields = preparedFields.stream().map(PreparedField::input).toList();
         List<MaskingEngine.ScreenText> memberFields = preparedFields.stream().filter(PreparedField::memberBearing)
@@ -138,7 +165,7 @@ public final class OutboundLeakScan {
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
             boolean member = ctx.isMemberIdentifier(entry.rawValue());
-            if (membersOnly && !member) {
+            if (membersOnly && !member || excludeMembers && member) {
                 continue;
             }
             List<MaskingEngine.ScreenText> matchingFields = member ? memberFields : allFields;

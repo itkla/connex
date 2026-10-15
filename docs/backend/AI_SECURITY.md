@@ -112,9 +112,15 @@ The implemented paragraph-interruption rules determine when a following definiti
 | Indented code cannot interrupt | `Hello\n    code` continues the paragraph |
 | Container paragraphs retain lazy continuations | `> Hello\n[Alice]: welcome.\n\n[Alice]: user:42` keeps the first bracket as a shortcut usage |
 
-Code-aware readings keep brackets inside paired code spans opaque, and reset backtick pairing at
-blank lines and the block starts listed above. The independent canonical pass handles the listed
-inline-token syntax without depending on that block state. Unambiguous explicit reference keys
+Code and escape handling use one shared sequential delimiter table following
+[CommonMark 0.31.2 §§2.4 and 6.1](https://spec.commonmark.org/0.31.2/#code-spans).
+Outside code, a backslash escapes the next ASCII punctuation character. An unescaped backtick run
+opens code only when a later raw run has exactly the same length; that whole span is literal,
+including its backslashes and brackets. Unmatched runs stay text. The next matching run is
+precomputed once, so no opener rescans the source. Code-aware structural readings retain the
+listed blank-line and block-start boundaries. Canonical local entries use the same transitions
+without depending on preceding block state; the extra no-code reading remains conservative.
+Unambiguous explicit reference keys
 remain keys; ambiguous bracket readings stay independent. The scans and fixed-number reading merge
 remain linear in stored prose length, with the label bound applied before extraction. Member
 provenance writers and readers use the same code-point bound, including supplementary characters.
@@ -166,7 +172,9 @@ MEMBER tokens before envelope/schema validation or repair retention. Noncanonica
 NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
 syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
 on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
-reset through the transport. Context-free bare-placeholder checks require braces for MEMBER, so
+reset through the transport. Incomplete lowercase and NFKC-equivalent token prefixes use the same
+normalization and source offsets as token validation, and are withheld across streaming flushes.
+Context-free bare-placeholder checks require braces for MEMBER, so
 ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
 Native call ids, names and thought signatures receive the same unexposed-token check as arguments
@@ -178,9 +186,14 @@ inside opaque fields without altering those fields.
 Final server-authored masking markers `[redacted]` and `[omitted by policy]` are excluded by
 position from MEMBER leak matching. Genuine source occurrences are replaced before these markers
 are inserted; a member named “Redacted” receives no label-wide exemption. Strict provider-authored
-scanning keeps its existing checks. Native replay call ids, names, thought signatures and raw and
-JSON-decoded arguments receive an additional strict MEMBER scan without any sentinel exemption;
-server-created markers in tool results retain their positional exemption. Field projections are built once per scanned segment and reused
+scanning keeps its existing checks. Outbound text retains its origin independently of serialization:
+server-static system directives, repair instructions, schema keys and validated catalog tool names
+never participate in MEMBER raw-name scanning. Tenant messages, stored content and masked tool results
+are scanned as tenant data. Replayed native ids, thought signatures, arguments and repair model output
+remain provider-authored, with a strict MEMBER scan of raw and JSON-decoded text and no sentinel
+exemption. Only tenant-data segments may grant dispatch exposure; provider text and static vocabulary
+cannot authorize a hidden binding. Server-created markers in tool results retain their positional
+exemption. Unclassified repair text defaults to tenant data. Field projections are built once per scanned segment and reused
 across the complete candidate dictionary. Tool-result provenance retains the JSON pointer of each originating textual field; containment
 never extends to unrelated sibling fields. Unscoped legacy declarations retain ordinary
 boundary-aware matching. For persisted provider-authored text, provenance

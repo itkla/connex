@@ -479,7 +479,8 @@ public class AiChatAgentLoopService {
                                     nativeReplay.exchanges(),
                                     nativeReplay.repairMessage(),
                                     closing,
-                                    stepCallBound);
+                                    stepCallBound,
+                                    nativeReplay.repairSegments());
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(

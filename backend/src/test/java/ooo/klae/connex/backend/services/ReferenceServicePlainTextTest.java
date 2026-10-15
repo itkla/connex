@@ -179,6 +179,19 @@ class ReferenceServicePlainTextTest {
         }
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("commonMarkInlineExamples")
+    void commonMarkEscapesAndCodeSpansRecoverTheWholeMemberLabel(MemberReferenceReadings.InlineExample example) {
+        String label = "Alice " + example.markdown() + " Former";
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ReferenceService.memberLabelsFromReaderVisibleContent("[" + label + "](user:42)").contains(label),
+                "CommonMark 0.31.2 example " + example.number());
+    }
+
+    static java.util.stream.Stream<MemberReferenceReadings.InlineExample> commonMarkInlineExamples() {
+        return MemberReferenceReadings.commonMarkInlineExamples().stream();
+    }
+
     @Test
     void paragraphInterruptionMatchesCommonMarkForEveryCoveredBlockType() {
         for (var reading : MemberReferenceReadings.paragraphInterruptions()) {
@@ -241,7 +254,7 @@ class ReferenceServicePlainTextTest {
     void canonicalCodeSpanLabelsStayLinearOnAdversarialBackticksAndBrackets() {
         for (String attack : java.util.List.of("[`]`".repeat(25_000), "[".repeat(50_000) + "`".repeat(50_000),
                 "`[".repeat(50_000), "[".repeat(50_000) + "]".repeat(50_000),
-                "\\`[\\]".repeat(20_000), "\\".repeat(100_000))) {
+                "\\`[\\]".repeat(20_000), "\\".repeat(100_000), "`\\`[".repeat(25_000))) {
             String content = attack + "\n<script>\n` stray\n</script>\n[Alice `]` Former](user:42)";
             assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
                     org.junit.jupiter.api.Assertions.assertTrue(ReferenceService.memberLabelsFromReaderVisibleContent(content)

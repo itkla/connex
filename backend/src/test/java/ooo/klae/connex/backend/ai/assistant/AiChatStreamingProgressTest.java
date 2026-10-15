@@ -382,6 +382,41 @@ class AiChatStreamingProgressTest {
         verify(persistence, org.mockito.Mockito.never()).appendPartialBatch(any(), anyInt(), any());
     }
 
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> splitRefusedMemberSpellings() {
+        return java.util.stream.Stream.of(false, true).flatMap(nativeProtocol -> java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "{{m", "1}}"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "｛｛ｍ", "１｝｝"),
+                org.junit.jupiter.params.provider.Arguments.of(nativeProtocol, "﹛﹛Ｍ", "1﹜﹜")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("splitRefusedMemberSpellings")
+    void splitNoncanonicalMemberTokensNeverReachPartialFrames(boolean nativeProtocol, String start, String end) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        when(persistence.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> (Integer) call.getArgument(1) + ((String) call.getArgument(2)).length());
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Unused Member");
+        var progress = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence, context);
+        var observer = progress.observer(nativeProtocol);
+        String safe = "Safe answer words. ".repeat(40);
+        String opening = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
+        observer.onContentDelta(opening + safe + start);
+        var batches = ArgumentCaptor.forClass(String.class);
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        for (String batch : batches.getAllValues()) {
+            assertTrue(!batch.contains(start));
+            assertTrue(!batch.contains("{{") && !batch.contains("｛") && !batch.contains("﹛"));
+        }
+        observer.onContentDelta(end + (nativeProtocol ? "\"}" : "\"}}"));
+        var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish(safe + start + end));
+        assertEquals("malformed_output", refused.terminalReason());
+        assertEquals("invented_placeholder", refused.detailReason());
+        verify(persistence, org.mockito.Mockito.atMost(4)).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertTrue(batches.getAllValues().stream().noneMatch(batch -> batch.contains(start) || batch.contains(end)));
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void unexposedMemberRefusalSurvivesRealTransportAndResetsAlreadyFlushedFrames(boolean nativeProtocol) throws Exception {

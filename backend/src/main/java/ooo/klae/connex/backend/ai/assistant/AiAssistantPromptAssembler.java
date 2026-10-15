@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
@@ -220,9 +221,17 @@ public class AiAssistantPromptAssembler {
     public record NativeReplay(
             List<AiToolExchange> exchanges,
             String repairMessage,
-            ToolBudgetAudit audit) {
+            ToolBudgetAudit audit,
+            List<OutboundSegment> repairSegments) {
+        /** Unclassified text keeps ordinary tenant-data scanning. */
+        public NativeReplay(List<AiToolExchange> exchanges, String repairMessage, ToolBudgetAudit audit) {
+            this(exchanges, repairMessage, audit, repairMessage == null ? List.of()
+                    : List.of(new OutboundSegment(repairMessage, OutboundSegment.Origin.TENANT_DATA)));
+        }
+
         public NativeReplay {
             exchanges = List.copyOf(exchanges);
+            repairSegments = List.copyOf(repairSegments);
             java.util.Objects.requireNonNull(audit, "audit");
         }
 
@@ -408,7 +417,8 @@ public class AiAssistantPromptAssembler {
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
-        String repairContent = repair == null ? null : repairRequest(repair, context);
+        List<OutboundSegment> repairSegments = repair == null ? List.of() : repairRequest(repair, context);
+        String repairContent = repair == null ? null : joinSegments(repairSegments);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
@@ -419,7 +429,7 @@ public class AiAssistantPromptAssembler {
             prompt.userTurn(toolResult);
         }
         if (repairContent != null) {
-            prompt.userTurn(repairContent);
+            prompt.segmentedUserTurn(repairSegments);
         }
         return prompt.build();
     }
@@ -512,13 +522,11 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.directive() != null && !skill.directive().isBlank()
                 && budget.fits(skill.directive(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.directive());
-            prompt.userTurn(skill.directive());
+            prompt.staticUserTurn(skill.directive());
         }
         if (skill.scopeDirective() != null && !skill.scopeDirective().isBlank()
                 && budget.fits(skill.scopeDirective(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.scopeDirective());
-            prompt.userTurn(skill.scopeDirective());
+            prompt.staticUserTurn(skill.scopeDirective());
         }
         if (!skill.evidence().isEmpty()) {
             prompt.userTurn(boundedSkillEvidence(
@@ -526,8 +534,7 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.closingDirective() != null && !skill.closingDirective().isBlank()
                 && budget.fits(skill.closingDirective(), AiSkillCatalog.maxDirectiveBytes())) {
-            context.addTrustedStaticText(skill.closingDirective());
-            prompt.userTurn(skill.closingDirective());
+            prompt.staticUserTurn(skill.closingDirective());
         }
     }
 
@@ -639,11 +646,12 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String repairContent = repair == null
-                ? null
+        List<OutboundSegment> repairSegments = repair == null ? List.of()
                 : repair.schemaRule().startsWith("native_")
-                        ? nativeToolRepairRequest(repair.schemaRule(), maxParallelCalls)
+                        ? List.of(new OutboundSegment(nativeToolRepairRequest(repair.schemaRule(), maxParallelCalls),
+                                OutboundSegment.Origin.SERVER_STATIC))
                         : nativeFinalRepairRequest(repair, context);
+        String repairContent = repair == null ? null : joinSegments(repairSegments);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
@@ -665,7 +673,7 @@ public class AiAssistantPromptAssembler {
                     turn.seq(),
                     turn.call()));
         }
-        return new NativeReplay(exchanges, repairContent, bounded.audit());
+        return new NativeReplay(exchanges, repairContent, bounded.audit(), repairSegments);
     }
 
     /**
@@ -1733,7 +1741,7 @@ public class AiAssistantPromptAssembler {
                         ENDING_FINAL_EXAMPLE);
     }
 
-    private String repairRequest(AiStructuredRepair repair, MaskingContext context) {
+    private List<OutboundSegment> repairRequest(AiStructuredRepair repair, MaskingContext context) {
         return repairRequest(
                 repair,
                 context,
@@ -1741,7 +1749,7 @@ public class AiAssistantPromptAssembler {
                         + "Return one corrected JSON step only.\n");
     }
 
-    private String nativeFinalRepairRequest(
+    private List<OutboundSegment> nativeFinalRepairRequest(
             AiStructuredRepair repair,
             MaskingContext context) {
         return repairRequest(
@@ -1768,18 +1776,23 @@ public class AiAssistantPromptAssembler {
                 + " rule. Return " + calls + " or one valid JSON final answer.";
     }
 
-    private String repairRequest(
+    private List<OutboundSegment> repairRequest(
             AiStructuredRepair repair,
             MaskingContext context,
             String instruction) {
         context.addTrustedStaticText(instruction);
-        String serialized = serialize(Map.of(
-                "schemaRule", repair.schemaRule(),
-                "output", MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
-                        repair.offendingOutput(), context),
-                "truncated", repair.truncated()));
-        return instruction
-                + MODEL_OUTPUT_BEGIN + "\n" + serialized + "\n" + MODEL_OUTPUT_END;
+        String output = serialize(MaskingEngine.maskFreeTextPreservingIssuedPlaceholders(
+                repair.offendingOutput(), context));
+        return List.of(
+                new OutboundSegment(instruction + MODEL_OUTPUT_BEGIN + "\n{\"schemaRule\":"
+                        + serialize(repair.schemaRule()) + ",\"output\":", OutboundSegment.Origin.SERVER_STATIC),
+                new OutboundSegment(output, OutboundSegment.Origin.PROVIDER_AUTHORED),
+                new OutboundSegment(",\"truncated\":" + repair.truncated() + "}\n" + MODEL_OUTPUT_END,
+                        OutboundSegment.Origin.SERVER_STATIC));
+    }
+
+    private static String joinSegments(List<OutboundSegment> segments) {
+        return segments.stream().map(OutboundSegment::text).collect(java.util.stream.Collectors.joining());
     }
 
     private void appendHistory(

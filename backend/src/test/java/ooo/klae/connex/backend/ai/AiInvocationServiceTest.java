@@ -2813,7 +2813,7 @@ class AiInvocationServiceTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"id", "name", "arguments", "signature", "escapedValue", "escapedKey"})
-    void nativeReplayCannotExemptProviderAuthoredMaskingSentinels(String field) {
+    void nativeReplayDistinguishesValidatedNamesFromProviderAuthoredMaskingSentinels(String field) {
         var context = new MaskingContext();
         context.registerMemberCandidate(field.equals("name") ? "search_records" : "[redacted]");
         var prompt = PromptAssembly.builder(context).system("Use concise analysis")
@@ -2834,9 +2834,18 @@ class AiInvocationServiceTest {
         var replay = new AiToolCall(field.equals("id") ? "[redacted]" : "call-1",
                 "search_records", arguments,
                 field.equals("signature") ? "[redacted]" : null);
-        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                () -> requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
-        verify(aiProvider, times(1)).complete(any());
+        if (field.equals("name")) {
+            providerReturns(new AiCompletionResult(
+                    "{\"text\":\"Ready\",\"citations\":[],\"suggestions\":[],\"title\":null}", 12, 7, "stop"));
+            var completed = assertInstanceOf(AiNativeToolCompletion.Content.class,
+                    requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
+            assertInstanceOf(AiStructuredOutcome.Parsed.class, completed.attempt().outcome());
+            verify(aiProvider, times(2)).complete(any());
+        } else {
+            assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> requestMemberNative(invocation, List.of(new AiToolExchange(replay, "{}", 1, 1))));
+            verify(aiProvider, times(1)).complete(any());
+        }
     }
 
     /** Runs the actual dispatch callback with caller-owned member bindings and native replay. */
