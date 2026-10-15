@@ -391,6 +391,46 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.currentPrivilegedMfaRequirements()?.standing).toBe("ATTESTATION_REQUIRED");
     });
 
+    it("confines on the standing an acceptance reports, even when the follow-up read fails", async () => {
+        stubBrowser("/onboarding");
+        stubBackend((url, method) => {
+            if (method === "POST" && url.endsWith("/api/ownership-offers/41/accept")) {
+                return json({ offer: {}, membership: null, standing: "ATTESTATION_REQUIRED", enforcedStanding: "ATTESTATION_REQUIRED" });
+            }
+            if (url.endsWith(REQUIREMENTS)) return json({ message: "Unavailable" }, 503);
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+
+        await api.acceptOwnershipOffer("41");
+
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
+        await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
+    });
+
+    it("never applies a read that started before an accepted ceremony", async () => {
+        stubBrowser(SECURITY, "?mfa=approve");
+        const reads = standingReads();
+        stubBackend((url) => (url.endsWith(REQUIREMENTS) ? reads.next() : null));
+        const api = await import("@/app/lib/api");
+
+        const olderCheck = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        const ceremony = api.settlePrivilegedMfaStanding("ceremony");
+        await flush();
+        reads.release(1, json({ message: "Unavailable" }, 503));
+        await expect(ceremony).resolves.toBe("failed");
+
+        reads.release(0, requirements("ATTESTATION_REQUIRED"));
+        await flush();
+        expect(api.currentPrivilegedMfaRequirements()).toBeNull();
+
+        reads.release(2, requirements("SATISFIED"));
+        await expect(olderCheck).resolves.toBe("applied");
+        expect(reads.served()).toBe(3);
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
     describe("against a backend that reports no standing", () => {
         it("releases after an accepted enrollment", async () => {
             stubBrowser(SECURITY, "?mfa=enroll");

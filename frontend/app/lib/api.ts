@@ -626,8 +626,8 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
- * nothing, and one that a server refusal or an identity change overtook is read again, up to three
- * attempts before it is reported as failed. A failed or malformed read keeps any confinement, and a
+ * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
+ * read again, up to three attempts before it is reported as failed. A failed or malformed read keeps any confinement, and a
  * standing this client does not know counts as malformed. A backend too old to report standing releases only
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
@@ -641,7 +641,10 @@ export async function settlePrivilegedMfaStanding(
     settlement: PrivilegedMfaSettlement,
 ): Promise<PrivilegedMfaSettleOutcome> {
     if (typeof window === "undefined") return "failed";
-    if (settlement === "ceremony") privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
+    if (settlement === "ceremony") {
+        privilegedMfaEventEpoch += 1;
+        privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
+    }
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
@@ -5431,14 +5434,19 @@ export function getOrgOwnershipOffers(orgId: number, init: RequestInit = {}) {
  * Accepts an ownership offer. Acceptance needs recent passkey authentication, which the shared
  * request path obtains. When accepting would confine the account until another owner approves its
  * passkey, the server answers 409 `PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED`; the caller
- * explains that and retries with `acknowledgeConfinement`. Ownership can newly confine the account,
- * so the standing is read again once the server accepts.
+ * explains that and retries with `acknowledgeConfinement`. Ownership can newly confine the account:
+ * the standing the acceptance reports confines the browser at once, and the full standing is then
+ * read again, so a failed read still leaves a newly confined owner confined.
  */
 export async function acceptOwnershipOffer(offerId: string, acknowledgeConfinement = false) {
     const acceptance = await postJson<Types.OwnershipOfferAcceptance>(
         `/api/ownership-offers/${encodeURIComponent(offerId)}/accept`,
         acknowledgeConfinement ? { acknowledgeConfinement: true } : {},
     );
+    if (typeof window !== "undefined") {
+        if (acceptance.enforcedStanding === "ENROLLMENT_REQUIRED") notePrivilegedMfaRefusal("enrollment");
+        if (acceptance.enforcedStanding === "ATTESTATION_REQUIRED") notePrivilegedMfaRefusal("attestation");
+    }
     await settlePrivilegedMfaStanding("check");
     return acceptance;
 }
