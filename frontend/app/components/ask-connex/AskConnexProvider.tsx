@@ -81,6 +81,7 @@ import {
     askConnexScopePreview,
     askConnexSessionStorageKey,
     askConnexTemplateDefaultsText,
+    askConnexToolCardAffordances,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     formatAnswerInstant,
@@ -321,6 +322,7 @@ function scopeRefusalReason(error: unknown): AskConnexScopeReason | null {
 
 function toolCardFailure(error: unknown, action: AskConnexToolAction): AskConnexToolCardFailure {
     if (!(error instanceof ApiError)) return 'actionFailed';
+    if (action !== 'undo' && error.code === 'AI_PROPOSAL_EXPIRED') return 'proposalExpired';
     if (action === 'undo' && error.status === 409) return 'undoConflict';
     if (action !== 'undo' && error.status === 409) return 'proposalChanged';
     if (action !== 'undo' && error.status === 403) return 'proposalPermissionLost';
@@ -2056,6 +2058,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || signal.aborted
             || !card
             || !actionableToolCallIds.has(toolCallId)
+            || !askConnexToolCardAffordances(card, Date.now()).includes(action)
             || toolActionsRef.current.has(toolCallId)) {
             return false;
         }
@@ -2121,7 +2124,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     if (!signal.aborted
                         && operationEpoch === sessionEpochRef.current
                         && activeSessionRef.current?.id === session.id
-                        && refreshed.status !== 'proposed') {
+                        && (failure === 'proposalExpired' || refreshed.status !== 'proposed')) {
                         dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
                     }
                 } catch {}
@@ -2824,6 +2827,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             pendingDetail: t('toolCards.states.pendingDetail'),
             pendingStatus: t('toolCards.states.pending'),
             proposalChanged: t('toolCards.failures.proposalChanged'),
+            proposalExpired: t('toolCards.failures.proposalExpired'),
+            proposalExpiredStatus: t('toolCards.states.proposalExpired'),
             proposalPermissionLost: t('toolCards.failures.proposalPermissionLost'),
             proposalUnavailable: t('toolCards.failures.proposalUnavailable'),
             proposedChange: t('toolCards.change.proposedChange'),

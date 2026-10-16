@@ -145,13 +145,15 @@ public class AiAssistantToolCallReadService {
             AiChatSession session,
             boolean pendingOnly,
             boolean mutationsAvailable) {
+        Instant now = clock.instant();
         List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
-                viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS).stream()
+                viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS,
+                AiAssistantProposalExpiry.pendingCreatedAfter(now)).stream()
                 .map(this::readStored)
                 .filter(Objects::nonNull)
                 .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)
                 .toList();
-        return project(viewer, session, stored, mutationsAvailable);
+        return project(viewer, session, stored, mutationsAvailable, now);
     }
 
     private AiAssistantToolCallReadDto get(
@@ -166,7 +168,7 @@ public class AiAssistantToolCallReadService {
             throw inaccessible();
         }
         List<AiAssistantToolCallReadDto> projected = project(
-                viewer, session, List.of(stored), mutationsAvailable);
+                viewer, session, List.of(stored), mutationsAvailable, clock.instant());
         if (projected.isEmpty()) {
             throw inaccessible();
         }
@@ -177,7 +179,7 @@ public class AiAssistantToolCallReadService {
             Viewer viewer,
             AiChatSession session,
             List<StoredToolCall> stored,
-            boolean mutationsAvailable) {
+            boolean mutationsAvailable, Instant now) {
         Set<Permission> viewerPermissions = workspaceService.permissionsFor(
                 viewer.workspaceId(), viewer.userId());
         Map<RecordKey, RecordSnapshot> visibleTargets = visibleTargets(
@@ -220,7 +222,7 @@ public class AiAssistantToolCallReadService {
                 continue;
             }
             UndoProjection undo = undoProjection(
-                    call, status, viewer.userId(), viewerPermissions, undoAvailable);
+                    call, status, viewer.userId(), viewerPermissions, undoAvailable, now);
             if (undo.undone()) {
                 status = "undone";
             }
@@ -241,11 +243,24 @@ public class AiAssistantToolCallReadService {
             List<AiAssistantToolCallReadDto.Change> changes = readable
                     ? changes(call, status, visibleTarget, viewerPermissions, review)
                     : List.of();
+            Instant deadline = call.toolCall().isServerProposal()
+                    ? AiAssistantProposalExpiry.reviewExpiresAt(call.toolCall().getCreatedAt()) : null;
+            String reviewState = switch (status) {
+                case PROPOSED -> deadline == null ? "unavailable"
+                        : AiAssistantProposalExpiry.isExpired(deadline, now) ? "expired" : "open";
+                case EXECUTED -> "applied";
+                case "undone" -> "undone";
+                case "rejected" -> "discarded";
+                case "failed" -> "failed";
+                default -> "unavailable";
+            };
             projected.add(new AiAssistantToolCallReadDto(
                     call.toolCall().getId(),
                     call.toolCall().getToolName(),
                     call.tier().name().toLowerCase(),
                     status,
+                    reviewState,
+                    deadline == null ? null : deadline.toString(),
                     target,
                     summary(
                             review, withheld, tool::requestSummary,
@@ -555,7 +570,7 @@ public class AiAssistantToolCallReadService {
             String status,
             int viewerUserId,
             Set<Permission> viewerPermissions,
-            boolean mutationsAvailable) {
+            boolean mutationsAvailable, Instant now) {
         if (call.tier() != ToolTier.AUTO
                 || !"executed".equals(status)
                 || call.toolCall().getResultJson() == null) {
@@ -582,7 +597,7 @@ public class AiAssistantToolCallReadService {
                     && expiresAt != null
                     && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId)
                     && hasUndoPermissions(call, viewerPermissions)
-                    && !clock.instant().isAfter(Instant.parse(expiresAt));
+                    && !now.isAfter(Instant.parse(expiresAt));
             return new UndoProjection(available, expiresAt, false);
         } catch (JacksonException exception) {
             return UndoProjection.NONE;

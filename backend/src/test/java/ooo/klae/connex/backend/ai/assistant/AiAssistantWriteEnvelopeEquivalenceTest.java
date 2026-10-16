@@ -177,17 +177,23 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUp() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
         workspaceService = mock(WorkspaceService.class);
-        personService = mock(PersonService.class);
-        dealService = mock(DealService.class);
-        taskService = mock(TaskService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
         pipelineService = mock(PipelineService.class);
-        activityService = mock(ActivityService.class);
-        noteService = mock(NoteService.class);
-        tagService = mock(TagService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         executorPersonMapper = mock(PersonMapper.class);
         AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
         AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -208,7 +214,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
-        companyService = mock(CompanyService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
                 new AiAssistantDraftDocumentWriteTool(null, null),
@@ -219,14 +225,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         tagService, personService, companyService, dealService),
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
-                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
                 new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                 new AiAssistantCreateReportWriteTool(null),
-                new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -261,7 +267,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
+                CLOCK, tagService);
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
@@ -496,7 +502,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(48, TURN.userId(), "failed", STAGE_ARGUMENTS, null));
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(cards);
+                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(cards);
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
                 .thenReturn(List.of());
@@ -526,14 +532,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -544,7 +550,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 taskMapper,
                 mock(NoteMapper.class),
@@ -922,7 +928,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
                 + "\"entityId\":75,\"fingerprint\":\"f\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
                 card(41, TURN.userId(), "executed", "create_activity",
                         MEETING_ARGUMENTS, meetingResult),
                 card(42, TURN.userId(), "executed", "create_activity", MEETING_ARGUMENTS,
@@ -958,14 +964,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -976,7 +982,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 activityMapper,
                 mock(TaskMapper.class),
                 noteMapper,
@@ -1171,7 +1177,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.getAccessibleSessionById(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
                 card(51, TURN.userId(), "executed", "add_tag",
                         tagArguments("person", 31), tagResult("person", 31, true)),
                 card(52, TURN.userId(), "executed", "add_tag",
@@ -1212,14 +1218,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1230,7 +1236,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(PipelineMapper.class),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1473,7 +1479,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
                 card(61, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(62, TURN.userId(), "proposed", "assign_owner",
                         ownerArguments("person", 31, "ghopper"), null),
@@ -1515,14 +1521,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1533,7 +1539,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),
@@ -1653,7 +1659,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"company\",\"owner\":\"Christian Weber\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
                 card(81, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(82, TURN.userId(), "executed", "assign_owner", assignCompany,
                         assignedResult),
@@ -1678,14 +1684,14 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 tagService, personService, companyService, dealService),
                         new AiAssistantRemoveTagWriteTool(
                                 tagService, personService, companyService, dealService),
-                        new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                        new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                        new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                         new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                         new AiAssistantCreatePersonWriteTool(null, null, null),
                         new AiAssistantCreateDealWriteTool(null, null, null, null),
                         new AiAssistantCreateCompanyWriteTool(null, null, JsonMapper.builder().build()),
                         new AiAssistantCreateReportWriteTool(null),
-                        new AiAssistantSetResponseDueWriteTool(mock(LeadResponseSlaService.class)),
+                        new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
                 readChatMapper,
@@ -1696,7 +1702,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 pipelineMapper,
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
-                mock(DealDocumentService.class),
+                AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
                 mock(ActivityMapper.class),
                 mock(TaskMapper.class),
                 mock(NoteMapper.class),

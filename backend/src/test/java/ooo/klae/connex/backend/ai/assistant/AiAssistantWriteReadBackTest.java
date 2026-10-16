@@ -404,7 +404,7 @@ class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
                 new LockedTarget(null, null),
                 (startUtc, endUtc) -> {
                     throw new IllegalStateException("No schedule read");
-                });
+                }, Map.of(), ooo.klae.connex.backend.services.MutationAdmission.UNRESTRICTED);
     }
 
     private void stubGraceHopper() {

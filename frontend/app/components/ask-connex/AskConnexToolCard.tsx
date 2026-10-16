@@ -16,7 +16,7 @@ import {
 import Link from 'next/link';
 import { Fragment, useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
-import { useLiveNow } from '@/app/hooks/useNow';
+import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import {
     ANSWER_ROW_PLACEHOLDER,
     askConnexCreatedRecordHref,
@@ -162,6 +162,8 @@ export type AskConnexToolCardLabels = {
     pendingDetail: string;
     pendingStatus: string;
     proposalChanged: string;
+    proposalExpired: string;
+    proposalExpiredStatus: string;
     proposalPermissionLost: string;
     proposalUnavailable: string;
     proposedChange: string;
@@ -194,6 +196,15 @@ function statusPresentation(
     status: ReturnType<typeof askConnexToolCardStatus>,
     labels: AskConnexToolCardLabels,
 ): StatusPresentation {
+    if (status === 'proposalExpired') {
+        return {
+            icon: ClockIcon,
+            label: labels.proposalExpiredStatus,
+            detail: labels.proposalExpired,
+            className: 'border-border bg-muted/20',
+            badgeVariant: 'outline',
+        };
+    }
     if (status === 'executed') {
         return {
             icon: CheckCircleIcon,
@@ -254,6 +265,7 @@ export function askConnexFailureMessage(
     labels: AskConnexToolCardLabels,
 ): string {
     if (failure === 'proposalChanged') return labels.proposalChanged;
+    if (failure === 'proposalExpired') return labels.proposalExpired;
     if (failure === 'proposalPermissionLost') return labels.proposalPermissionLost;
     if (failure === 'proposalUnavailable') return labels.proposalUnavailable;
     if (failure === 'undoConflict') return labels.undoConflict;
@@ -406,7 +418,7 @@ export default function AskConnexToolCard({
     formatDeadline,
     formatRemaining,
 }: AskConnexToolCardProps) {
-    const now = useLiveNow();
+    const now = useProposalReviewNow(card.status === 'proposed' ? [card.reviewExpiresAt] : []);
     const titleId = useId();
     const articleRef = useRef<HTMLElement>(null);
     const failureRef = useRef<HTMLDivElement>(null);
@@ -426,7 +438,7 @@ export default function AskConnexToolCard({
     const outcomeSummary = askConnexToolOutcomeSummary(card, labels.summaries);
     const undoWindow = askConnexUndoWindow(card, effectiveNow);
     const busy = card.pendingAction !== null;
-    const changes = status === 'proposed' ? askConnexToolChanges(card) : [];
+    const changes = card.status === 'proposed' ? askConnexToolChanges(card) : [];
     const removal = askConnexToolProposesRemoval(card);
     const resultValues = status === 'executed' || status === 'expired' ? card.outcomeValues : [];
     const createdRecordHref = status === 'executed' || status === 'expired'

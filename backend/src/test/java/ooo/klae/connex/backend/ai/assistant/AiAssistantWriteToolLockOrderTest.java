@@ -244,7 +244,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
     }
 
     @Test
-    void anImmediateTagOnACompanyLocksItForUpdateAndResolvesTheTagOnlyAfterTheScopeGate()
+    void anImmediateTagLocksDefinitionBeforeTargetAndAssociationsBeforeAdmission()
             throws Exception {
         Tag tag = new Tag();
         tag.setId(9);
@@ -267,11 +267,13 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(tagService).getAllTags();
+        order.verify(tagService).lockDefinitionForShare(9);
         order.verify(companyService).lockOwnedCompanyForUpdate(52);
+        order.verify(tagService).lockAssociationsForUpdate("company", 52);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
         order.verify(companyService).getCompanyById(52);
-        order.verify(tagService).getAllTags();
         order.verify(companyService).addTag(52, 9);
         verify(taskService, never()).lockBoardForCreation();
     }

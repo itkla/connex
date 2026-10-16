@@ -444,7 +444,8 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("pendingOnly") boolean pendingOnly,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("reviewCreatedAfter") LocalDateTime reviewCreatedAfter);
 
     List<AiChatToolCall> listToolCallsByTurn(
         @Param("workspaceId") int workspaceId,

@@ -201,6 +201,13 @@ public class ActivityService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity) {
+        return create(activity, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.ACTIVITY_CREATE)
+    public Activity create(Activity activity, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         try {
@@ -210,6 +217,7 @@ public class ActivityService {
             activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
             requireLinkedRecordsVisible(workspaceId, activity, true);
             workspaceService.requirePermission(Permission.ACTIVITY_CREATE);
+            admission.beforeMutation();
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
                     "Created activity " + activity.getSubject(),

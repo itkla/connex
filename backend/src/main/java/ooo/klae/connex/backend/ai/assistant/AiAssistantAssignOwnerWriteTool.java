@@ -127,11 +127,11 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         Target target = execution.row().target();
         Integer applied = switch (target.kind()) {
             case "person" -> appliedOwner(
-                    personService.updateOwner(target.id(), ownerId), Person::getOwnerId);
+                    personService.updateOwner(target.id(), ownerId, execution.admission()), Person::getOwnerId);
             case "company" -> appliedOwner(
-                    companyService.updateOwner(target.id(), ownerId), Company::getOwnerId);
+                    companyService.updateOwner(target.id(), ownerId, execution.admission()), Company::getOwnerId);
             case "deal" -> appliedOwner(
-                    dealService.updateOwner(target.id(), ownerId), Deal::getOwnerId);
+                    dealService.updateOwner(target.id(), ownerId, execution.admission()), Deal::getOwnerId);
             default -> throw new BadRequestException("Unsupported owner target");
         };
         Map<String, Object> outcome = new LinkedHashMap<>();

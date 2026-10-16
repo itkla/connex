@@ -474,6 +474,50 @@ complete answer is checked again at stream finish.
 No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
 keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.
 
+### Assistant proposal review deadlines
+
+`AiAssistantProposalExpiry.PROPOSAL_REVIEW_WINDOW` is seventy-two hours, anchored only to the
+original server `ai_chat_tool_call.created_at` interpreted as UTC with microsecond precision.
+A trusted still-proposed row expires at `now >= created_at + window`, including legacy singles and
+stranded AUTO rows. Missing or invalid creation times fail closed. Reads, replay and retries never
+extend the deadline. Expiry derives `reviewState` and `reviewExpiresAt` on both legacy DTOs; it does
+not write a new status, column or holding. Terminal outcomes retain their actual meaning, and undo
+continues to use its independent inverse eligibility and ten-minute deadline.
+
+Each approval and AUTO execution carries a transaction-bound `MutationAdmission` through
+`AiAssistantWriteTool.Execution` to the domain delegate. The callback reads the injected clock
+at the final pre-mutation boundary after every blocking prerequisite lock and validation, including
+successful no-op branches. Successful admission belongs to that one atomic action and may commit
+after the deadline; subsequent effects do not perform a new expiry decision. The framework refuses
+to persist an execution receipt if the delegate did not admit. Non-assistant overloads retain their
+original signatures and use unrestricted admission. New write tools must propagate this callback
+and prove its placement under their domain locks; an early framework check is insufficient. The
+complete hierarchy and checkpoints are in [LOCKING.md](LOCKING.md#assistant-write-tools).
+
+Legacy approval and discard return HTTP 409 with code `AI_PROPOSAL_EXPIRED` and message
+`Assistant proposal review window has expired` only after authorization, requester/session, trust,
+state and tier validation. Discard checks immediately before its conditional rejection write under
+session/tool-call locks; it adds no domain permission, target lookup or domain lock. An expired
+refusal rolls back without domain mutation, success audit, receipt or rejection. AUTO remains
+ineligible for manual decisions; its existing generation-owned failure settlement remains intact.
+
+Every list captures one injected-clock instant for SQL and projection. Pending reads filter trusted
+`proposed` rows with `created_at > now - 72 hours` before their existing ordering and 100-row limit,
+including audited retained reads. Historical and individual reads retain authorized expired rows.
+False-marker proposed/failed rows and malformed envelopes retain existing exclusion rules; legacy
+terminal history remains visible without being promoted to trusted, with a null review deadline.
+Current visibility, special-care masking, processing restrictions, local restriction fences and
+retained-read audits remain authoritative.
+
+Frontend Apply and Discard require a valid open deadline and client time strictly before it. A
+local timer, focus and visibility resume disarm them without a network frame; the typed expiry
+error clears the action and settles the individual row without retry. EN/JA expiry copy and
+historical/pending reload merging preserve the existing surfaces. This deadline is decision
+expiry, not erasure: deletion cascades, export ownership, retention and account-erasure handling
+are unchanged. V230 is marker-only, raises the rollback floor, and does not repair retained-chat
+privacy. Ship the full contract together and drain older instances as described in
+[UPGRADING.md](../UPGRADING.md#v230-assistant-proposal-review-expiry).
+
 ### Adding an assistant write tool
 
 Adding an assistant write tool is one `AiAssistantWriteTool` bean, its catalog line and `description` arm, its record in the sealed `AiAssistantWriteToolRequest`, its two `AiChatProgressService` arms (`sourceForTool` and `resultCount`, forced by `AiChatProgressServiceTest`), its own permitted-method grants in `AiAssistantWriteToolSpiArchTest`, its request and outcome label arms in `frontend/app/lib/askConnex.ts` with EN and JA copy (forced by the same arch test), its toolset staying within that toolset's pinned ceiling in `AiAssistantPromptEnvelopeTest`, and its trajectory golden. A tool that changes an existing record is confirm-tier unless [`docs/PRODUCT.md`](../PRODUCT.md) enumerates it as an immediate write; a confirm-tier tool returns non-empty `diffs` for every card it can apply (the client never arms Apply without one) and resolves any name the model wrote through `resolve`, never inside `apply`, so the framework pins it. A card that states a column the target holds now as its before-value declares `ReviewInput.FIELDS` and reads it from `RecordSnapshot.fields`, which the card projection fills from the row it already loaded for the page (a person's `title` and `firstResponseDueAt`; a company's `website`, `industry`, `address`; a deal's `value`, `expectedCloseDate`); a tool that does not declare it is handed an empty map. A shared-in row can have owner-only columns masked; `RecordSnapshot.sharedIn` keeps a missing field there from being treated as a statement that the record holds none. A tool whose delegate writes only a record the workspace owns (the lead-response service behind `set_response_due`) declares `requiresOwnedTarget()`: the framework then refuses a contact or company shared in from another workspace recoverably with `unresolved_reference` when the proposal is prepared, so no card offers an approval the delegate could only refuse, and the registry permits it only on record kinds (person, company, deal); deal ownership is checked through the workspace-scoped `DealService.getDealById` query. `update_record_fields` declares it because both person and company update delegates require ownership. `AiAssistantRemoveTagWriteTool` is the reference for a new confirm-tier tool.

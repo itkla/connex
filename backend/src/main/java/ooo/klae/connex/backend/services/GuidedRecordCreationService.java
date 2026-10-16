@@ -44,6 +44,13 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createPerson(GuidedPersonCreateRequestDto request) {
+        return createPerson(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_CREATE)
+    public Person createPerson(GuidedPersonCreateRequestDto request, MutationAdmission admission) {
         lockPermission(Permission.PERSON_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
             RecordCreationRecordType.person, request.templateUse());
@@ -60,12 +67,19 @@ public class GuidedRecordCreationService {
         return personService.createReviewed(
             person,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds));
+            augmentation(request.templateUse(), customFields, tagIds), admission);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(GuidedCompanyCreateRequestDto request) {
+        return createCompany(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMPANY_CREATE)
+    public Company createCompany(GuidedCompanyCreateRequestDto request, MutationAdmission admission) {
         lockPermission(Permission.COMPANY_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
             RecordCreationRecordType.company, request.templateUse());
@@ -79,7 +93,7 @@ public class GuidedRecordCreationService {
         return companyService.createCompanyReviewed(
             company,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds));
+            augmentation(request.templateUse(), customFields, tagIds), admission);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -92,6 +106,13 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName) {
+        return createDeal(request, reviewedStageName, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_CREATE)
+    public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName, MutationAdmission admission) {
         lockPermission(Permission.DEAL_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
             RecordCreationRecordType.deal, request.templateUse());
@@ -107,7 +128,7 @@ public class GuidedRecordCreationService {
         return dealService.createReviewed(
             deal,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName));
+            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName), admission);
     }
 
     private void lockPermission(Permission permission) {

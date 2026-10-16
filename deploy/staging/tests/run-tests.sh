@@ -1950,6 +1950,18 @@ case_rollback_floor_allows_compatible_previous_jar() (
     check_floor_rollback compatible_root_path "$floor" "$floor" "$floor" allowed
 )
 
+case_expiry_floor_rejects_pre_v230_jar() (
+    local floor=tenant/V230__ai_proposal_review_expiry_cutover.sql
+    check_floor_rollback expiry_incompatible "$floor" '' "$floor" refused
+)
+
+case_expiry_floor_allows_compatible_v230_jar() (
+    local floor=tenant/V230__ai_proposal_review_expiry_cutover.sql layout
+    for layout in root boot; do
+        check_floor_rollback "expiry_compatible-$layout" "$floor" "$floor" "$floor" allowed "$layout" || return 1
+    done
+)
+
 case_rollback_without_floor_preserves_legacy_behavior() (
     check_floor_rollback no_file '' '' '' allowed
 )
@@ -2058,7 +2070,7 @@ install_floor_recovery_stubs() {
 }
 
 setup_floor_recovery_fixture() {
-    local root="$1" floor=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql
+    local root="$1" floor="${2:-tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql}"
     load_deploy "$root"
     DEPLOY_PREVIOUS=3535353535353535353535353535353535353535
     DEPLOY_RETAINED=3434343434343434343434343434343434343434
@@ -2096,6 +2108,25 @@ assert_forward_recovery_committed() {
     assert_absent no_previous_backend "restart backend $previous" "$root/events.log" || return 1
     assert_absent no_previous_frontend "restart frontend $previous" "$root/events.log" || return 1
 }
+
+case_expiry_floor_recovery_refuses_pre_v230_jar() (
+    local root="$SANDBOX/expiry-floor-recovery" target previous status=0
+    setup_floor_recovery_fixture "$root" tenant/V230__ai_proposal_review_expiry_cutover.sql || return 1
+    target="$DEPLOY_TARGET"
+    previous="$DEPLOY_PREVIOUS"
+    quiesce_frontend_and_switch_checkout "$target" || return 1
+    cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
+    write_transaction backend_starting || return 1
+    run_floor_recovery_timer "$root" > "$root/initial.log" 2>&1 || status=$?
+    assert_status expiry_recovery_failure 1 "$status" || return 1
+    assert_equals expiry_forward_only forward_only "$(release_manifest_value "$TRANSACTION_FILE" phase)" || return 1
+    assert_equals expiry_target_jar_preserved "$target" "$(jar_git_sha "$LIVE_JAR")" || return 1
+    assert_contains expiry_recovery_refused 'rollback_state=refused_floor' "$root/initial.log" || return 1
+    assert_file_missing expiry_frontend_stays_stopped "$root/frontend-sha" || return 1
+    touch "$root/healthy"
+    run_floor_recovery_timer "$root" > "$root/timer.log" 2>&1 || { cat "$root/timer.log"; return 1; }
+    assert_forward_recovery_committed "$root" "$target" "$previous"
+)
 
 case_floor_backend_health_failure_recovers_on_next_timer() (
     local root="$SANDBOX/floor-health-retry" target previous status=0
@@ -3047,6 +3078,9 @@ case_jar_identity_reads_every_build_layout() {
 run_case case_pair_rollback_restores_exact_artifacts
 run_case case_rollback_floor_refuses_incompatible_previous_jar
 run_case case_rollback_floor_allows_compatible_previous_jar
+run_case case_expiry_floor_rejects_pre_v230_jar
+run_case case_expiry_floor_allows_compatible_v230_jar
+run_case case_expiry_floor_recovery_refuses_pre_v230_jar
 run_case case_rollback_without_floor_preserves_legacy_behavior
 run_case case_malformed_rollback_floor_fails_closed
 run_case case_floor_backend_health_failure_recovers_on_next_timer

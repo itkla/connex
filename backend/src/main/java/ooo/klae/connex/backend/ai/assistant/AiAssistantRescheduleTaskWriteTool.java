@@ -98,7 +98,7 @@ public class AiAssistantRescheduleTaskWriteTool implements AiAssistantWriteTool 
             throw new IllegalStateException("Assistant tool request is invalid");
         }
         Target target = execution.row().target();
-        Task returned = taskService.reschedule(target.id(), request.dueDate());
+        Task returned = taskService.reschedule(target.id(), request.dueDate(), execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", "executed");
         outcome.put("recordType", "task");

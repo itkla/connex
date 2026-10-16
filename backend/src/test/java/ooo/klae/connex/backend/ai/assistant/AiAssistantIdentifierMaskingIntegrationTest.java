@@ -1151,7 +1151,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 List.of(taskMapper.getTaskById(workspace.getId(), fixture.task().getId()))).getFirst();
         assertTrue(storedTask.getDescription().contains("[Prior Member Label](user:"));
         assertTrue(storedTask.getDescription().contains("[Pending Member Label](user:"));
-        var delegate = mock(ooo.klae.connex.backend.services.TaskService.class);
+        var delegate = AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class);
         when(delegate.complete(storedTask.getId())).thenReturn(storedTask);
         when(delegate.reschedule(storedTask.getId(), "2026-10-15")).thenReturn(storedTask);
         AiAssistantWriteTool declared = "complete_task".equals(tool)
@@ -1165,7 +1165,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 new AiAssistantWriteTool.Row(new AiAssistantWriteTool.Target("task", storedTask.getId()), request),
                 List.of(), null, new AiAssistantWriteTool.LockedTarget(null, null), (start, end) -> {
                     throw new AssertionError("Task writes cannot read schedule conflicts");
-                }));
+                }, Map.of(), ooo.klae.connex.backend.services.MutationAdmission.UNRESTRICTED));
         ObjectMapper mapper = JsonMapper.builder().build();
         String storedJson = mapper.writeValueAsString(Map.of("tier", "confirm", "outcome", outcome.data()));
         assertFalse(storedJson.contains("{{M"));

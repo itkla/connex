@@ -74,6 +74,7 @@ import AskConnexProposalReview, {
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
+import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import type {
     AskConnexAttachment,
     AskConnexFileAttachment,
@@ -954,8 +955,10 @@ function ToolCallCards({
     review: AskConnexToolReview;
     onAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
+    const now = useProposalReviewNow(cards.filter((card) => card.status === 'proposed')
+        .map((card) => card.reviewExpiresAt));
     const groups = askConnexProposalGroups(
-        cards, actionableToolCallIds, review.excludedToolCallIds,
+        cards, actionableToolCallIds, review.excludedToolCallIds, now,
     );
     const grouped = askConnexGroupedToolCallIds(groups);
     const ungrouped = cards.filter((card) => !grouped.has(card.id));

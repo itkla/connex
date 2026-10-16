@@ -303,12 +303,8 @@ class AiChatMapperTest extends AbstractMapperTest {
                 toolCall.getId(),
                 chatMapper.getToolCallBySession(
                         workspace.getId(), session.getId(), toolCall.getId()).getId());
-        assertEquals(
-                List.of(toolCall.getId()),
-                chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), true, 1).stream()
-                        .map(AiChatToolCall::getId)
-                        .toList());
+        assertTrue(chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), true, 1, java.time.LocalDateTime.MIN).isEmpty());
         assertNull(chatMapper.getToolCallBySession(
                 workspace.getId() + 1, session.getId(), toolCall.getId()));
         assertEquals(1, chatMapper.updateToolCall(
@@ -355,7 +351,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertTrue(chatMapper.getToolCallBySessionForUpdate(
                 workspace.getId(), session.getId(), secondToolCall.getId()).isServerProposal());
         assertTrue(chatMapper.listToolCallsBySession(
-                        workspace.getId(), session.getId(), false, 10).stream()
+                        workspace.getId(), session.getId(), false, 10, java.time.LocalDateTime.MIN).stream()
                 .filter(listed -> listed.getId() == secondToolCall.getId())
                 .findFirst()
                 .orElseThrow()
@@ -369,13 +365,13 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), false, 1).stream()
+                                workspace.getId(), session.getId(), false, 1, java.time.LocalDateTime.MIN).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId(), session.getId(), true, 1).isEmpty());
+                workspace.getId(), session.getId(), true, 1, java.time.LocalDateTime.MIN).isEmpty());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId() + 1, session.getId(), false, 1).isEmpty());
+                workspace.getId() + 1, session.getId(), false, 1, java.time.LocalDateTime.MIN).isEmpty());
         assertEquals(
                 turn.getId(),
                 chatMapper.getLatestActiveTurnBySession(

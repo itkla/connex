@@ -314,16 +314,30 @@ class AiAssistantControllerTest {
     }
 
     @Test
+    void expiredProposalDecisionsUseTheCentralConflictContract() throws Exception {
+        when(writeToolService.approve(42, 29))
+                .thenThrow(new ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException());
+        when(writeToolService.reject(42, 29))
+                .thenThrow(new ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException());
+        for (String operation : java.util.List.of("approve", "reject")) {
+            mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/29/" + operation))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("AI_PROPOSAL_EXPIRED"))
+                    .andExpect(jsonPath("$.message").value("Assistant proposal review window has expired"));
+        }
+    }
+
+    @Test
     void approvalRejectionAndUndoUseSessionScopedToolCallEndpoints() throws Exception {
         JsonMapper objectMapper = JsonMapper.builder().build();
         when(writeToolService.approve(42, 29)).thenReturn(new AiAssistantToolCallDto(
-                29, "change_deal_stage", "confirm", "executed",
+                29, "change_deal_stage", "confirm", "executed", "applied", null,
                 objectMapper.readTree("{\"stage\":\"Proposal\"}"), false, null));
         when(writeToolService.reject(42, 30)).thenReturn(new AiAssistantToolCallDto(
-                30, "assign_owner", "confirm", "rejected",
+                30, "assign_owner", "confirm", "rejected", "discarded", null,
                 objectMapper.createObjectNode(), false, null));
         when(writeToolService.undo(42, 31)).thenReturn(new AiAssistantToolCallDto(
-                31, "create_note", "auto", "undone",
+                31, "create_note", "auto", "undone", "undone", null,
                 objectMapper.readTree("{\"recordType\":\"note\"}"), false,
                 "2026-08-10T12:10:00Z"));
 
@@ -350,6 +364,8 @@ class AiAssistantControllerTest {
                 "assign_owner",
                 "confirm",
                 "proposed",
+                "open",
+                "2026-08-13T12:00:00Z",
                 new AiAssistantToolCallReadDto.Target("person", 31, "Ada Lovelace"),
                 "Assign an owner",
                 null,

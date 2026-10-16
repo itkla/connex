@@ -894,6 +894,8 @@
       AND m.session_id = #{sessionId}
     <if test="pendingOnly">
       AND tc.status = 'proposed'
+      AND tc.server_proposal = TRUE
+      AND tc.created_at &gt; #{reviewCreatedAfter}
     </if>
     ORDER BY m.seq ASC, tc.id ASC
     LIMIT #{limit}
