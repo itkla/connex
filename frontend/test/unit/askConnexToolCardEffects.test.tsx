@@ -119,15 +119,15 @@ async function mount(node: React.ReactNode): Promise<{
     interactive: Interactive;
     root: { render: (next: React.ReactNode) => void; unmount: () => void };
     rerender: (next: React.ReactNode) => Promise<void>;
-    scheduled: Array<() => void>;
+    scheduled: Array<{ handler: () => void; delay: number | undefined }>;
     resume: (type: 'focus' | 'visibilitychange') => void;
 }> {
     const interactive = installInteractiveDocument();
     const documentEvents = vi.spyOn(document, 'addEventListener');
-    const scheduled: Array<() => void> = [];
+    const scheduled: Array<{ handler: () => void; delay: number | undefined }> = [];
     Object.assign(window, {
-        setTimeout: (handler: () => void) => {
-            scheduled.push(handler);
+        setTimeout: (handler: () => void, delay?: number) => {
+            scheduled.push({ handler, delay });
             return scheduled.length;
         },
         clearTimeout: () => {},
@@ -208,7 +208,7 @@ describe("assistant tool card undo window", () => {
 
         await act(async () => {
             const close = scheduled[0];
-            if (close) close();
+            if (close) close.handler();
         });
 
         expect(present(interactive.elements, "You can undo this until")).toBe(false);
@@ -473,13 +473,15 @@ describe("proposal review deadline", () => {
             const { interactive, root, scheduled, resume } = await mount(renderedCard(proposal, action));
             expect(control(interactive, "Apply the proposed change to Acme renewal")).toBeDefined();
             expect(control(interactive, "Discard the proposed change to Acme renewal")).toBeDefined();
+            expect(scheduled).toHaveLength(1);
+            const timer = scheduled[0];
+            if (!timer) throw new Error('Missing proposal deadline timer');
+            expect(timer.delay).toBe(deadline - NOW);
 
             clock.mockReturnValue(deadline);
             await act(async () => {
                 if (trigger === 'timer') {
-                    const timer = scheduled[0];
-                    if (!timer) throw new Error('Missing proposal deadline timer');
-                    timer();
+                    timer.handler();
                 } else resume(trigger);
             });
 

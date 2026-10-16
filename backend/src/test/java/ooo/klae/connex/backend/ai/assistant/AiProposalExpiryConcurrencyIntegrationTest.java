@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -38,6 +39,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 
 /** Observes real lock waits before advancing the review clock for every executable branch. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -91,6 +93,33 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
         }
         Proposal proposal = proposal(tool, kind);
         assertRefusalAfterWait(proposal, lastLock(tool, kind), false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"date_only", "value_only", "unchanged_value"})
+    void eachDealFieldCheckpointRefusesAfterWaitAndAdmitsBeforeDeadline(String fields) throws Exception {
+        Map<String, Object> arguments = switch (fields) {
+            case "date_only" -> Map.of("expected_close_date", "2030-01-02");
+            case "value_only" -> Map.of("value", "2000.00");
+            case "unchanged_value" -> Map.of("value", "1000.00");
+            default -> throw new IllegalArgumentException(fields);
+        };
+        Proposal proposal = proposal("update_record_fields", "deal", arguments);
+        assertRefusalAfterWait(proposal, byId("deal", deal.getId()), false, false,
+                !"unchanged_value".equals(fields));
+        assertEquals("value_only".equals(fields) ? "2000.00" : "1000.00",
+                jdbc.queryForObject("SELECT value FROM deal WHERE workspace_id = ? AND id = ?",
+                        String.class, workspace.getId(), deal.getId()));
+        assertEquals("date_only".equals(fields) ? "2030-01-02" : null,
+                jdbc.queryForObject("SELECT expected_close_date FROM deal WHERE workspace_id = ? AND id = ?",
+                        String.class, workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void activityExpiryDefersFailureAuditUntilAuthorityLocksAreReleased() throws Exception {
+        assertRefusalAfterWait(proposal("create_activity", "person"), byId("person", person.getId()),
+                false, true, true);
+        assertEquals(1, activityFailureAudits());
     }
 
     @Test
@@ -210,11 +239,16 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
     }
 
     private void assertRefusalAfterWait(Proposal proposal, LockRow row, boolean discard) throws Exception {
+        assertRefusalAfterWait(proposal, row, discard, false, true);
+    }
+
+    private void assertRefusalAfterWait(Proposal proposal, LockRow row, boolean discard,
+            boolean queueActorWriter, boolean changesDomain) throws Exception {
         var before = domainSnapshot();
         CountDownLatch connected = new CountDownLatch(1);
         AtomicLong waitingConnection = new AtomicLong();
         try (Connection holder = Objects.requireNonNull(jdbc.getDataSource()).getConnection();
-                var executor = Executors.newSingleThreadExecutor()) {
+                var executor = Executors.newFixedThreadPool(2)) {
             holder.setAutoCommit(false);
             long holdingConnection;
             try (var statement = holder.createStatement(); var result = statement.executeQuery("SELECT CONNECTION_ID()")) {
@@ -240,7 +274,15 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
                         if (discard) {
                             writes.reject(proposal.sessionId(), proposal.id());
                         } else {
-                            execute(proposal);
+                            try {
+                                execute(proposal);
+                            } catch (AiAssistantProposalExpiredException refusal) {
+                                if (queueActorWriter) {
+                                    assertEquals(0, activityFailureAudits(),
+                                            "The failure audit must wait for the decision transaction to complete");
+                                }
+                                throw refusal;
+                            }
                         }
                     });
                 } finally {
@@ -251,11 +293,27 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
                 assertTrue(connected.await(15, TimeUnit.SECONDS));
                 awaitWait(waitingConnection.get(), holdingConnection, row.table(), decision);
                 assertFalse(decision.isDone());
+                Future<?> actorWriter = null;
+                if (queueActorWriter) {
+                    CountDownLatch writerConnected = new CountDownLatch(1);
+                    AtomicLong writerConnection = new AtomicLong();
+                    actorWriter = executor.submit(() -> {
+                        updateActor(writerConnection, writerConnected);
+                        return null;
+                    });
+                    assertTrue(writerConnected.await(15, TimeUnit.SECONDS));
+                    MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, writerConnection.get(),
+                            "app_user", Integer.toString(actor.getId()));
+                    awaitWait(writerConnection.get(), waitingConnection.get(), "app_user", actorWriter);
+                }
                 now.set(deadline);
                 holder.commit();
                 ExecutionException failure = assertThrows(ExecutionException.class,
                         () -> decision.get(20, TimeUnit.SECONDS));
                 assertInstanceOf(AiAssistantProposalExpiredException.class, failure.getCause());
+                if (actorWriter != null) {
+                    actorWriter.get(20, TimeUnit.SECONDS);
+                }
             } finally {
                 holder.rollback();
             }
@@ -269,7 +327,45 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
         } else {
             execute(proposal);
             assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id()).getStatus());
-            assertNotEquals(before, domainSnapshot(), "The before-deadline control must perform the intended action");
+            if (changesDomain) {
+                assertNotEquals(before, domainSnapshot(), "The before-deadline control must perform the intended action");
+            } else {
+                assertEquals(before, domainSnapshot(), "An admitted no-op must preserve domain state");
+            }
+        }
+    }
+
+    private int activityFailureAudits() {
+        return Objects.requireNonNull(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND actor_id = ? AND action = 'activity.create' AND outcome = 'failure'
+                """, Integer.class, workspace.getId(), actor.getId()));
+    }
+
+    private void updateActor(AtomicLong connectionId, CountDownLatch connected) throws Exception {
+        try (Connection connection = Objects.requireNonNull(jdbc.getDataSource()).getConnection()) {
+            boolean autoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (var session = connection.createStatement()) {
+                try (var result = session.executeQuery("SELECT CONNECTION_ID()")) {
+                    assertTrue(result.next());
+                    connectionId.set(result.getLong(1));
+                }
+                session.execute("SET SESSION innodb_lock_wait_timeout = 10");
+                connected.countDown();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE app_user SET timezone = timezone WHERE id = ?")) {
+                    statement.setInt(1, actor.getId());
+                    assertEquals(1, statement.executeUpdate());
+                }
+                connection.commit();
+            } finally {
+                connection.rollback();
+                try (var reset = connection.createStatement()) {
+                    reset.execute("SET SESSION innodb_lock_wait_timeout = DEFAULT");
+                }
+                connection.setAutoCommit(autoCommit);
+            }
         }
     }
 

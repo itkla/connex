@@ -764,7 +764,7 @@ or durable privacy fence in this slice.
 | Record fields | Person/company duplicate hierarchy → target → canonical validation; admit before first record write. Deal value/date writes share one admission for the atomic action. |
 | Draft document | Deal root → snapshot/template/version reads; admit before `insertNextVersion`, with no template-content pin or new lock. |
 | Stage change | Canonical ordered stage/deal board locks and `LockedStageChange` validation; admit before first stage/outcome/position write. |
-| Activity creation | Framework target → linked person exclusive and required visibility grant → permission validation; admit before insert. |
+| Activity creation | Framework target → linked person exclusive and required visibility grant → permission validation; admit before insert. Failure audits defer until the decision transaction completes, so they cannot re-lock authority roots behind a writer waiting on that transaction. |
 | Task creation | Assignee membership → board → linked person shared and exact grant, or held deal → permission validation; admit before insert. |
 | Note creation | Framework target → linked-record validation; admit before insert. |
 | Guided person/company/deal creation | Canonical duplicate/identity → template set/root → sorted custom-field/tag/relationship locks (deal stage before pipeline); admit after final validation immediately before the core insert, not before augmentation preparation. |

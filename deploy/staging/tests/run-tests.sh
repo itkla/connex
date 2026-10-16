@@ -115,6 +115,7 @@ load_deploy() {
 # the deploy refuses every real release as an identity mismatch.
 make_jar() {
     local path="$1" sha="$2" layout="${3:-root}" migration="${4:-}" root dir prefix=
+    local migration_source="${5:-}"
     root="$path.root"
     rm -rf "$root"
     case "$layout" in
@@ -126,7 +127,11 @@ make_jar() {
     printf 'build.gitSha=%s\n' "$sha" > "$root/$dir/build-info.properties"
     if [ -n "$migration" ]; then
         mkdir -p "$(dirname "$root/${prefix}db/migration/$migration")"
-        printf 'SELECT 1;\n' > "$root/${prefix}db/migration/$migration"
+        if [ -n "$migration_source" ]; then
+            cp "$migration_source" "$root/${prefix}db/migration/$migration" || return 1
+        else
+            printf 'SELECT 1;\n' > "$root/${prefix}db/migration/$migration"
+        fi
     fi
     (
         cd "$root" || return 1
@@ -148,7 +153,7 @@ make_runtime() {
 make_bundle() {
     local root="$1" sha="$2" provenance="${3:-built-from-target}"
     local jar="$root/$sha.jar" runtime="$root/$sha-runtime"
-    make_jar "$jar" "$sha" "${5:-root}" "${4:-}"
+    make_jar "$jar" "$sha" "${5:-root}" "${4:-}" "${6:-}" || return 1
     make_runtime "$runtime" "$sha"
     seal_release_bundle "$sha" "$jar" "$runtime" "$provenance"
     rm -rf "$runtime" "$jar"
@@ -1854,6 +1859,7 @@ case_pair_rollback_restores_exact_artifacts() (
 check_floor_rollback() (
     local variant="$1" declaration="$2" previous_migration="$3" target_migration="$4"
     local expected="$5" layout="${6:-root}" root="$SANDBOX/floor-$1"
+    local migration_source="${7:-}" previous_source=
     local previous=5555555555555555555555555555555555555555
     local retained=4444444444444444444444444444444444444444
     local target sudo_log alert_log status=0
@@ -1870,8 +1876,11 @@ check_floor_rollback() (
     rm -f "$STAGING_DIR/deploy/staging/rollback-floor"
     printf 'invalid-checkout-floor\n' > "$STAGING_DIR/deploy/staging/rollback-floor"
     make_bundle "$root" "$retained" rebuilt-from-marker-commit || return 1
-    make_bundle "$root" "$previous" rebuilt-from-marker-commit "$previous_migration" "$layout" || return 1
-    make_bundle "$root" "$target" built-from-target "$target_migration" "$layout" || return 1
+    if [ "$previous_migration" = "$target_migration" ]; then
+        previous_source="$migration_source"
+    fi
+    make_bundle "$root" "$previous" rebuilt-from-marker-commit "$previous_migration" "$layout" "$previous_source" || return 1
+    make_bundle "$root" "$target" built-from-target "$target_migration" "$layout" "$migration_source" || return 1
     cp "$RELEASES_DIR/$target/backend.jar" "$LIVE_JAR"
     printf '%s\n' "$previous" > "$MARKER"
     printf '%s\n' "$retained" > "$ROLLBACK_MARKER"
@@ -1950,15 +1959,29 @@ case_rollback_floor_allows_compatible_previous_jar() (
     check_floor_rollback compatible_root_path "$floor" "$floor" "$floor" allowed
 )
 
+repository_expiry_floor() {
+    local floor
+    floor="$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$STAGING_DEPLOY_DIR/rollback-floor")" || return 1
+    assert_equals shipped_expiry_floor tenant/V230__ai_proposal_review_expiry_cutover.sql "$floor" >&2 || return 1
+    assert_file_exists shipped_expiry_migration "$STAGING_DEPLOY_DIR/../../backend/src/main/resources/db/migration/$floor" >&2 || return 1
+    printf '%s\n' "$floor"
+}
+
 case_expiry_floor_rejects_pre_v230_jar() (
-    local floor=tenant/V230__ai_proposal_review_expiry_cutover.sql
-    check_floor_rollback expiry_incompatible "$floor" '' "$floor" refused
+    local floor declaration source previous=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql
+    floor="$(repository_expiry_floor)" || return 1
+    declaration="$(cat "$STAGING_DEPLOY_DIR/rollback-floor")" || return 1
+    source="$STAGING_DEPLOY_DIR/../../backend/src/main/resources/db/migration/$floor"
+    check_floor_rollback expiry_incompatible "$declaration" "$previous" "$floor" refused root "$source"
 )
 
 case_expiry_floor_allows_compatible_v230_jar() (
-    local floor=tenant/V230__ai_proposal_review_expiry_cutover.sql layout
+    local floor declaration source layout
+    floor="$(repository_expiry_floor)" || return 1
+    declaration="$(cat "$STAGING_DEPLOY_DIR/rollback-floor")" || return 1
+    source="$STAGING_DEPLOY_DIR/../../backend/src/main/resources/db/migration/$floor"
     for layout in root boot; do
-        check_floor_rollback "expiry_compatible-$layout" "$floor" "$floor" "$floor" allowed "$layout" || return 1
+        check_floor_rollback "expiry_compatible-$layout" "$declaration" "$floor" "$floor" allowed "$layout" "$source" || return 1
     done
 )
 
@@ -2071,13 +2094,14 @@ install_floor_recovery_stubs() {
 
 setup_floor_recovery_fixture() {
     local root="$1" floor="${2:-tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql}"
+    local previous_migration="${3:-}" migration_source="${4:-}" declaration="${5:-$floor}"
     load_deploy "$root"
     DEPLOY_PREVIOUS=3535353535353535353535353535353535353535
     DEPLOY_RETAINED=3434343434343434343434343434343434343434
-    DEPLOY_TARGET="$(make_target_commit "$floor")" || return 1
-    make_bundle "$root" "$DEPLOY_PREVIOUS" rebuilt-from-marker-commit || return 1
+    DEPLOY_TARGET="$(make_target_commit "$declaration")" || return 1
+    make_bundle "$root" "$DEPLOY_PREVIOUS" rebuilt-from-marker-commit "$previous_migration" || return 1
     make_bundle "$root" "$DEPLOY_RETAINED" rebuilt-from-marker-commit || return 1
-    make_bundle "$root" "$DEPLOY_TARGET" built-from-target "$floor" || return 1
+    make_bundle "$root" "$DEPLOY_TARGET" built-from-target "$floor" root "$migration_source" || return 1
     cp "$RELEASES_DIR/$DEPLOY_PREVIOUS/backend.jar" "$LIVE_JAR"
     printf '%s\n' "$DEPLOY_PREVIOUS" > "$MARKER"
     printf '%s\n' "$DEPLOY_RETAINED" > "$ROLLBACK_MARKER"
@@ -2111,7 +2135,11 @@ assert_forward_recovery_committed() {
 
 case_expiry_floor_recovery_refuses_pre_v230_jar() (
     local root="$SANDBOX/expiry-floor-recovery" target previous status=0
-    setup_floor_recovery_fixture "$root" tenant/V230__ai_proposal_review_expiry_cutover.sql || return 1
+    local floor declaration source previous_migration=tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql
+    floor="$(repository_expiry_floor)" || return 1
+    declaration="$(cat "$STAGING_DEPLOY_DIR/rollback-floor")" || return 1
+    source="$STAGING_DEPLOY_DIR/../../backend/src/main/resources/db/migration/$floor"
+    setup_floor_recovery_fixture "$root" "$floor" "$previous_migration" "$source" "$declaration" || return 1
     target="$DEPLOY_TARGET"
     previous="$DEPLOY_PREVIOUS"
     quiesce_frontend_and_switch_checkout "$target" || return 1

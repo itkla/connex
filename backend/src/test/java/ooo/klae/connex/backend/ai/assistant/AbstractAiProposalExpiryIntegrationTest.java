@@ -271,6 +271,10 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
     }
 
     Proposal proposal(String tool, String kind) {
+        return proposal(tool, kind, Map.of());
+    }
+
+    Proposal proposal(String tool, String kind, Map<String, Object> recordFields) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(actor.getId());
@@ -278,10 +282,15 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         session.setVisibility("private");
         session.setStatus("active");
         chats.insertSession(session);
-        return proposal(tool, kind, session.getId(), 1);
+        return proposal(tool, kind, session.getId(), 1, recordFields);
     }
 
     Proposal proposal(String tool, String kind, int sessionId, int sequence) {
+        return proposal(tool, kind, sessionId, sequence, Map.of());
+    }
+
+    private Proposal proposal(String tool, String kind, int sessionId, int sequence,
+            Map<String, Object> recordFields) {
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         Map<String, Object> arguments = new LinkedHashMap<>();
         if (!"workspace".equals(kind)) {
@@ -294,14 +303,18 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
             case "reschedule_task" -> arguments.put("due_date", "2030-01-02");
             case "set_response_due" -> arguments.put("due_in_hours", 24);
             case "update_record_fields" -> {
-                switch (kind) {
-                    case "person" -> arguments.put("title", "Director");
-                    case "company" -> arguments.put("industry", "Manufacturing");
-                    case "deal" -> {
-                        arguments.put("value", "2000.00");
-                        arguments.put("expected_close_date", "2030-01-02");
+                if (!recordFields.isEmpty()) {
+                    arguments.putAll(recordFields);
+                } else {
+                    switch (kind) {
+                        case "person" -> arguments.put("title", "Director");
+                        case "company" -> arguments.put("industry", "Manufacturing");
+                        case "deal" -> {
+                            arguments.put("value", "2000.00");
+                            arguments.put("expected_close_date", "2030-01-02");
+                        }
+                        default -> throw new IllegalArgumentException(kind);
                     }
-                    default -> throw new IllegalArgumentException(kind);
                 }
             }
             case "draft_document" -> arguments.put("template", document.getName());
@@ -397,7 +410,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         snapshot.put("deal_collaborator", jdbc.queryForList(
                 "SELECT c.* FROM deal_collaborator c JOIN deal d ON d.id = c.deal_id WHERE d.workspace_id = ? ORDER BY c.deal_id, c.user_id",
                 workspace.getId()));
-        snapshot.put("audit_log", jdbc.queryForList("SELECT id, action, entity_type, entity_id FROM audit_log WHERE workspace_id = ? ORDER BY id",
+        snapshot.put("audit_log", jdbc.queryForList("SELECT id, action, entity_type, entity_id FROM audit_log WHERE workspace_id = ? AND outcome = 'success' ORDER BY id",
                 workspace.getId()));
         return snapshot;
     }

@@ -223,7 +223,7 @@ public class ActivityService {
                     "Created activity " + activity.getSubject(),
                     auditService.diff(null, activity, AUDIT_FIELDS));
         } catch (Exception e) {
-            auditService.recordFailure("activity.create", "activity", null, activity.getSubject(),
+            auditService.deferFailure("activity.create", "activity", null, activity.getSubject(),
                     "Failed to create activity", e.getMessage());
             throw e;
         }
