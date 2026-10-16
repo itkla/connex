@@ -407,17 +407,11 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     /**
-     * A batch the endpoint declared, one of whose calls invented a placeholder, runs no call.
+     * A declared batch with an invented placeholder is refused before admission or execution.
      *
-     * <p>The declared twin of the golden above. On an endpoint that declared a batch the parse
-     * boundary admits this response within its bound — no envelope refusal fires — and sums the
-     * demask warnings of its calls, so the only thing standing between the invented placeholder
-     * and the execution of its sibling is the loop settling an admitted batch that carries a
-     * warning as malformed output before admission. The fixture scripts both what a laundering
-     * server would ask for (a repair) and what an executing one would reach (a step after two
-     * calls), each answered cleanly, so this golden passes only if the server does neither: one
-     * provider request, bounded to the declared batch, a failed turn, no durable tool call, no
-     * answer, and the response audited as the parsed batch it was with its warning recorded.
+     * <p>The fixture offers both a repair and a later step after executing the calls, so one
+     * provider request and no durable tool row prove neither path was reached. The malformed
+     * response retains its warning in the audit rather than being admitted as a parsed batch.
      */
     @Test
     void aDeclaredBatchInventingAPlaceholderRunsNoCallAndEndsTheTurn() {
@@ -443,8 +437,9 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         assertEquals(0,
                 auditRowsParsedAs("ai.llm.call", "malformed_output", "native_multiple_calls"),
                 "a batch within its declared bound is not an over-bound refusal");
-        assertEquals(1, auditRowsWithDemaskWarnings("ai.llm.call", "parsed"),
-                "the admitted response must be audited with its invented placeholder counted");
+        assertEquals(1, auditRowsWithDemaskWarnings("ai.llm.call", "malformed_output"),
+                "the refused response must retain its invented-placeholder warning");
+        assertEquals(0, auditRowsWithDemaskWarnings("ai.llm.call", "parsed"));
     }
 
     /**

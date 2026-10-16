@@ -195,6 +195,32 @@ class AiChatAttachmentContextServiceTest {
     }
 
     @Test
+    void imageDescriptionDiscardsInventedReferenceWarnings() {
+        Attachment image = attachment(33, "scan.jpg", "image/jpeg");
+        byte[] jpeg = { (byte) 0xff, (byte) 0xd8, (byte) 0xff, 1 };
+        AiInputImage inputImage = new AiInputImage("image/jpeg", jpeg, 1, 1);
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(image));
+        when(managedObjectService.openAttachment(TURN.workspaceId(), image))
+                .thenReturn(content(jpeg));
+        when(attachmentPolicy.readImage(eq("scan.jpg"), any(), eq((long) jpeg.length)))
+                .thenReturn(inputImage);
+        when(invocationAdmissionService.acquireDirect()).thenReturn(directAdmission);
+        when(invocationService.complete(
+                any(AiInvocation.class),
+                eq(directAdmission),
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class)))
+                .thenReturn(new AiCompletionOutcome("[unknown reference]", 1, 12, 4, "stop"));
+
+        var refusal = assertThrows(AiAssistantLoopException.class,
+                () -> service.prepare(TURN, NOW.plusSeconds(70), NO_STOP));
+
+        assertEquals("malformed_output", refusal.terminalReason());
+        assertEquals("image_description_invalid", refusal.detailReason());
+
+    }
+
+    @Test
     void participantRemovedMidTurnDoesNotEgressRemainingImages() {
         Attachment first = attachment(31, "first.jpg", "image/jpeg");
         Attachment second = attachment(32, "second.jpg", "image/jpeg");

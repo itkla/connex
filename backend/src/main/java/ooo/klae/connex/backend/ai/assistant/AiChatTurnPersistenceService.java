@@ -894,7 +894,8 @@ public class AiChatTurnPersistenceService {
      * terminal screen the resolved path applies, and it is purged when it cannot be shown.
      *
      * <p>A turn stopped by {@link AiAssistantTerminalReasons#AUTHORIZATION_WITHDRAWN} purges its
-     * partial unconditionally. The retained text carries no resource metadata, so a later read can
+     * partial unconditionally; malformed output also purges it. Streaming invented-reference
+     * detection withdraws partials immediately, before any later provider failure. Retained text carries no resource metadata, so a later read can
      * only gate it on session access; retaining it would leave facts readable that the requester
      * lost the right to read, or that a processing restriction withdrew mid-turn.
      */
@@ -1009,6 +1010,7 @@ public class AiChatTurnPersistenceService {
         if (RUNNING.equals(stored.getStatus())
                 && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
                 && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
+                        || "malformed_output".equals(reason)
                         || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
                 && chatMapper.resetTurnPartialContent(
                         stored.getWorkspaceId(), stored.getSessionId(), stored.getId(),

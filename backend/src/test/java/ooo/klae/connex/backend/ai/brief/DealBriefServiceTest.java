@@ -127,7 +127,40 @@ class DealBriefServiceTest {
     }
 
     @Test
-    void generate_happyPath_returnsDemaskedSectionsPersistsAndWarnings() {
+    void generate_happyPath_returnsDemaskedSectionsPersistsWithoutWarnings() {
+        BriefAssembly assembly = assembly();
+        arrangeMiss(assembly);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(
+                                section("Who they are", "Mina Patel leads the call."),
+                                section("Deal status", "Proposal sent."),
+                                section("Next move", "Call tomorrow."))),
+                        0,
+                        120,
+                        45,
+                        "end_turn"));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals(3, result.getSections().size());
+        assertEquals("Who they are", result.getSections().get(0).title());
+        assertEquals("Mina Patel leads the call.", result.getSections().get(0).body());
+        assertEquals(NOW.toString(), result.getGeneratedAt());
+        assertEquals(0, result.getWarnings());
+
+        ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class), eq(admission));
+        assertEquals(AiFeature.DEAL_BRIEF, invocation.getValue().feature());
+        assertEquals(DealBriefService.MAX_TOKENS, invocation.getValue().maxTokens());
+        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0),
+                eq(NOW.toString()), eq(List.of(73)));
+    }
+
+    @Test
+    void generate_warnedOutputIsNeitherServedNorCached() {
         BriefAssembly assembly = assembly();
         arrangeMiss(assembly);
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), eq(admission)))
@@ -143,20 +176,11 @@ class DealBriefServiceTest {
 
         DealBriefDto result = service.generate(DEAL_ID);
 
-        assertTrue(result.isAvailable());
-        assertEquals(3, result.getSections().size());
-        assertEquals("Who they are", result.getSections().get(0).title());
-        assertEquals("Mina Patel leads the call.", result.getSections().get(0).body());
-        assertEquals(NOW.toString(), result.getGeneratedAt());
-        assertEquals(2, result.getWarnings());
 
-        ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class), eq(admission));
-        assertEquals(AiFeature.DEAL_BRIEF, invocation.getValue().feature());
-        assertEquals(DealBriefService.MAX_TOKENS, invocation.getValue().maxTokens());
-        verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
-                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(2),
-                eq(NOW.toString()), eq(List.of(73)));
+        assertFalse(result.isAvailable());
+        assertEquals("provider_error", result.getReason());
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(), anyInt(), anyString(), any());
     }
 
     @Test
@@ -590,6 +614,87 @@ class DealBriefServiceTest {
         verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
         verify(aiInvocationService, never()).completeStructured(
                 any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class));
+    }
+
+    @Test
+    void generate_oldVersionRowUnderExhaustedAdmissionHasNoStaleFallback() {
+        BriefAssembly assembly = assembly();
+        arrangeMiss(assembly);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.of(row("v3-output-hash", 0, "2026-07-01T09:00:00Z")));
+        when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("rate_limited", result.getReason());
+        verify(dealBriefAssembler).assemble(WORKSPACE_ID, DEAL_ID);
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(aiOutputCacheStore, never()).read(anyString(), eq(DealBriefContent.class));
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class));
+    }
+
+    @Test
+    void generate_concurrentOldVersionRequestsRegenerateOnceWithoutStaleFallback() throws Exception {
+        BriefAssembly assembly = assembly();
+        arrangeMiss(assembly);
+        var committed = new AtomicReference<>(row("v3-output-hash", 0, "2026-07-01T09:00:00Z"));
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var joined = new java.util.concurrent.CountDownLatch(1);
+        var properties = new ooo.klae.connex.backend.ai.AiProperties();
+        properties.setInvocationQuotaAttemptsPerOrg(1);
+        when(workspaceService.getCurrentOrgId()).thenReturn(11);
+        var coordinator = org.mockito.Mockito.spy(new AiInvocationAdmissionService(
+                properties, workspaceService, Clock.fixed(NOW, ZoneOffset.UTC)));
+        org.mockito.Mockito.doAnswer(call -> {
+            Admission acquired = (Admission) call.callRealMethod();
+            if (acquired.decision() == Decision.FOLLOWER) {
+                joined.countDown();
+            }
+            return acquired;
+        }).when(coordinator).acquire(any(), anyString(), anyBoolean());
+        var concurrentService = new DealBriefService(dealBriefAssembler, aiInvocationService,
+                coordinator, aiFeatureGate, aiOutputCacheStore, workspaceService, Clock.fixed(NOW, ZoneOffset.UTC));
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenAnswer(call -> Optional.of(committed.get()));
+        when(aiOutputCacheStore.read("payload", DealBriefContent.class))
+                .thenReturn(Optional.of(content("Fresh regeneration.")));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class)))
+                .thenAnswer(call -> {
+                    started.countDown();
+                    assertTrue(joined.await(10, java.util.concurrent.TimeUnit.SECONDS));
+                    return new AiStructuredOutcome.Parsed<>(content("Fresh regeneration."), 0, 3, 2, "stop");
+                });
+        when(aiOutputCacheStore.saveForPersons(anyInt(), anyString(), anyInt(), anyInt(), anyString(),
+                any(), anyInt(), anyString(), any())).thenAnswer(call -> {
+                    committed.set(row(HASH, 0, NOW.toString()));
+                    return true;
+                });
+        java.util.concurrent.Callable<DealBriefDto> request = () -> {
+            LocaleContextHolder.setLocale(Locale.ENGLISH);
+            try {
+                return concurrentService.generate(DEAL_ID);
+            } finally {
+                LocaleContextHolder.resetLocaleContext();
+            }
+        };
+
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(request);
+            assertTrue(started.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            var second = executor.submit(request);
+            for (var result : List.of(first.get(10, java.util.concurrent.TimeUnit.SECONDS),
+                    second.get(10, java.util.concurrent.TimeUnit.SECONDS))) {
+                assertTrue(result.isAvailable());
+                assertEquals("Fresh regeneration.", result.getSections().getFirst().body());
+            }
+        }
+
+        verify(aiInvocationService, org.mockito.Mockito.times(1)).completeStructured(
+                any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class));
+        verify(aiOutputCacheStore).saveForPersons(anyInt(), anyString(), anyInt(), anyInt(), anyString(),
+                any(), anyInt(), anyString(), any());
     }
 
     private void arrangeMiss(BriefAssembly assembly) {

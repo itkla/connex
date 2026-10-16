@@ -2015,7 +2015,10 @@ class AiChatAgentLoopServiceTest {
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
-                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    ((AiInvocation) invocation.getArgument(0)).context().exposeDispatchedPayload("{{P1}}");
+                    return malformed;
+                })
                 .thenAnswer(invocation -> {
                     AiInvocation repairedInvocation = invocation.getArgument(0);
                     String repairPrompt = repairedInvocation.prompt().getMessages().getLast().getContent();
@@ -2052,7 +2055,10 @@ class AiChatAgentLoopServiceTest {
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
-                .thenReturn(malformed)
+                .thenAnswer(invocation -> {
+                    ((AiInvocation) invocation.getArgument(0)).context().exposeDispatchedPayload("{{P1}}");
+                    return malformed;
+                })
                 .thenAnswer(invocation -> {
                     AiRawOutputGuard outputGuard = invocation.getArgument(2);
                     assertEquals("bare_placeholder", outputGuard.rejectionReason(objectMapper.readTree(
@@ -2730,6 +2736,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     AiInvocation request = invocation.getArgument(0);
+                    request.context().exposeDispatchedPayload("{{P1}} {{P2}}");
                     String suggestion = Demasker.demask(
                             "Show recent activity for {{P1}}", request.context()).text();
                     String title = Demasker.demask(
@@ -2780,6 +2787,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
                 .thenAnswer(invocation -> {
                     AiInvocation request = invocation.getArgument(0);
+                    request.context().exposeDispatchedPayload("{{P1}} {{P2}}");
                     String overLength = Demasker.demask(
                             "Review {{P1}}", request.context()).text();
                     String controlPhrase = Demasker.demask(
@@ -5202,6 +5210,106 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("malformed_output", result.reason());
         verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
+        verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
+        verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());
+        if (nativeProtocol) {
+            verify(invocationService, times(1)).completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class));
+        } else {
+            verify(invocationService, times(1)).completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        }
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> streamFailureCases() {
+        return java.util.stream.Stream.of(false, true).flatMap(nativeProtocol -> java.util.stream.Stream.of("timeout", "disconnect")
+                .flatMap(failure -> java.util.stream.Stream.of(ooo.klae.connex.backend.ai.masking.EntityKind.values())
+                        .flatMap(kind -> java.util.stream.Stream.of("canonical", "newline", "tab")
+                                .flatMap(spelling -> java.util.stream.Stream.of(false, true)
+                                        .map(hidden -> org.junit.jupiter.params.provider.Arguments.of(
+                                                nativeProtocol, failure, kind, spelling, hidden))))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("streamFailureCases")
+    void inventedReferenceWithdrawsDurablePartialsBeforeTransportFailure(boolean nativeProtocol, String failure, ooo.klae.connex.backend.ai.masking.EntityKind kind, String spelling, boolean hiddenField) {
+        AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
+                TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
+                TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
+                AiPrivacyMode.MASKED, true);
+        AiChatMessage userMessage = new AiChatMessage();
+        userMessage.setId(streamedTurn.userMessageId());
+        userMessage.setAuthorKind("user");
+        userMessage.setContent("Summarize my pipeline");
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
+                .thenReturn(new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0, nativeProtocol));
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
+                .thenReturn(AiChatAttachmentContext.empty());
+        when(persistenceService.appendPartialBatch(
+                eq(streamedTurn), eq(0), any()))
+                .thenAnswer(invocation -> ((String) invocation.getArgument(2)).length());
+        when(persistenceService.resolve(
+                eq(streamedTurn), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        var partial = new java.util.concurrent.atomic.AtomicReference<>("");
+        when(persistenceService.appendPartialBatch(eq(streamedTurn), anyInt(), any())).thenAnswer(call -> {
+            partial.updateAndGet(value -> value + (String) call.getArgument(2));
+            return partial.get().length();
+        });
+        org.mockito.Mockito.doAnswer(call -> {
+            partial.set("");
+            return null;
+        }).when(persistenceService).resetPartialContent(eq(streamedTurn), anyInt());
+        java.util.function.Consumer<AiInvocation> stream = invocation -> {
+            String prefix = "Visible partial answer. ".repeat(20);
+            String reference = invocation.context().tokenFor(kind, "Unsent label");
+            String guess = spelling.equals("newline") ? "{{\n" + kind.tokenPrefix() + "1}}"
+                    : spelling.equals("tab") ? "{{" + kind.tokenPrefix() + "1\t}}" : reference;
+            if (hiddenField) {
+                invocation.streamObserver().onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix));
+                invocation.streamObserver().onProviderField(guess);
+            } else {
+                String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + guess);
+                int token = output.indexOf("{{");
+                invocation.streamObserver().onContentDelta(output.substring(0, token));
+                invocation.streamObserver().onContentDelta(output.substring(token));
+            }
+        };
+        if (nativeProtocol) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        if ("timeout".equals(failure)) {
+                            throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException("fixture");
+                        }
+                        throw new ooo.klae.connex.backend.ai.provider.AiProviderException("fixture");
+                    });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenAnswer(call -> {
+                        stream.accept(call.getArgument(0));
+                        if ("timeout".equals(failure)) {
+                            throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException("fixture");
+                        }
+                        throw new ooo.klae.connex.backend.ai.provider.AiProviderException("fixture");
+                    });
+        }
+        var result = service.run(streamedTurn);
+        assertEquals("timeout".equals(failure) ? AiGenerationTaskResult.Outcome.TIMED_OUT
+                : AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("timeout".equals(failure) ? "provider_idle_timeout" : "provider_error", result.reason());
+        assertEquals("", partial.get());
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> hiddenField || !nativeProtocol ? offset > 0 : offset == 0));
         verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
         verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());

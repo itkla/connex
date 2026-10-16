@@ -42,6 +42,7 @@ class AiChatStreamingProgressTest {
                         + ((String) call.getArgument(2)).length());
         MaskingContext context = new MaskingContext();
         String token = MaskingEngine.maskField(EntityKind.PERSON, "Ada Lovelace", context);
+        context.exposeDispatchedPayload(token);
         AiChatStreamingProgress progress = new AiChatStreamingProgress(
                 turn(AiPrivacyMode.MASKED), persistenceService, context);
 
@@ -129,12 +130,12 @@ class AiChatStreamingProgressTest {
                 new MaskingContext(AiPrivacyMode.UNMASKED));
 
         AiChatStreamingProgress.Observer observer = progress.observer(true);
-        observer.onContentDelta("{\"text\":\"Braces {{P1}} stay literal.\"}");
-        observer.finish("Braces {{P1}} stay literal.");
+        observer.onContentDelta("{\"text\":\"Braces {P1} stay literal.\"}");
+        observer.finish("Braces {P1} stay literal.");
 
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).appendPartialBatch(any(), anyInt(), batches.capture());
-        assertEquals("Braces {{P1}} stay literal.", batches.getValue());
+        assertEquals("Braces {P1} stay literal.", batches.getValue());
     }
 
     @Test
@@ -460,6 +461,8 @@ class AiChatStreamingProgressTest {
             } else {
                 verify(persistence, org.mockito.Mockito.atLeastOnce()).appendPartialBatch(any(), anyInt(), any());
             }
+            verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(queued),
+                    org.mockito.ArgumentMatchers.intThat(offset -> nativeProtocol ? offset == 0 : offset > 0));
             var refused = org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
                     () -> observer.finish(answer));
             assertEquals("malformed_output", refused.terminalReason());

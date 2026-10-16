@@ -207,7 +207,7 @@ final class AiAssistantMaskingTestSupport {
                     ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
                     "", ooo.klae.connex.backend.ai.provider.AiReasoningMode.NONE,
                     nativeProtocol && assignment ? List.of(new ooo.klae.connex.backend.ai.provider.AiToolCall(
-                            "member-guess", "assign_owner", "{\"handle\":\"r1\",\"owner\":\"{{M1}}\"}")) : List.of());
+                            "reference-guess", "assign_owner", mapper.readTree(output).path("tool").path("args").toString())) : List.of());
         };
         org.mockito.Mockito.doAnswer(call -> completion.apply(call.getArgument(0))).when(provider).complete(any());
         org.mockito.Mockito.doAnswer(call -> completion.apply(call.getArgument(0))).when(provider).completeStreaming(any(), any());

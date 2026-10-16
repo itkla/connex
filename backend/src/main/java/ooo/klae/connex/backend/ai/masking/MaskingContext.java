@@ -28,7 +28,7 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 public final class MaskingContext {
     private static final Logger log = LoggerFactory.getLogger(MaskingContext.class);
     private static final Pattern DISPATCHED_TOKEN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
-    private static final Pattern MEMBER_PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z][1-9][0-9]*)\\s*}}");
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{\\s*([A-Za-z][1-9][0-9]*)\\s*}}");
     private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     private static final Pattern PLACEHOLDER_PREFIX = Pattern.compile("\\{\\{?\\s*+[A-Za-z]?[0-9]*+\\s*+}?");
     private final Map<String, String> tokenToOriginalValue = new LinkedHashMap<>();
@@ -194,25 +194,60 @@ public final class MaskingContext {
     }
 
     /**
-     * Detects unexposed member placeholders, including tokens reconstructed by link cleanup.
+     * Detects invented placeholders of every kind, including tokens reconstructed by link cleanup.
      * The identity source map preserves doubled braces that ordinary prose canonicalization cancels.
      */
-    public boolean containsUnexposedMemberToken(String text) {
-        return !refusedMemberPlaceholders(text).isEmpty();
+    public boolean containsUnexposedToken(String text) {
+        return !refusedPlaceholders(text).isEmpty();
+    }
+
+    /**
+     * Checks complete provider-controlled text before parsing can discard a suffix or admit repair.
+     * Suffix reductions decode nested Unicode escapes in amortized linear time: each reduction
+     * removes five characters. Remaining backslashes cannot hide placeholder braces. This scan
+     * never changes retained output and never accepts an otherwise refused placeholder.
+     */
+    public boolean containsUnexposedTokenInProviderText(String text) {
+        if (containsUnexposedToken(text)) {
+            return true;
+        }
+        StringBuilder decoded = new StringBuilder(text.length());
+        for (int index = 0; index < text.length(); index++) {
+            decoded.append(text.charAt(index));
+            while (decoded.length() >= 6) {
+                int start = decoded.length() - 6;
+                if (decoded.charAt(start) != '\\' || decoded.charAt(start + 1) != 'u') {
+                    break;
+                }
+                int value = 0;
+                boolean valid = true;
+                for (int digitIndex = start + 2; digitIndex < start + 6; digitIndex++) {
+                    int digit = Character.digit(decoded.charAt(digitIndex), 16);
+                    if (digit < 0) {
+                        valid = false;
+                        break;
+                    }
+                    value = value * 16 + digit;
+                }
+                if (!valid) {
+                    break;
+                }
+                decoded.setLength(start);
+                decoded.append((char) value);
+            }
+        }
+        return containsUnexposedToken(decoded.toString()
+                .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+                .replace("\\b", "\b").replace("\\f", "\f").replace("\\", ""));
     }
 
     /** Source spans whose spelling or exposure cannot be demasked by the canonical token parser. */
-    List<PlaceholderSpan> refusedMemberPlaceholders(String text) {
+    List<PlaceholderSpan> refusedPlaceholders(String text) {
         Objects.requireNonNull(text, "text");
         var labels = placeholderProjection(text);
-        var matcher = MEMBER_PLACEHOLDER.matcher(labels.value());
+        var matcher = PLACEHOLDER.matcher(labels.value());
         List<PlaceholderSpan> refused = new ArrayList<>();
         while (matcher.find()) {
-            String canonicalToken = "{{" + matcher.group(1).toUpperCase(java.util.Locale.ROOT) + "}}";
-            if (Character.toUpperCase(matcher.group(1).charAt(0)) != 'M'
-                    && !memberIdentifierValues.contains(tokenToOriginalValue.get(canonicalToken))) {
-                continue;
-            }
             int start = labels.starts()[matcher.start()];
             int end = labels.ends()[matcher.end() - 1];
             var literal = DISPATCHED_TOKEN.matcher(text.substring(start, end));
@@ -225,7 +260,7 @@ public final class MaskingContext {
     }
 
     /**
-     * Withholds every incomplete spelling recognized by member validation, preserving its original
+     * Withholds every incomplete spelling recognized by placeholder validation, preserving its original
      * offset through the same NFKC and label projection. A flush cannot publish a refused prefix.
      */
     public static int withheldPlaceholderStart(String text, int safeLength) {
@@ -288,8 +323,7 @@ public final class MaskingContext {
     }
 
     String demaskableValueForToken(String token) {
-        return memberIdentifierValues.contains(tokenToOriginalValue.get(token)) && !exposedTokens.contains(token)
-                ? null : originalValueForToken(token);
+        return exposedTokens.contains(token) ? originalValueForToken(token) : null;
     }
 
     /**

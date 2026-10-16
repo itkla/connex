@@ -90,6 +90,27 @@ class BusinessCardAiExtractionServiceTest {
     }
 
     @Test
+    void extractDiscardsInventedReferenceWarnings() {
+        when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(true);
+        when(aiInvocationService.completeStructured(any(), eq(BusinessCardAiExtraction.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new BusinessCardAiExtraction(
+                                "  Ada   Lovelace ",
+                                "ADA@Example.TEST",
+                                "+1 (202) 555-0199",
+                                "Engineer",
+                                "Analytical Labs"),
+                        1,
+                        12,
+                        20,
+                        "end_turn"));
+
+        Optional<BusinessCardScanResponse> outcome = service.extract(validated);
+
+        assertTrue(outcome.isEmpty());
+    }
+
+    @Test
     void extractReturnsEmptyWhenAiIsNotAuthorized() {
         when(aiFeatureGate.isAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION)).thenReturn(false);
 

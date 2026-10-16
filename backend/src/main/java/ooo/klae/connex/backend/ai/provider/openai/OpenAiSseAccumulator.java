@@ -247,6 +247,7 @@ public final class OpenAiSseAccumulator {
             }
             thoughtsOpen = true;
             reasoning.append(value);
+            observer.onProviderField(reasoning.toString());
             return;
         }
         if (thoughtsOpen && content != null && content.isString()
@@ -258,6 +259,7 @@ public final class OpenAiSseAccumulator {
             }
             if (!value.isEmpty()) {
                 text.append(value);
+                observer.onProviderField(text.toString());
                 observer.onContentDelta(value);
             }
             return;
@@ -277,6 +279,7 @@ public final class OpenAiSseAccumulator {
             return;
         }
         target.append(value);
+        observer.onProviderField(target.toString());
         if (publish) {
             observer.onContentDelta(value);
         }
@@ -310,6 +313,10 @@ public final class OpenAiSseAccumulator {
             }
             ToolFragments fragments = tools.computeIfAbsent(index, ignored -> new ToolFragments());
             fragments.append(call, implied);
+            observer.onProviderField(fragments.id.toString());
+            observer.onProviderField(fragments.name.toString());
+            observer.onProviderField(fragments.arguments.toString());
+            observer.onProviderField(fragments.thoughtSignature.toString());
         }
     }
 

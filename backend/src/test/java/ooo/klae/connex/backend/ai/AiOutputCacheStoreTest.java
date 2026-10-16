@@ -70,8 +70,8 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
-    void contentHash_usesProviderProfileGroundingVersion() {
-        assertEquals("v3-provider-profile-grounding", AiOutputCacheStore.HASH_VERSION);
+    void contentHash_usesDispatchedExposureVersion() {
+        assertEquals("v4-dispatched-exposure", AiOutputCacheStore.HASH_VERSION);
     }
 
     @Test

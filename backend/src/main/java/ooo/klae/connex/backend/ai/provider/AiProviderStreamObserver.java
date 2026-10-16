@@ -18,6 +18,10 @@ public interface AiProviderStreamObserver {
     default void onNetworkChunk() {
     }
 
+    /** Supplies a complete accumulated provider field for screening without publishing it as answer text. */
+    default void onProviderField(String text) {
+    }
+
     /** Receives one provider-normalized model content fragment. */
     void onContentDelta(String text);
 }

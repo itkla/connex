@@ -1939,11 +1939,10 @@ public class AiChatAgentLoopService {
      * whose calls invented a placeholder fails the turn as malformed output when it carries one
      * call — the loop's own demask check — and it must neither be laundered into a repairable
      * refusal nor have its sibling calls executed because it carried two. The parse boundary holds
-     * an envelope refusal to the same rule: for a response carrying several calls it demasks every
-     * call before it refuses the response for its size, its content, a shared identifier or a
-     * sibling the step guard rejected, and carries the count on the refusal; a refusal carrying a
-     * non-zero count settles here exactly as a demasked batch does — as malformed output with no
-     * repair — whichever repair rule the envelope broke.
+     * every envelope refusal to the same rule: complete-text validation rejects invented references
+     * across all reversible kinds before guard or schema admission, including malformed arguments
+     * and opaque native fields. A refusal carrying warnings settles here as malformed output with
+     * no repair, before any sibling call can execute.
      */
     private NativeStepAttempt nativeStepAttempt(
             AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion, MaskingContext maskingContext) {

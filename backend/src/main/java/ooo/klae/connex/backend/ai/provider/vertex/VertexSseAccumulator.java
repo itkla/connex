@@ -140,8 +140,10 @@ public final class VertexSseAccumulator {
                 String value = textNode.asString();
                 if (part.path("thought").asBoolean(false)) {
                     reasoning.append(value);
+                    observer.onProviderField(reasoning.toString());
                 } else if (!value.isEmpty()) {
                     text.append(value);
+                    observer.onProviderField(text.toString());
                     observer.onContentDelta(value);
                 }
             }
