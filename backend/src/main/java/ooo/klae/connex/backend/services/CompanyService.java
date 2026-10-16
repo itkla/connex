@@ -264,10 +264,13 @@ public class CompanyService {
 
     /**
      * Evaluates a company segment within the active workspace and returns one filtered page without
-     * exposing the evaluated id set to the client.
+     * exposing the evaluated id set to the client. The page and its total are narrowed by the same
+     * owner scope and warmth filter as the plain browser page; {@code warmth} is null when the
+     * request asked for neither a warmth filter nor a warmth sort.
      */
     public PageResponse<Company> getSegmentCompaniesPage(SegmentDefinition definition, String query,
-            String sort, String dir, List<String> industry, boolean noIndustry, int limit, int offset) {
+            String sort, String dir, List<String> industry, boolean noIndustry, MemberScope memberScope,
+            WarmthFilter warmth, int limit, int offset) {
         List<Integer> ids = segmentService.evaluate("company", definition);
         if (ids.isEmpty()) {
             return new PageResponse<>(List.of(), 0);
@@ -276,25 +279,28 @@ public class CompanyService {
         String segmentIdsJson = idsJson(ids);
         return new PageResponse<>(
             companyMapper.getSegmentCompaniesPage(
-                workspaceId, segmentIdsJson, query, sort, dir, industry, noIndustry, limit, offset),
+                workspaceId, segmentIdsJson, query, sort, dir, industry, noIndustry, memberScope, warmth,
+                limit, offset),
             companyMapper.countSegmentCompanies(
-                workspaceId, segmentIdsJson, query, industry, noIndustry)
+                workspaceId, segmentIdsJson, query, industry, noIndustry, memberScope, warmth)
         );
     }
 
     /**
-     * Retrieves every company id matching a segment and the supplied company filters, subject to
-     * the bulk-operation limit.
+     * Retrieves every company id matching a segment and the supplied company filters, including
+     * owner scope and warmth, subject to the bulk-operation limit, so "select all matching" selects
+     * exactly what the segment page lists.
      */
     public List<Integer> getMatchingSegmentCompanyIds(SegmentDefinition definition, String query,
-            List<String> industry, boolean noIndustry) {
+            List<String> industry, boolean noIndustry, MemberScope memberScope, WarmthFilter warmth) {
         List<Integer> ids = segmentService.evaluate("company", definition);
         if (ids.isEmpty()) {
             return List.of();
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> matches = companyMapper.getSegmentCompanyIdsFiltered(
-            workspaceId, idsJson(ids), query, industry, noIndustry, MAX_MATCHING_IDS + 1);
+            workspaceId, idsJson(ids), query, industry, noIndustry, memberScope, warmth,
+            MAX_MATCHING_IDS + 1);
         if (matches.size() > MAX_MATCHING_IDS) {
             throw new BadRequestException(
                 "Too many matching companies; narrow the filters before selecting all");

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -14,7 +15,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -358,15 +361,50 @@ class RecordListControllerTest {
         request.setDir("desc");
         request.setIndustry(List.of("Technology"));
         request.setNoIndustry(true);
+        MemberScope memberScope = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(companyService.getSegmentCompaniesPage(
-            definition, "%50\\%\\_Company%", "name", "desc", List.of("Technology"), true, 25, 25))
+            definition, "%50\\%\\_Company%", "name", "desc", List.of("Technology"), true,
+            memberScope, null, 25, 25))
             .thenReturn(new PageResponse<>(List.of(), 7));
 
         var response = controller.getSegmentCompaniesPage(request);
 
         assertEquals(7, response.total());
         verify(companyService).getSegmentCompaniesPage(
-            definition, "%50\\%\\_Company%", "name", "desc", List.of("Technology"), true, 25, 25);
+            definition, "%50\\%\\_Company%", "name", "desc", List.of("Technology"), true,
+            memberScope, null, 25, 25);
+    }
+
+    @Test
+    void companySegmentPageResolvesOwnerScopeWarmthAndTheCanonicalWarmthSort() {
+        CompanyController controller = companyController();
+        CompanySegmentQueryRequest request = new CompanySegmentQueryRequest();
+        SegmentDefinition definition = new SegmentDefinition();
+        request.setDefinition(definition);
+        request.setSort("WARMTH");
+        request.setDir("desc");
+        request.setScope("members");
+        request.setMemberIds(List.of(3, 5));
+        request.setWarmthBands(List.of("cool", "cold"));
+        request.setNoWarmth(true);
+        request.setGoesColdWithinDays(30);
+        MemberScope memberScope = MemberScope.fromRequest("members", List.of(3, 5), 7);
+        WarmthFilter warmth = WarmthFilter.fromRequest(
+            List.of("cool", "cold"), true, 30, "warmth", Instant.parse("2026-08-18T00:00:00Z"));
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
+        when(warmthFilterResolver.resolve(List.of("cool", "cold"), true, 30, "warmth")).thenReturn(warmth);
+        when(companyService.getSegmentCompaniesPage(
+            definition, null, "warmth", "desc", null, false, memberScope, warmth, 25, 0))
+            .thenReturn(new PageResponse<>(List.of(), 2));
+
+        var response = controller.getSegmentCompaniesPage(request);
+
+        assertEquals(2, response.total());
+        verify(companyService).getSegmentCompaniesPage(
+            definition, null, "warmth", "desc", null, false, memberScope, warmth, 25, 0);
     }
 
     @Test
@@ -378,13 +416,70 @@ class RecordListControllerTest {
         request.setDefinition(definition);
         request.setQ("Target");
         request.setIndustry(List.of("Technology"));
+        MemberScope memberScope = MemberScope.allTeam();
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(companyService.getMatchingSegmentCompanyIds(
-            definition, "%Target%", List.of("Technology"), false)).thenReturn(ids);
+            definition, "%Target%", List.of("Technology"), false, memberScope, null)).thenReturn(ids);
 
         assertSame(ids, controller.getSegmentCompanyIds(request));
 
         verify(companyService).getMatchingSegmentCompanyIds(
-            definition, "%Target%", List.of("Technology"), false);
+            definition, "%Target%", List.of("Technology"), false, memberScope, null);
+    }
+
+    @Test
+    void companySegmentIdsResolveOwnerScopeAndWarmthWithoutTheSort() {
+        CompanyController controller = companyController();
+        CompanySegmentQueryRequest request = new CompanySegmentQueryRequest();
+        SegmentDefinition definition = new SegmentDefinition();
+        List<Integer> ids = List.of(9);
+        request.setDefinition(definition);
+        request.setSort("warmth");
+        request.setScope("me");
+        request.setWarmthBands(List.of("hot"));
+        MemberScope memberScope = MemberScope.fromRequest("me", null, 7);
+        WarmthFilter warmth = WarmthFilter.fromRequest(
+            List.of("hot"), false, null, null, Instant.parse("2026-08-18T00:00:00Z"));
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve("me", null, 7)).thenReturn(memberScope);
+        when(warmthFilterResolver.resolve(List.of("hot"), false, null, null)).thenReturn(warmth);
+        when(companyService.getMatchingSegmentCompanyIds(
+            definition, null, null, false, memberScope, warmth)).thenReturn(ids);
+
+        assertSame(ids, controller.getSegmentCompanyIds(request));
+
+        verify(warmthFilterResolver).resolve(List.of("hot"), false, null, null);
+        verify(companyService).getMatchingSegmentCompanyIds(
+            definition, null, null, false, memberScope, warmth);
+    }
+
+    @Test
+    void companySegmentEndpointsRejectAnUnhonourableWarmthFilterBeforeEvaluatingTheSegment() {
+        CompanyController controller = new CompanyController(
+            companyService, bulkOperationService, workspaceService, memberScopeResolver,
+            new WarmthFilterResolver(Clock.fixed(Instant.parse("2026-08-18T00:00:00Z"), ZoneOffset.UTC)));
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
+
+        for (Integer horizon : List.of(0, 3651)) {
+            CompanySegmentQueryRequest request = new CompanySegmentQueryRequest();
+            request.setDefinition(new SegmentDefinition());
+            request.setGoesColdWithinDays(horizon);
+
+            assertThrows(BadRequestException.class, () -> controller.getSegmentCompaniesPage(request));
+            assertThrows(BadRequestException.class, () -> controller.getSegmentCompanyIds(request));
+        }
+        CompanySegmentQueryRequest unknownBand = new CompanySegmentQueryRequest();
+        unknownBand.setDefinition(new SegmentDefinition());
+        unknownBand.setWarmthBands(List.of("lukewarm"));
+
+        assertThrows(BadRequestException.class, () -> controller.getSegmentCompaniesPage(unknownBand));
+        assertThrows(BadRequestException.class, () -> controller.getSegmentCompanyIds(unknownBand));
+        verify(companyService, never()).getSegmentCompaniesPage(
+            any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyInt(), anyInt());
+        verify(companyService, never()).getMatchingSegmentCompanyIds(
+            any(), any(), any(), anyBoolean(), any(), any());
     }
 
     @Test
