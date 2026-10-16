@@ -76,7 +76,6 @@ import {
     warmthFacetOptions,
     warmthRequestParams,
     withValidWarmthHorizon,
-    withoutWarmth,
     withoutWarmthHorizon,
 } from '@/app/components/records/warmthFilters';
 import WarmthPill from '@/app/components/records/WarmthPill';
@@ -203,13 +202,8 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
-    const validatedFilterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
-    const showArchived = validatedFilterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
-    const segmentScoped = !showArchived && hasSegments;
-    const filterState = useMemo(
-        () => (segmentScoped ? withoutWarmth(validatedFilterState) : validatedFilterState),
-        [segmentScoped, validatedFilterState],
-    );
+    const filterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
+    const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
 
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo<CompanyFilterParams>(() => {
@@ -306,12 +300,6 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setFilterState(next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest);
         if (next && sortKey === WARMTH_SORT_KEY) applySort(null, 'asc');
     }, [applySort, filterState, setFilterState, sortKey]);
-    const changeDefinition = useCallback((next: SegmentDefinition) => {
-        setDefinition(next);
-        if (sortKey === WARMTH_SORT_KEY && hasSegmentConditions(evaluableSegmentDefinition(next))) {
-            applySort(null, 'asc');
-        }
-    }, [applySort, sortKey]);
     const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
         selectAllRequestRef.current += 1;
         setMatchedSignature(null);
@@ -344,11 +332,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
 
     const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
     const loadFacets = useCallback(() => {
-        getCompanyFacets({ warmth: !segmentScoped })
+        getCompanyFacets({ warmth: true })
             .catch(() => getCompanyFacets())
             .then(setCompanyFacets)
             .catch(() => setCompanyFacets(null));
-    }, [segmentScoped]);
+    }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
     const refresh = useCallback(() => {
         clearSelection();
@@ -731,7 +719,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             key: WARMTH_SORT_KEY,
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByCompanyId.get(c.id)?.score ?? null,
-            sortable: !showArchived && !segmentScoped,
+            sortable: !showArchived,
             render: (c) => <WarmthPill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
         },
         {
@@ -776,7 +764,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, segmentScoped, commentCounts]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
@@ -786,7 +774,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         const options = companyFacets.industries.map((name) => ({ key: name, label: name }));
         if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
         if (options.length) out.push({ key: 'industry', label: t('columnIndustry'), options });
-        const warmthOptions = segmentScoped ? [] : warmthFacetOptions(
+        const warmthOptions = warmthFacetOptions(
             companyFacets.warmthBands,
             filterState[WARMTH_FILTER_KEY],
             (band) => ttemp(band),
@@ -796,7 +784,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             out.push({ key: WARMTH_FILTER_KEY, label: t('columnWarmth'), options: warmthOptions });
         }
         return out;
-    }, [companyFacets, filterState, segmentScoped, t, ttemp]);
+    }, [companyFacets, filterState, t, ttemp]);
     const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || (!showArchived && hasSegments);
     const clearAll = useCallback(() => {
@@ -942,10 +930,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             setFilterState(filters);
             applyQuery(config.query ?? '');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
-            changeDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            setDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
             setActiveSavedView(config, savedViewId);
         },
-        [setFilterState, applyQuery, applySort, changeDefinition, setActiveSavedView],
+        [setFilterState, applyQuery, applySort, setActiveSavedView],
     );
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
@@ -1098,7 +1086,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                                 fields={segmentFields}
                                                 options={segmentOptions}
                                                 allowGroups
-                                                onChange={changeDefinition}
+                                                onChange={setDefinition}
                                             />
                                         )}
                                     </>
@@ -1116,7 +1104,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         fields={segmentFields}
                                         options={segmentOptions}
                                         allowGroups
-                                        onChange={changeDefinition}
+                                        onChange={setDefinition}
                                     />
                                 )}
                                 {effectiveDisplayMode !== 'table' && (
