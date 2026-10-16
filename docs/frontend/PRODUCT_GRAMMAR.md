@@ -39,7 +39,7 @@ Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.
 - Empty: shared `EmptyState`; use an encouraging first-run treatment only when it is truly a first-run empty, and a neutral treatment for no-results/filtered empties.
-- Error: shared `ErrorState`, normally within `SectionBoundary` so a section failure does not blank the whole page.
+- Error: shared `ErrorState`, normally within `SectionBoundary` so a section failure does not blank the whole page. A route `error.tsx` under `app/(app)` hands it Next's `retry`, so "Try again" re-fetches the failed segment; the root `app/error.tsx` and `app/global-error.tsx` hand it `reset` because the one-time-link entry routes sit beneath them (see `frontend/AGENTS.md`, #1781).
 - Permission: `AccessDenied`/localized page equivalent. A 403 must never masquerade as an empty result.
 
 ## Cards, density, and mobile
