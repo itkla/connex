@@ -36,6 +36,17 @@ FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 TRANSACTION_FILE="$STATE_DIR/deploy-transaction"
 PRUNE_NEEDED_MARKER="$STATE_DIR/prune-needed"
 LIVE_JAR="$STAGING_DIR/backend/build/libs/backend-0.0.1-SNAPSHOT.jar"
+# Next.js writes these beneath its dist directory while it serves: 16.3 promotes build seeds into
+# server/route-cache on first request, and the fetch and image caches live under cache/. The
+# launcher keeps the sealed runtime as the server's working directory, so they appear inside the
+# bundle. They are runtime state, not build output: the frontend digest skips them, and sealing
+# refuses a runtime that already contains one, so no build output is ever left unhashed.
+FRONTEND_RUNTIME_CACHE_PATHS=(
+    .next/server/route-cache
+    .next/cache
+    .next-new/server/route-cache
+    .next-new/cache
+)
 FRONTEND_ENV=/etc/connex-staging/frontend.env
 SMOKE_LOGIN_FILE=/etc/connex-staging/smoke-login.json
 SMOKE_LOGIN_REQUIRED_UID=0
@@ -368,11 +379,16 @@ release_manifest_value() {
 }
 
 frontend_tree_sha256() {
-    local runtime="$1"
+    local runtime="$1" cache_path
+    local -a runtime_cache=()
+    for cache_path in "${FRONTEND_RUNTIME_CACHE_PATHS[@]}"; do
+        [ "${#runtime_cache[@]}" -eq 0 ] || runtime_cache+=(-o)
+        runtime_cache+=(-path "./$cache_path")
+    done
     (
         local path value digest_line digest
         cd "$runtime" || exit 1
-        find . \( -type f -o -type l \) -print0 \
+        find . \( "${runtime_cache[@]}" \) -prune -o \( -type f -o -type l \) -print0 \
             | LC_ALL=C sort -z \
             | while IFS= read -r -d '' path; do
                 if [ -L "$path" ]; then
@@ -434,6 +450,16 @@ verify_release_bundle() {
     verify_release_directory "$sha" "$RELEASES_DIR/$sha"
 }
 
+frontend_runtime_has_cache() {
+    local runtime="$1" cache_path
+    for cache_path in "${FRONTEND_RUNTIME_CACHE_PATHS[@]}"; do
+        if [ -e "$runtime/$cache_path" ] || [ -L "$runtime/$cache_path" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 assemble_frontend_runtime() {
     local source_root="$1" dist_name="$2" runtime="$3" sha="$4"
     local dist_dir="$source_root/$dist_name"
@@ -466,6 +492,11 @@ seal_release_bundle() {
     pending="$(mktemp -d "$RELEASES_DIR/.release-${sha}.XXXXXX")" || return 1
     if ! cp -f "$backend_jar" "$pending/backend.jar" \
         || ! cp -a "$runtime" "$pending/frontend"; then
+        rm -rf "$pending" || true
+        return 1
+    fi
+    if frontend_runtime_has_cache "$pending/frontend"; then
+        log "Refusing to seal ${sha:0:8}: its frontend runtime already contains a Next.js runtime cache path"
         rm -rf "$pending" || true
         return 1
     fi
