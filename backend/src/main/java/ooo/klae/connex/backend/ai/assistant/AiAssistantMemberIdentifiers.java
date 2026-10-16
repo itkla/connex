@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.ReferenceService;
@@ -49,8 +50,7 @@ public final class AiAssistantMemberIdentifiers {
     }
     /** Registers all authored occurrences after the existing reader-visibility boundary. */
     public static void seedReferenceText(String readerVisibleContent, MaskingContext context) {
-        ReferenceService.memberLabelsFromReaderVisibleContent(readerVisibleContent)
-                .forEach(context::registerMemberCandidate);
+        readerVisibleLabels(readerVisibleContent).forEach(context::registerMemberCandidate);
     }
 
     /** Captures bounded raw provenance from all textual values in a durable write request. */
@@ -159,9 +159,17 @@ public final class AiAssistantMemberIdentifiers {
 
     /** Declares authored labels from a stored reader-authorized prose snapshot as candidates. */
     public static List<AiAssistantToolResult.Identifier> referenceIdentifiers(String readerVisibleContent) {
-        return ReferenceService.memberLabelsFromReaderVisibleContent(readerVisibleContent).stream()
+        return readerVisibleLabels(readerVisibleContent).stream()
                 .map(label -> new AiAssistantToolResult.Identifier("member", label))
                 .toList();
+    }
+
+    private static List<String> readerVisibleLabels(String content) {
+        var reading = ReferenceService.memberReferenceReading(content);
+        if (!reading.complete()) {
+            throw new MaskingLeakException("Assistant member reference content is incomplete");
+        }
+        return reading.references().stream().map(ReferenceService.MemberReference::label).distinct().toList();
     }
 
 }

@@ -100,6 +100,31 @@ describe("NoteContent Markdown rendering", () => {
         expect(html).not.toContain("note:9");
     });
 
+    const sharedReaderFixtures = [
+        ["separate table cells", "| ` | [Former][m] | ` |\n| --- | --- | --- |\n\n[m]: TYPE:42"],
+        ["separate table rows", "| First | Second |\n| --- | --- |\n| ` | [Former][m] |\n| ` | Other |\n\n[m]: TYPE:42"],
+        ["escaped table pipes", "| Al\\|ice | [Former][m] |\n| --- | --- |\n\n[m]: TYPE:42"],
+        ["footnote bodies", "See [^f].\n\n[^f]: [Former][m]\n\n[m]: TYPE:42"],
+        ["escaped footnote labels", "[Former][m]\n\nSee [^a\\]b].\n\n[^a\\]b]:\n    [m]:\n    TYPE:42"],
+        ["escaped footnote paragraph interruption", "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](TYPE:42 \"title\")\n    `"],
+        ["footnotes inside containers", "[Former][m]\n\n> > See [^f].\n> >\n> > [^f]:\n> >     [m]:\n> >     TYPE:42"],
+    ] as const;
+
+    it.each(sharedReaderFixtures)("resolves the shared reader differential in %s", (_name, fixture) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            const content = fixture.replace("TYPE", type);
+            const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
+            const unresolved = render(content);
+
+            expect(authorized).toContain("Server label");
+            expect(authorized).not.toContain("Former");
+            expect(unresolved).toContain("Unavailable reference");
+            expect(unresolved).not.toContain("Former");
+            expect(unresolved).not.toContain(`${type}:42`);
+        }
+    });
+
     it("rejects executable links and unsafe images", () => {
         const html = render([
             "[Unsafe](javascript:alert(1))",

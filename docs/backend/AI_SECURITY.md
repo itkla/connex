@@ -81,8 +81,25 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. The collector covers the
-following constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+labels, including both authored HTML-entity spellings and decoded labels. Both member provenance
+and reader visibility now use the pure `ReferenceContentReader` shared by `ReferenceService`.
+It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
+footnotes extension, with block and inline source spans. It does not globally decode the document
+before parsing. Resolved links, images and all link-reference definitions (including unused and
+duplicate definitions) contribute internal targets; HTML `href` attributes do not, matching
+`NoteContent`'s `skipHtml` posture. The closed vocabulary remains `user`, `person`, `deal`, `company`,
+`note`, `file`, `task` and `activity`. Nonpositive, invalid or overflowing internal IDs retain an
+unsafe signal instead of disappearing from visibility checks.
+
+Member label spans exclude link syntax, reference keys and destinations. UTF-16 source offsets
+retain original line endings and container gaps; logical and rendered label readings supplement
+the authored spelling. Table-cell offsets are mapped back across escaped pipes because the
+extension removes those backslashes before inline parsing. The collector covers the following
+constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+
+The existing label APIs retain their source-spelling and entity-decoding contract, including
+ordering. The completeness-aware AI reading additionally includes rendered labels with code,
+emphasis and escape syntax removed, sharing the same authorization target groups.
 
 | Covered construct | One-line example |
 | --- | --- |
@@ -99,9 +116,12 @@ following constructs. Examples show stored source; `\n`, `\r` and `\t` denote li
 | Continued definition keys and destinations, with LF, CR or CRLF | `[Alice][m n]\n\n> [m\n> n]:\r> <user:42>` |
 | Titled definitions, without decoding the title for member detection | `[Alice][m]\n\n[m]: user:42 "a&#10;b"` |
 | Unicode case-folded and whitespace-collapsed keys | `[Alice][SS]\n\n[ß]: user:42`; `[Alice][m n]\n\n[M\tN]: user:42` |
+| Independent table-cell and table-row inline contexts | ``| ` | [Alice][m] | ` |\n| --- | --- | --- |\n\n[m]: user:42`` |
+| Footnote-body links | `See [^f].\n\n[^f]: [Alice][m]\n\n[m]: user:42` |
 | The shared 999-code-point label bound, checked before copying or normalization | `"[" + "😀".repeat(999) + "](user:42)"` is accepted; 1,000 code points are outside the bound |
 
-The implemented paragraph-interruption rules determine when a following definition may start:
+The retained conservative supplement uses these paragraph-interruption rules when deciding
+whether a following definition suppresses a shortcut reading:
 
 | Paragraph rule | One-line example |
 | --- | --- |
@@ -112,7 +132,7 @@ The implemented paragraph-interruption rules determine when a following definiti
 | Indented code cannot interrupt | `Hello\n    code` continues the paragraph |
 | Container paragraphs retain lazy continuations | `> Hello\n[Alice]: welcome.\n\n[Alice]: user:42` keeps the first bracket as a shortcut usage |
 
-Code and escape handling use one shared sequential delimiter table following
+The compatibility supplement's code and escape handling use one shared sequential delimiter table following
 [CommonMark 0.31.2 §§2.4 and 6.1](https://spec.commonmark.org/0.31.2/#code-spans).
 Outside code, a backslash escapes the next ASCII punctuation character. An unescaped backtick run
 opens code only when a later raw run has exactly the same length; that whole span is literal,
@@ -128,10 +148,76 @@ Cartesian product of labels and ids. Group deduplication and visibility matching
 each shared target set is traversed once per phase rather than once per label. Member
 provenance writers and readers use the same code-point bound, including supplementary characters.
 
-Full CommonMark parity is **not claimed**. Any construct not listed above is a bounded residual
-tracked in [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser
-for both reference readers; the owner decision is pending. In particular, raw HTML block state is
-not modelled, and reference-style labels adjacent to raw HTML remain in that residual.
+The parser closes the definition-layout and shared-reader residuals in
+[#2071](https://github.com/itkla/connex/issues/2071) and
+[#2072](https://github.com/itkla/connex/issues/2072): zero-indent LF/CR/CRLF continuations,
+blockquote/list containers and raw-HTML block termination use actual parser semantics. Tables and
+footnotes have separate inline/container contexts; differential fixtures cover backend discovery
+and frontend rendering.
+Autolink-literal and strikethrough artifacts are deliberately absent: literal autolinks use
+HTTP(S)/mailto rather than internal schemes, and strikethrough introduces no destination or
+separate inline context. Links within tildes and task lists remain covered by core inline parsing.
+
+CommonMark is authoritative for resolved syntax, with the existing bounded conservative readings
+retained additively inside the shared reader. Canonical source readings still apply in code/HTML,
+accept `&colon;` and `\:` separators, and preserve oversized non-spec definition-key protection.
+Duplicate definitions still retain every possible member ID even when the parser resolves the
+first definition to another type. Unclosed HTML and other deliberately conservative readings can
+therefore contribute candidates without an AST link. Those candidates can cause extra redaction
+or masking; they do not grant authorization. The fixed-number supplement runs over the full text
+even when parser admission fails, and shared target sets avoid label/id Cartesian expansion.
+The same bounded definition/destination supplement inventories all eight target types, including
+indented or container definitions that parser/renderer extension differences could otherwise hide.
+Malformed angle destinations stop at impossible internal-reference syntax rather than repeatedly
+searching the remaining body for a closing angle.
+
+Parser admission is capped at **262,144 UTF-16 units per body**, without truncation. Upstream block
+and inline nesting limits stay at **100**; an AST reaching saturation is incomplete, including
+depths 100 and 101 (99 remains readable). Tables allow at most **256 columns** and **8,192 prospective
+cells** across the body. A conservative source scan bounds padded-cell expansion before parsing;
+separator rows, edge pipes and pipe-heavy prose/code/HTML also consume that budget, and the AST
+checks exact column counts. Parser or source-span failures are incomplete too. These are resource
+bounds, not a claim that every possible upstream input has a universal linear-time proof.
+
+A linear preflight also caps prospective bracket work at **16,777,216**: at each raw `]`, it adds
+the cumulative number of raw `[` characters seen so far. This intentionally overcounts escaped,
+code and balanced brackets. It upper-bounds the pinned parser's repeated traversal of prior
+brackets on every successful link; even below the input cap, 131,000 unmatched openers followed
+by 26,000 empty links would otherwise cause about 3.4 billion iterations. Exceeding the budget is
+incomplete (`bracket_limit`), while the existing 50,000-opener/one-link regression remains admitted.
+
+The pinned footnotes extension has two known renderer differences: its label scanner does not
+handle escaped closing brackets, and its continuation indentation is absolute inside containers.
+Until upstream supports those layouts, all container footnotes, footnote labels containing a
+backslash or opening bracket, and ordinary-definition fallbacks whose key starts with `^` are
+explicitly incomplete (`unsupported_footnote`). This conservatively refuses some valid Markdown
+instead of accepting a partial AST. Escaped footnote definition markers are checked in a linear
+source pass, independently of the AST: a missed footnote can merge paragraphs into a code span
+and leave no definition node to diagnose. Literal source examples may therefore be refused too.
+The escaped-label, paragraph-interruption and nested-blockquote reproductions are
+also exercised against the frontend renderer. Normal root footnotes remain supported; the
+compatibility inventory still retains targets and member candidates from refused bodies.
+
+Every incomplete visibility reading replaces the whole body with `(unavailable reference)`, also
+on reader-authorized AI projections and context-free snippets. No unchecked prefix or suffix is
+returned. Structured references retain their independent existing visibility checks. The
+Micrometer counter `connex.reference.content.incomplete`, tagged only with the bounded `reason`
+enum, makes these decisions visible without recording content, labels, IDs or workspace data.
+Queue identifier admission parses the original complete text and refuses incomplete readings with
+the existing `identifier_text_unsafe` error before identifier queries or provider dispatch. Direct
+AI member projections also refuse via `MaskingLeakException`, so retained partial compatibility
+candidates are never treated as permission to send unread content. An unrepresentable `user:`
+destination also refuses at both AI admission paths: its authored label cannot be associated
+with an authorizable integer ID.
+An invalid non-member destination does not suppress valid member provenance from original queue text.
+There is no cross-request content, AST or authorization cache. Per-group member visibility,
+500-ID batches and combined identifier limits remain unchanged; persisted references and mention
+recipients still use only
+the existing canonical write grammar and its 100-reference cap.
+
+Residuals are intentional conservative over-inclusion, the explicit footnote refusals above,
+bounded/unrepresentable inputs refusing instead of rendering, and future parser/renderer version
+drift, which requires renewing the differential fixtures when either dependency changes.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

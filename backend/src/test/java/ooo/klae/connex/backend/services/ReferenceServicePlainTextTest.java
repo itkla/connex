@@ -14,6 +14,18 @@ import org.junit.jupiter.api.Test;
 
 class ReferenceServicePlainTextTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "[Secret][m]\n\n[m]:\nnote:42", "[Secret][m]\r\r[m]:\rnote:42",
+            "[Secret][m]\n\n> [m]: note:42", "[Secret][m]\n\n- [m]: note:42",
+            "[Secret][m]\n\n1. [m]:\n   note:42",
+            "| ` | [Secret][m] | ` |\n| --- | --- | --- |\n\n[m]: note:42",
+            "See [^f].\n\n[^f]: [Secret][m]\n\n[m]: note:42"
+    })
+    void toPlainText_redactsNewParserLayouts(String content) {
+        assertEquals("a note", ReferenceService.toPlainText(content));
+    }
+
     @Test
     void toPlainText_redactsReferenceStyleNoteLinksAndDefinitions() {
         String content = "Discuss [Secret][n], [Collapsed][], and [Shortcut].\n\n"
