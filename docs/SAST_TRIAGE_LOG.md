@@ -478,7 +478,12 @@ requirements meet in these handlers and the conflict is resolved by acceptance, 
   cross-site subresource shapes via a Fetch-Metadata allowlist (`Sec-Fetch-Dest: empty` only,
   `no-cors` refused, cross-site origins refused outside the CORS allowlist); a forged row can
   only ever name a session the caller already had access to, carries no caller-supplied text,
-  and the write is rate-limited per workspace.
+  and the write is rate-limited per workspace. Chromium exercises the refusal end to end through
+  the Next.js `/api` rewrite (`frontend/test/e2e/assistant-admission-filter.spec.ts`, #1520) on
+  every push to `main` and on every pull request that changes `frontend/` or `backend/`; a
+  pull request touching only `docs/` or `deploy/` does not run it. The browser, staging and Caddy
+  evidence is in
+  [AI_SECURITY.md](backend/AI_SECURITY.md#cross-site-admission-of-audited-assistant-reads).
 - Residual: clients that omit Fetch Metadata (documented in the filter's Javadoc) and
   `SameSite=None` SAML deployments retain a narrowed forgery vector for these metadata-only rows.
 
