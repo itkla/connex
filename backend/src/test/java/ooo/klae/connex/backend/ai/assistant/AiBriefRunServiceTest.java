@@ -212,6 +212,20 @@ class AiBriefRunServiceTest {
     }
 
     @Test
+    void anInventedReferenceFailureIsNeverAnnouncedAsAScheduledBrief() {
+        AiBriefSchedule pending = pending(AiBriefRunService.DAILY);
+        var failed = turn("failed");
+        failed.setTerminalReason("malformed_output");
+        when(persistenceService.readTurn(3, 9)).thenReturn(failed);
+
+        assertEquals(AiBriefRunService.Outcome.FAILED, service.deliverPending(pending));
+
+        verify(scheduleMapper).releasePendingTurn(eq(7), eq(4), eq(9), eq(false),
+                eq(AiBriefRunService.REASON_GENERATION_FAILED), anyString());
+        verify(notificationDelivery, never()).deliver(any());
+    }
+
+    @Test
     void aBriefStillRunningIsLeftAloneUntilItStalls() {
         AiBriefSchedule fresh = pending(AiBriefRunService.DAILY);
         when(persistenceService.readTurn(3, 9)).thenReturn(turn("running"));

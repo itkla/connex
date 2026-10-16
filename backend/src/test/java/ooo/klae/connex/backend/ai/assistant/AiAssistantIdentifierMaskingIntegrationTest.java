@@ -222,9 +222,9 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 MaskingContext context = new MaskingContext();
                 order.forEach(value -> MaskingEngine.maskField(EntityKind.PERSON, value.getName(), context));
                 String masked = MaskingEngine.maskFreeText(candidate.getName(), context);
-                assertEquals(candidate.getName(), Demasker.demask(masked, context).text());
                 String payload = mapper.writeValueAsString(support.firstProviderRequest(
                         support.invocation("Ask " + candidate.getName(), context, mapper), mapper).messages());
+                assertEquals(candidate.getName(), Demasker.demask(masked, context).text());
                 assertNoBaseFragments(base, payload, new LinkParityCase(candidate.getName(), candidate.getName()));
                 AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
                 AiAssistantToolResult scope = support.scopeResult(candidate,

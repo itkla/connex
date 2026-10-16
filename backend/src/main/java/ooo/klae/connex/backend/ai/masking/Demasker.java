@@ -12,9 +12,9 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Re-identifies provider output by replacing issued request-local placeholders with their original
- * display values. Unknown placeholder-shaped references are replaced with a fixed marker and
- * counted as warnings so callers can discard low-integrity output.
+ * Re-identifies provider output only when a request-local binding is valid and its token was
+ * exposed by a provider dispatch in the current run. Unknown placeholder-shaped references receive
+ * a fixed marker and warnings so callers can discard low-integrity output.
  */
 public final class Demasker {
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}");
@@ -36,7 +36,7 @@ public final class Demasker {
     }
 
     /**
-     * Replaces issued placeholders such as {@code {{P1}}} and {@code {{ P1 }}}. Bare identifiers
+     * Replaces issued and exposed placeholders such as {@code {{P1}}} and {@code {{ P1 }}}. Bare identifiers
      * such as {@code P1} are never replaced.
      * @param modelOutput provider output
      * @param ctx request-local masking context
@@ -121,7 +121,7 @@ public final class Demasker {
 
     private static DemaskResult demaskString(
             String masked, MaskingContext ctx, Consumer<String> memberProvenance) {
-        var refused = ctx.refusedMemberPlaceholders(masked);
+        var refused = ctx.refusedPlaceholders(masked);
         StringBuilder canonical = new StringBuilder();
         int sourceEnd = 0;
         for (var span : refused) {

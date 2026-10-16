@@ -143,7 +143,8 @@ public class AiReportNarrativeService {
                             AiReportNarrativeContent.class,
                             AiReportProseResolver.noLiteralFigures(),
                             admission);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)) {
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<AiReportNarrativeContent> parsed)
+                            || parsed.demaskWarnings() != 0) {
                         return ReportNarrativeDto.unavailable(PROVIDER_ERROR);
                     }
                     AiReportFigures figures = AiReportFigures.from(

@@ -133,7 +133,8 @@ public class DealBriefService {
                                     MAX_TOKENS, TEMPERATURE),
                             DealBriefContent.class,
                             admission);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)
+                            || parsed.demaskWarnings() != 0) {
                         return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
                     }
                     Optional<DealBriefContent> validated = DealBriefValidator.validate(

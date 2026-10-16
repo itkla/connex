@@ -147,6 +147,8 @@ import {
 } from '@/app/lib/askConnexSurface';
 import {
     absorbAskConnexStreamPartial,
+    adoptSettledAskConnexStreamPartial,
+    adoptsSettledAskConnexPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -865,9 +867,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (streamEpoch !== streamEpochRef.current) return;
             }
             let partial: string;
+            let settledTurn: boolean;
             try {
                 const durable = await getAiChatTurn(sessionId, turnId, { signal });
                 partial = durable.partialContent ?? '';
+                settledTurn = adoptsSettledAskConnexPartial(
+                    durable.status, durable.terminalReason, isActiveTurnStatus(durable.status));
             } catch {
                 const current = streamRef.current;
                 if (!signal.aborted
@@ -880,6 +885,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (signal.aborted || streamEpoch !== streamEpochRef.current) return;
             const current = streamRef.current;
             if (current?.turnId !== turnId) return;
+            if (settledTurn) {
+                streamRef.current = adoptSettledAskConnexStreamPartial(current, partial);
+                invalidateStream();
+                return;
+            }
             const settled = settleAskConnexStreamHydration(current, partial);
             streamRef.current = settled.state;
             invalidateStream();
@@ -1015,6 +1025,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (streamEpoch !== streamEpochRef.current) return;
         if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) return;
         const partial = durable.partialContent ?? '';
+        if (adoptsSettledAskConnexPartial(durable.status, durable.terminalReason, isActiveTurnStatus(durable.status))) {
+            const held = streamRef.current?.turnId === durable.turnId ? streamRef.current : null;
+            if (held === null && partial.length === 0) return;
+            streamRef.current = adoptSettledAskConnexStreamPartial(
+                held ?? createAskConnexStream(durable.turnId), partial);
+            invalidateStream();
+            return;
+        }
         if (partial.length === 0) return;
         const current = streamRef.current?.turnId === durable.turnId
             ? streamRef.current

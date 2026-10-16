@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.Demasker;
+import ooo.klae.connex.backend.ai.masking.IncrementalProviderTextScreen;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
@@ -32,7 +33,7 @@ final class AiChatStreamingProgress {
     private boolean excluded;
     private boolean streamTruncated;
     private boolean taskHandle;
-    private boolean refusedMember;
+    private boolean refusedReference;
 
     /**
      * Creates the streaming batcher for one turn.
@@ -40,8 +41,7 @@ final class AiChatStreamingProgress {
      * <p>A masked turn demasks each batch here, at the choke point, because the requester is
      * entitled to the same demasked answer they would receive when the turn settles — masking
      * governs what leaves for the provider, not what returns to the member who asked. An unmasked
-     * turn deliberately skips demasking: its context holds no bindings, and running the demasker
-     * anyway would rewrite a literal brace pair the model typed into an unknown-reference marker.
+     * turn skips replacement but applies the same invented-reference validation before publication.
      */
     AiChatStreamingProgress(
             AiChatQueuedTurn turn,
@@ -77,12 +77,8 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        if (excluded || streamTruncated || taskHandle || refusedMember) {
-            return;
-        }
-        if (demasking && maskingContext.containsUnexposedMemberToken(text)) {
-            refusedMember = true;
-            pending.setLength(0);
+        screenProviderText(text);
+        if (excluded || streamTruncated || taskHandle || refusedReference) {
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -110,6 +106,20 @@ final class AiChatStreamingProgress {
         if (pending.length() >= BATCH_CHARACTERS) {
             flush();
         }
+    }
+
+    /** Withdraws published output on detection while leaving transport failure classification deferred. */
+    private void screenProviderText(String text) {
+        if (!refusedReference && maskingContext.containsUnexposedTokenInProviderText(text)) {
+            refuseReference();
+        }
+    }
+
+    private void refuseReference() {
+        refusedReference = true;
+        persistenceService.resetPartialContent(turn, durable.length());
+        durable.setLength(0);
+        pending.setLength(0);
     }
 
     /**
@@ -260,18 +270,23 @@ final class AiChatStreamingProgress {
      * exists to catch exactly that disagreement.
      */
     void reset() {
-        persistenceService.resetPartialContent(turn, durable.length());
+        if (!refusedReference) {
+            persistenceService.resetPartialContent(turn, durable.length());
+        }
         durable.setLength(0);
         pending.setLength(0);
         excluded = false;
         streamTruncated = false;
         taskHandle = false;
-        refusedMember = false;
+        refusedReference = false;
         lastCheckNanos = System.nanoTime();
     }
 
     final class Observer implements AiProviderStreamObserver {
         private final AiAssistantTextDeltaProjector projector;
+        private IncrementalProviderTextScreen providerText = new IncrementalProviderTextScreen(maskingContext);
+        private final java.util.Map<String, IncrementalProviderTextScreen> fields = new java.util.HashMap<>();
+        private long screenedCharacters;
         private AiChatCancellationHooks.Registration registration;
 
         private Observer(AiAssistantTextDeltaProjector.Shape shape) {
@@ -311,7 +326,50 @@ final class AiChatStreamingProgress {
 
         @Override
         public void onContentDelta(String text) {
-            projector.accept(text);
+            if (text == null || text.isEmpty() || refusedReference) {
+                return;
+            }
+            screenedCharacters += text.length();
+            if (providerText.append(text)) {
+                refuseReference();
+            }
+            if (refusedReference) {
+                stopScreening();
+                return;
+            }
+            if (streamTruncated || excluded || taskHandle) {
+                projector.retain(text);
+            } else {
+                projector.accept(text);
+            }
+            if (refusedReference) {
+                stopScreening();
+            }
+        }
+
+        @Override
+        public void onProviderField(String field, String delta) {
+            if (delta == null || delta.isEmpty() || refusedReference) {
+                return;
+            }
+            screenedCharacters += delta.length();
+            if (fields.computeIfAbsent(field, ignored -> new IncrementalProviderTextScreen(maskingContext)).append(delta)) {
+                refuseReference();
+                stopScreening();
+            }
+        }
+
+        private void stopScreening() {
+            providerText = null;
+            fields.clear();
+        }
+
+        int activeScreens() {
+            return (providerText == null ? 0 : 1) + fields.size();
+        }
+
+        long screenedCharacters() {
+            return screenedCharacters;
         }
 
         /**
@@ -325,8 +383,12 @@ final class AiChatStreamingProgress {
          * the durable bound is a known prefix, not a mismatch.
          */
         String finish(String expectedText) {
+            if (refusedReference) {
+                throw AiAssistantLoopException.malformed("invented_placeholder");
+            }
             String projected = projector.finish();
-            if (refusedMember || demasking && maskingContext.containsUnexposedMemberToken(projected)) {
+            screenProviderText(projected);
+            if (refusedReference) {
                 throw AiAssistantLoopException.malformed("invented_placeholder");
             }
             String comparable = demasking
@@ -348,13 +410,14 @@ final class AiChatStreamingProgress {
         }
 
         void requireNoTerminalText() {
+            projector.projectRetained();
             if (projector.hasProjectedText()) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
         }
 
-        boolean hasProjectedText() {
-            return projector.hasProjectedText();
+        boolean requiresReset() {
+            return projector.hasProjectedText() || streamTruncated || excluded || taskHandle || refusedReference;
         }
     }
 }

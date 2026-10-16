@@ -175,6 +175,16 @@ public class ScriptedAiProvider implements AiProvider {
                     observer.onContentDelta(delta);
                     observer.onNetworkChunk();
                 }
+                observer.onProviderField("reasoning", result.reasoning());
+                for (int index = 0; index < result.toolCalls().size(); index++) {
+                    AiToolCall call = result.toolCalls().get(index);
+                    observer.onProviderField("tool:" + index + ":id", call.id());
+                    observer.onProviderField("tool:" + index + ":name", call.name());
+                    observer.onProviderField("tool:" + index + ":arguments", call.arguments());
+                    if (call.thoughtSignature() != null) {
+                        observer.onProviderField("tool:" + index + ":signature", call.thoughtSignature());
+                    }
+                }
                 return result;
             } finally {
                 observer.onTransportClosed();

@@ -7,6 +7,28 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## AI exposure-gated output upgrade (#2056)
+
+The all-kind demasking change bumps generated-output cache hashes to `v4-dispatched-exposure`.
+Older deal briefs, risk/introduction rationales, report narratives and composer outputs are invalid
+and regenerate lazily when requested. There is no stale fallback and no eager regeneration or data
+backfill. Normal admission and quotas still apply, so these panels can temporarily be unavailable
+or rate limited until fresh generation succeeds. Deterministic CRM/report data remains available.
+
+Plan for a temporary rise in provider demand and context-assembly load after deployment. Existing
+rows bypass the deal brief's early admission precheck: even when quota is exhausted, requests with
+old rows load CRM context, mask and hash it before the generation admission refuses. Concurrent
+requests for the same identity and hash join the existing single flight within one JVM, and
+non-refresh leaders recheck for a newly published output before generating. Multiple replicas retain
+the existing replica-local coordination limitation. Monitor ordinary quota/admission and database
+capacity rather than bypassing those gates to warm caches.
+
+Persisted transcript answers and summaries are already demasked and remain displayable. Replay
+remasks them into fresh tokens; persisted provenance never grants exposure. Legacy masked artifacts
+that need demasking without dispatch evidence from the current run fail closed and disposable
+artifacts must regenerate. There is no persisted token map or exposure backfill. The detailed
+contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-across-callers-and-upgrades).
+
 ## Versioning
 
 - **SemVer**, one product version per release, stamped as a **version-locked backend + frontend +

@@ -155,7 +155,8 @@ public class IntroRationaleService {
                                             TEMPERATURE),
                                     IntroRationaleContent.class,
                                     admission);
-                    if (!(outcome instanceof AiStructuredOutcome.Parsed<IntroRationaleContent> parsed)) {
+                    if (!(outcome instanceof AiStructuredOutcome.Parsed<IntroRationaleContent> parsed)
+                            || parsed.demaskWarnings() != 0) {
                         return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
                     }
                     Optional<IntroRationaleContent> validated = IntroRationaleValidator.validate(

@@ -312,6 +312,26 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
+    void malformedOutputTerminalizationPurgesTheDurablePartialAnswer() {
+        when(chatMapper.resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7)).thenReturn(1);
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(1);
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(7);
+        storedTurn.setPartialContent("Atlas renewal is slipping");
+
+        assertTrue(service.markTerminal(TURN, "failed", "malformed_output"));
+
+        InOrder order = inOrder(chatMapper);
+        order.verify(chatMapper).resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7);
+        order.verify(chatMapper).updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "malformed_output", null, null);
+    }
+
+    @Test
     void authorizationWithdrawnTerminalizationFailsClosedWhenThePurgeMissesItsRow() {
         storedTurn.setStreamed(true);
         storedTurn.setPartialContentUtf16Offset(7);

@@ -294,12 +294,12 @@ class IntroRationaleServiceTest {
     }
 
     @Test
-    void generate_swappedPair_returnsDemaskedRationalePersistsAndWarnings() {
+    void generate_swappedPair_returnsDemaskedRationalePersistsWithoutWarnings() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         content("Alice and Bob share three trusted connections and complementary roles."),
-                        2, 80, 24, "end_turn"));
+                        0, 80, 24, "end_turn"));
 
         IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
 
@@ -311,7 +311,7 @@ class IntroRationaleServiceTest {
                 result.getRationale());
         assertEquals(List.of("mutual_connections"), result.getReasonCodes());
         assertEquals(NOW.toString(), result.getGeneratedAt());
-        assertEquals(2, result.getWarnings());
+        assertEquals(0, result.getWarnings());
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
         verify(aiInvocationService).completeStructured(invocation.capture(), eq(IntroRationaleContent.class), eq(admission));
@@ -319,8 +319,24 @@ class IntroRationaleServiceTest {
         assertEquals(IntroRationaleService.MAX_TOKENS, invocation.getValue().maxTokens());
         verify(aiOutputCacheStore).saveForPersons(
                 eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
-                eq(HASH), any(IntroRationaleContent.class), eq(2), eq(NOW.toString()),
+                eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()),
                 eq(List.of(PERSON_A_ID, PERSON_B_ID)));
+    }
+
+    @Test
+    void generate_warnedOutputIsNeitherServedNorCached() {
+        arrangeMiss(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        content("Alice and Bob share three trusted connections and complementary roles."),
+                        2, 80, 24, "end_turn"));
+
+        IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
+
+
+        assertUnavailable(result, "provider_error");
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(), anyInt(), anyString(), any());
     }
 
     @Test
