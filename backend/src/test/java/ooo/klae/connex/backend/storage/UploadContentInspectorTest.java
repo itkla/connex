@@ -45,6 +45,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -122,6 +123,40 @@ class UploadContentInspectorTest {
         assertArrayEquals(
             MessageDigest.getInstance("SHA-256").digest(inspected.content()),
             inspected.sha256());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = UploadFormat.class, names = {"DOCX", "XLSX", "PPTX"})
+    void preservesCertificatePackageBytesAndDigestForNewAndLegacyUploads(UploadFormat format)
+            throws Exception {
+        byte[] content = PackageFixtures.signedOoxmlWithCertificate(
+            format, PackageFixtures.signerCertificate());
+        String fileName = "signed." + PackageFixtures.extension(format);
+        InspectedUpload uploaded = inspector.inspect(UploadPurpose.ATTACHMENT,
+            UploadSource.from(fileName, PackageFixtures.declaredContentType(format), content));
+        InspectedUpload migrated = inspector.inspectLegacyAttachment(
+            UploadSource.from(fileName, "application/octet-stream", content));
+
+        for (InspectedUpload inspected : List.of(uploaded, migrated)) {
+            assertEquals(format, inspected.format());
+            assertEquals(PackageFixtures.declaredContentType(format), inspected.contentType());
+            assertEquals(content.length, inspected.contentLength());
+            assertArrayEquals(content, inspected.content());
+            assertArrayEquals(MessageDigest.getInstance("SHA-256").digest(content), inspected.sha256());
+            try (InputStream storedSource = inspected.source().openStream()) {
+                assertArrayEquals(content, storedSource.readAllBytes());
+            }
+        }
+    }
+
+    @Test
+    void legacyInspectionRefusesCertificateWithTrailingPayload() throws Exception {
+        byte[] content = PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX,
+            PackageFixtures.concatenate(PackageFixtures.signerCertificate(),
+                PackageFixtures.ascii("MZ appended executable")));
+
+        assertThrows(UnsupportedUploadMediaTypeException.class, () -> inspector.inspectLegacyAttachment(
+            UploadSource.from("signed.docx", "application/octet-stream", content)));
     }
 
     @ParameterizedTest
