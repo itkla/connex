@@ -60,27 +60,33 @@ public class AiAgentScheduler {
             if (Thread.currentThread().isInterrupted() || !initializer.isReady()) {
                 return;
             }
-            JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 scope.inWorkspace(workspaceId, () -> {
-                    for (var expired : runs.expiredRuns(workspaceId, 25)) {
-                        persistence.expire(expired);
-                    }
-                    if (!properties.isMissionsEnabled()) {
-                        return null;
-                    }
-                    for (var candidate : runs.dueRuns(workspaceId, 1)) {
-                        try {
-                            runner.run(candidate);
-                        } catch (RuntimeException refusal) {
-                            persistence.defer(candidate);
+                    JobRunDetail detail = JobRunDetail.startedUtc();
+                    JobRunStatus outcome = JobRunStatus.SUCCEEDED;
+                    try {
+                        for (var expired : runs.expiredRuns(workspaceId, 25)) {
+                            persistence.expire(expired);
                         }
+                        if (properties.isMissionsEnabled()) {
+                            for (var candidate : runs.dueRuns(workspaceId, 1)) {
+                                try {
+                                    runner.run(candidate);
+                                } catch (RuntimeException refusal) {
+                                    persistence.defer(candidate);
+                                }
+                            }
+                        }
+                    } catch (RuntimeException failure) {
+                        outcome = JobRunStatus.FAILED;
+                    } finally {
+                        jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, outcome, detail);
                     }
                     return null;
                 });
-                jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, JobRunStatus.SUCCEEDED, detail);
-            } catch (RuntimeException failure) {
-                jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, JobRunStatus.FAILED, detail);
+            } catch (RuntimeException unavailablePlacement) {
+                workspaceCursor = workspaceId;
+                continue;
             }
             workspaceCursor = workspaceId;
         }

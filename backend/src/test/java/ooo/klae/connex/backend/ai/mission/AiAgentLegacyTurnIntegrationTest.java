@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -21,7 +22,7 @@ import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiChatQueuedTurn;
-import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -45,11 +46,15 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         AiChatQueuedTurn captured = runningTainted();
         finish(invalidate());
         assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-        assertThrows(RuntimeException.class, () -> AiChatPrivacyGuard.requireCurrent(chatMapper, captured.privacyToken()));
-        assertThrows(RuntimeException.class, () -> turns.upsertHistorySummary(captured, null, 0,
-                "Captured summary", "{\"kind\":\"history_summary\",\"throughSeq\":1}", 1, 1));
+        AiChatQueuedTurn fresh = running(captured.sessionId());
+        AiChatQueuedTurn stale = withOriginalPrivacy(fresh, captured);
+        assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
+                () -> turns.upsertHistorySummary(stale, null, 0,
+                        "Captured summary", "{\"kind\":\"history_summary\",\"throughSeq\":1}", 1, 1)).detailReason());
         assertNull(chatMapper.getHistorySummary(workspace.getId(), captured.sessionId()));
-        assertEquals(0, residuals(captured.sessionId()));
+        assertEquals(2, residuals(captured.sessionId()));
+        assertDoesNotThrow(() -> turns.upsertHistorySummary(fresh, null, 0, "Current summary",
+                "{\"kind\":\"history_summary\",\"throughSeq\":1}", 1, 1));
     }
 
     @Test
@@ -57,29 +62,24 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         AiChatQueuedTurn captured = runningTainted();
         finish(invalidate());
         assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-        assertThrows(RuntimeException.class, () -> AiChatPrivacyGuard.requireCurrent(chatMapper, captured.privacyToken()));
-        assertThrows(RuntimeException.class, () -> turns.resolve(captured, "Captured answer", "{}", 1, 1));
+        AiChatQueuedTurn fresh = running(captured.sessionId());
+        AiChatQueuedTurn stale = withOriginalPrivacy(fresh, captured);
+        assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
+                () -> turns.resolve(stale, "Captured answer", "{}", 1, 1)).detailReason());
         assertNull(chatMapper.getLatestAnswer(workspace.getId(), captured.sessionId()));
-        assertEquals(0, residuals(captured.sessionId()));
-    }
-
-    @Test
-    void secondaryDispatchCannotRefreshPrivacyIdentityAfterCompletedPurge() {
-        AiChatQueuedTurn captured = runningTainted();
-        AiChatPrivacyGuard.execute(chatMapper, captured.privacyToken(), () -> {
-            finish(invalidate());
-            assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-            assertNotNull(chatMapper.getPrivacySession(workspace.getId(), captured.sessionId()));
-            assertThrows(RuntimeException.class, AiChatPrivacyGuard::requireEgressCurrent);
-            return null;
-        });
+        assertEquals(2, residuals(captured.sessionId()));
+        assertTrue(turns.resolve(fresh, "Current answer", "{}", 1, 1));
     }
 
     @ParameterizedTest
     @MethodSource("derivedWriters")
     void allDerivedWritersRejectStaleTokens(String writer) {
         AiChatQueuedTurn captured = runningTainted();
-        int toolId = turns.proposeTool(captured, 1, 0, "get_record", "{}");
+        finish(invalidate());
+        assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        AiChatQueuedTurn fresh = running(captured.sessionId());
+        AiChatQueuedTurn stale = withOriginalPrivacy(fresh, captured);
+        int toolId = turns.proposeTool(fresh, 1, 0, "get_record", "{}");
         Consumer<AiChatQueuedTurn> callback = switch (writer) {
             case "title" -> turn -> turns.applyGeneratedTitle(turn, "Captured title");
             case "partial" -> turn -> turns.appendPartialBatch(turn, 0, "Captured partial");
@@ -90,15 +90,18 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
             case "failure" -> turn -> turns.failTool(turn, toolId, "{\"text\":\"Captured error\"}");
             default -> throw new AssertionError(writer);
         };
-        finish(invalidate());
-        assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-        assertThrows(RuntimeException.class, () -> AiChatPrivacyGuard.requireCurrent(chatMapper, captured.privacyToken()));
         if ("title".equals(writer)) {
-            assertFalse(turns.applyGeneratedTitle(captured, "Captured title"));
-        } else {
-            assertThrows(RuntimeException.class, () -> callback.accept(captured));
+            turns.resolve(fresh, "Current answer", "{}", 1, 1);
         }
-        assertEquals(0, residuals(captured.sessionId()));
+        assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
+                () -> callback.accept(stale)).detailReason());
+        assertEquals("proposed", chatMapper.getToolCallBySession(
+                workspace.getId(), captured.sessionId(), toolId).getStatus());
+        assertFalse(chatMapper.getPrivacySession(workspace.getId(), captured.sessionId()).getTitle()
+                .contains("Captured"));
+        assertEquals("title".equals(writer) ? "Current answer" : null,
+                turns.readTurn(fresh.sessionId(), fresh.turnId()).getPartialContent());
+        assertDoesNotThrow(() -> callback.accept(fresh));
     }
 
     @Test
@@ -150,6 +153,13 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
 
     private static Stream<String> derivedWriters() {
         return Stream.of("title", "partial", "reset", "progress", "arguments", "result", "failure");
+    }
+
+    private AiChatQueuedTurn withOriginalPrivacy(AiChatQueuedTurn fresh, AiChatQueuedTurn captured) {
+        return new AiChatQueuedTurn(fresh.workspaceId(), fresh.userId(), fresh.sessionId(),
+                fresh.turnId(), fresh.userMessageId(), fresh.userMessageSeq(), fresh.restrictionEpoch(),
+                fresh.includePrivateNotes(), fresh.pageContext(), fresh.attachmentIds(), fresh.privacyMode(),
+                fresh.streamed(), fresh.scope(), captured.privacyToken());
     }
 
     private AiChatQueuedTurn runningTainted() {

@@ -2,6 +2,9 @@ package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,17 +12,20 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -68,8 +74,11 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     @Autowired private AiAgentRunPersistenceService persistence;
     @Autowired private AiAgentRunMapper runs;
     @Autowired private AiChatMapper chat;
-    @Autowired private AiAgentCapabilityGate capability;
+    @MockitoSpyBean private AiAgentCapabilityGate capability;
     @Autowired private AiAgentPrivacyInitializer initializer;
+    @Autowired private AiAgentPrivacyService privacy;
+    @Autowired private ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper privacyMapper;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
     @Autowired private AiProperties properties;
     @Autowired private AiAssistantToolExecutor tools;
     @Autowired private AiInvocationService invocations;
@@ -245,23 +254,102 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         assertNoEffects(run);
     }
 
+    /** The fallback fixture explicitly settles known zero usage so capability alone decides admission. */
     @ParameterizedTest
-    @ValueSource(strings = {"mission_repair_gate", "mission_fallback_gate"})
-    void gateLossOnSecondaryAttemptPreventsAnotherDispatch(String fixture) {
+    @CsvSource({"mission_repair_gate,true", "mission_repair_gate,false", "mission_fallback_gate,true", "mission_fallback_gate,false"})
+    void secondaryAttemptDependsOnlyOnItsCapabilityGate(String fixture, boolean disable) {
         Person selected = person("Florence Rookhaven", "florence.rookhaven@example.invalid", null);
         AiAgentRun run = create(selected, fixture);
+        AtomicReference<RuntimeException> refusal = new AtomicReference<>();
+        doAnswer(call -> {
+            try {
+                return call.callRealMethod();
+            } catch (RuntimeException failure) {
+                refusal.set(failure);
+                throw failure;
+            }
+        }).when(capability).requireTarget(any());
         onScriptedStep((script, completed) -> {
-            if (journal().recorded().size() == 2) properties.setMissionsEnabled(false);
+            if (journal().recorded().size() == 2) {
+                if ("mission_fallback_gate".equals(fixture)) {
+                    persistence.recordUsage(AiAgentExecutionPolicy.current(), 0, 0);
+                    assertFalse(onlyAttempt(run).isUsageUncertain());
+                }
+                properties.setMissionsEnabled(!disable);
+            }
         });
         try {
             execute(run);
         } finally {
             properties.setMissionsEnabled(true);
         }
-        assertAttempts(2, 1);
-        assertEquals(0, reports(run));
+        assertAttempts(2, disable ? 1 : 2);
+        assertEquals(disable ? 0 : 1, reports(run));
+        if (disable) {
+            assertEquals("mission_unavailable", assertInstanceOf(
+                    ooo.klae.connex.backend.exceptions.AiAgentUnavailableException.class, refusal.get()).getMessage());
+        } else {
+            assertEquals(null, refusal.get());
+            assertEquals("done", runs.getRun(workspaceId(), run.getId()).getStatus());
+        }
         assertLeaseReleased(run);
         assertNoEffects(run);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"mission_repair_gate", "mission_closing_repair"})
+    void repairAtTheDispatchBoundaryKeepsTheClosingReport(String fixture) {
+        Person selected = person("Rosalind Fairhaven", "rosalind.fairhaven@example.invalid", null);
+        AiAgentRun run = create(selected, fixture);
+        jdbc.update("UPDATE ai_agent_run SET max_steps=2 WHERE workspace_id=? AND id=?", workspaceId(), run.getId());
+
+        execute(runs.getRun(workspaceId(), run.getId()));
+
+        assertAttempts(2, 2);
+        assertFalse(journal().recorded().getFirst().request().nativeTools().finalOnly());
+        assertTrue(journal().recorded().getLast().request().nativeTools().finalOnly());
+        assertEquals("done", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertAccounting(runs.getRun(workspaceId(), run.getId()), 2, 4);
+        assertEquals(1, reports(run));
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=?", workspaceId(), run.getId()));
+        assertLeaseReleased(run);
+    }
+
+    @Test
+    void completedPurgeRefusesActualProviderDispatchWithOriginalPrivacyIdentity() {
+        Person selected = person("Eleanor Brookhaven", "eleanor.brookhaven@example.invalid", null);
+        AiAgentRun run = create(selected, "mission_privacy_boundary");
+        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(workspaceId(),
+                run.getSessionId(), run.getPrivacyGeneration(),
+                chat.getPrivacySession(workspaceId(), run.getSessionId()).getMissionTaintSeq());
+        onScriptedStep((script, completed) -> {
+            UUID operation = UUID.randomUUID();
+            var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+            transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            transaction.executeWithoutResult(status -> privacy.invalidateWorkspaces(
+                    List.of(workspaceId()), operation, "restriction", null, null));
+            boolean complete = false;
+            for (int batch = 0; batch < 100 && !complete; batch++) {
+                complete = privacy.batch(workspaceId(), operation.toString());
+            }
+            assertTrue(complete);
+            assertFalse(privacyMapper.getBarrier(workspaceId()).isBlocked());
+        });
+        authenticate();
+        try {
+            MaskingContext context = new MaskingContext();
+            AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
+                    PromptAssembly.builder(context).system("Review the supplied evidence")
+                            .userTurn("connex_script_mission_privacy_boundary").build(), 64, 0.1);
+            var refused = assertThrows(AiAssistantLoopException.class, () ->
+                    ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.execute(chat, token,
+                            () -> invocations.complete(invocation)));
+            assertEquals("restrictions_changed", refused.detailReason());
+        } finally {
+            clearAuthentication();
+        }
+        assertAttempts(1, 0);
+        assertEquals(0, reports(run));
     }
 
     @Test

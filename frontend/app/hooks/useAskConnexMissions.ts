@@ -20,16 +20,20 @@ type MissionSnapshot = {
 
 /** Owns session mission discovery and controls under an abortable account/workspace identity. */
 export function useAskConnexMissions({
-    identity, sessionId, enabled, visible, refreshVersion, onChanged,
+    identity, sessionId, enabled, visible, refreshVersion, contentVersion = 0, onChanged, onContentInvalidated,
 }: {
     identity: string;
     sessionId: number | null;
     enabled: boolean;
     visible: boolean;
     refreshVersion: number;
+    /** Invalidates rendered content and all pending responses before canonical privacy reload. */
+    contentVersion?: number;
     onChanged: (sessionId: number) => void;
+    /** Withdraws other session projections when canonical mission state loses readable content. */
+    onContentInvalidated?: (sessionId: number) => void;
 }) {
-    const key = `${identity}:${sessionId ?? 'new'}`;
+    const key = `${identity}:${sessionId ?? 'new'}:${contentVersion}`;
     const [snapshot, setSnapshot] = useState<MissionSnapshot | null>(null);
     const [reload, setReload] = useState(0);
     const current = enabled && snapshot?.key === key ? snapshot : null;
@@ -39,7 +43,11 @@ export function useAskConnexMissions({
     const loadedPagesRef = useRef(1);
     const creationRef = useRef<{ identity: string; sessionId: number; body: AiAgentRunCreateRequest } | null>(null);
     const changedRef = useRef(onChanged);
+    const invalidatedRef = useRef(onContentInvalidated);
+    const retainedRunsRef = useRef<readonly AiAgentRun[]>([]);
     useEffect(() => { changedRef.current = onChanged; }, [onChanged]);
+    useEffect(() => { invalidatedRef.current = onContentInvalidated; }, [onContentInvalidated]);
+    useEffect(() => { retainedRunsRef.current = current?.runs ?? []; }, [current?.runs]);
 
     useEffect(() => {
         if (!enabled) return;
@@ -71,12 +79,20 @@ export function useAskConnexMissions({
                 runs.push(...page.items.filter((item) => !runs.some((existing) => existing.id === item.id)));
             }
             if (signal.aborted || revision !== refreshRef.current) return;
+            const lastId = runs.at(-1)?.id;
+            const contentInvalidated = retainedRunsRef.current.some((previous) => {
+                if (previous.contentWithheld) return false;
+                const durable = runs.find((run) => run.id === previous.id);
+                return durable ? durable.contentWithheld
+                    : page.nextCursor === null || (lastId !== undefined && previous.id >= lastId);
+            });
             setSnapshot((previous) => ({
                 key, runs, nextCursor: page.nextCursor, loading: false, problem: null,
                 output: previous?.key === key && runs.some((run) => run.id === previous.output?.runId
                     && run.outputAvailable && !run.contentWithheld) ? previous.output : null,
                 pendingId: previous?.key === key ? previous.pendingId : null,
             }));
+            if (contentInvalidated) invalidatedRef.current?.(sessionId);
         } catch (error) {
             if (signal.aborted || revision !== refreshRef.current) return;
             setSnapshot({ key, runs: [], nextCursor: null, loading: false, output: null, pendingId: null,
@@ -92,6 +108,11 @@ export function useAskConnexMissions({
     }, [enabled, refresh, refreshVersion, reload, sessionId, visible]);
 
     const upsert = useCallback((run: AiAgentRun) => {
+        const retained = retainedRunsRef.current.find((item) => item.id === run.id);
+        if (sessionId !== null && retained && !retained.contentWithheld
+                && newerAskConnexMission(retained, run).contentWithheld) {
+            invalidatedRef.current?.(sessionId);
+        }
         setSnapshot((previous) => {
             if (previous?.key !== key) return previous;
             const existing = previous.runs.find((item) => item.id === run.id);
@@ -100,7 +121,7 @@ export function useAskConnexMissions({
                 runs: [updated, ...previous.runs.filter((item) => item.id !== run.id)].sort((a, b) => b.id - a.id),
                 output: updated.contentWithheld || !updated.outputAvailable ? null : previous.output };
         });
-    }, [key]);
+    }, [key, sessionId]);
 
     const create = useCallback(async (targetSessionId: number, goal: string, scope: AiAgentRecordScope, creationSignal?: AbortSignal): Promise<boolean> => {
         const signal = creationSignal ?? controllerRef.current?.signal;

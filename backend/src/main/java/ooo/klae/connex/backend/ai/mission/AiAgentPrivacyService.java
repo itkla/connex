@@ -117,6 +117,8 @@ public class AiAgentPrivacyService {
     /**
      * Joins the restriction or accepted-operation transaction; all affected barriers lock before work rows.
      * Existing operations preserve their original generation and discovery watermarks.
+     * Placement is already installed before this transaction; control mappers validate it on
+     * the same connection without changing the tenant work scope.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void invalidateWorkspaces(
@@ -130,14 +132,13 @@ public class AiAgentPrivacyService {
         }
         Integer orgId = null;
         for (int workspaceId : ordered) {
-            Integer workspaceOrg = tenantWorkScope.unroutedRead(() ->
-                    "restriction".equals(reason) || "dsr".equals(reason)
-                            ? workspaceMapper.getOrgId(workspaceId)
-                            : lifecycleMapper.findWorkspaceOrgIdForLifecycle(workspaceId));
+            Integer workspaceOrg = "restriction".equals(reason) || "dsr".equals(reason)
+                    ? workspaceMapper.getOrgId(workspaceId)
+                    : lifecycleMapper.findWorkspaceOrgIdForLifecycle(workspaceId);
             if (workspaceOrg == null || (!"account_erasure".equals(reason) && orgId != null && !orgId.equals(workspaceOrg))) {
                 throw unavailable();
             }
-            String catalog = tenantWorkScope.unroutedRead(() -> catalogResolver.resolveCatalog(workspaceOrg));
+            String catalog = catalogResolver.resolveCatalog(workspaceOrg);
             if (!Objects.equals(catalog, tenantContext.getCatalog())) {
                 throw unavailable();
             }

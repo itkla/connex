@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
 /** Observes real MySQL contention before releasing mission claims and competing admissions. */
@@ -45,6 +46,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     @Autowired private AiRestrictionEpoch epoch;
     @Autowired private ObjectMapper json;
     @Autowired private AiChatTurnPersistenceService turns;
+    @Autowired private TenantWorkScope tenantWorkScope;
     @MockitoSpyBean private AiAgentRunMapper runs;
     @MockitoSpyBean private AiChatMapper chat;
     @MockitoSpyBean private WorkspaceService workspaces;
@@ -102,6 +104,74 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
         Integer leases = jdbc.queryForObject("SELECT COUNT(*) FROM ai_run_lease WHERE workspace_id=? AND subject_kind='agent_run' AND subject_id=? AND released_at IS NULL",
                 Integer.class, workspace.getId(), run.getId());
         assertEquals(1, leases);
+    }
+
+    @Test
+    void claimRootLocksFenceStaleMaintenanceWithoutAuthorizationLocks() throws Exception {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(currentUser.getId());
+        session.setTitle("Claim maintenance race fixture");
+        session.setVisibility("private");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        var request = new AiAgentRunCreateRequest(UUID.randomUUID().toString(), "record_review_v1", "Review",
+                new AiAgentRunCreateRequest.Scope("record", "company", 1), null);
+        AiAgentRun discovered = persistence.create(session.getId(), request, "en",
+                AiAgentCapabilityGate.hash("maintenance-race"),
+                json.writeValueAsString(request.scope()), epoch.current(workspace.getId()));
+        CountDownLatch claimHasRoots = new CountDownLatch(1);
+        CountDownLatch releaseClaim = new CountDownLatch(1);
+        CountDownLatch maintenanceAtSession = new CountDownLatch(1);
+        AtomicBoolean paused = new AtomicBoolean();
+        AtomicLong waitingConnection = new AtomicLong();
+        doAnswer(invocation -> {
+            Object result = invocation.callRealMethod();
+            if (Thread.currentThread().getName().equals("mission-claim-holder")
+                    && paused.compareAndSet(false, true)) {
+                claimHasRoots.countDown();
+                assertTrue(releaseClaim.await(30, TimeUnit.SECONDS));
+            }
+            return result;
+        }).when(runs).lockRun(workspace.getId(), discovered.getId());
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("mission-maintenance-contender")) {
+                Long connection = jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class);
+                assertNotNull(connection);
+                waitingConnection.set(connection);
+                maintenanceAtSession.countDown();
+            }
+            return invocation.callRealMethod();
+        }).when(chat).getSessionByIdForMaintenanceUpdate(workspace.getId(), session.getId());
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var claim = workers.submit(() -> claimAs("mission-claim-holder", discovered));
+            try {
+                assertTrue(claimHasRoots.await(10, TimeUnit.SECONDS));
+                var maintenance = workers.submit(() -> {
+                    Thread.currentThread().setName("mission-maintenance-contender");
+                    tenantWorkScope.inWorkspace(workspace.getId(), () -> persistence.cancelForDeparture(discovered));
+                    return true;
+                });
+                assertTrue(maintenanceAtSession.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, waitingConnection.get(),
+                        "ai_chat_session", Integer.toString(session.getId()));
+                releaseClaim.countDown();
+                assertTrue(claim.get(10, TimeUnit.SECONDS));
+                assertTrue(maintenance.get(10, TimeUnit.SECONDS));
+            } finally {
+                releaseClaim.countDown();
+            }
+        }
+        AiAgentRun stored = runs.getRun(workspace.getId(), discovered.getId());
+        assertEquals("running", stored.getStatus());
+        assertEquals(discovered.getExecutionGeneration() + 1, stored.getExecutionGeneration());
+        var segments = runs.listSegments(workspace.getId(), discovered.getId());
+        assertEquals(1, segments.size());
+        assertEquals(stored.getActiveSegmentId(), Integer.valueOf(segments.getFirst().getId()));
+        assertEquals(stored.getExecutionGeneration(), segments.getFirst().getExecutionGeneration());
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ai_run_lease WHERE workspace_id=? AND subject_kind='agent_run' AND subject_id=? AND released_at IS NULL",
+                Integer.class, workspace.getId(), discovered.getId()));
     }
 
     @Test

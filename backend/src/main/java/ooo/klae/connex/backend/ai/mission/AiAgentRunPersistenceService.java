@@ -224,6 +224,14 @@ public class AiAgentRunPersistenceService {
         workspaces.requirePermission(turn.workspaceId(), turn.userId(), Permission.AI_USE);
     }
 
+    /** Reads the durable allowance so repairs cannot spend the final report decision on a tool. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public int remainingDispatches(AiAgentExecutionPolicy policy) {
+        lockExecution(policy);
+        AiAgentSegment segment = lockAttempt(policy);
+        return segment.getReservedSteps() - segment.getKnownSteps();
+    }
+
     /** Records each attempted model call before its local dispatch fence, including fallback calls. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public void reserveDispatch(AiAgentExecutionPolicy policy, long tokenCeiling) {

@@ -277,6 +277,7 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     context_window_too_small: { category: 'availability', message: 'contextWindowTooSmall' },
     access_revoked: { category: 'authorization', message: 'accessRevoked' },
     restrictions_changed: { category: 'authorization', message: 'restrictionsChanged' },
+    privacy_invalidated: { category: 'authorization', message: 'restrictionsChanged' },
     image_input_unsupported: { category: 'unsupportedInput', message: 'imageUnsupported' },
     tool_outside_skill_authority: { category: 'generic', message: 'toolAuthority' },
     attachment_auto_write_blocked: { category: 'generic', message: 'generic' },

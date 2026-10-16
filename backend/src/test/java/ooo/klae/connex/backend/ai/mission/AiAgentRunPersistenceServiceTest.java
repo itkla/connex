@@ -302,8 +302,17 @@ class AiAgentRunPersistenceServiceTest {
     void knownUsageSettlesUncertaintyAndAccumulatesBeforeNextDispatch() {
         AiAgentExecutionPolicy policy = policy();
         service.reserveDispatch(policy, 8192);
+        java.util.ArrayList<List<Number>> persisted = new java.util.ArrayList<>();
+        doAnswer(call -> {
+            AiAgentSegment written = call.getArgument(0);
+            persisted.add(List.of(written.getKnownSteps(), written.getKnownInputTokens(),
+                    written.getKnownOutputTokens(), written.isUsageUncertain() ? 1 : 0));
+            return 1;
+        }).when(runs).updateSegment(segment, "running");
         service.recordUsage(policy, 2048, 512);
+        assertEquals(List.of(List.of(1, 2048L, 512L, 0)), persisted);
         service.reserveDispatch(policy, 8192);
+        assertEquals(List.of(List.of(1, 2048L, 512L, 0), List.of(2, 2048L, 512L, 1)), persisted);
 
         assertEquals(2, segment.getKnownSteps());
         assertEquals(2048, segment.getKnownInputTokens());

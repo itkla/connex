@@ -143,19 +143,22 @@ public class AiAssistantService {
     }
 
     /** Returns one accessible session together with an ordered page of messages. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiChatSessionDetailDto get(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
+        retainTranscriptPrivacy(workspaceId);
         sessionReadAudit.recordAccessible(workspaceId, userId, session);
+        session = requireAccessible(workspaceId, userId, id);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /** Returns one retained session and records the metadata-only administrative read. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public AiChatSessionDetailDto getRetained(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
@@ -168,7 +171,14 @@ public class AiAssistantService {
             throw inaccessible();
         }
         requireStillRetained(workspaceId, userId, session);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
+        retainTranscriptPrivacy(workspaceId);
         auditRetainedRead(session);
+        session = chatMapper.getRetainedSessionById(workspaceId, userId, id, activeMemberIds);
+        if (session == null) {
+            throw inaccessible();
+        }
+        requireStillRetained(workspaceId, userId, session);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
@@ -183,6 +193,13 @@ public class AiAssistantService {
             return;
         }
         if (activeMemberIds(workspaceId, userId).contains(session.getCreatedByUserId())) {
+            throw inaccessible();
+        }
+    }
+
+    /** Holds fresh privacy authority through projection; the lock also flushes the mapper cache. */
+    private void retainTranscriptPrivacy(int workspaceId) {
+        if (chatMapper.lockPrivacyBarrierForShare(workspaceId) == null) {
             throw inaccessible();
         }
     }

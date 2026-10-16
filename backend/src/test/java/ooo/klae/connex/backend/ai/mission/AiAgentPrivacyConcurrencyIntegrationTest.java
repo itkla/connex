@@ -2,11 +2,14 @@ package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 
 import java.util.List;
@@ -29,6 +32,8 @@ import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -36,6 +41,132 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @Autowired private TenantWorkScope tenantWorkScope;
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @MockitoSpyBean private AiAgentPrivacyMapper workMapper;
+    @MockitoSpyBean private AiChatMapper chat;
+    @Autowired private AiAssistantService assistant;
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void transcriptReadOpenedBeforePurgeProjectsOnlyFreshCommittedContent(boolean retained) throws Exception {
+        AiChatSession session = taintedSession();
+        transaction().executeWithoutResult(status -> {
+            chatMapper.getSessionByIdForMaintenanceUpdate(workspace.getId(), session.getId());
+            insertMessage(session.getId(), 1);
+        });
+        if (retained) {
+            workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
+            jdbc.update("UPDATE ai_chat_session SET created_by_user_id=NULL WHERE workspace_id=? AND id=?",
+                    workspace.getId(), session.getId());
+        }
+        AiChatMapper real = sqlSessions.getMapper(AiChatMapper.class);
+        CountDownLatch snapshotOpened = new CountDownLatch(1);
+        CountDownLatch resumeReader = new CountDownLatch(1);
+        AtomicBoolean firstRead = new AtomicBoolean(true);
+        org.mockito.stubbing.Answer<AiChatSession> snapshot = invocation -> {
+            AiChatSession found = retained
+                    ? real.getRetainedSessionById(invocation.getArgument(0), invocation.getArgument(1),
+                            invocation.getArgument(2), invocation.getArgument(3))
+                    : real.getAccessibleSessionById(invocation.getArgument(0), invocation.getArgument(1),
+                            invocation.getArgument(2));
+            if (Thread.currentThread().getName().equals("mission-transcript-reader")
+                    && firstRead.compareAndSet(true, false)) {
+                assertNotNull(found);
+                assertEquals("Private cleanup fixture", found.getTitle());
+                snapshotOpened.countDown();
+                await(resumeReader);
+            }
+            return found;
+        };
+        if (retained) {
+            doAnswer(snapshot).when(chat).getRetainedSessionById(
+                    eq(workspace.getId()), eq(currentUser.getId()), eq(session.getId()), anyList());
+        } else {
+            doAnswer(snapshot).when(chat).getAccessibleSessionById(
+                    workspace.getId(), currentUser.getId(), session.getId());
+        }
+        try (var workers = Executors.newSingleThreadExecutor()) {
+            var reader = workers.submit(() -> {
+                Thread.currentThread().setName("mission-transcript-reader");
+                authenticateAs(currentUser, workspace.getId());
+                try {
+                    return retained ? assistant.getRetained(session.getId(), 1, 50)
+                            : assistant.get(session.getId(), 1, 50);
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            try {
+                assertTrue(snapshotOpened.await(10, TimeUnit.SECONDS));
+                finish(invalidate());
+                assertEquals(0, messageCount(session.getId()));
+                assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+                String currentTitle = real.getPrivacySession(workspace.getId(), session.getId()).getTitle();
+                assertFalse("Private cleanup fixture".equals(currentTitle));
+                resumeReader.countDown();
+                var projected = reader.get(10, TimeUnit.SECONDS);
+                assertEquals(currentTitle, projected.session().getTitle());
+                assertTrue(projected.messages().items().isEmpty());
+                assertEquals(0, projected.messages().total());
+                assertNull(projected.activeTurn());
+            } finally {
+                resumeReader.countDown();
+            }
+        }
+    }
+
+    @Test
+    void transcriptProjectionKeepsInvalidationBehindItsPrivacyBarrier() throws Exception {
+        AiChatSession session = taintedSession();
+        transaction().executeWithoutResult(status -> {
+            chatMapper.getSessionByIdForMaintenanceUpdate(workspace.getId(), session.getId());
+            insertMessage(session.getId(), 1);
+        });
+        AiChatMapper realChat = sqlSessions.getMapper(AiChatMapper.class);
+        AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
+        CountDownLatch projecting = new CountDownLatch(1);
+        CountDownLatch releaseProjection = new CountDownLatch(1);
+        CountDownLatch invalidating = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
+        doAnswer(invocation -> {
+            var messages = realChat.listMessages(invocation.getArgument(0), invocation.getArgument(1),
+                    invocation.getArgument(2), invocation.getArgument(3));
+            if (Thread.currentThread().getName().equals("mission-projecting-reader")) {
+                projecting.countDown();
+                await(releaseProjection);
+            }
+            return messages;
+        }).when(chat).listMessages(workspace.getId(), session.getId(), 50, 0);
+        doAnswer(invocation -> {
+            waitingConnection.set(connectionId());
+            invalidating.countDown();
+            return realPrivacy.lockBarrier(invocation.getArgument(0));
+        }).when(workMapper).lockBarrier(workspace.getId());
+        String operation;
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var reader = workers.submit(() -> {
+                Thread.currentThread().setName("mission-projecting-reader");
+                authenticateAs(currentUser, workspace.getId());
+                try {
+                    return assistant.get(session.getId(), 1, 50);
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            try {
+                assertTrue(projecting.await(10, TimeUnit.SECONDS));
+                var invalidation = workers.submit(() -> tenantWorkScope.inWorkspace(workspace.getId(), this::invalidate));
+                assertTrue(invalidating.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, waitingConnection.get(),
+                        "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                releaseProjection.countDown();
+                assertEquals(1, reader.get(10, TimeUnit.SECONDS).messages().total());
+                operation = invalidation.get(10, TimeUnit.SECONDS);
+            } finally {
+                releaseProjection.countDown();
+            }
+        }
+        finish(operation);
+        assertTrue(assistant.get(session.getId(), 1, 50).messages().items().isEmpty());
+    }
 
     @Test
     void duplicateBatchCannotCommitTwice() throws Exception {

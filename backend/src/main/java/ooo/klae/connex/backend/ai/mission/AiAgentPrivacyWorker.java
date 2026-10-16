@@ -38,25 +38,29 @@ public class AiAgentPrivacyWorker {
             return;
         }
         for (int workspaceId : workspaces) {
-            JobRunDetail started = JobRunDetail.startedUtc();
-            boolean failed = false;
             try {
                 tenantWorkScope.inLifecycleWorkspace(workspaceId, () -> {
-                    departures.reconcile(workspaceId);
-                    privacyService.reconcileErasedOwners(workspaceId);
-                    List<AiAgentPrivacyWork> work = privacyMapper.dueWork(workspaceId, 1);
-                    if (!work.isEmpty()) {
-                        privacyService.batch(workspaceId, work.getFirst().getOperationKey());
+                    JobRunDetail started = JobRunDetail.startedUtc();
+                    JobRunStatus outcome = JobRunStatus.SUCCEEDED;
+                    try {
+                        departures.reconcile(workspaceId);
+                        privacyService.reconcileErasedOwners(workspaceId);
+                        List<AiAgentPrivacyWork> work = privacyMapper.dueWork(workspaceId, 1);
+                        if (!work.isEmpty()) {
+                            privacyService.batch(workspaceId, work.getFirst().getOperationKey());
+                        }
+                    } catch (RuntimeException failure) {
+                        outcome = JobRunStatus.FAILED;
+                    } finally {
+                        jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_CLEANUP, workspaceId,
+                                outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "cleanup")));
                     }
                 });
-            } catch (RuntimeException failure) {
-                failed = true;
-            } finally {
-                jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_CLEANUP, workspaceId,
-                        failed ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,
-                        new JobRunDetail(started.startedAt(), Map.of("phase", "cleanup")));
+            } catch (RuntimeException unavailablePlacement) {
                 workspaceCursor.set(workspaceId);
+                continue;
             }
+            workspaceCursor.set(workspaceId);
         }
     }
 }

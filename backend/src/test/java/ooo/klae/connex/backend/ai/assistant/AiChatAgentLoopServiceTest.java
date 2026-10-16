@@ -5263,7 +5263,8 @@ class AiChatAgentLoopServiceTest {
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
                 TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
-                AiPrivacyMode.MASKED, true);
+                AiPrivacyMode.MASKED, true, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(streamedTurn.userMessageId());
         userMessage.setAuthorKind("user");

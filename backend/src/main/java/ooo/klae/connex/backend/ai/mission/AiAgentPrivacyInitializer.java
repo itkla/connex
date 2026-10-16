@@ -56,17 +56,10 @@ public class AiAgentPrivacyInitializer {
                 return;
             }
             for (int workspaceId : ids) {
-                JobRunDetail started = JobRunDetail.startedUtc();
-                boolean failed = false;
                 try {
                     initialize(workspaceId);
                 } catch (RuntimeException failure) {
                     successful = false;
-                    failed = true;
-                } finally {
-                    jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION, workspaceId,
-                            failed ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,
-                            new JobRunDetail(started.startedAt(), Map.of("phase", "initialization")));
                 }
             }
             after = ids.getLast();
@@ -76,10 +69,20 @@ public class AiAgentPrivacyInitializer {
     /** Initializes one exact workspace using its freshly verified organization placement. */
     public void initialize(int workspaceId) {
         tenantWorkScope.inWorkspace(workspaceId, () -> {
-            privacyService.initialize(workspaceId);
-            privacyService.reconcileLegacyTurns(workspaceId);
-            startupRecovery.reconcile(workspaceId);
-            return null;
+            JobRunDetail started = JobRunDetail.startedUtc();
+            JobRunStatus outcome = JobRunStatus.SUCCEEDED;
+            try {
+                privacyService.initialize(workspaceId);
+                privacyService.reconcileLegacyTurns(workspaceId);
+                startupRecovery.reconcile(workspaceId);
+                return null;
+            } catch (RuntimeException failure) {
+                outcome = JobRunStatus.FAILED;
+                throw failure;
+            } finally {
+                jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION, workspaceId,
+                        outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "initialization")));
+            }
         });
     }
 

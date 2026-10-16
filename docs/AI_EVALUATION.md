@@ -50,7 +50,7 @@ One fixture serves two goldens (`confirm_proposal` backs both the proposal golde
 
 ### Record-review mission goldens (Phase 2 slice 1)
 
-`ai.mission.AiAgentScriptedTrajectoryTest` adds 28 cases using 23 separate fixtures under `ai/scripted/missions`. Its inherited harness resolves this bounded fixture directory without changing the provider's 64-script or journal limits. The cases exercise the real mission runner and persistence: one grounded report with empty review collection, exact attempt/dispatch and accounting assertions, masked outbound requests, primary-record scope and unknown-handle refusal, every declared write-tool refusal, cancellation, provider uncertainty, capability/context refusal, secondary gate loss, and special-care output screening. Static fixture loading and compilation do not establish these outcomes; execute the MySQL suite before activation.
+`ai.mission.AiAgentScriptedTrajectoryTest` adds 33 cases using 25 separate fixtures under `ai/scripted/missions`. Its inherited harness resolves this bounded fixture directory without changing the provider's 64-script or journal limits. The cases exercise the real mission runner and persistence: one grounded report with empty review collection, exact attempt/dispatch and accounting assertions, masked outbound requests, primary-record scope and unknown-handle refusal, every declared write-tool refusal, cancellation, provider uncertainty, capability/context refusal, secondary gate loss with matched enabled controls, repair at the final dispatch boundary, completed-purge egress refusal, and special-care output screening. Static fixture loading and compilation do not establish these outcomes; execute the MySQL suite before activation.
 
 ```bash
 ./gradlew scriptedTrajectoryTest \

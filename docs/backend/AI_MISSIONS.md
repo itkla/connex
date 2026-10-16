@@ -20,7 +20,9 @@ three attempts. Every actual provider dispatch reserves a decision before egress
 `AiInvocationService`; known usage is monotonic, while uncertain dispatch consumes the
 remaining reservation conservatively. Organization budget accounting and per-invocation
 audit remain independent gates. The ordinary loop reserves its closing decision, and an
-exhausted allowance refuses further provider calls.
+exhausted allowance refuses further provider calls. Mission repairs consult the remaining durable
+dispatch allowance before assembling each request, including native repair retries, and force
+the final-answer schema for its last decision. Ordinary parsed-step budgeting is unchanged.
 
 Each attempt rebuilds a masked context from the bounded goal and a fresh read of the
 selected record. Session history, summaries, attachments, private notes, replay state,
@@ -91,14 +93,21 @@ Every execution retains its original generation and captured taint sequence. Cur
 privacy requires an unchanged taint identity, the current unblocked barrier generation,
 current access, and an unwithheld mission source. Reader predicates apply before physical
 erasure, including ordinary transcript, retained content, notification sources, and tenant
-export. Export residual counting remains unconditional: privacy filtering cannot hide
+export. Transcript detail reads use READ COMMITTED, lock the actor/workspace/organization audit parents
+shared before barrier S, append strict read audits after the barrier, and retain it through projection. They flush the
+mapper cache at that lock, and reload session metadata afterward. Browser invalidation discards
+rendered and buffered text, including missing-turn reconnects and late responses. Canonical terminal
+partials replace local text exactly. Withdrawal invalidates mission output snapshots before reload.
+Export residual counting remains unconditional: privacy filtering cannot hide
 remaining rows from teardown verification.
 
 Restrictions invalidate all workspaces in the affected organization in the same
 transaction as the person mutation. Existing authorization and person roots precede
 stripe-ordered local write fences; exact workspace barriers lock in ascending order,
 then work rows are inserted. No mission/session locks are acquired by invalidation.
-Current placement must agree for every workspace. Clearing a person restriction never
+Current placement must agree for every workspace. Tenant routing is installed before the
+transaction starts; in-transaction control-mapper reads revalidate placement on the same connection
+without switching the tenant work scope. Clearing a person restriction never
 revives old content.
 
 ## Bounded erasure

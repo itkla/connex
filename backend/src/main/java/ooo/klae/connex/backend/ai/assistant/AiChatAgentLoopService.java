@@ -405,6 +405,18 @@ public class AiChatAgentLoopService {
                 Set<String> rawIdentifierRefusals = new LinkedHashSet<>();
                 AiChatStreamingProgress.Observer streamingObserver = null;
                 while (outcome == null) {
+                    if (mission != null) {
+                        int remaining = mission.persistence().remainingDispatches(mission);
+                        if (remaining <= 0) {
+                            return AiGenerationTaskResult.failed("mission_budget_exhausted");
+                        }
+                        if (remaining == 1 && !closing) {
+                            closing = true;
+                            closingAttempted = true;
+                            closingReason = "mission_budget_exhausted";
+                            stepContext = skillContext.withClosingDirective(CLOSING_DIRECTIVE);
+                        }
+                    }
                     rawIdentifierRefusals.clear();
                     List<AiToolDefinition> nativeDefinitions = nativeTools
                             ? promptAssembler.nativeToolDefinitions(state.loadedToolsets)
