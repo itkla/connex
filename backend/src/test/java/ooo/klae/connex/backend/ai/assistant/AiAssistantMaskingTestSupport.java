@@ -197,6 +197,7 @@ final class AiAssistantMaskingTestSupport {
         java.util.function.Function<AiCompletionRequest, AiCompletionResult> completion = request -> {
             request.providerAttemptExecutor().execute(() -> {
                 request.providerAttemptExecutor().beforeSend();
+                respondWithDispatchEvidence(request, mapper);
                 if (observer != null && !assignment) {
                     observer.onContentDelta(output);
                 }
@@ -282,6 +283,7 @@ final class AiAssistantMaskingTestSupport {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
                 request.providerAttemptExecutor().beforeSend();
+                respondWithDispatchEvidence(request, mapper);
                 return "";
             });
             return new AiCompletionResult("", 1, 1, "tool_calls",
@@ -319,6 +321,30 @@ final class AiAssistantMaskingTestSupport {
             Map<String, List<String>> memberIdentifiers) {
     }
 
+    private static void respondWithDispatchEvidence(AiCompletionRequest request, ObjectMapper mapper) {
+        var dispatch = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                request, ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                false, mapper);
+        List<ooo.klae.connex.backend.ai.masking.OutboundSegment> legacySegments = new ArrayList<>();
+        request.messages().forEach(message -> legacySegments.addAll(message.segments()));
+        if (request.nativeTools() != null) {
+            request.nativeTools().exchanges().forEach(exchange -> legacySegments.addAll(exchange.resultSegments()));
+            legacySegments.addAll(request.nativeTools().repairSegments());
+        }
+        String legacyPayload = mapper.writeValueAsString(legacySegments.stream()
+                .filter(segment -> segment.origin() == ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.TENANT_DATA
+                        || segment.origin() == ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.TENANT_TOOL_RESULT)
+                .map(ooo.klae.connex.backend.ai.masking.OutboundSegment::text).toList());
+        java.util.Set<String> legacyTokens = new java.util.HashSet<>();
+        var matcher = java.util.regex.Pattern.compile("\\{\\{\\s*([A-Z][1-9][0-9]*)\\s*}}").matcher(legacyPayload);
+        while (matcher.find()) {
+            legacyTokens.add("{{" + matcher.group(1) + "}}");
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(legacyTokens, dispatch.dispatchedTokens(),
+                "Final adapter body must preserve MEMBER exposure parity on existing fixtures");
+        ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(dispatch);
+    }
+
     private ProviderHarness newProviderHarness(ObjectMapper mapper) {
         int firstMock = fixtureMocks.size();
         AiProvider provider = fixtureMock(AiProvider.class);
@@ -329,6 +355,7 @@ final class AiAssistantMaskingTestSupport {
             AiCompletionRequest request = call.getArgument(0);
             String output = request.providerAttemptExecutor().execute(() -> {
                 request.providerAttemptExecutor().beforeSend();
+                respondWithDispatchEvidence(request, mapper);
                 return "Ready";
             });
             return new AiCompletionResult(output, 1, 1, "stop");

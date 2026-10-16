@@ -964,15 +964,9 @@ public class AiInvocationService {
         registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
-        String memberExposurePayload;
         try {
             serializedPrompt = serializeProviderInput(
                     effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
-            memberExposurePayload = objectMapper.writeValueAsString(outboundSegments(
-                    effectiveInvocation.prompt(), nativeTools, effectiveInvocation.context()).stream()
-                    .filter(segment -> segment.origin() == OutboundSegment.Origin.TENANT_DATA
-                            || segment.origin() == OutboundSegment.Origin.TENANT_TOOL_RESULT)
-                    .map(OutboundSegment::text).toList());
         } catch (AiProviderException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
@@ -1034,7 +1028,7 @@ public class AiInvocationService {
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, memberExposurePayload, budgetLease, outputTokensClamped,
+                serializedPrompt, budgetLease, outputTokensClamped,
                 nativeTools == null ? 1 : nativeTools.maxParallelCalls());
         try {
             if (!effectiveInvocation.images().isEmpty()) {
@@ -1153,7 +1147,7 @@ public class AiInvocationService {
             AiReasoningMode reasoningMode,
             AiProviderAttemptExecutor providerAttemptExecutor) {
         List<AiMessage> messages = invocation.prompt().getMessages().stream()
-                .map(message -> new AiMessage(message.getRole(), message.getContent()))
+                .map(message -> new AiMessage(message.getRole(), message.getContent(), message.getSegments()))
                 .toList();
         return new AiCompletionRequest(
                 resolved.target(), resolved.credentials(), systemPrompt(invocation.prompt(), reasoningMode),
@@ -1546,7 +1540,6 @@ public class AiInvocationService {
         private final Runnable initialCommitment;
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
-        private final String memberExposurePayload;
         private final boolean outputTokensClamped;
         private final int maxParallelCalls;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
@@ -1565,7 +1558,6 @@ public class AiInvocationService {
                 Runnable initialCommitment,
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
-                String memberExposurePayload,
                 AiOrganizationBudgetCoordinator.Lease budgetLease,
                 boolean outputTokensClamped,
                 int maxParallelCalls) {
@@ -1580,7 +1572,6 @@ public class AiInvocationService {
             this.providerAttemptGuard = providerAttemptGuard;
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
-            this.memberExposurePayload = Objects.requireNonNull(memberExposurePayload, "memberExposurePayload");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
             this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
@@ -1673,7 +1664,11 @@ public class AiInvocationService {
         public synchronized void beforeSend() {
             checkpoint();
             Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
-            invocation.context().exposeDispatchedPayload(memberExposurePayload);
+        }
+
+        @Override
+        public synchronized void onResponse(Set<String> dispatchedTokens) {
+            invocation.context().exposeDispatchedTokens(dispatchedTokens);
         }
 
         @Override

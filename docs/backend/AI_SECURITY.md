@@ -160,8 +160,22 @@ messages retain ordinary short-label word boundaries. Tool-result containment an
 operate per tenant-bearing textual value; fixed tool, tier, status and record-type fields retain
 their ordinary matching rules.
 
-Allocation alone never authorizes MEMBER demasking. The invocation `beforeSend` choke point records
-member tokens present in the final payload after screening, budgeting and truncation. Only tokens
+Allocation alone never authorizes MEMBER demasking. Provider adapters derive immutable token evidence
+from the decoded tenant-data and tool-result text positions in their final serialized bodies, after
+screening, budgeting and truncation. `AiMessage` retains each message's positional origin segments;
+native result and repair segments retain theirs. Every serialized string value must match its
+recorded provenance; missing, extra, changed or unclassified positions refuse before transport.
+Static vocabulary, schemas, image data and provider-authored replay or repair cannot grant exposure.
+OpenAI-compatible and scripted providers share the same body serializer; Azure, Bedrock and both
+Vertex families apply the same body/provenance validation to their own formats.
+
+`AiProviderDispatch` pairs those exact body bytes with their staged token set. The existing
+`beforeSend` callback still commits pre-send budget accounting. Transports promote that attempt's
+set through `onResponse` at response headers, including HTTP error responses, before reading the
+body, parsing or publishing a delta. A connection failure or timeout before headers promotes
+nothing. A rebuilt fallback body carries fresh evidence; retries reusing identical bytes retain
+their existing transport behavior. Scripted transport failures follow the same rule, while a
+scripted HTTP rejection counts as a response. Only tokens
 exposed in an actual dispatch during the current run can demask; earlier dispatches in the run remain
 valid, and history inside a dispatched payload counts. A guessed unissued or unexposed member token
 in a final answer, stream or tool argument follows invented-placeholder refusal and cannot reveal

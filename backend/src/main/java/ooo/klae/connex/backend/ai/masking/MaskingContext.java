@@ -158,13 +158,22 @@ public final class MaskingContext {
     }
 
     /**
-     * Records member tokens in the final envelope at the actual provider dispatch boundary.
+     * Records bound tokens from a dispatched tenant-text projection.
      * Earlier dispatched tokens remain reversible throughout this request.
      */
     public void exposeDispatchedPayload(String serializedPayload) {
         var matcher = DISPATCHED_TOKEN.matcher(Objects.requireNonNull(serializedPayload, "serializedPayload"));
         while (matcher.find()) {
             String token = "{{" + matcher.group(1) + "}}";
+            if (originalValueForToken(token) != null) {
+                exposedTokens.add(token);
+            }
+        }
+    }
+
+    /** Promotes adapter-validated tokens only after the provider responds to that attempt. */
+    public void exposeDispatchedTokens(Set<String> tokens) {
+        for (String token : Set.copyOf(tokens)) {
             if (originalValueForToken(token) != null) {
                 exposedTokens.add(token);
             }
