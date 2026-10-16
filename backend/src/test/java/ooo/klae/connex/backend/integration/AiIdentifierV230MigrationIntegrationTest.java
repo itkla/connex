@@ -38,10 +38,7 @@ class AiIdentifierV230MigrationIntegrationTest {
                                 + " DROP COLUMN ai_identifier_source_name, DROP COLUMN ai_identifier_key_version, ALGORITHM=INSTANT");
                     }
                 }
-                String extraColumns = table.equals("deal") ? ", pipeline_id, stage_id" : "";
-                String extraValues = table.equals("deal") ? ", 1, 1" : "";
-                statement.executeUpdate("INSERT INTO " + table + " (id, workspace_id, name" + extraColumns
-                        + ") VALUES (1, 1, '㍿ Legacy'" + extraValues + ")");
+                statement.executeUpdate(legacyInsert(table));
             }
             String v156;
             try (var input = new ClassPathResource("db/migration/tenant/V156__deal_duplicate_review_proofs.sql").getInputStream()) {
@@ -60,9 +57,7 @@ class AiIdentifierV230MigrationIntegrationTest {
                     }
                 }
                 statement.executeUpdate("UPDATE " + table + " SET name = '㍿ LEGACY ' WHERE id = 1");
-                statement.executeUpdate("INSERT INTO " + table + " (workspace_id, name"
-                        + (table.equals("deal") ? ", pipeline_id, stage_id" : "")
-                        + ") VALUES (1, 'Old binary insert'" + (table.equals("deal") ? ", 1, 1" : "") + ")");
+                statement.executeUpdate(oldBinaryInsert(table));
                 try (var columns = connection.getMetaData().getColumns(scratch.name(), null, table, "ai_identifier_%")) {
                     int count = 0;
                     while (columns.next()) {
@@ -79,5 +74,25 @@ class AiIdentifierV230MigrationIntegrationTest {
                 assertNull(rows.getString(1), "V156 legacy trigger must still invalidate its own duplicate key");
             }
         }
+    }
+
+    private static String legacyInsert(String table) {
+        return switch (table) {
+            case "person" -> "INSERT INTO person (id, workspace_id, name) VALUES (1, 1, '㍿ Legacy')";
+            case "company" -> "INSERT INTO company (id, workspace_id, name) VALUES (1, 1, '㍿ Legacy')";
+            case "deal" -> "INSERT INTO deal (id, workspace_id, name, pipeline_id, stage_id)"
+                    + " VALUES (1, 1, '㍿ Legacy', 1, 1)";
+            default -> throw new IllegalArgumentException(table);
+        };
+    }
+
+    private static String oldBinaryInsert(String table) {
+        return switch (table) {
+            case "person" -> "INSERT INTO person (workspace_id, name) VALUES (1, 'Old binary insert')";
+            case "company" -> "INSERT INTO company (workspace_id, name) VALUES (1, 'Old binary insert')";
+            case "deal" -> "INSERT INTO deal (workspace_id, name, pipeline_id, stage_id)"
+                    + " VALUES (1, 'Old binary insert', 1, 1)";
+            default -> throw new IllegalArgumentException(table);
+        };
     }
 }
