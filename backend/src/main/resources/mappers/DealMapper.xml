@@ -1124,11 +1124,15 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+      ai_identifier_source_name, ai_identifier_key_version, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES (
-      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{duplicateNormalizedName,jdbcType=VARCHAR}, #{value,jdbcType=DECIMAL},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name},
+      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+      #{name,jdbcType=VARCHAR}, 1, #{duplicateNormalizedName,jdbcType=VARCHAR}, #{value,jdbcType=DECIMAL},
       #{actualValue,jdbcType=DECIMAL}, #{valueSource}, #{currency},
       #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
@@ -1137,12 +1141,16 @@
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
+      workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+      ai_identifier_source_name, ai_identifier_key_version, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
-      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
+      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name},
+      #{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+      #{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+      #{d.name,jdbcType=VARCHAR}, 1, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
        #{d.actualValue,jdbcType=DECIMAL}, #{d.valueSource}, #{d.currency},
        #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
        #{d.closedReason}, #{d.won})
@@ -1152,6 +1160,10 @@
   <update id="update">
     UPDATE deal
     SET name = #{name},
+        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+        ai_identifier_key_version = 1,
         duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
         duplicate_name_revision = duplicate_name_revision + 1,
         currency = #{currency},
@@ -1179,6 +1191,10 @@
   <update id="updateName">
     UPDATE deal
     SET name = #{name},
+        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+        ai_identifier_key_version = 1,
         duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
         duplicate_name_revision = duplicate_name_revision + 1
     WHERE workspace_id = #{workspaceId} AND id = #{id}

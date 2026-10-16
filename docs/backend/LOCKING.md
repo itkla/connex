@@ -637,6 +637,28 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+### AI identifier key reconciliation
+
+Queue-time identifier resolution remains inside the caller-membership → exact chat-session
+critical section above. Current canonical keys reduce returned rows and round trips; the SQL
+containment prefilter still examines the visible corpus. Stale rows deliberately keep legacy
+lookup cost until reconciliation finishes. No new queue locks or network work are introduced.
+
+`AiIdentifierKeyBackfillRunner` resolves placement before entering each workspace sweep and keeps
+that catalog pinned across the small transactions. Each `AiIdentifierKeyBackfillTransaction` page
+uses `READ_COMMITTED`, reads a non-locking keyset page, then CAS-updates at most 100 exact parent
+rows of **one table**, in ascending id order. It touches only derived aliases/snapshot/version and
+explicitly retains `updated_at`; it publishes no events and reads/writes no identity groups,
+duplicate-decision roots, share grants or other aggregates. Consequently it takes no domain mutex
+and cannot acquire an ancestor after a parent lock. It never mixes person/company/deal locks in a
+transaction or uses a range `FOR UPDATE` scan.
+
+The update rechecks owning workspace, original name byte-for-byte, archive/processing state
+and bundle freshness after contention. A rename, deletion, restriction or competing reconciliation
+wins safely; skipped rows remain stale and are reported in the final pending count. A later run
+restarts from zero to revisit races behind the cursor. Restored archived/restricted rows remain
+on compatibility lookup until written by a current name writer or reconciled on another start.
+
 ### Assistant write tools
 
 Task targets declare `TASK_ROW` and `TARGET_FINGERPRINT` together. Completion declares the

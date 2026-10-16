@@ -7,6 +7,36 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## AI identifier lookup keys (tenant V230)
+
+V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
+requires `ALGORITHM=INSTANT` and fails instead of falling back to a core-table rebuild. No index,
+generated-column or trigger DDL is added. TEXT keys hold NFKC expansion beyond a 255-character
+source name. DDL still needs metadata locks; deploy outside long-running transactions.
+
+Flyway only adds columns. `AiIdentifierKeyBackfillRunner` runs after application startup migrations
+on every ordinary `dev`, `test`, SaaS, silo and on-prem backend start, regardless of the AI feature
+switch. It resolves active catalogs and owning workspaces through the control plane, pins each
+placement before transactions, and writes sorted 100-row pages per table. Maintenance modes other
+than `off` (including `seeder`) do not instantiate the runner. In single-database mode its null
+catalog is the default database; catalog-per-placement mode reconciles each active placement.
+
+The sweep is restartable and safe with multiple replicas: byte-exact compare-and-set skips changed,
+deleted, restricted or already-current rows, and preserves `updated_at`. Workspace data failures
+leave that workspace on compatibility lookup and log only its id; unservable placements are skipped,
+while unexpected placement mismatches fail closed. Startup logs report scanned/written/skipped and
+eligible pending counts. A normal restart reruns the sweep from zero. During a rolling deployment,
+old binaries can create new pending rows or rename previously current ones; after draining them,
+restart a current backend and confirm pending=0 in each servable workspace. Archived/restricted rows
+are excluded from that count and use fallback if restored before a later reconciliation.
+
+Current bundles use the Java canonical prefilter; stale/missing bundles retain legacy lookup with
+its possible corpus-sized pagination. No coverage or admission cap changes. The existing rollback
+floor remains `tenant/V228`: older binaries ignore the nullable additions and safely retain their
+own identifier lookup. Changing canonical forms or eligibility requires bumping the key format
+version, keeping fallback and rerunning reconciliation. See [AI_SECURITY.md](backend/AI_SECURITY.md#ask-connex-record-identifier-prefilter-tenant-v230)
+and [LOCKING.md](backend/LOCKING.md#ai-identifier-key-reconciliation).
+
 ## AI exposure-gated output upgrade (#2056)
 
 The all-kind demasking change bumps generated-output cache hashes to `v4-dispatched-exposure`.

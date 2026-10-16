@@ -180,8 +180,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             }
             String turn = "Ask " + sample.text() + " today.";
             MaskingEngine.MentionScanText scan = MaskingEngine.mentionScanText(turn);
-            assertTrue(identifierMapper.findMentionedRecords(workspace.getId(), "[" + workspace.getId() + "]",
-                    scan.lookupText(), 200, "", 0).stream().anyMatch(row -> row.getId() == person.getId()
+            assertTrue(identifierMapper.findMentionedRecords(workspace.getId(), "[" + workspace.getId() + "]", scan.literalText(), scan.labelText(), 200, "", 0).stream().anyMatch(row -> row.getId() == person.getId()
                             && "person".equals(row.getKind())), sample.toString());
             assertTrue(MaskingEngine.containsIdentifierMention(scan, sample.stored()), sample.toString());
             AiAssistantIdentifierResolver.Resolution resolution = resolver.resolve(turn);
@@ -719,8 +718,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                         .filter(name -> MaskingEngine.containsIdentifierMention(scan, name.value()))
                         .map(ParityName::key).collect(Collectors.toSet());
                 assertTrue(javaMatches.contains(target.key()), target.value());
-                Set<String> candidates = identifierMapper.findMentionedRecords(workspace.getId(),
-                        "[" + workspace.getId() + "]", scan.lookupText(), 200, "", 0).stream()
+                Set<String> candidates = identifierMapper.findMentionedRecords(workspace.getId(), "[" + workspace.getId() + "]", scan.literalText(), scan.labelText(), 200, "", 0).stream()
                         .map(name -> name.getKind() + ":" + name.getId()).collect(Collectors.toSet());
                 assertTrue(candidates.containsAll(javaMatches),
                         () -> "SQL dropped Java matches for batch " + batch + " and " + target.value());

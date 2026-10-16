@@ -52,6 +52,53 @@ Features do not build raw prompts.
 
 Any new feature must preserve the same masking and leak-scan boundary for every provider/protocol path.
 
+### Ask Connex record-identifier prefilter (tenant V230)
+
+`AiIdentifierLookupKeys.fromName` derives literal and conversation-label aliases from
+`CanonicalText` and the existing dictionary eligibility rules. Every person/company/deal name
+writer binds both aliases through explicit MyBatis parameter handlers receiving the same raw name
+parameter as `name`, alongside its exact source snapshot and format version. Ineligible aliases
+are empty strings; a missing bundle remains null. Canonical text and snapshots are sensitive
+CRM data: they stay in the owning parent row, its tenant export and physical erasure, never logs,
+provider metadata or a new authority source.
+
+A bundle is current only when its version equals `AiIdentifierLookupKeys.VERSION`, both keys are
+non-null, and the snapshot equals the current name byte-for-byte (`CAST(... AS BINARY)`). Current
+rows use binary `LOCATE` against separately bound Java literal/label turn projections. There is no
+per-row SQL normalization or blanket Unicode admission in that branch. Every Java-admitted
+mention contains its corresponding stored alias, so SQL remains a superset. The existing Java
+ASCII-word and original-source boundary checks remain the admission authority. SQL substring
+matches such as `Li` in `client` can over-include and are rejected by Java. Many such canonical
+substring matches can still require multiple pages even when Java admits none.
+
+Missing bundles, older versions and old-binary renames take the existing SQL normalization and
+non-ASCII/bracket fallback. No trigger is needed, and rollback-compatible writers keep working.
+The 200-row keyset page is a materialization bound, never a corpus/admission cap: full pages
+continue until exhaustion or the existing combined 20 admitted-identifier limit is exceeded.
+Visibility stays owned-or-shared within the control-derived organization ceiling; archived and
+processing-restricted people and archived companies remain excluded.
+
+`AiIdentifierKeyBackfillRunner` reconciles processable owned rows at normal startup in catalog-pinned
+100-row CAS transactions, with no domain events or timestamp changes. It reports scanned, written,
+skipped and remaining eligible pending counts without names. Races behind its cursor wait for the
+next run and keep fallback coverage. Drain old writers, rerun reconciliation and check pending=0
+before claiming steady-state retrieval cost. A canonicalization, eligibility or JDK Unicode change
+requires a version bump and reconciliation; do not silently reinterpret current stored keys.
+
+This design bounds rows **returned** and identifier SQL round trips by canonical matches, not
+rows examined: containment still scans the visible corpus. Stale rollout rows retain the legacy
+pagination cost (the 50,200-row unbackfilled regression requires 252 mapper calls). The cost
+integration fixture exercises 200, 5,000 and 50,200 Japanese names, ASCII/Japanese and maximum-size
+turns, real NFKC mentions, production `EXPLAIN ANALYZE`, and resolver plus durable queue duration
+inside the established membership/session lock order. A second connection proves contention and release. Timing is
+reported, never asserted against shared-host thresholds; deterministic page/row counts are asserted.
+Membership and session acquire/hold intervals are reported separately through commit, alongside the
+complete queue transaction (real authorization, message/turn writes and scope reads; audit and
+realtime delivery use fixture mocks). Acquire timings include lock-query/round-trip latency; queue
+and hold timings include the two-connection contention probes. The V230 MySQL fixture has not yet
+produced a measured baseline: the local schema-readiness gate expired before database verification.
+No resolver latency, lock duration or rows-examined improvement has been established by that run.
+
 ### Ask Connex member identifiers
 
 The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, company, deal,

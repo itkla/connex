@@ -955,16 +955,24 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url, created_at)
-    VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{website}, #{industry},
+    INSERT INTO company (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+      ai_identifier_source_name, ai_identifier_key_version, website, industry, phone, address, logo_url, created_at)
+    VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name},
+      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+      #{name,jdbcType=VARCHAR}, 1, #{website}, #{industry},
       #{phone}, #{address}, #{logoUrl}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (workspace_id, owner_id, name, website, industry, phone, address, logo_url)
+    INSERT INTO company (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+      ai_identifier_source_name, ai_identifier_key_version, website, industry, phone, address, logo_url)
     VALUES
     <foreach collection="list" item="c" separator=",">
-      (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, #{c.name}, #{c.website}, #{c.industry},
+      (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, #{c.name},
+      #{c.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+      #{c.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+      #{c.name,jdbcType=VARCHAR}, 1, #{c.website}, #{c.industry},
        #{c.phone}, #{c.address}, #{c.logoUrl})
     </foreach>
   </insert>
@@ -972,6 +980,10 @@
   <update id="update">
     UPDATE company
     SET name = #{name},
+        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
+        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
+        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+        ai_identifier_key_version = 1,
         website = #{website},
         industry = #{industry},
         phone = #{phone},
