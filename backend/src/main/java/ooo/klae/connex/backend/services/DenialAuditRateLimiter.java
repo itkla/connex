@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -73,6 +74,7 @@ public class DenialAuditRateLimiter {
     private final Clock clock;
     private final MeterRegistry meterRegistry;
     private final Counter evictions;
+    private final AtomicLong admissionSequence = new AtomicLong();
     private final ConcurrentHashMap<Key, Window> windows = new ConcurrentHashMap<>();
 
     /**
@@ -84,11 +86,12 @@ public class DenialAuditRateLimiter {
      * @param reason denial reason the row records
      * @param clientAddress client address the row was admitted for, empty when none was resolved
      * @param userAgentFingerprint memory-only header digest, empty for absent or rejected headers
-     * @param admittedAtMillis when this fingerprint was admitted
+     * @param admittedAtMillis clock sample taken for this admission
+     * @param admissionId unique limiter-local identity independent of the clock
      */
     public record Admission(
             int userId, String action, String reason, String clientAddress, String userAgentFingerprint,
-            long admittedAtMillis) {
+            long admittedAtMillis, long admissionId) {
     }
 
     public DenialAuditRateLimiter(
@@ -123,6 +126,7 @@ public class DenialAuditRateLimiter {
         Key key = new Key(userId, action, reason);
         String address = Objects.requireNonNullElse(clientAddress, UNRESOLVED_ADDRESS);
         String fingerprint = userAgentFingerprint(request);
+        long admissionId = admissionSequence.incrementAndGet();
         long now = clock.millis();
         AtomicBoolean accepted = new AtomicBoolean();
         windows.compute(key, (existingKey, existing) -> {
@@ -137,7 +141,7 @@ public class DenialAuditRateLimiter {
                 }
                 accepted.set(true);
                 List<Fingerprint> fingerprints = new ArrayList<>(admitted.fingerprints());
-                fingerprints.add(new Fingerprint(fingerprint, now));
+                fingerprints.add(new Fingerprint(fingerprint, admissionId));
                 List<Admitted> next = new ArrayList<>(live);
                 next.set(next.indexOf(admitted), new Admitted(address, admitted.admittedAtMillis(),
                         List.copyOf(fingerprints)));
@@ -148,7 +152,7 @@ public class DenialAuditRateLimiter {
             }
             accepted.set(true);
             List<Admitted> next = new ArrayList<>(live);
-            next.add(new Admitted(address, now, List.of(new Fingerprint(fingerprint, now))));
+            next.add(new Admitted(address, now, List.of(new Fingerprint(fingerprint, admissionId))));
             return new Window(List.copyOf(next));
         });
         if (windows.size() > MAX_TRACKED_DENIALS) {
@@ -158,12 +162,13 @@ public class DenialAuditRateLimiter {
             meterRegistry.counter(SUPPRESSED_METRIC, "action", action).increment();
             return Optional.empty();
         }
-        return Optional.of(new Admission(userId, action, reason, address, fingerprint, now));
+        return Optional.of(new Admission(userId, action, reason, address, fingerprint, now, admissionId));
     }
 
     /**
      * Hands back only the fingerprint admission whose audit row could not be written, matching its
-     * address, fingerprint and admission timestamp. A late release never drops a newer admission.
+     * address, fingerprint and unique admission identity. Clock samples never identify admissions,
+     * so a paused acquisition or same-millisecond retry cannot let a stale release drop a newer one.
      *
      * <p>Releasing the first or any later fingerprint permits that fingerprint to retry immediately.
      * Other fingerprints keep their suppression and the address's original expiry. Removing the last
@@ -184,7 +189,7 @@ public class DenialAuditRateLimiter {
                 }
                 List<Fingerprint> fingerprints = admitted.fingerprints().stream()
                         .filter(agent -> !agent.hash().equals(admission.userAgentFingerprint())
-                                || agent.admittedAtMillis() != admission.admittedAtMillis())
+                                || agent.admissionId() != admission.admissionId())
                         .toList();
                 if (!fingerprints.isEmpty()) {
                     remaining.add(new Admitted(admitted.address(), admitted.admittedAtMillis(), fingerprints));
@@ -270,7 +275,7 @@ public class DenialAuditRateLimiter {
         }
     }
 
-    private record Fingerprint(String hash, long admittedAtMillis) {
+    private record Fingerprint(String hash, long admissionId) {
     }
 
     private record Admitted(String address, long admittedAtMillis, List<Fingerprint> fingerprints) {

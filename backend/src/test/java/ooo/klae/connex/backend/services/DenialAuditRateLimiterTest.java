@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -548,6 +549,75 @@ class DenialAuditRateLimiterTest {
         assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
     }
 
+    @Test
+    void staleReleasesPreserveSameMillisecondRetriesForAddressAndFingerprintAdmissions() {
+        for (boolean retainAddress : List.of(false, true)) {
+            DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+            if (retainAddress) {
+                assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+            }
+            DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                    request("Browser B")).orElseThrow();
+            limiter.release(stale);
+            DenialAuditRateLimiter.Admission retry = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                    request("Browser B")).orElseThrow();
+            assertEquals(stale.admittedAtMillis(), retry.admittedAtMillis());
+
+            limiter.release(stale);
+
+            assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+            assertNotEquals(stale, retry);
+        }
+    }
+
+    /** A sampled timestamp can predate the address window that eventually admits the request. */
+    @Test
+    void staleReleaseAfterAPausedRolloverKeepsEightAddressWindowsAtThirtyTwoRows() throws Exception {
+        TestClock time = new TestClock(0);
+        PausingClock clock = new PausingClock(time);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        time.advance(Duration.ofSeconds(WINDOW_SECONDS).minusMillis(1));
+        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser B")).orElseThrow();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            clock.pauseNextReading.set(true);
+            Future<DenialAuditRateLimiter.Admission> paused = pool.submit(() ->
+                    limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS, request("Browser B")).orElseThrow());
+            assertTrue(clock.sampled.await(10, TimeUnit.SECONDS));
+            time.advance(Duration.ofMillis(1));
+            assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+            clock.resume.countDown();
+            DenialAuditRateLimiter.Admission current = paused.get(10, TimeUnit.SECONDS);
+            assertEquals(stale.admittedAtMillis(), current.admittedAtMillis());
+            int successfulRows = 2;
+            for (String agent : List.of("Browser C", "Browser D")) {
+                assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, agent));
+                successfulRows++;
+            }
+            for (int address = 1; address < 8; address++) {
+                for (int agent = 0; agent < 4; agent++) {
+                    assertTrue(admits(limiter, 7, CONFINED, "2001:db8::" + address, "Browser " + agent));
+                    successfulRows++;
+                }
+            }
+
+            limiter.release(stale);
+            if (admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B")) {
+                successfulRows++;
+            }
+
+            assertEquals(0.0, evictions());
+            assertEquals(32, successfulRows);
+            assertNotEquals(stale, current);
+            assertEquals(1.0, suppressed(CONFINED));
+        } finally {
+            clock.resume.countDown();
+            pool.shutdownNow();
+        }
+    }
+
     /**
      * Any signed-in user can trigger an export step-up denial, so rotating source addresses, for
      * example across an IPv6 /64, must not reopen the per-request volume the window bounds.
@@ -722,6 +792,50 @@ class DenialAuditRateLimiterTest {
             } else {
                 windows.put(key, live);
             }
+        }
+    }
+
+    /** Pauses one read after sampling so its acquisition can resume across an address-window rollover. */
+    private static final class PausingClock extends Clock {
+        private final Clock delegate;
+        private final AtomicBoolean pauseNextReading = new AtomicBoolean();
+        private final CountDownLatch sampled = new CountDownLatch(1);
+        private final CountDownLatch resume = new CountDownLatch(1);
+
+        private PausingClock(Clock delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return delegate.getZone();
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return Instant.ofEpochMilli(millis());
+        }
+
+        @Override
+        public long millis() {
+            long now = delegate.millis();
+            if (pauseNextReading.compareAndSet(true, false)) {
+                sampled.countDown();
+                try {
+                    if (!resume.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out resuming the sampled clock read");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while pausing the sampled clock read", exception);
+                }
+            }
+            return now;
         }
     }
 

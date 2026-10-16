@@ -84,7 +84,7 @@ from the limiter. An accepted empty header has its own digest. Matching or copie
 indistinguishable, and valid header rotation can exhaust an address's four fingerprints without
 consuming other address slots. This is differentiation, not authenticated browser identity.
 
-An append failure releases only the matching address, fingerprint and admission timestamp so that
+An append failure releases only the matching address, fingerprint and unique admission identity so that
 fingerprint can retry. Other admitted fingerprints keep their suppression and the original address
 slot, window start and expiry, even when the failed row opened the address window. Releasing the last
 fingerprint removes the address slot, restoring address capacity and letting the next admission

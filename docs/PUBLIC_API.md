@@ -98,7 +98,7 @@ UTF-8 header is hashed with unkeyed SHA-256 in memory only; the digest is never 
 as a metric tag. Absent and firewall-rejected headers share a sentinel and never prevent admission;
 rejected user agents remain null in the audit row. The address uses the same trusted-proxy
 resolver as browser denials. Browser and public denials share admission windows. An append failure
-is logged and releases only its address/fingerprint/timestamp admission so it can retry without
+is logged and releases only its address/fingerprint/identity admission so it can retry without
 removing other fingerprints' suppression. Releasing the last fingerprint or reaching the original
 expiry removes its address slot; otherwise the slot, original start and expiry remain. This preserves
 evidence for surviving fingerprints, including retries the old rule would admit. Retained slots still
