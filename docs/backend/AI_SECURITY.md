@@ -478,6 +478,32 @@ Native assistant tools are capability-declared transport choices, not a second a
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.
 
+### Cross-site admission of audited assistant reads
+
+The GET handlers under `/api/ai/assistant/` that write `ai.assistant.session.read` (an administrator reading another member's session) would write that row under the victim's actor id if a foreign page could reach them. `AiAssistantNavigationAdmissionFilter`, which `SecurityConfig` registers unconditionally (no AI switch gates it), therefore admits only the shapes the SPA makes. It answers `403`, `text/plain`, `Assistant API request shape is not allowed` to a `Sec-Fetch-Dest` other than `empty`, to `Sec-Fetch-Mode: no-cors`, and to a `Sec-Fetch-Site` outside `same-origin`/`none` whose `Origin` is not in `connex.cors.allowed-origins`. A request with no Fetch Metadata is admitted on purpose; that residual and its bound are in the filter's Javadoc and in the [accepted-residual record](../SAST_TRIAGE_LOG.md#accepted-residual--audited-administrative-assistant-session-reads-111-114-151-152).
+
+That fail-open path means a hop that dropped the headers would switch the control off without a sound, so the closed path is proven in a real browser rather than with MockMvc alone (#1520):
+
+- **Every CI run, through the Next.js rewrite.** `frontend/test/e2e/assistant-admission-filter.spec.ts` runs in the `Frontend — unit & e2e` stack: Chromium, then `next start` and the `/api/:path*` rewrite in `next.config.ts`, then the backend. A page on `http://attacker.example` reads a chat's `/attachments` route as an `<img>`, as an opaque `no-cors` fetch, as a credentialed `cors` fetch and as a top-level link navigation. The `<img>`, the opaque fetch and the navigation each get the filter's `403` and body. The navigation carries the default `SameSite=Lax` session cookie, which is the forgery a Lax deployment is actually exposed to. A second context re-issues the session cookies as `SameSite=None; Secure`, the SAML posture the filter was written for. Its `<img>` and opaque fetch then carry the live session cross-site and are still refused with the filter's body. A request on the same session with no Fetch Metadata reads the route `200`, so the refusals turn on the browser's metadata alone.
+- **The credentialed `cors` fetch is refused one filter earlier.** `SecurityConfig` puts the `CorsFilter` before `CsrfFilter` and the admission filter after it, so an `Origin` outside the allowlist gets Spring's `DefaultCorsProcessor` refusal, `403` `Invalid CORS request`, before the admission filter runs. The spec asserts that body. For this shape the filter's `Origin` condition is the second refusal, not the first, and a change in which layer answers has to be recorded here.
+- **The SPA is unaffected.** The same spec opens a chat at `/ask-connex/{id}`. The workspace's session, attachments and tool-call reads go out with `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: cors` and `Sec-Fetch-Dest: empty` and answer `200`, as does an in-page same-origin `fetch` of the attachments route. They are admitted by the allowlist, not by the fail-open path.
+- **Why the body is the proof.** The filter admits absent metadata, so a `403` with its body is only possible when `Sec-Fetch-*` reached the backend. Without the headers, the Lax-cookie subresources, which carry no session, would get `401`, and every request carrying the session would get `200`. The Next.js 16 rewrite proxy (`next/dist/server/lib/router-utils/proxy-request.js`) sets `changeOrigin`, which replaces `Host`, adds `X-Forwarded-Host`, and forwards the remaining request headers, `Sec-Fetch-*`, `Origin` and `Cookie` among them, as the browser sent them.
+- **Public staging.** `preview.connexcrm.jp` (Cloudflare, its tunnel and the staging proxy in front of the backend) was checked the same way for #1520. `GET /api/ai/assistant/sessions` with `Sec-Fetch-Dest: image`, `Sec-Fetch-Mode: no-cors` and `Sec-Fetch-Site: cross-site` returned `403` with the filter's body, and the same request without Fetch Metadata returned `401`.
+- **Production compose.** `deploy/Caddyfile` sends `/api/*` straight to `backend:8080` with `reverse_proxy`, which forwards request headers unchanged apart from its declared `header_up` lines (`X-Forwarded-For` set, `CF-Connecting-IP` removed). Next.js is not on that path.
+
+Any new hop in front of `/api/`, whether an edge rule, a header allowlist or a CDN transform, must forward `Sec-Fetch-Dest`, `Sec-Fetch-Mode`, `Sec-Fetch-Site` and `Origin`. The browser spec covers only the Next.js hop, so probe the new topology from outside:
+
+```bash
+ORIGIN=https://preview.connexcrm.jp
+curl -s -w '\n%{http_code}\n' -H 'Sec-Fetch-Dest: image' -H 'Sec-Fetch-Mode: no-cors' \
+  -H 'Sec-Fetch-Site: cross-site' "$ORIGIN/api/ai/assistant/sessions"   # the filter's body, then 403
+curl -s -o /dev/null -w '%{http_code}\n' "$ORIGIN/api/ai/assistant/sessions"   # 401: no metadata, no session
+```
+
+A `401` from the first command means the hop strips the headers and the control is inert behind it.
+
+The spec reads every cross-origin response through a forward proxy in the test, `frontend/test/e2e/support/wire-tap.ts`, because Chromium's Opaque Response Blocking discards a non-image `no-cors` or `<img>` body before Playwright or DevTools can read it. That proxy also serves the foreign page itself, because Chromium refuses a page fulfilled through Playwright's `route` any request to a loopback app before it is sent, consistent with Local Network Access treating the fulfilled page as public.
+
 ### Task handles and proposals
 
 `list_tasks` issues per-turn `t1`, `t2`, … handles and `assignedToMe`, never task ids. Task handles
