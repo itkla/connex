@@ -194,5 +194,3 @@ public interface AiAgentPrivacyMapper {
     int settleLegacyTurn(@Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId, @Param("turnId") int turnId);
 }
-
-

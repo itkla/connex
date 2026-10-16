@@ -125,4 +125,3 @@ public interface AiAgentRunMapper {
             @Param("afterId") int afterId, @Param("limit") int limit);
 
 }
-

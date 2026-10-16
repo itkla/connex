@@ -224,4 +224,3 @@ ALTER TABLE ai_chat_tool_call
     ADD CONSTRAINT fk_ai_chat_tool_call_mission FOREIGN KEY (workspace_id, mission_run_id) REFERENCES ai_agent_run (workspace_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT chk_ai_chat_tool_call_origin CHECK ((artifact_origin = 'reactive' AND mission_run_id IS NULL) OR (artifact_origin = 'mission' AND mission_run_id IS NOT NULL AND privacy_generation IS NOT NULL)),
     ADD CONSTRAINT chk_ai_chat_tool_call_privacy_generation CHECK (privacy_generation IS NULL OR privacy_generation > 0);
-
