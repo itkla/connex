@@ -316,9 +316,6 @@ export default async function DealPage({ params }: DealPageProps) {
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
                             currentUserId={currentUser.id}
-                            canUpdate={effectivePermissions.includes('DEAL_UPDATE')}
-                            canDelete={effectivePermissions.includes('DEAL_DELETE')}
-                            canAttach={effectivePermissions.includes('ATTACHMENT_CREATE')}
                             personSeeds={personSeeds}
                             dealSeeds={dealSeeds}
                             collaborators={collaborators}

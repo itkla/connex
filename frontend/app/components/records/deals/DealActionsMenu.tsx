@@ -43,6 +43,7 @@ import {
 } from '@/app/components/records/RecordComposers';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { usePermission } from '@/app/hooks/usePermissions';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
@@ -57,22 +58,18 @@ const EMPTY_DEALS: Deal[] = [];
 const EMPTY_USERS: User[] = [];
 
 /**
- * The deal detail page's action bar. Each mutation shows only when the member's effective
- * permissions allow it, the same gates the deal cards apply, so a read-only member sees no
- * affordance the server would refuse; the server still decides, and its refusals reach the shared
- * error toast.
- * @param props.canUpdate whether the member holds `DEAL_UPDATE`: edit, team and won/lost/open
- * @param props.canDelete whether the member holds `DEAL_DELETE`
- * @param props.canAttach whether the member holds `ATTACHMENT_CREATE`
+ * The deal detail page's action bar. Each mutation shows only when the member's live effective
+ * permissions allow it, read from the same fail-closed provider the deal cards use, so a read-only
+ * member sees no affordance the server would refuse, and an entitled member's controls return as soon
+ * as the provider resolves. Edit, team and won/lost/open need `DEAL_UPDATE`, Delete `DEAL_DELETE`,
+ * attachments `ATTACHMENT_CREATE`, and each New item its record's create permission. The server
+ * still decides, and its refusals reach the shared error toast.
  */
 export default function DealActionsMenu({
     deal,
     pipelines,
     stagesByPipeline,
     currentUserId,
-    canUpdate,
-    canDelete,
-    canAttach,
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
@@ -81,15 +78,18 @@ export default function DealActionsMenu({
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
-    canUpdate: boolean;
-    canDelete: boolean;
-    canAttach: boolean;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
+    const canUpdate = usePermission('DEAL_UPDATE');
+    const canDelete = usePermission('DEAL_DELETE');
+    const canAttach = usePermission('ATTACHMENT_CREATE');
+    const canAddActivity = usePermission('ACTIVITY_CREATE');
+    const canAddNote = usePermission('NOTE_CREATE');
+    const canAddTask = usePermission('TASK_CREATE');
     const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [editOpen, setEditOpen] = useState(false);
@@ -174,34 +174,42 @@ export default function DealActionsMenu({
                         {t('add')}
                     </Button>
                 )}
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="brand" size="toolbar" menu>
-                            <PlusIcon className="size-4" />
-                            {t('new')}
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            onSelect={() => setActivityOpen(true)}
-                        >
-                            <ChatBubbleLeftRightIcon className="size-4" />
-                            <span>{t('addActivity')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => setNoteOpen(true)}
-                        >
-                            <DocumentTextIcon className="size-4" />
-                            <span>{t('addNote')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => setTaskOpen(true)}
-                        >
-                            <CheckCircleIcon className="size-4" />
-                            <span>{t('addTask')}</span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                {(canAddActivity || canAddNote || canAddTask) && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="brand" size="toolbar" menu>
+                                <PlusIcon className="size-4" />
+                                {t('new')}
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {canAddActivity && (
+                                <DropdownMenuItem
+                                    onSelect={() => setActivityOpen(true)}
+                                >
+                                    <ChatBubbleLeftRightIcon className="size-4" />
+                                    <span>{t('addActivity')}</span>
+                                </DropdownMenuItem>
+                            )}
+                            {canAddNote && (
+                                <DropdownMenuItem
+                                    onSelect={() => setNoteOpen(true)}
+                                >
+                                    <DocumentTextIcon className="size-4" />
+                                    <span>{t('addNote')}</span>
+                                </DropdownMenuItem>
+                            )}
+                            {canAddTask && (
+                                <DropdownMenuItem
+                                    onSelect={() => setTaskOpen(true)}
+                                >
+                                    <CheckCircleIcon className="size-4" />
+                                    <span>{t('addTask')}</span>
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
                 {(canUpdate || canDelete) && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>

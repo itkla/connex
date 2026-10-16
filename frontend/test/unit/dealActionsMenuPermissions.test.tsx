@@ -21,6 +21,10 @@ vi.mock('@/app/components/attachments/useAttachmentUploader', () => ({
     }),
 }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => vi.fn() }));
+const granted = vi.hoisted(() => ({ permissions: new Set<string>() }));
+vi.mock('@/app/hooks/usePermissions', () => ({
+    usePermission: (permission: string) => granted.permissions.has(permission),
+}));
 vi.mock('@/app/hooks/useRecordTargetSearch', () => ({
     useContactTargetSearch: () => ({}),
     useDealTargetSearch: () => ({}),
@@ -62,7 +66,10 @@ afterEach(async () => {
     container.remove();
 });
 
-async function renderMenu(canUpdate: boolean, canDelete: boolean, canAttach: boolean) {
+const ALL = ['DEAL_UPDATE', 'DEAL_DELETE', 'ATTACHMENT_CREATE', 'ACTIVITY_CREATE', 'NOTE_CREATE', 'TASK_CREATE'];
+
+async function renderMenu(...permissions: string[]) {
+    granted.permissions = new Set(permissions);
     await act(async () => root.render(
         <NextIntlClientProvider locale="en" messages={enDeals}>
             <TooltipProvider>
@@ -71,9 +78,6 @@ async function renderMenu(canUpdate: boolean, canDelete: boolean, canAttach: boo
                 pipelines={[]}
                 stagesByPipeline={{}}
                 currentUserId={11}
-                canUpdate={canUpdate}
-                canDelete={canDelete}
-                canAttach={canAttach}
             />
             </TooltipProvider>
         </NextIntlClientProvider>,
@@ -90,22 +94,20 @@ function offers(label: string): boolean {
     return labels().includes(label);
 }
 
-describe('the deal detail actions follow the member\'s effective permissions', () => {
-    it('offers no mutation to a read-only member, and drops the empty overflow menu', async () => {
-        await renderMenu(false, false, false);
+describe('the deal detail actions follow the member\'s live effective permissions', () => {
+    it('offers no mutation to a read-only member, and drops the empty menus', async () => {
+        await renderMenu();
 
-        expect(offers(t.edit)).toBe(false);
-        expect(offers(t.manageTeam)).toBe(false);
-        expect(offers(t.markWon)).toBe(false);
-        expect(offers(t.markLost)).toBe(false);
-        expect(offers(t.delete)).toBe(false);
-        expect(offers(t.add)).toBe(false);
+        for (const label of [t.edit, t.manageTeam, t.markWon, t.markLost, t.delete, t.add,
+            t.new, t.addActivity, t.addNote, t.addTask]) {
+            expect(offers(label)).toBe(false);
+        }
         expect(container.querySelector(`[aria-label="${t.moreActions}"]`)).toBeNull();
         expect(offers(t.viewInMap)).toBe(true);
     });
 
     it('withholds editing, team and outcome changes from a member without DEAL_UPDATE', async () => {
-        await renderMenu(false, true, true);
+        await renderMenu(...ALL.filter((permission) => permission !== 'DEAL_UPDATE'));
 
         expect(offers(t.edit)).toBe(false);
         expect(offers(t.manageTeam)).toBe(false);
@@ -115,7 +117,7 @@ describe('the deal detail actions follow the member\'s effective permissions', (
     });
 
     it('withholds deletion from a member without DEAL_DELETE', async () => {
-        await renderMenu(true, false, true);
+        await renderMenu(...ALL.filter((permission) => permission !== 'DEAL_DELETE'));
 
         expect(offers(t.edit)).toBe(true);
         expect(offers(t.manageTeam)).toBe(true);
@@ -123,10 +125,20 @@ describe('the deal detail actions follow the member\'s effective permissions', (
         expect(offers(t.delete)).toBe(false);
     });
 
-    it('offers every action to a member holding all three', async () => {
-        await renderMenu(true, true, true);
+    it('offers each New item only with its record\'s create permission', async () => {
+        await renderMenu('NOTE_CREATE');
 
-        for (const label of [t.edit, t.manageTeam, t.markWon, t.markLost, t.delete, t.add]) {
+        expect(offers(t.new)).toBe(true);
+        expect(offers(t.addNote)).toBe(true);
+        expect(offers(t.addActivity)).toBe(false);
+        expect(offers(t.addTask)).toBe(false);
+    });
+
+    it('offers every action to a member holding them all', async () => {
+        await renderMenu(...ALL);
+
+        for (const label of [t.edit, t.manageTeam, t.markWon, t.markLost, t.delete, t.add,
+            t.new, t.addActivity, t.addNote, t.addTask]) {
             expect(offers(label)).toBe(true);
         }
     });
