@@ -33,8 +33,11 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
  * the purpose-bound grant cookie, the session only supplies exchange lineage, and a signed-in
  * signer who has not yet enrolled a passkey must still be able to countersign or opt out.
  *
- * <p>Each denial is audited at most once per window for a user, action, reason and client address,
- * through {@link DenialAuditRateLimiter}; every denied request is still refused.
+ * <p>Each denial is audited at most once per address window for a user, action, reason and User-Agent
+ * fingerprint, through {@link DenialAuditRateLimiter}: eight addresses each admit four fingerprints.
+ * Without releases, every address-only admission remains admitted while windows are retained.
+ * Releases preserve other fingerprints' evidence and their address slot until its original expiry.
+ * Every denied request is still refused.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
@@ -137,13 +140,14 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Records a denial at most once per window for this user, action and client address.
+     * Records a denial at most once per address window for this user, action, reason and fingerprint.
      *
      * <p>Both denials can be written by a {@code GET}, so another site can trigger them: with a
      * top-level navigation under the {@code SameSite=Lax} session cookie, and with any subresource load
      * under the {@code SameSite=None} that SAML deployments use. Unbounded, every visit appended a row
-     * attributed to the victim (#1850). The write is strict so that a failure hands the window
-     * back instead of suppressing the next denial's evidence; the request is refused either way.
+     * attributed to the victim (#1850). The write is strict so that a failure returns only its
+     * fingerprint admission, allowing it to retry while preserving other fingerprints' evidence;
+     * the request is refused either way.
      * Fetch metadata is recorded only as advisory context: non-browser clients can forge it, so
      * it never affects admission or the rate-limit key (#1936).
      */
@@ -151,7 +155,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             String reason) {
         String clientIp = clientIpResolver.resolveForDenialAudit(request);
         Optional<DenialAuditRateLimiter.Admission> admission =
-                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp);
+                denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp, request);
         if (admission.isEmpty()) {
             return;
         }
