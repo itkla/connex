@@ -148,7 +148,7 @@ public class AiAssistantToolCallReadService {
         Instant now = clock.instant();
         List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
                 viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS,
-                AiAssistantProposalExpiry.pendingCreatedAfter(now)).stream()
+                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null).stream()
                 .map(this::readStored)
                 .filter(Objects::nonNull)
                 .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)

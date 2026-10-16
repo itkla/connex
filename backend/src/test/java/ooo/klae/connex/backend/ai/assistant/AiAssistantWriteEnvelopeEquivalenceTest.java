@@ -518,7 +518,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(48, TURN.userId(), "failed", STAGE_ARGUMENTS, null));
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(cards);
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(cards);
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
                 .thenReturn(List.of());
@@ -980,7 +980,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
                 + "\"entityId\":75,\"fingerprint\":\"f\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
                 card(41, TURN.userId(), "executed", "create_activity",
                         MEETING_ARGUMENTS, meetingResult),
                 card(42, TURN.userId(), "executed", "create_activity", MEETING_ARGUMENTS,
@@ -1246,7 +1246,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.getAccessibleSessionById(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
                 card(51, TURN.userId(), "executed", "add_tag",
                         tagArguments("person", 31), tagResult("person", 31, true)),
                 card(52, TURN.userId(), "executed", "add_tag",
@@ -1568,7 +1568,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
                 card(61, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(62, TURN.userId(), "proposed", "assign_owner",
                         ownerArguments("person", 31, "ghopper"), null),
@@ -1770,7 +1770,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"company\",\"owner\":\"Christian Weber\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
                 card(81, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(82, TURN.userId(), "executed", "assign_owner", assignCompany,
                         assignedResult),

@@ -440,6 +440,11 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("id") int id);
 
+    /**
+     * Lists session tool calls with an optional pending-proposal filter.
+     *
+     * @param reviewCreatedAfter real UTC cutoff when pendingOnly is true; null for history reads
+     */
     List<AiChatToolCall> listToolCallsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

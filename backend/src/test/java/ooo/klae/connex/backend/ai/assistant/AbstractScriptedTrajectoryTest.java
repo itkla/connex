@@ -399,7 +399,7 @@ abstract class AbstractScriptedTrajectoryTest {
                     accepted.turnId(),
                     settled.getStatus(),
                     settled.getTerminalReason(),
-                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50, java.time.LocalDateTime.MIN),
+                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50, null),
                     chatMapper.listMessages(workspace.getId(), sessionId, 50, 0).stream()
                             .filter(message -> "assistant".equals(message.getAuthorKind()))
                             .toList());
