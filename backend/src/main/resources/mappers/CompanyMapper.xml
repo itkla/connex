@@ -585,35 +585,19 @@
       <when test="sort == 'address'">c.address</when>
       <when test="sort == 'createdAt'">c.created_at</when>
       <when test="sort == 'updatedAt'">c.updated_at</when>
-      <when test="sort == 'warmth'">COALESCE(w.raw_weight, 0.0)</when>
+      <when test="sort == 'warmth' and warmth != null">COALESCE(w.raw_weight, 0.0)</when>
       <otherwise>c.name</otherwise>
     </choose>
     <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
     , c.id ASC
   </sql>
 
-  <!-- The smart-segment page has no warmth aggregate joined and takes no warmth parameter, so it
-       keeps its own whitelist without the warmth column: an unsupported sort falls through to name
-       exactly as it does for any other unknown key. -->
-  <sql id="segmentPageOrderBy">
-    ORDER BY
-    <choose>
-      <when test="sort == 'name'">c.name</when>
-      <when test="sort == 'website'">c.website</when>
-      <when test="sort == 'industry'">c.industry</when>
-      <when test="sort == 'phone'">c.phone</when>
-      <when test="sort == 'address'">c.address</when>
-      <when test="sort == 'createdAt'">c.created_at</when>
-      <when test="sort == 'updatedAt'">c.updated_at</when>
-      <otherwise>c.name</otherwise>
-    </choose>
-    <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
-    , c.id ASC
-  </sql>
-
+  <!-- The smart-segment statements apply the browser's complete filter contract to the evaluated
+       segment ids: the same warmth predicate as pageWhere, plus memberScopePredicate after it. -->
   <sql id="segmentPageWhere">
     <where>
       AND <include refid="visible"/>
+      <include refid="warmthWhere"/>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
           OR c.phone LIKE #{query} OR c.address LIKE #{query})
@@ -790,8 +774,10 @@
     FROM company c
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
+    <include refid="warmthJoin"/>
     <include refid="segmentPageWhere"/>
-    <include refid="segmentPageOrderBy"/>
+    <include refid="memberScopePredicate"/>
+    <include refid="pageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
@@ -800,7 +786,9 @@
     FROM company c
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
+    <include refid="warmthFilterJoin"/>
     <include refid="segmentPageWhere"/>
+    <include refid="memberScopePredicate"/>
   </select>
 
   <select id="getSegmentCompanyIdsFiltered" resultType="int">
@@ -808,7 +796,9 @@
     FROM company c
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
+    <include refid="warmthFilterJoin"/>
     <include refid="segmentPageWhere"/>
+    <include refid="memberScopePredicate"/>
     ORDER BY c.id
     LIMIT #{limit}
   </select>

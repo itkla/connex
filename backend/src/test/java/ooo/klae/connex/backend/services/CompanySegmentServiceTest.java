@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.util.List;
 import java.time.Clock;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,7 +14,9 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -58,7 +61,7 @@ class CompanySegmentServiceTest {
         when(segmentService.evaluate("company", definition)).thenReturn(List.of());
 
         var result = companyService.getSegmentCompaniesPage(
-            definition, "%Target%", "name", "asc", null, false, 25, 0);
+            definition, "%Target%", "name", "asc", null, false, MemberScope.allTeam(), null, 25, 0);
 
         assertTrue(result.items().isEmpty());
         assertEquals(0, result.total());
@@ -66,29 +69,32 @@ class CompanySegmentServiceTest {
     }
 
     @Test
-    void segmentPageUsesJsonTableBackedPageAndCountQueries() {
+    void segmentPageForwardsOwnerScopeAndWarmthToTheJsonTableBackedPageAndCountQueries() {
         SegmentDefinition definition = mock(SegmentDefinition.class);
         List<Integer> ids = List.of(3, 5);
         List<String> industries = List.of("Technology");
+        MemberScope memberScope = MemberScope.fromRequest("me", null, 11);
+        WarmthFilter warmth = WarmthFilter.fromRequest(
+            List.of("hot"), false, null, "warmth", Instant.parse("2026-08-18T00:00:00Z"));
         Company first = company(3);
         Company second = company(5);
         when(segmentService.evaluate("company", definition)).thenReturn(ids);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(companyMapper.getSegmentCompaniesPage(
-            7, "[3,5]", "%Target%", "name", "desc", industries, true, 25, 0))
+            7, "[3,5]", "%Target%", "warmth", "desc", industries, true, memberScope, warmth, 25, 0))
             .thenReturn(List.of(first, second));
         when(companyMapper.countSegmentCompanies(
-            7, "[3,5]", "%Target%", industries, true)).thenReturn(2L);
+            7, "[3,5]", "%Target%", industries, true, memberScope, warmth)).thenReturn(2L);
 
         var result = companyService.getSegmentCompaniesPage(
-            definition, "%Target%", "name", "desc", industries, true, 25, 0);
+            definition, "%Target%", "warmth", "desc", industries, true, memberScope, warmth, 25, 0);
 
         assertEquals(List.of(first, second), result.items());
         assertEquals(2, result.total());
         verify(companyMapper).getSegmentCompaniesPage(
-            7, "[3,5]", "%Target%", "name", "desc", industries, true, 25, 0);
+            7, "[3,5]", "%Target%", "warmth", "desc", industries, true, memberScope, warmth, 25, 0);
         verify(companyMapper).countSegmentCompanies(
-            7, "[3,5]", "%Target%", industries, true);
+            7, "[3,5]", "%Target%", industries, true, memberScope, warmth);
     }
 
     @Test
@@ -98,15 +104,18 @@ class CompanySegmentServiceTest {
         List<Integer> matchingIds = List.of(5);
         when(segmentService.evaluate("company", definition)).thenReturn(segmentIds);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        MemberScope memberScope = MemberScope.fromRequest("unassigned", null, 11);
+        WarmthFilter warmth = WarmthFilter.fromRequest(
+            null, true, null, null, Instant.parse("2026-08-18T00:00:00Z"));
         when(companyMapper.getSegmentCompanyIdsFiltered(
-            7, "[3,5]", "%Target%", null, false, 1001))
+            7, "[3,5]", "%Target%", null, false, memberScope, warmth, 1001))
             .thenReturn(matchingIds);
 
         assertEquals(matchingIds, companyService.getMatchingSegmentCompanyIds(
-            definition, "%Target%", null, false));
+            definition, "%Target%", null, false, memberScope, warmth));
 
         verify(companyMapper).getSegmentCompanyIdsFiltered(
-            7, "[3,5]", "%Target%", null, false, 1001);
+            7, "[3,5]", "%Target%", null, false, memberScope, warmth, 1001);
     }
 
     private static Company company(int id) {

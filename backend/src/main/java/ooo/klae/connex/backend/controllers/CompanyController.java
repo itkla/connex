@@ -140,7 +140,8 @@ public class CompanyController {
 
     /**
      * Retrieves a company page matching a smart segment without accepting an expanded id list in
-     * the URL.
+     * the URL. The segment is intersected with the same owner scope, warmth filter, and warmth sort
+     * {@code GET /page} honours, so a filter shown beside a segment narrows what it claims to.
      */
     @PostMapping("/segment/page")
     public PageResponse<CompanyDto> getSegmentCompaniesPage(
@@ -149,9 +150,13 @@ public class CompanyController {
         String query = request.getQ() == null || request.getQ().isBlank()
             ? null
             : LikePattern.containing(request.getQ());
+        String sortKey = WarmthFilter.canonicalSort(request.getSort());
+        MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            request.getWarmthBands(), request.isNoWarmth(), request.getGoesColdWithinDays(), sortKey);
         PageResponse<Company> result = companyService.getSegmentCompaniesPage(
-            request.getDefinition(), query, request.getSort(), request.getDir(), request.getIndustry(),
-            request.isNoIndustry(), bounds.size(), bounds.offset());
+            request.getDefinition(), query, sortKey, request.getDir(), request.getIndustry(),
+            request.isNoIndustry(), memberScope, warmth, bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(CompanyDto::from).toList(), result.total());
     }
 
@@ -189,15 +194,21 @@ public class CompanyController {
     }
 
     /**
-     * Retrieves the bounded id set matching a smart segment and optional company filters.
+     * Retrieves the bounded id set matching a smart segment and optional company filters, including
+     * owner scope and warmth, so "select all matching" selects exactly the rows the segment page
+     * lists. A warmth sort cannot change which rows match, so it is not resolved here.
      */
     @PostMapping("/segment/ids")
     public List<Integer> getSegmentCompanyIds(@Valid @RequestBody CompanySegmentQueryRequest request) {
         String query = request.getQ() == null || request.getQ().isBlank()
             ? null
             : LikePattern.containing(request.getQ());
+        MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            request.getWarmthBands(), request.isNoWarmth(), request.getGoesColdWithinDays(), null);
         return companyService.getMatchingSegmentCompanyIds(
-            request.getDefinition(), query, request.getIndustry(), request.isNoIndustry());
+            request.getDefinition(), query, request.getIndustry(), request.isNoIndustry(),
+            memberScope, warmth);
     }
 
     /**

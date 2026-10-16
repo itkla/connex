@@ -306,11 +306,13 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         List<Company> page = companyMapper.getSegmentCompaniesPage(
             segmentWorkspace.getId(), idsJson, "%Target%", "name", "asc",
-            List.of("Technology"), false, 1, 1);
+            List.of("Technology"), false, MemberScope.allTeam(), null, 1, 1);
         long count = companyMapper.countSegmentCompanies(
-            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false);
+            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false,
+            MemberScope.allTeam(), null);
         List<Integer> ids = companyMapper.getSegmentCompanyIdsFiltered(
-            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false, 1001);
+            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false,
+            MemberScope.allTeam(), null, 1001);
 
         assertEquals(List.of(bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);

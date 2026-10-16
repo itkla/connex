@@ -80,17 +80,26 @@ public interface CompanyMapper {
     List<CompanyRevenueCurrencyDto> getCompanyRevenueByCurrency(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId);
+    /**
+     * One page of a smart segment's evaluated ids, narrowed by the browser's search, industry, owner
+     * scope, and warmth filter, and ordered by the browser's sort whitelist including warmth.
+     */
     List<Company> getSegmentCompaniesPage(@Param("workspaceId") int workspaceId,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
+    /** Total for the segment page; joins the warmth aggregate only when the filter narrows rows. */
     long countSegmentCompanies(@Param("workspaceId") int workspaceId,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
-            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry);
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth);
+    /** Ids behind the segment page; backs "select all matching" while a segment is active. */
     List<Integer> getSegmentCompanyIdsFiltered(@Param("workspaceId") int workspaceId,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
