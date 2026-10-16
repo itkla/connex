@@ -32,7 +32,12 @@ export type WireTap = {
 export type WireTapOptions = {
     /** Origin of the app under test; the only origin the tap relays to. */
     app: string;
-    /** HTML the tap answers itself for each foreign origin, so those origins need no DNS or server. */
+    /**
+     * HTML the tap answers itself instead of relaying, keyed by absolute URL without its query
+     * string (`http://attacker.example/`). A foreign origin served this way needs no DNS or server;
+     * a page under the app origin stands in for a document the app serves, so its requests to the
+     * app are same-origin.
+     */
     pages: Readonly<Record<string, string>>;
 };
 
@@ -73,15 +78,16 @@ function refuse(response: ServerResponse): void {
 function relay(
     request: IncomingMessage,
     response: ServerResponse,
+    app: URL,
     target: URL,
     exchanges: WireExchange[],
 ): void {
     const method = request.method ?? "GET";
     const upstream = forwardRequest(
         {
-            protocol: target.protocol,
-            hostname: target.hostname,
-            port: target.port,
+            protocol: app.protocol,
+            hostname: app.hostname,
+            port: app.port,
             method,
             path: `${target.pathname}${target.search}`,
             headers: endToEndHeaders(request.headers),
@@ -118,17 +124,21 @@ function relay(
  * not an image before Playwright or DevTools can read it. The only vantage point that still sees
  * the status and body the server returned is the connection itself, which is where this sits.
  *
- * Foreign origins are served from `pages` by the tap itself. Chromium refuses a page fulfilled
- * through Playwright's `route` any request to a loopback app before it is sent, consistent with
- * Local Network Access treating the fulfilled page as public. Behind this loopback proxy both ends
- * share one address space, so the browser sends the requests and computes `Sec-Fetch-*` exactly as
- * for a real site.
+ * Foreign pages, and any stand-in page under the app origin, are served from `pages` by the tap
+ * itself. A page fulfilled through Playwright's `route` was observed never to send its requests to
+ * a loopback app: Chromium stopped them before they left the browser. The same page served through
+ * this proxy does send them, with the `Sec-Fetch-*` a real cross-site page gets. Chromium's Local
+ * Network Access checks are the likely cause, but that is inferred from the behaviour and not
+ * confirmed in Chromium's source.
  *
- * Request headers are relayed unchanged apart from hop-by-hop headers, so what reaches the app is
- * what the browser sent. Point a context at it with `proxy: { server, bypass: "<-loopback>" }`:
- * Chromium bypasses every proxy for loopback hosts unless told not to.
+ * Every relayed request goes to the configured app origin, whose scheme, host and port are fixed
+ * when the tap starts; the browser's request supplies only the path, query, method, body and
+ * headers. Request headers are relayed unchanged apart from hop-by-hop headers, so what reaches the
+ * app is what the browser sent. Point a context at the tap with
+ * `proxy: { server, bypass: "<-loopback>" }`: Chromium bypasses every proxy for loopback hosts
+ * unless told not to.
  *
- * @param options the app origin to relay to and the foreign pages to serve
+ * @param options the app origin to relay to and the pages to serve
  * @returns the running tap; close it when the test is done
  */
 export async function startWireTap(options: WireTapOptions): Promise<WireTap> {
@@ -146,7 +156,8 @@ export async function startWireTap(options: WireTapOptions): Promise<WireTap> {
             refuse(response);
             return;
         }
-        const page = options.pages[target.origin];
+        const pageKey = `${target.origin}${target.pathname}`;
+        const page = Object.hasOwn(options.pages, pageKey) ? options.pages[pageKey] : undefined;
         if (page !== undefined) {
             response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
             response.end(page);
@@ -156,7 +167,7 @@ export async function startWireTap(options: WireTapOptions): Promise<WireTap> {
             refuse(response);
             return;
         }
-        relay(request, response, target, exchanges);
+        relay(request, response, app, target, exchanges);
     });
     server.on("connection", (socket) => {
         sockets.add(socket);

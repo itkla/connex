@@ -30,10 +30,17 @@ const SESSION_COOKIE = "JSESSIONID";
  */
 const FOREIGN_ORIGIN = "http://attacker.example";
 
-/** The request shapes a foreign page can aim at an assistant read, keyed by their Fetch Metadata. */
+/**
+ * A path under the app origin that the wire tap answers itself. The page there stands in for an app
+ * document carrying injected markup, so every request it makes to the app is
+ * `Sec-Fetch-Site: same-origin`.
+ */
+const SAME_ORIGIN_PROBE_PATH = "/__wire-tap/same-origin-probe";
+
+/** The request shapes a page can aim at an assistant read, keyed by their Fetch Metadata. */
 type RequestShape = "cors" | "image" | "navigation" | "opaque";
 
-/** The subresource shapes the foreign page issues as soon as it loads, sorted. */
+/** The subresource shapes a probe page issues as soon as it loads, sorted. */
 const SUBRESOURCE_SHAPES: readonly RequestShape[] = ["cors", "image", "opaque"];
 
 /** Every shape, sorted: the subresources plus the navigation a test clicks. */
@@ -67,19 +74,23 @@ async function createChat(api: APIRequestContext, title: string): Promise<number
         data: { title, autoTitle: false },
     });
     expect(response.status(), await response.text()).toBe(201);
-    const body = (await response.json()) as { id: number };
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null || !("id" in body) || typeof body.id !== "number") {
+        throw new Error(`Session creation answered without a numeric id: ${JSON.stringify(body)}`);
+    }
     expect(body.id).toBeGreaterThan(0);
     return body.id;
 }
 
 /**
- * The attacker's page. On load it reads the target as an `<img>`, as an opaque `no-cors` fetch and
- * as a credentialed `cors` fetch; the link is the top-level navigation a test clicks on purpose.
+ * A page that, on load, reads the target as an `<img>`, as an opaque `no-cors` fetch and as a
+ * credentialed `cors` fetch; the link is the top-level navigation a test clicks on purpose. Served
+ * on a foreign origin it is the attacker's page; served under the app origin it is injected markup.
  */
-function foreignPage(target: string): string {
+function probePage(target: string): string {
     const url = JSON.stringify(target);
     return [
-        "<!doctype html><html><head><title>attacker</title></head><body>",
+        "<!doctype html><html><head><title>probe</title></head><body>",
         `<a id="navigate" href="${target}">open</a>`,
         `<img alt="" src="${target}">`,
         "<script>",
@@ -105,22 +116,31 @@ function shapeOf(exchange: WireExchange): RequestShape | null {
     return null;
 }
 
-/** The distinct shapes that have reached `path` through the tap so far, sorted for comparison. */
+/**
+ * Whether an exchange is a read of `path`. A preflight is an `OPTIONS` carrying the `cors` shape's
+ * metadata, and the CORS layer refuses a foreign one with the same body as the credentialed read,
+ * so only a `GET` counts.
+ */
+function isReadOf(exchange: WireExchange, path: string): boolean {
+    return exchange.method === "GET" && exchange.url.pathname === path;
+}
+
+/** The distinct shapes that have read `path` through the tap so far, sorted for comparison. */
 function shapesAt(tap: WireTap, path: string): RequestShape[] {
     const shapes = new Set<RequestShape>();
     for (const exchange of tap.exchanges()) {
-        const shape = exchange.url.pathname === path ? shapeOf(exchange) : null;
+        const shape = isReadOf(exchange, path) ? shapeOf(exchange) : null;
         if (shape !== null) shapes.add(shape);
     }
     return [...shapes].sort();
 }
 
-/** The first exchange of one shape that reached `path`; the caller has already waited for it. */
+/** The first read of `path` in one shape; the caller has already waited for it. */
 function exchangeOf(tap: WireTap, path: string, shape: RequestShape): WireExchange {
     const exchange = tap.exchanges().find((candidate) => (
-        candidate.url.pathname === path && shapeOf(candidate) === shape
+        isReadOf(candidate, path) && shapeOf(candidate) === shape
     ));
-    if (exchange === undefined) throw new Error(`No ${shape} request reached ${path}`);
+    if (exchange === undefined) throw new Error(`No ${shape} read of ${path} crossed the tap`);
     return exchange;
 }
 
@@ -131,6 +151,15 @@ function sessionCookie(cookies: readonly Cookie[]): Cookie {
         throw new Error(`The storage-state tenant carries no ${SESSION_COOKIE} cookie`);
     }
     return session;
+}
+
+/**
+ * Whether the browser attached the live session to an exchange. The answer is a boolean so a
+ * failing assertion prints no cookie values.
+ */
+function carriesSession(exchange: WireExchange, session: Cookie): boolean {
+    const pairs = (header(exchange, "cookie") ?? "").split(/;\s*/);
+    return pairs.includes(`${SESSION_COOKIE}=${session.value}`);
 }
 
 /** Opens a context whose every request crosses the tap, holding the given cookies. */
@@ -149,12 +178,16 @@ async function tappedContext(
 }
 
 /**
- * Asserts the browser sent a cross-site request of the expected shape and the app refused it with
- * the expected body.
+ * Asserts the browser sent a request from the expected site and the app refused it with the
+ * expected body.
  */
-function expectRefused(exchange: WireExchange, body: string, reason: string): void {
-    expect(header(exchange, "sec-fetch-site"), `${exchange.url.pathname} was not cross-site`)
-        .toBe("cross-site");
+function expectRefused(
+    exchange: WireExchange,
+    site: "cross-site" | "same-origin",
+    body: string,
+    reason: string,
+): void {
+    expect(header(exchange, "sec-fetch-site"), `${exchange.url.pathname} was not ${site}`).toBe(site);
     expect(exchange.status, reason).toBe(403);
     expect(exchange.body, reason).toBe(body);
 }
@@ -162,14 +195,32 @@ function expectRefused(exchange: WireExchange, body: string, reason: string): vo
 /** Why a filter refusal is only possible when the browser's Fetch Metadata reached the backend. */
 const METADATA_REACHED_BACKEND =
     "the admission filter admits a request with no Fetch Metadata, so its 403 body (not the 401 an "
-    + "unauthenticated read gets, nor the 200 a live session gets) proves Sec-Fetch-* crossed the "
-    + "Next.js /api rewrite intact";
+    + "unauthenticated read gets, nor the 200 a live session gets) proves the browser's Sec-Fetch-* "
+    + "headers crossed the Next.js /api rewrite";
 
 /** Why the credentialed cross-origin fetch meets the CORS layer's refusal rather than the filter's. */
 const CORS_REFUSES_FIRST =
     "SecurityConfig runs the CorsFilter before the admission filter, and an Origin outside "
     + "connex.cors.allowed-origins is refused there first; both are refusals, but a change in which "
     + "one answers must be reflected in docs/backend/AI_SECURITY.md";
+
+/** Why a same-origin link navigation isolates the destination check. */
+const DESTINATION_ALONE =
+    "a same-origin navigation passes the site check and is not no-cors, so only "
+    + "Sec-Fetch-Dest: document can refuse it; this 403 body proves that header crossed the Next.js "
+    + "/api rewrite and that the destination check refuses it in a real browser";
+
+/** Why a same-origin opaque fetch isolates the mode check. */
+const MODE_ALONE =
+    "a same-origin fetch with Sec-Fetch-Dest: empty passes the destination and site checks, so only "
+    + "Sec-Fetch-Mode: no-cors can refuse it; this 403 body proves that header crossed the Next.js "
+    + "/api rewrite and that the mode check refuses it in a real browser";
+
+/** Why an `<img>` in the app's own document must still be refused. */
+const INJECTED_IMAGE =
+    "an <img> in an app document, such as one in model-authored Ask Connex markdown, is same-origin "
+    + "and carries the session, so the site check admits it and the destination and mode checks "
+    + "must refuse it";
 
 /** Waits for the first GET the page makes to exactly `path`, ignoring its query string. */
 function nextRead(page: Page, path: string) {
@@ -188,7 +239,7 @@ test.describe("Ask Connex read admission in a real browser", () => {
 
         const tap = await startWireTap({
             app: baseURL,
-            pages: { [FOREIGN_ORIGIN]: foreignPage(new URL(path, baseURL).toString()) },
+            pages: { [`${FOREIGN_ORIGIN}/`]: probePage(new URL(path, baseURL).toString()) },
         });
         const foreign = await tappedContext(browser, tap, cookies);
         try {
@@ -201,16 +252,16 @@ test.describe("Ask Connex read admission in a real browser", () => {
             await expect(attacker.locator("body")).toHaveText(FILTER_REFUSAL);
             await expect.poll(() => shapesAt(tap, path)).toEqual(ALL_SHAPES);
 
-            expectRefused(exchangeOf(tap, path, "image"), FILTER_REFUSAL, METADATA_REACHED_BACKEND);
-            expectRefused(exchangeOf(tap, path, "opaque"), FILTER_REFUSAL, METADATA_REACHED_BACKEND);
-            expectRefused(exchangeOf(tap, path, "cors"), CORS_REFUSAL, CORS_REFUSES_FIRST);
+            expectRefused(exchangeOf(tap, path, "image"), "cross-site", FILTER_REFUSAL, METADATA_REACHED_BACKEND);
+            expectRefused(exchangeOf(tap, path, "opaque"), "cross-site", FILTER_REFUSAL, METADATA_REACHED_BACKEND);
+            expectRefused(exchangeOf(tap, path, "cors"), "cross-site", CORS_REFUSAL, CORS_REFUSES_FIRST);
 
             const navigation = exchangeOf(tap, path, "navigation");
             expect(
-                header(navigation, "cookie") ?? "",
+                carriesSession(navigation, session),
                 "a SameSite=Lax session rides a top-level cross-site GET, which is what makes this the realistic forgery",
-            ).toContain(`${SESSION_COOKIE}=${session.value}`);
-            expectRefused(navigation, FILTER_REFUSAL, METADATA_REACHED_BACKEND);
+            ).toBe(true);
+            expectRefused(navigation, "cross-site", FILTER_REFUSAL, METADATA_REACHED_BACKEND);
         } finally {
             await foreign.close();
             await tap.close();
@@ -235,7 +286,7 @@ test.describe("Ask Connex read admission in a real browser", () => {
 
         const tap = await startWireTap({
             app: baseURL,
-            pages: { [FOREIGN_ORIGIN]: foreignPage(new URL(path, baseURL).toString()) },
+            pages: { [`${FOREIGN_ORIGIN}/`]: probePage(new URL(path, baseURL).toString()) },
         });
         const foreign = await tappedContext(browser, tap, crossSiteCookies);
         try {
@@ -245,13 +296,13 @@ test.describe("Ask Connex read admission in a real browser", () => {
 
             for (const shape of SUBRESOURCE_SHAPES) {
                 expect(
-                    header(exchangeOf(tap, path, shape), "cookie") ?? "",
+                    carriesSession(exchangeOf(tap, path, shape), session),
                     `the ${shape} request must carry the live session, or this test proves nothing about SameSite=None`,
-                ).toContain(`${SESSION_COOKIE}=${session.value}`);
+                ).toBe(true);
             }
-            expectRefused(exchangeOf(tap, path, "image"), FILTER_REFUSAL, METADATA_REACHED_BACKEND);
-            expectRefused(exchangeOf(tap, path, "opaque"), FILTER_REFUSAL, METADATA_REACHED_BACKEND);
-            expectRefused(exchangeOf(tap, path, "cors"), CORS_REFUSAL, CORS_REFUSES_FIRST);
+            expectRefused(exchangeOf(tap, path, "image"), "cross-site", FILTER_REFUSAL, METADATA_REACHED_BACKEND);
+            expectRefused(exchangeOf(tap, path, "opaque"), "cross-site", FILTER_REFUSAL, METADATA_REACHED_BACKEND);
+            expectRefused(exchangeOf(tap, path, "cors"), "cross-site", CORS_REFUSAL, CORS_REFUSES_FIRST);
         } finally {
             await foreign.close();
             await tap.close();
@@ -259,6 +310,49 @@ test.describe("Ask Connex read admission in a real browser", () => {
 
         const control = await page.request.get(path);
         expect(control.status(), "the session the subresources carried is live and can read the route").toBe(200);
+    });
+
+    test("same-origin shapes the workspace never makes are refused by the destination or mode check alone", async ({ browser, context, page }, testInfo) => {
+        const baseURL = baseUrlOf(testInfo.project.use.baseURL);
+        const chatId = await createChat(page.request, `Admission same-origin shapes ${Date.now()}`);
+        const path = attachmentsPath(chatId);
+        const cookies = await context.cookies();
+        const session = sessionCookie(cookies);
+        const probeUrl = new URL(SAME_ORIGIN_PROBE_PATH, baseURL).toString();
+
+        const tap = await startWireTap({
+            app: baseURL,
+            pages: { [probeUrl]: probePage(new URL(path, baseURL).toString()) },
+        });
+        const tapped = await tappedContext(browser, tap, cookies);
+        try {
+            const probe = await tapped.newPage();
+            await probe.goto(probeUrl);
+            await expect.poll(() => shapesAt(tap, path)).toEqual(SUBRESOURCE_SHAPES);
+
+            await probe.locator("#navigate").click();
+            await expect(probe).toHaveURL(new URL(path, baseURL).toString());
+            await expect(probe.locator("body"), DESTINATION_ALONE).toHaveText(FILTER_REFUSAL);
+            await expect.poll(() => shapesAt(tap, path)).toEqual(ALL_SHAPES);
+
+            for (const shape of ALL_SHAPES) {
+                expect(
+                    carriesSession(exchangeOf(tap, path, shape), session),
+                    `the same-origin ${shape} request must carry the live session, so only the filter can refuse it`,
+                ).toBe(true);
+            }
+            expectRefused(exchangeOf(tap, path, "navigation"), "same-origin", FILTER_REFUSAL, DESTINATION_ALONE);
+            expectRefused(exchangeOf(tap, path, "opaque"), "same-origin", FILTER_REFUSAL, MODE_ALONE);
+            expectRefused(exchangeOf(tap, path, "image"), "same-origin", FILTER_REFUSAL, INJECTED_IMAGE);
+
+            const admitted = exchangeOf(tap, path, "cors");
+            expect(header(admitted, "sec-fetch-site"), "the control read was not same-origin").toBe("same-origin");
+            expect(admitted.status, "the shape the workspace makes is admitted on the same page and session").toBe(200);
+            expect(JSON.parse(admitted.body)).toEqual([]);
+        } finally {
+            await tapped.close();
+            await tap.close();
+        }
     });
 
     test("the assistant workspace still reads its own chat from the app origin", async ({ page }) => {
@@ -279,7 +373,7 @@ test.describe("Ask Connex read admission in a real browser", () => {
             expect(sent["sec-fetch-site"], response.url()).toBe("same-origin");
             expect(sent["sec-fetch-mode"], response.url()).toBe("cors");
             expect(sent["sec-fetch-dest"], response.url()).toBe("empty");
-            expect(response.status(), `${response.url()}: ${await response.text()}`).toBe(200);
+            expect(response.status(), response.url()).toBe(200);
         }
 
         const inPage = await page.evaluate(async (path) => {
