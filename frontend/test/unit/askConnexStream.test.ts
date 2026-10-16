@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     ASK_CONNEX_STREAM_HYDRATION_LIMIT,
     absorbAskConnexStreamPartial,
+    adoptSettledAskConnexStreamPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -365,3 +366,40 @@ describe('Ask Connex turn cancellation', () => {
         )).resolves.toBe('failed');
     });
 });
+
+describe('a settled turn\'s durable partial is authoritative', () => {
+    it('clears an answer the server withdrew when the reset frame never arrived', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'Taro approved the '), delta(18, 'quote')]);
+        expect(streamed.text).toBe('Taro approved the quote');
+
+        const settled = adoptSettledAskConnexStreamPartial(streamed, '');
+
+        expect(settled.text).toBe('');
+        expect(settled.pending).toEqual([]);
+        expect(settled.settled).toBe(true);
+    });
+
+    it('takes a shorter settled partial exactly, as after a timeout that followed a refusal and a fresh attempt', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'The withdrawn first attempt')]);
+
+        const settled = adoptSettledAskConnexStreamPartial(streamed, 'Fresh');
+
+        expect(settled.text).toBe('Fresh');
+    });
+
+    it('lets neither a late frame nor a stale hydration grow a settled answer again', () => {
+        const settled = adoptSettledAskConnexStreamPartial(
+            applyAll(createAskConnexStream(9), [delta(0, 'withdrawn text')]), '');
+
+        expect(applyAskConnexStreamDelta(settled, delta(0, 'withdrawn text')).state.text).toBe('');
+        expect(settleAskConnexStreamHydration(settled, 'withdrawn text').state.text).toBe('');
+        expect(absorbAskConnexStreamPartial(settled, 'withdrawn text').state.text).toBe('');
+    });
+
+    it('still keeps live text ahead of a lagging partial while the turn is active', () => {
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'live text ahead')]);
+
+        expect(absorbAskConnexStreamPartial(streamed, 'live').state.text).toBe('live text ahead');
+    });
+});
+
