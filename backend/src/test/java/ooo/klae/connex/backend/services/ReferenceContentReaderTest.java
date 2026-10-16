@@ -57,6 +57,255 @@ class ReferenceContentReaderTest {
                 .stream().map(layout -> Arguments.of(type, layout.formatted(type))));
     }
 
+    static Stream<Arguments> tableDisagreements() {
+        return TYPES.stream().flatMap(type -> Stream.of(
+                "| h |\n| - |\n|\nprefix `\n[Former `]` Member](%s:42 \"title\")\nsuffix `",
+                "prefix `\n\nh|i\n--|--|--\n[Former|Member](%s:42 \"title\")\n`")
+                .flatMap(layout -> Stream.of("", "> ", "- ").map(prefix -> {
+                    String content = layout.formatted(type);
+                    if (prefix.equals("> ")) {
+                        content = "> " + content.replace("\n", "\n> ");
+                    } else if (prefix.equals("- ")) {
+                        content = "- " + content.replace("\n", "\n  ");
+                    }
+                    return Arguments.of(type, content);
+                })));
+    }
+
+    @ParameterizedTest
+    @MethodSource("tableDisagreements")
+    void tableDisagreementsNeverLoseAnInternalDestination(String type, String content) {
+        var reading = ReferenceContentReader.read(content);
+        var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+
+        assertTrue(reading.complete(), content);
+        assertTrue(reading.targets().contains(target), content);
+        assertTrue(reading.links().stream().anyMatch(link -> link.target().filter(target::equals).isPresent())
+                || reading.unexplainedTargets().contains(target), content);
+        if (type.equals("user") && reading.unexplainedTargets().contains(target)) {
+            assertFalse(ReferenceService.memberReferenceReading(content).complete());
+        }
+        if (type.equals("note")) {
+            assertEquals("a note", ReferenceService.toPlainText(content));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {":", "&colon;", "&#58;", "&#058;", "&#x3a;", "&#X0003A;", "\\:"})
+    void censusCoversAllTypesAndAcceptedSeparatorsInLiteralAndCodeContexts(String separator) {
+        for (String type : TYPES) {
+            String token = type.toUpperCase(java.util.Locale.ROOT) + separator + "42";
+            for (String content : List.of(token, "<" + token + ">", "`" + token + "`",
+                    "```\n" + token + "\n```", "    " + token, "| " + token + " |")) {
+                var reading = ReferenceContentReader.read(content);
+                var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+                assertTrue(reading.targets().contains(target), content);
+                if (reading.links().stream().noneMatch(link -> link.target().filter(target::equals).isPresent())) {
+                    assertTrue(reading.unexplainedTargets().contains(target), content);
+                    assertEquals(type.equals("note") ? "a note" : "(unavailable reference)",
+                            ReferenceService.toPlainText(content));
+                    if (type.equals("user")) {
+                        assertFalse(ReferenceService.memberReferenceReading(content).complete());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void censusRunsBeyondTheParserCapAndRequiresSourceCoverageForEachOccurrence() {
+        String content = "[Former](user:42) bare user:43";
+        var reading = ReferenceContentReader.read(content);
+        assertEquals(Set.of(new ReferenceContentReader.ReferenceTarget("user", 43)), reading.unexplainedTargets());
+        assertFalse(ReferenceService.memberReferenceReading(content).complete());
+
+        var unrelated = ReferenceContentReader.read(content + "\n\n[unused]: user:43");
+        assertEquals(reading.unexplainedTargets(), unrelated.unexplainedTargets());
+        assertFalse(ReferenceService.memberReferenceReading(content + "\n\n[unused]: user:43").complete());
+        assertTrue(ReferenceContentReader.read("[unused]: user:43").unexplainedTargets().isEmpty());
+
+        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1) + "note:42");
+        assertEquals(ReferenceContentReader.Status.INPUT_LIMIT, oversized.status());
+        assertTrue(oversized.targets().contains(new ReferenceContentReader.ReferenceTarget("note", 42)));
+    }
+
+    @Test
+    void sameIdDefinitionsCannotExplainAMissedTableDestination() {
+        for (String type : TYPES) {
+            String content = "| h |\n| - |\n|\nprefix `\n[Former `]` Member](" + type
+                    + ":42 \"title\")\nsuffix `\n\n[unused]: " + type + ":42";
+            var reading = ReferenceContentReader.read(content);
+            var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+            assertTrue(reading.targets().contains(target));
+            assertEquals(Set.of(target), reading.unexplainedTargets());
+            if (type.equals("user")) {
+                assertFalse(ReferenceService.memberReferenceReading(content).complete());
+            }
+            if (type.equals("note")) {
+                assertEquals("a note", ReferenceService.toPlainText(content));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[literal user:42](user:42)", "[Former](user:42 \"literal user:42\")",
+            "[user:42]: user:42", "[Former][user:42]\n\n[user:42]: user:42"
+    })
+    void labelsTitlesAndKeysDoNotExplainTheirOwnLiteralTokens(String content) {
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.unexplainedTargets().contains(new ReferenceContentReader.ReferenceTarget("user", 42)));
+        assertFalse(ReferenceService.memberReferenceReading(content).complete());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "**Former**", "Former `]`", "Former &amp; Member", "Former\\]", "😀 Former"})
+    void sourceCoverageFollowsTheDestinationAfterTheCompleteFormattedLabel(String label) {
+        for (String content : List.of("[" + label + "](user:42)", "![" + label + "](<user:42> \"title\")")) {
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.complete(), content);
+            assertTrue(reading.unexplainedTargets().isEmpty(), content);
+            assertTrue(ReferenceService.memberReferenceReading(content).complete(), content);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\n", "\r", "\r\n"})
+    void aBackslashAtTheEndOfADefinitionLineDoesNotEscapeTheNextLinesClosingBracket(String newline) {
+        for (String prefix : List.of("", "> ")) {
+            String content = "[Former][a\\" + newline + "]" + newline + newline
+                    + prefix + "[a\\" + newline + prefix + "]: user:42";
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.links().stream().anyMatch(link -> link.target()
+                    .filter(target -> target.equals(new ReferenceContentReader.ReferenceTarget("user", 42))).isPresent()),
+                    content);
+            assertTrue(reading.unexplainedTargets().isEmpty(), content);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\n", "\r", "\r\n"})
+    void aFinalSoftOrHardLineBreakDoesNotHideTheInlineDestination(String newline) {
+        for (String prefix : List.of("", "> ")) {
+            for (String spaces : List.of("", "  ")) {
+                String content = prefix + "[Former" + spaces + newline + prefix + "](user:42)";
+                var reading = ReferenceContentReader.read(content);
+                assertTrue(reading.links().stream().anyMatch(link -> link.target()
+                        .filter(target -> target.equals(new ReferenceContentReader.ReferenceTarget("user", 42))).isPresent()),
+                        content);
+                assertTrue(reading.unexplainedTargets().isEmpty(), content);
+                assertTrue(ReferenceService.memberReferenceReading(content).complete(), content);
+            }
+        }
+    }
+
+    @Test
+    void censusAlsoRecognizesEntityEncodedDestinationDigitsWhenBothParsesMissTheLink() {
+        for (String type : TYPES) {
+            String content = "| h |\n| - |\n|\nprefix `\n[Former `]` Member](" + type
+                    + "&#x3a;&#52;&#x32; \"title\")\nsuffix `";
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.targets().contains(new ReferenceContentReader.ReferenceTarget(type, 42)));
+            assertTrue(reading.unexplainedTargets().contains(new ReferenceContentReader.ReferenceTarget(type, 42)));
+            if (type.equals("user")) {
+                assertFalse(ReferenceService.memberReferenceReading(content).complete());
+            }
+        }
+    }
+
+    @Test
+    void entityEncodedTypeLettersCannotHideDestinationsOrLoseTheirOriginalSourceCoverage() {
+        for (String type : TYPES) {
+            for (String spelling : List.of("&#" + (int) type.charAt(0) + ";" + type.substring(1),
+                    type.chars().mapToObj(letter -> "&#" + letter + ";")
+                            .collect(java.util.stream.Collectors.joining()),
+                    type.chars().mapToObj(letter -> "&#x00" + Integer.toHexString(letter) + ";")
+                            .collect(java.util.stream.Collectors.joining()))) {
+                var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+                String hidden = "| h |\n| - |\n|\nprefix `\n[Former `]` Member](" + spelling
+                        + "&#58;&#52;2 \"title\")\nsuffix `";
+                var missed = ReferenceContentReader.read(hidden);
+                assertTrue(missed.targets().contains(target), hidden);
+                assertTrue(missed.unexplainedTargets().contains(target), hidden);
+                if (type.equals("user")) {
+                    assertFalse(ReferenceService.memberReferenceReading(hidden).complete());
+                }
+                var resolved = ReferenceContentReader.read("[Former](" + spelling + "&#58;&#52;2)");
+                assertTrue(resolved.targets().contains(target), spelling);
+                assertTrue(resolved.unexplainedTargets().isEmpty(), spelling);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "2147483648", "999999999999999999999999999999999999"})
+    void unrepresentableCensusIdsRemainUnsafeForVisibilityMembersAndSnippets(String id) {
+        for (String type : TYPES) {
+            String content = "literal " + type + ":" + id;
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.unparseableTypes().contains(type), content);
+            assertEquals(type.equals("note") ? "a note" : "(unavailable reference)",
+                    ReferenceService.toPlainText(content), content);
+            if (type.equals("user")) {
+                assertFalse(ReferenceService.memberReferenceReading(content).complete());
+            }
+        }
+    }
+
+    @Test
+    void censusRetainsItsTypeForAdversariallyPaddedNumericTypeEntities() {
+        String content = TYPES.stream().map(type -> "&#" + "0".repeat(30_000)
+                + (int) type.charAt(0) + ";" + type.substring(1) + ":42")
+                .collect(java.util.stream.Collectors.joining(" "));
+        assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(content.length() < ReferenceContentReader.MAX_INPUT_LENGTH);
+            assertEquals(TYPES.stream().map(type -> new ReferenceContentReader.ReferenceTarget(type, 42))
+                    .collect(java.util.stream.Collectors.toSet()), reading.unexplainedTargets());
+            assertFalse(ReferenceService.memberReferenceReading(content).complete());
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a", "😀"})
+    void resolvedOversizedMemberLabelsRefuseAiWithoutChangingLegacyLabelBounds(String character) {
+        for (String prefix : List.of("", "!")) {
+            String bounded = prefix + "[" + character.repeat(999) + "](user:42)";
+            String oversized = prefix + "[" + character.repeat(1_000) + "](user:42)";
+            assertTrue(ReferenceService.memberReferenceReading(bounded).complete());
+            assertTrue(ReferenceService.memberLabelsFromReaderVisibleContent(bounded).contains(character.repeat(999)));
+            assertFalse(ReferenceService.memberReferenceReading(oversized).complete());
+            assertTrue(ReferenceService.memberLabelsFromReaderVisibleContent(oversized).isEmpty());
+            assertTrue(ReferenceContentReader.read(oversized).targets()
+                    .contains(new ReferenceContentReader.ReferenceTarget("user", 42)));
+        }
+        assertTrue(ReferenceService.memberReferenceReading("[](user:42)").complete());
+        assertTrue(ReferenceService.memberReferenceReading("![](user:42)").complete());
+    }
+
+    @Test
+    void legacyDefinitionSuppressionDoesNotRemoveShortcutLabelsFromIncompleteRichReadings() {
+        String content = "[Alice Former][m]\n\n[m]: \r\n> user:42\n\n[m]: user:42";
+        assertEquals(List.of("Alice Former"), ReferenceService.memberLabelsFromReaderVisibleContent(content));
+        var reading = ReferenceService.memberReferenceReading(content);
+        assertFalse(reading.complete());
+        var authored = reading.references().stream().filter(reference -> reference.label().equals("Alice Former"))
+                .findFirst().orElseThrow();
+        var shortcut = reading.references().stream().filter(reference -> reference.label().equals("m"))
+                .findFirst().orElseThrow();
+        assertSame(authored.memberIds(), shortcut.memberIds());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user:7)", "user:(7"})
+    void invalidDefinitionsKeepTheirConservativeLabelsAndOnlyUnexplainedIdsRefuseAi(String destination) {
+        String content = "[Alice Former]: " + destination + "\n\n[Alice Former]: user:42";
+        var reading = ReferenceService.memberReferenceReading(content);
+        assertTrue(reading.references().contains(new ReferenceService.MemberReference("Alice Former", Set.of(42))));
+        assertEquals(List.of("Alice Former"), ReferenceService.memberLabelsFromReaderVisibleContent(content));
+        assertEquals(destination.equals("user:(7"), reading.complete());
+    }
+
     @ParameterizedTest
     @MethodSource("referenceLayouts")
     void resolvesEveryInternalTypeThroughCommonMarkAndGfm(String type, String content) {
@@ -66,6 +315,7 @@ class ReferenceContentReaderTest {
         assertTrue(reading.targets().contains(new ReferenceContentReader.ReferenceTarget(type, 42)), content);
         assertTrue(reading.links().stream().anyMatch(link -> link.target()
                 .filter(target -> target.type().equals(type) && target.id() == 42).isPresent()), content);
+        assertTrue(reading.unexplainedTargets().isEmpty(), content);
         if (type.equals("user") && !content.startsWith("<")) {
             assertTrue(reading.memberReferences().stream().anyMatch(reference ->
                     reference.label().equals("Former") && reference.memberIds().contains(42)), content);

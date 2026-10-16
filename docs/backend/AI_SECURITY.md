@@ -100,6 +100,9 @@ constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks 
 The existing label APIs retain their source-spelling and entity-decoding contract, including
 ordering. The completeness-aware AI reading additionally includes rendered labels with code,
 emphasis and escape syntax removed, sharing the same authorization target groups.
+Legacy definition-key suppression applies only to the source-label view: when the AST instead
+resolves that bracket as a shortcut, its label remains in the AI masking view with the same
+authorization group. Malformed definitions never remove later valid fallback candidates.
 
 | Covered construct | One-line example |
 | --- | --- |
@@ -154,6 +157,29 @@ The parser closes the definition-layout and shared-reader residuals in
 blockquote/list containers and raw-HTML block termination use actual parser semantics. Tables and
 footnotes have separate inline/container contexts; differential fixtures cover backend discovery
 and frontend rendering.
+The pinned table extension disagrees with GFM on lone-pipe body rows and unequal header/delimiter
+column counts. The reader therefore unions links and definitions from a second bounded parse
+with footnotes but without tables. A destination census independently scans the **full original
+body**, including source rejected by parser admission. It recognizes the eight internal types
+case-insensitively, literal/escaped colons and named/decimal/hex colon entities followed by digits.
+Numeric entity spellings of type letters and digits also count, without decoding the whole body:
+for example, `u&#115;er:42` cannot hide the same missed link from the census.
+Only an actual link, image or definition destination from either parse explains a census hit, by the
+same type, integer ID and original source occurrence; compatibility scans cannot explain one.
+An unrelated definition with the same ID cannot establish coverage for a missed table link.
+Literal tokens in labels, titles and reference keys also remain unexplained. Every unexplained hit
+joins the visibility inventory, so invisible destinations are still redacted when both parses miss
+them. A visible destination retains the existing scoped authorization checks.
+
+Any unexplained `user:` census hit makes member/AI admission incomplete and refuses before
+provider dispatch. Nonpositive or overflowing census IDs retain an unsafe signal. Context-free
+snippets replace unexplained or unrepresentable references with the existing unavailable placeholder,
+or `a note` when a note target is present. Code spans, fenced/indented code, literal examples, HTML and table
+cells all count: this deliberately redacts or refuses some non-rendered references. A malformed
+`user:7)` definition followed by a valid `user:42` definition retains its conservative user-42
+alias but refuses AI admission because user 7 remains unexplained. `user:(7` is not a destination
+token; its valid fallback shortcut remains maskable. The differential fixtures cover both table
+disagreements across all eight types, including blockquote/list containers.
 Autolink-literal and strikethrough artifacts are deliberately absent: literal autolinks use
 HTTP(S)/mailto rather than internal schemes, and strikethrough introduces no destination or
 separate inline context. Links within tildes and task lists remain covered by core inline parsing.
@@ -198,11 +224,18 @@ The escaped-label, paragraph-interruption and nested-blockquote reproductions ar
 also exercised against the frontend renderer. Normal root footnotes remain supported; the
 compatibility inventory still retains targets and member candidates from refused bodies.
 
+Member labels retain the existing **999-code-point** bound, including supplementary characters.
+A resolved member link or image whose authored label exceeds that bound makes AI member admission
+incomplete instead of silently dropping its label. Destination visibility discovery remains
+independent of the label bound; genuinely empty labels remain admitted.
+
 Every incomplete visibility reading replaces the whole body with `(unavailable reference)`, also
 on reader-authorized AI projections and context-free snippets. No unchecked prefix or suffix is
 returned. Structured references retain their independent existing visibility checks. The
 Micrometer counter `connex.reference.content.incomplete`, tagged only with the bounded `reason`
-enum, makes these decisions visible without recording content, labels, IDs or workspace data.
+vocabulary, makes these decisions visible without recording content, labels, IDs or workspace data.
+The additional fixed `member_provenance` reason records incomplete member admission when parsing
+itself completed but member destinations remain unsafe or unexplained.
 Queue identifier admission parses the original complete text and refuses incomplete readings with
 the existing `identifier_text_unsafe` error before identifier queries or provider dispatch. Direct
 AI member projections also refuse via `MaskingLeakException`, so retained partial compatibility
@@ -216,8 +249,10 @@ recipients still use only
 the existing canonical write grammar and its 100-reference cap.
 
 Residuals are intentional conservative over-inclusion, the explicit footnote refusals above,
-bounded/unrepresentable inputs refusing instead of rendering, and future parser/renderer version
-drift, which requires renewing the differential fixtures when either dependency changes.
+the census refusing or redacting literal code examples, bounded/unrepresentable inputs refusing
+instead of rendering, and future parser/renderer version drift. Renew the differential fixtures
+when either dependency changes; census over-inclusion remains intentional even where neither
+parser renders a link.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

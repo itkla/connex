@@ -104,6 +104,12 @@ describe("NoteContent Markdown rendering", () => {
         ["separate table cells", "| ` | [Former][m] | ` |\n| --- | --- | --- |\n\n[m]: TYPE:42"],
         ["separate table rows", "| First | Second |\n| --- | --- |\n| ` | [Former][m] |\n| ` | Other |\n\n[m]: TYPE:42"],
         ["escaped table pipes", "| Al\\|ice | [Former][m] |\n| --- | --- |\n\n[m]: TYPE:42"],
+        ["lone pipe table rows", "| h |\n| - |\n|\nprefix `\n[Former `]` Member](TYPE:42 \"title\")\nsuffix `"],
+        ["unequal table column counts", "prefix `\n\nh|i\n--|--|--\n[Former|Member](TYPE:42 \"title\")\n`"],
+        ["lone pipe table rows in quotes", "> | h |\n> | - |\n> |\n> prefix `\n> [Former `]` Member](TYPE:42 \"title\")\n> suffix `"],
+        ["unequal table columns in quotes", "> prefix `\n>\n> h|i\n> --|--|--\n> [Former|Member](TYPE:42 \"title\")\n> `"],
+        ["lone pipe table rows in lists", "- | h |\n  | - |\n  |\n  prefix `\n  [Former `]` Member](TYPE:42 \"title\")\n  suffix `"],
+        ["unequal table columns in lists", "- prefix `\n  \n  h|i\n  --|--|--\n  [Former|Member](TYPE:42 \"title\")\n  `"],
         ["footnote bodies", "See [^f].\n\n[^f]: [Former][m]\n\n[m]: TYPE:42"],
         ["escaped footnote labels", "[Former][m]\n\nSee [^a\\]b].\n\n[^a\\]b]:\n    [m]:\n    TYPE:42"],
         ["escaped footnote paragraph interruption", "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](TYPE:42 \"title\")\n    `"],
@@ -113,15 +119,17 @@ describe("NoteContent Markdown rendering", () => {
     it.each(sharedReaderFixtures)("resolves the shared reader differential in %s", (_name, fixture) => {
         const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
         for (const type of types) {
-            const content = fixture.replace("TYPE", type);
-            const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
-            const unresolved = render(content);
+            for (const spelling of [type, `&#${type.charCodeAt(0)};${type.slice(1)}`]) {
+                const content = fixture.replace("TYPE", spelling);
+                const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
+                const unresolved = render(content);
 
-            expect(authorized).toContain("Server label");
-            expect(authorized).not.toContain("Former");
-            expect(unresolved).toContain("Unavailable reference");
-            expect(unresolved).not.toContain("Former");
-            expect(unresolved).not.toContain(`${type}:42`);
+                expect(authorized).toContain("Server label");
+                expect(authorized).not.toContain("Former");
+                expect(unresolved).toContain("Unavailable reference");
+                expect(unresolved).not.toContain("Former");
+                expect(unresolved).not.toContain(`${type}:42`);
+            }
         }
     });
 

@@ -47,6 +47,23 @@ class ReferenceServiceReaderVisibilityTest {
         return ReferenceContentReaderTest.referenceLayouts();
     }
 
+    static Stream<Arguments> tableDisagreements() {
+        return ReferenceContentReaderTest.tableDisagreements();
+    }
+
+    @ParameterizedTest
+    @MethodSource("tableDisagreements")
+    void tableDisagreementsStillRequireScopedVisibility(String type, String content) {
+        when(workspace.getCurrentUserId()).thenReturn(13);
+        assertEquals(type.equals("note") ? "(private note)" : "(unavailable reference)",
+                service.redactInvisibleTargets(7,
+                        List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        verifyTargetLookup(type);
+        makeVisible(type);
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+    }
+
     @ParameterizedTest
     @MethodSource("referenceLayouts")
     void everyParserLayoutUsesWorkspaceAndReaderVisibility(String type, String content) {

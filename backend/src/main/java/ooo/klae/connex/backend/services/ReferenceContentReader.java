@@ -61,6 +61,11 @@ final class ReferenceContentReader {
     private static final String REFERENCE_SEPARATOR = "(?::|&colon;|\\\\:)";
     private static final String REFERENCE_TYPE_PATTERN =
         "(user|person|deal|company|note|file|task|activity)";
+    private static final List<String> CENSUS_TYPES = List.of(TYPE_USER, TYPE_PERSON, TYPE_DEAL, TYPE_COMPANY,
+            TYPE_NOTE, TYPE_FILE, TYPE_TASK, TYPE_ACTIVITY);
+    private static final Pattern DESTINATION_CENSUS = Pattern.compile(
+        "(?i)" + censusTypePattern()
+            + "(?::|\\\\:|&colon;|&#0*+58;|&#x0*+3a;)(?<id>(?:[0-9]++|&#[0-9]++;|&#x[0-9a-f]++;)++)");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
         "(?im)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
@@ -103,6 +108,12 @@ final class ReferenceContentReader {
             .maxOpenBlockParsers(MAX_NESTING)
             .maxInlineNesting(MAX_NESTING)
             .build();
+    private static final Parser PARSER_WITHOUT_TABLES = Parser.builder()
+            .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES)
+            .extensions(List.of(FootnotesExtension.create()))
+            .maxOpenBlockParsers(MAX_NESTING)
+            .maxInlineNesting(MAX_NESTING)
+            .build();
 
     private ReferenceContentReader() {
     }
@@ -120,15 +131,17 @@ final class ReferenceContentReader {
         }
     }
 
-    /** Compatibility candidates are additive and are never evidence of a resolved Markdown link. */
+    /** Compatibility and census candidates are additive; only AST destinations explain census hits. */
     record Reading(List<LinkOccurrence> links, List<ReferenceTarget> targets, Set<String> unparseableTypes,
-            List<MemberReference> memberReferences, List<MemberReference> maskingReferences, Status status) {
+            List<MemberReference> memberReferences, List<MemberReference> maskingReferences,
+            Set<ReferenceTarget> unexplainedTargets, boolean memberTargetsComplete, Status status) {
         Reading {
             links = List.copyOf(links);
             targets = List.copyOf(targets);
             unparseableTypes = Set.copyOf(unparseableTypes);
             memberReferences = List.copyOf(memberReferences);
             maskingReferences = List.copyOf(maskingReferences);
+            unexplainedTargets = Set.copyOf(unexplainedTargets);
         }
 
         boolean complete() {
@@ -143,24 +156,33 @@ final class ReferenceContentReader {
     record ReferenceTarget(String type, int id) {
     }
 
-    private record MarkdownTargets(List<ReferenceTarget> targets, Set<String> unparseableTypes) {
+    private record MarkdownTargets(List<ReferenceTarget> targets, Set<String> unparseableTypes,
+            boolean unparseableMemberLinks) {
+    }
+
+    private record CensusHit(ReferenceTarget target, int start, int end) {
+    }
+
+    private record DestinationCensus(List<CensusHit> hits, Set<ReferenceTarget> targets, Set<String> unparseableTypes) {
     }
 
     /**
-     * Parses original source once, without global entity decoding or truncation. The fixed-number
-     * compatibility scans still cover the entire source when parser admission fails. Their label
-     * bound and shared target groups avoid label/id Cartesian expansion on ambiguous definitions.
+     * Parses bounded original source with and without tables, without global entity decoding or
+     * truncation. The census and fixed-number compatibility scans still cover the entire source
+     * when parser admission fails. Shared target groups avoid label/id Cartesian expansion.
      */
     static Reading read(String content) {
         if (content == null || content.isEmpty()) {
-            return new Reading(List.of(), List.of(), Set.of(), List.of(), List.of(), Status.COMPLETE);
+            return new Reading(List.of(), List.of(), Set.of(), List.of(), List.of(), Set.of(), true, Status.COMPLETE);
         }
-        List<MemberLabelSpan> labels = memberLabelSpans(content);
-        List<LinkOccurrence> links = new ArrayList<>();
+        MemberLabels labels = memberLabels(content);
+        Set<LinkOccurrence> links = new LinkedHashSet<>();
+        DestinationCensus census = destinationCensus(content);
         MarkdownTargets compatibility = content.length() <= MAX_INPUT_LENGTH
-                ? compatibilityTargets(content) : new MarkdownTargets(List.of(), Set.of());
+                ? compatibilityTargets(content) : new MarkdownTargets(List.of(), Set.of(), false);
         var targets = new LinkedHashSet<>(compatibility.targets());
         var unparseable = new HashSet<>(compatibility.unparseableTypes());
+        var parsedTargets = new LinkedHashSet<ReferenceTarget>();
         Status status = content.length() > MAX_INPUT_LENGTH ? Status.INPUT_LIMIT : tableBudgetStatus(content);
         if (status == Status.COMPLETE) {
             status = bracketBudgetStatus(content);
@@ -168,19 +190,234 @@ final class ReferenceContentReader {
         if (status == Status.COMPLETE) {
             status = footnoteSourceStatus(content);
         }
+        CensusCoverage coverage = new CensusCoverage(census.hits(), status == Status.COMPLETE ? content.length() : 0);
         if (status == Status.COMPLETE) {
             try {
-                status = collectParsed(PARSER.parse(content), content, links, targets, unparseable);
+                status = collectParsed(PARSER.parse(content), content, links, parsedTargets, unparseable, coverage);
+                Status withoutTables = collectParsed(PARSER_WITHOUT_TABLES.parse(content), content, links,
+                        parsedTargets, unparseable, coverage);
+                if (status == Status.COMPLETE) {
+                    status = withoutTables;
+                }
             } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
                 status = Status.PARSE_FAILURE;
             }
         }
+        targets.addAll(parsedTargets);
+        targets.addAll(census.targets());
+        unparseable.addAll(census.unparseableTypes());
+        Set<ReferenceTarget> unexplained = coverage.unexplained();
         var references = memberReferences(content, labels, links);
-        if (status != Status.COMPLETE) {
-            Metrics.counter("connex.reference.content.incomplete", "reason", status.name().toLowerCase(Locale.ROOT))
-                    .increment();
+        boolean memberTargetsComplete = !compatibility.unparseableMemberLinks()
+                && !census.unparseableTypes().contains(TYPE_USER)
+                && unexplained.stream().noneMatch(target -> TYPE_USER.equals(target.type()))
+                && links.stream().noneMatch(link -> TYPE_USER.equals(link.type()) && (link.target().isEmpty()
+                        || !link.labelSpans().isEmpty() && link.authoredLabel().isEmpty()));
+        if (status != Status.COMPLETE || !memberTargetsComplete) {
+            String reason = status == Status.COMPLETE ? "member_provenance" : status.name().toLowerCase(Locale.ROOT);
+            Metrics.counter("connex.reference.content.incomplete", "reason", reason).increment();
         }
-        return new Reading(links, new ArrayList<>(targets), unparseable, references.source(), references.masking(), status);
+        return new Reading(new ArrayList<>(links), new ArrayList<>(targets), unparseable,
+                references.source(), references.masking(), unexplained, memberTargetsComplete, status);
+    }
+
+    /**
+     * Inventories literal destinations independently of Markdown, including code and malformed
+     * tables. Fixed type/separator alternatives and disjoint possessive digit runs keep the scan
+     * linear. Only destinations resolved by either AST can explain a hit; compatibility readings
+     * never turn an otherwise unreadable member destination into permission for AI admission.
+     */
+    private static DestinationCensus destinationCensus(String content) {
+        List<CensusHit> hits = new ArrayList<>();
+        Set<ReferenceTarget> targets = new LinkedHashSet<>();
+        Set<String> unparseable = new HashSet<>();
+        Matcher destinations = DESTINATION_CENSUS.matcher(content);
+        while (destinations.find()) {
+            for (String type : CENSUS_TYPES) {
+                if (destinations.start(type) >= 0) {
+                    var target = parseReferenceTarget(type, normalizeReferenceSyntax(destinations.group("id")));
+                    if (target.isPresent()) {
+                        targets.add(target.get());
+                        hits.add(new CensusHit(target.get(), destinations.start(), destinations.end()));
+                    } else {
+                        unparseable.add(type);
+                    }
+                    break;
+                }
+            }
+        }
+        return new DestinationCensus(hits, targets, unparseable);
+    }
+
+    /** Entity-encoded type letters must not hide renderer-recognized destinations from the census. */
+    private static String censusTypePattern() {
+        var pattern = new StringBuilder("(?:");
+        for (String type : CENSUS_TYPES) {
+            if (pattern.length() > 3) {
+                pattern.append('|');
+            }
+            pattern.append("(?<").append(type).append('>');
+            for (int index = 0; index < type.length(); index++) {
+                char letter = type.charAt(index);
+                char upper = Character.toUpperCase(letter);
+                pattern.append("(?:").append(letter)
+                        .append("|&#0*+").append((int) letter).append(';')
+                        .append("|&#0*+").append((int) upper).append(';')
+                        .append("|&#x0*+(?:").append(Integer.toHexString(letter))
+                        .append('|').append(Integer.toHexString(upper)).append(");)");
+            }
+            pattern.append(')');
+        }
+        return pattern.append(')').toString();
+    }
+
+    /**
+     * Matches individual census occurrences to actual destination source, never to another token
+     * with the same ID. The offset index is bounded by parser admission and gives constant-time
+     * coverage lookup; labels, reference keys and titles cannot explain a destination token.
+     */
+    private static final class CensusCoverage {
+        private final List<CensusHit> hits;
+        private final int[] hitAt;
+        private final boolean[] explained;
+
+        private CensusCoverage(List<CensusHit> hits, int inputLength) {
+            this.hits = hits;
+            hitAt = new int[inputLength];
+            explained = new boolean[hits.size()];
+            for (int index = 0; index < hits.size(); index++) {
+                if (hits.get(index).start() < hitAt.length) {
+                    hitAt[hits.get(index).start()] = index + 1;
+                }
+            }
+        }
+
+        private void explain(Node node, ReferenceTarget target, String content, TableSource tableSource) {
+            var source = new SourceCursor(content, sourceSpans(node, tableSource));
+            source.skipWhitespace();
+            if (node instanceof LinkReferenceDefinition) {
+                if (!source.take('[')) {
+                    return;
+                }
+                while (source.current() >= 0 && source.current() != ']') {
+                    if (source.current() == '\\') {
+                        int line = source.span;
+                        source.advance();
+                        if (source.span == line) {
+                            source.advance();
+                        }
+                    } else {
+                        source.advance();
+                    }
+                }
+                if (!source.take(']') || !source.take(':')) {
+                    return;
+                }
+            } else if (source.take('<')) {
+                explainAt(source, target);
+                return;
+            } else {
+                Node last = node.getLastChild();
+                List<SourceSpan> label = List.of();
+                while (last != null && label.isEmpty()) {
+                    label = sourceSpans(last, tableSource);
+                    last = last.getPrevious();
+                }
+                if (label.isEmpty()) {
+                    source.take('!');
+                    if (!source.take('[')) {
+                        return;
+                    }
+                } else {
+                    SourceSpan end = label.getLast();
+                    source.seek(end.getInputIndex() + end.getLength());
+                }
+                source.skipWhitespace();
+                if (!source.take(']') || !source.take('(')) {
+                    return;
+                }
+            }
+            source.skipWhitespace();
+            source.take('<');
+            explainAt(source, target);
+        }
+
+        private void explainAt(SourceCursor source, ReferenceTarget target) {
+            if (source.current() < 0 || source.index >= hitAt.length) {
+                return;
+            }
+            int ordinal = hitAt[source.index] - 1;
+            if (ordinal >= 0) {
+                CensusHit hit = hits.get(ordinal);
+                if (hit.target().equals(target) && hit.end() <= source.spanEnd()) {
+                    explained[ordinal] = true;
+                }
+            }
+        }
+
+        private Set<ReferenceTarget> unexplained() {
+            Set<ReferenceTarget> result = new HashSet<>();
+            for (int index = 0; index < hits.size(); index++) {
+                if (!explained[index]) {
+                    result.add(hits.get(index).target());
+                }
+            }
+            return result;
+        }
+    }
+
+    /** Walks original node spans while skipping container prefixes between physical source lines. */
+    private static final class SourceCursor {
+        private final String content;
+        private final List<SourceSpan> spans;
+        private int span;
+        private int index;
+
+        private SourceCursor(String content, List<SourceSpan> spans) {
+            this.content = content;
+            this.spans = spans;
+            index = spans.isEmpty() ? content.length() : spans.getFirst().getInputIndex();
+            seek(index);
+        }
+
+        private void seek(int offset) {
+            index = offset;
+            while (span < spans.size() && index >= spanEnd()) {
+                span++;
+                if (span < spans.size()) {
+                    index = Math.max(index, spans.get(span).getInputIndex());
+                }
+            }
+        }
+
+        private int spanEnd() {
+            SourceSpan current = spans.get(span);
+            return current.getInputIndex() + current.getLength();
+        }
+
+        private int current() {
+            return span < spans.size() ? content.charAt(index) : -1;
+        }
+
+        private void advance() {
+            if (current() >= 0) {
+                seek(index + 1);
+            }
+        }
+
+        private boolean take(char expected) {
+            if (current() != expected) {
+                return false;
+            }
+            advance();
+            return true;
+        }
+
+        private void skipWhitespace() {
+            while (current() == ' ' || current() == '\t' || current() == '\r' || current() == '\n') {
+                advance();
+            }
+        }
     }
 
     /**
@@ -280,8 +517,8 @@ final class ReferenceContentReader {
     }
 
     /** Saturation is incomplete even if the resulting bounded AST still contains some links. */
-    private static Status collectParsed(Node document, String content, List<LinkOccurrence> links,
-            Set<ReferenceTarget> targets, Set<String> unparseable) {
+    private static Status collectParsed(Node document, String content, Collection<LinkOccurrence> links,
+            Set<ReferenceTarget> targets, Set<String> unparseable, CensusCoverage coverage) {
         Status status = Status.COMPLETE;
         Deque<WalkEntry> pending = new ArrayDeque<>();
         pending.push(new WalkEntry(document, 0, 0, null));
@@ -307,7 +544,12 @@ final class ReferenceContentReader {
                 }
             }
             if (node instanceof LinkReferenceDefinition definition) {
-                collectDestination(definition.getDestination(), targets, unparseable);
+                String destination = definition.getDestination();
+                String type = collectDestination(destination, targets, unparseable);
+                if (type != null) {
+                    parseReferenceTarget(type, destination.substring(destination.indexOf(':') + 1))
+                            .ifPresent(target -> coverage.explain(node, target, content, tableSource));
+                }
                 if (definition.getLabel().startsWith("^")) {
                     status = Status.UNSUPPORTED_FOOTNOTE;
                 }
@@ -320,7 +562,9 @@ final class ReferenceContentReader {
                 String destination = node instanceof Link link ? link.getDestination() : ((Image) node).getDestination();
                 String type = collectDestination(destination, targets, unparseable);
                 if (type != null) {
-                    links.add(linkOccurrence(node, type, destination, content, tableSource));
+                    LinkOccurrence occurrence = linkOccurrence(node, type, destination, content, tableSource);
+                    links.add(occurrence);
+                    occurrence.target().ifPresent(target -> coverage.explain(node, target, content, tableSource));
                 }
             }
             for (Node child = node.getLastChild(); child != null; child = child.getPrevious()) {
@@ -450,18 +694,21 @@ final class ReferenceContentReader {
     private record MemberReadings(List<MemberReference> source, List<MemberReference> masking) {
     }
 
-    private record RenderedMemberLabel(String label, MemberTargets targets) {
+    private record MemberLabels(List<MemberLabelSpan> spans, Set<Integer> definitionStarts) {
+    }
+
+    private record MaskingMemberLabel(String label, MemberTargets targets) {
     }
 
     /** Preserves compatibility ordering and group identity before adding rendered label spellings. */
     private static MemberReadings memberReferences(
-            String content, List<MemberLabelSpan> labels, List<LinkOccurrence> links) {
+            String content, MemberLabels labels, Collection<LinkOccurrence> links) {
         List<MemberReference> references = new ArrayList<>();
         Map<MemberTargets, Set<String>> collected = new HashMap<>();
         Map<LabelRange, Set<MemberTargets>> groups = new HashMap<>();
         Map<Integer, MemberTargets> singletons = new HashMap<>();
-        List<RenderedMemberLabel> rendered = new ArrayList<>();
-        for (MemberLabelSpan span : labels) {
+        List<MaskingMemberLabel> additional = new ArrayList<>();
+        for (MemberLabelSpan span : labels.spans()) {
             groups.computeIfAbsent(new LabelRange(span.start(), span.end()), ignored -> new LinkedHashSet<>())
                     .add(span.targets());
             if (span.targets().ids.size() == 1) {
@@ -470,7 +717,7 @@ final class ReferenceContentReader {
             collectMemberReferences(references, collected, span.targets(),
                     normalizeReferenceSyntax(content.substring(span.start(), span.end())));
         }
-        labels.forEach(span -> collectMemberReferences(references, collected, span.targets(),
+        labels.spans().forEach(span -> collectMemberReferences(references, collected, span.targets(),
                 content.substring(span.start(), span.end())));
         for (LinkOccurrence link : links) {
             if (!TYPE_USER.equals(link.type()) || link.target().isEmpty() || link.labelSpans().isEmpty()) {
@@ -483,16 +730,21 @@ final class ReferenceContentReader {
             MemberTargets group = groups.getOrDefault(range, Set.of()).stream()
                     .filter(candidate -> candidate.ids.contains(id)).findFirst()
                     .orElseGet(() -> singletons.computeIfAbsent(id, MemberTargets::new));
+            boolean sourceLabel = !labels.definitionStarts().contains(link.sourceSpans().getFirst().getInputIndex());
             for (String label : List.of(normalizeReferenceSyntax(link.authoredLabel()), link.authoredLabel(),
                     link.logicalLabel())) {
                 if (memberLabelWithinLimit(label)) {
-                    collectMemberReferences(references, collected, group, label);
+                    if (sourceLabel) {
+                        collectMemberReferences(references, collected, group, label);
+                    } else {
+                        additional.add(new MaskingMemberLabel(label, group));
+                    }
                 }
             }
-            rendered.add(new RenderedMemberLabel(link.decodedLabel(), group));
+            additional.add(new MaskingMemberLabel(link.decodedLabel(), group));
         }
         List<MemberReference> source = List.copyOf(references);
-        for (RenderedMemberLabel label : rendered) {
+        for (MaskingMemberLabel label : additional) {
             if (memberLabelWithinLimit(label.label())) {
                 collectMemberReferences(references, collected, label.targets(), label.label());
             }
@@ -502,15 +754,16 @@ final class ReferenceContentReader {
 
     private static MarkdownTargets compatibilityTargets(String content) {
         if (content == null || content.isBlank()) {
-            return new MarkdownTargets(List.of(), Set.of());
+            return new MarkdownTargets(List.of(), Set.of(), false);
         }
         String normalized = normalizeReferenceSyntax(content);
         if (normalized.indexOf('[') < 0) {
-            return new MarkdownTargets(List.of(), Set.of());
+            return new MarkdownTargets(List.of(), Set.of(), false);
         }
         List<ReferenceTarget> targets = new ArrayList<>();
         Set<String> unparseableTypes = new HashSet<>();
         collectInlineTargets(normalized, targets, unparseableTypes);
+        boolean unparseableMemberLinks = unparseableTypes.contains(TYPE_USER);
         collectReferenceTargets(REFERENCE_DEFINITION.matcher(normalized), targets, unparseableTypes);
         Matcher definitions = MEMBER_REFERENCE_DEFINITION.matcher(content);
         while (definitions.find()) {
@@ -522,7 +775,7 @@ final class ReferenceContentReader {
                 collectDestination(destination, targets, unparseableTypes);
             }
         }
-        return new MarkdownTargets(targets, unparseableTypes);
+        return new MarkdownTargets(targets, unparseableTypes, unparseableMemberLinks);
     }
 
     static String normalizeReferenceSyntax(String content) {
@@ -607,9 +860,9 @@ final class ReferenceContentReader {
         }
     }
 
-    private static List<MemberLabelSpan> memberLabelSpans(String content) {
+    private static MemberLabels memberLabels(String content) {
         if (content == null || content.indexOf('[') < 0 || content.isBlank()) {
-            return List.of();
+            return new MemberLabels(List.of(), Set.of());
         }
         Map<String, MemberTargets> memberDefinitions = new HashMap<>();
         ReferenceDelimiters delimiters = new ReferenceDelimiters(content, true);
@@ -644,7 +897,7 @@ final class ReferenceContentReader {
                     matchingLabelEnds(content, mode != 0, mode == 2, true, delimiters));
             readings.add(spans);
         }
-        return mergeMemberLabelReadings(readings);
+        return new MemberLabels(mergeMemberLabelReadings(readings), Set.copyOf(validDefinitionStarts));
     }
 
     /**

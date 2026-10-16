@@ -76,7 +76,8 @@ class AiAssistantIdentifierResolverTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"input", "blocks", "inlines", "table", "footnote", "brackets"})
+    @ValueSource(strings = {"input", "blocks", "inlines", "table", "footnote", "brackets",
+            "raw", "code", "disagreement", "same-id", "encoded", "label"})
     void incompleteQueueReadingsRefuseBeforeIdentifierLookupOrProviderAdmission(String kind) {
         String text = switch (kind) {
             case "input" -> "x".repeat(262_145) + "[Late](user:42)";
@@ -85,6 +86,12 @@ class AiAssistantIdentifierResolverTest {
             case "table" -> "| x ".repeat(258);
             case "footnote" -> "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](user:42 \"title\")\n    `";
             case "brackets" -> "[".repeat(131_000) + "[](u)".repeat(26_000);
+            case "raw" -> "literal user:42";
+            case "code" -> "```\n[Former](user:42)\n```";
+            case "disagreement" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `";
+            case "same-id" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `\n\n[unused]: user:42";
+            case "encoded" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](u&#115;er:42 \"title\")\nsuffix `";
+            case "label" -> "[" + "a".repeat(1_000) + "](user:42)";
             default -> throw new IllegalArgumentException(kind);
         };
         var mapper = mock(AiAssistantIdentifierMapper.class);

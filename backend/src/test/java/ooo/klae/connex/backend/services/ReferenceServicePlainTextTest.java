@@ -121,10 +121,19 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
-    void toPlainText_preservesNoteLikeProseOutsideMarkdownDestinations() {
+    void toPlainText_redactsUnexplainedNoteTokensEvenOutsideMarkdownDestinations() {
         String content = "Ship release-note:123 after reviewing note:456 in plain prose";
 
-        assertEquals(content, ReferenceService.toPlainText(content));
+        assertEquals("a note", ReferenceService.toPlainText(content));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "| h |\n| - |\n|\nprefix `\n[Secret `]` Member](note:42 \"title\")\nsuffix `",
+            "prefix `\n\nh|i\n--|--|--\n[Secret|Label](note:42 \"title\")\n`"
+    })
+    void toPlainText_redactsBothTableParserDisagreements(String content) {
+        assertEquals("a note", ReferenceService.toPlainText(content));
     }
 
     @Test
@@ -155,8 +164,15 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
-    void toPlainText_preservesCodeSpanBracketsNearNoteLikeProse() {
+    void toPlainText_redactsUnexplainedNoteTokensBesideCodeSpanBrackets() {
         String content = "Use `]` in prose before reviewing note:123";
+
+        assertEquals("a note", ReferenceService.toPlainText(content));
+    }
+
+    @Test
+    void toPlainText_preservesCodeSpanBracketsNearNonDestinationProse() {
+        String content = "Use `]` in prose before reviewing note:abc";
 
         assertEquals(content, ReferenceService.toPlainText(content));
     }

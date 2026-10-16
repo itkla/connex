@@ -11,9 +11,11 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -32,6 +34,28 @@ import tools.jackson.databind.json.JsonMapper;
 /** Captures actual invocation dispatches after every assistant source can discard member tokens. */
 class AiAssistantMemberExposureTest {
     private static final String MEMBER = "AlixMember";
+    private static final Map<String, Set<String>> CENSUS_REFUSALS = Map.of(
+            "canonical-code-span", Set.of(
+                    "HTML then local code <div>\n` stray\n</div>`:",
+                    "HTML then local code <div>\n` stray\n</div>`&colon;",
+                    "HTML then local code <div>\n` stray\n</div>`\\:",
+                    "HTML then local code <div>\n` stray\n</div>``:",
+                    "HTML then local code <div>\n` stray\n</div>``&colon;",
+                    "HTML then local code <div>\n` stray\n</div>``\\:"),
+            "b", Set.of("unclosed opaque construct <!--", "unclosed opaque construct <?",
+                    "unclosed opaque construct <!DECL", "unclosed opaque construct <![CDATA["),
+            "c", Set.of("container continuation - ", "container continuation * ", "container continuation + ",
+                    "container continuation 1. ", "container continuation 2) ", "container continuation > - "),
+            "final-2", Set.of("literal continuation marker -", "literal continuation marker >",
+                    "continued container definition key > - ", "continued container definition key - ",
+                    "continued container definition key 1. "),
+            "definition-fallback", Set.of("invalid definition user:7 \"title\" trailing",
+                    "invalid definition user:7 'title' trailing", "invalid definition user:7 (title) trailing",
+                    "invalid definition user:7 \"unterminated", "invalid definition user:7 (unescaped (parenthesis))",
+                    "invalid definition <user:7", "invalid definition user:7)"),
+            "paragraph-context", Set.of("encoded reference key is a paragraph shortcut Al&#93;ice",
+                    "encoded reference key is a paragraph shortcut Al&#91;ice",
+                    "encoded reference key is a paragraph shortcut Alice &amp; Bob", "encoded titled definition in paragraph"));
     private final JsonMapper mapper = JsonMapper.builder().build();
     private final AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
     private final AiAssistantMaskingTestSupport support = new AiAssistantMaskingTestSupport(7, 11);
@@ -1143,7 +1167,7 @@ class AiAssistantMemberExposureTest {
     @ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void encodedReaderVisibleReferenceLabelsAreMaskedInActualPayload(boolean nativeProtocol) throws Exception {
-        String text = "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43";
+        String text = "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n\n[invite]: user:43";
         var context = new MaskingContext();
         AiAssistantMemberIdentifiers.seedReferenceText(text, context);
         var result = new AiAssistantToolResult(Map.of("description", text),
@@ -1159,6 +1183,25 @@ class AiAssistantMemberExposureTest {
         assertFalse(payload.contains("Alice"));
         assertFalse(payload.contains("Pending"));
         assertEquals(0, capture.warnings());
+    }
+
+    @Test
+    void anEncodedDefinitionInsideAParagraphRetainsCandidatesButRefusesBeforeAdmission() {
+        String text = "[Alice &amp; Bob](user&#58;42) [Pending &lt;Name&gt;][invite]\n[invite]: user:43";
+        var references = ooo.klae.connex.backend.services.ReferenceService.memberReferencesInContent(text);
+        assertTrue(references.contains(new ooo.klae.connex.backend.services.ReferenceService.MemberReference(
+                "Alice & Bob", Set.of(42))));
+        assertTrue(references.contains(new ooo.klae.connex.backend.services.ReferenceService.MemberReference(
+                "Pending <Name>", Set.of(43))));
+        var context = new MaskingContext();
+        var refused = org.junit.jupiter.api.Assertions.assertThrows(
+                ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> AiAssistantMemberIdentifiers.seedReferenceText(text, context));
+        assertEquals("Assistant member reference content is incomplete", refused.getMessage());
+        org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                () -> AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        assertTrue(context.identifierDictionary().isEmpty());
+        assertTrue(context.tokenBindings().isEmpty());
     }
 
     static Stream<Arguments> encodedReferenceDelimiters() {
@@ -1470,7 +1513,84 @@ class AiAssistantMemberExposureTest {
     static Stream<Arguments> memberReferenceReadings() {
         return Stream.of(false, true).flatMap(nativeProtocol ->
                 ooo.klae.connex.backend.services.MemberReferenceReadings.all().stream()
-                        .map(reading -> Arguments.of(nativeProtocol, reading)));
+                        .map(reading -> Arguments.of(nativeProtocol, reading, censusRefuses(reading))));
+    }
+
+    private static boolean censusRefuses(ooo.klae.connex.backend.services.MemberReferenceReadings.Reading reading) {
+        return CENSUS_REFUSALS.getOrDefault(reading.rule(), Set.of()).contains(reading.name());
+    }
+
+    @Test
+    void theExplicitCensusRefusalGoldenCoversEveryReviewedLegacyCase() {
+        assertEquals(32, CENSUS_REFUSALS.values().stream().mapToInt(Set::size).sum());
+        assertEquals(32, ooo.klae.connex.backend.services.MemberReferenceReadings.all().stream()
+                .filter(AiAssistantMemberExposureTest::censusRefuses).count());
+    }
+
+    static Stream<Arguments> tableDisagreementReadings() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                Arguments.of(nativeProtocol, true,
+                        "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `", "Former `]` Member"),
+                Arguments.of(nativeProtocol, true,
+                        "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `\n\n[unused]: user:42",
+                        "Former `]` Member"),
+                Arguments.of(nativeProtocol, true,
+                        "| h |\n| - |\n|\nprefix `\n[Former `]` Member](u&#115;er:42 \"title\")\nsuffix `",
+                        "Former `]` Member"),
+                Arguments.of(nativeProtocol, false,
+                        "prefix `\n\nh|i\n--|--|--\n[Former|Member](user:42 \"title\")\n`", "Former|Member")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"a", "😀"})
+    void oversizedResolvedMemberLabelsRefuseBeforeProviderAdmission(String character) {
+        for (String prefix : List.of("", "!")) {
+            String content = prefix + "[" + character.repeat(1_000) + "](user:42)";
+            var context = new MaskingContext();
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(
+                    ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.seedReferenceText(content, context));
+            assertEquals("Assistant member reference content is incomplete", refused.getMessage());
+            org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.referenceIdentifiers(content));
+            assertTrue(context.identifierDictionary().isEmpty());
+            assertTrue(context.tokenBindings().isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("tableDisagreementReadings")
+    void tableDisagreementsEitherRefuseBeforeDispatchOrMaskTheActualProviderPayload(
+            boolean nativeProtocol, boolean refuse, String content, String label) throws Exception {
+        var context = new MaskingContext();
+        if (refuse) {
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(
+                    ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.seedReferenceText(content, context));
+            assertEquals("Assistant member reference content is incomplete", refused.getMessage());
+            org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.referenceIdentifiers(content));
+            assertTrue(context.identifierDictionary().isEmpty());
+            assertTrue(context.tokenBindings().isEmpty());
+            return;
+        }
+        AiAssistantMemberIdentifiers.seedReferenceText(content, context);
+        assertTrue(context.identifierDictionary().contains(label));
+        assertTrue(context.tokenBindings().isEmpty());
+        var result = new AiAssistantToolResult(Map.of("description", content),
+                AiAssistantMemberIdentifiers.referenceIdentifiers(content));
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertFalse(payload.contains("Former"));
+        assertTrue(payload.contains("{{M"));
+        assertTrue(context.tokenBindings().stream().anyMatch(binding -> label.equals(binding.getValue())));
+        assertEquals(0, capture.warnings());
     }
 
     @ParameterizedTest
@@ -1555,9 +1675,24 @@ class AiAssistantMemberExposureTest {
 
     @ParameterizedTest
     @MethodSource("memberReferenceReadings")
-    void everyConservativeMemberReadingIsMaskedInActualPayload(
-            boolean nativeProtocol, ooo.klae.connex.backend.services.MemberReferenceReadings.Reading reading) throws Exception {
+    void everyConservativeMemberReadingIsMaskedOrRefusedBeforeProviderDispatch(
+            boolean nativeProtocol, ooo.klae.connex.backend.services.MemberReferenceReadings.Reading reading,
+            boolean refuse) throws Exception {
         var context = new MaskingContext();
+        assertTrue(ooo.klae.connex.backend.services.ReferenceService.memberReferencesInContent(reading.content()).stream()
+                .anyMatch(reference -> reference.label().equals(reading.label()) && reference.memberIds().contains(42)),
+                reading.rule() + ": " + reading.name());
+        if (refuse) {
+            var refused = org.junit.jupiter.api.Assertions.assertThrows(
+                    ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.seedReferenceText(reading.content(), context));
+            assertEquals("Assistant member reference content is incomplete", refused.getMessage());
+            org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> AiAssistantMemberIdentifiers.referenceIdentifiers(reading.content()));
+            assertTrue(context.identifierDictionary().isEmpty());
+            assertTrue(context.tokenBindings().isEmpty());
+            return;
+        }
         AiAssistantMemberIdentifiers.seedReferenceText(reading.content(), context);
         assertTrue(context.tokenBindings().isEmpty());
         var result = new AiAssistantToolResult(Map.of("description", reading.content()),

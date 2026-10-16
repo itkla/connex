@@ -1087,6 +1087,11 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 assertTrue(context.identifierDictionary().contains(label), label);
                 assertFalse(mapper.writeValueAsString(result.data()).contains(label), label);
             }
+            String projected = mapper.valueToTree(result.data()).at("/notes/0/content").asString();
+            assertTrue(projected.startsWith("x".repeat(490)));
+            assertTrue(projected.contains("| --- | --- | --- |"));
+            assertTrue(projected.contains("See [^f]."));
+            assertEquals(3, projected.split(java.util.regex.Pattern.quote(MaskingEngine.REDACTED), -1).length - 1);
             var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
             var prompt = nativeProtocol
                     ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(), budget,
@@ -1098,8 +1103,56 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             for (String label : List.of("Table Stored Alias", "Footnote Stored Alias", "Container Stored Alias")) {
                 assertFalse(payload.contains(label), label);
             }
-            assertTrue(payload.contains("{{M"));
+            assertTrue(payload.contains("x".repeat(490)));
+            assertTrue(payload.contains("| --- | --- | --- |"));
+            assertTrue(payload.contains("See [^f]."));
+            assertTrue(payload.split(java.util.regex.Pattern.quote(MaskingEngine.REDACTED), -1).length - 1 >= 3);
             assertEquals(0, capture.warnings());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void tableDisagreementsRefuseOrMaskStoredAliasesBeforeProviderSerialization(boolean nativeProtocol) throws Exception {
+        var fixture = memberReferenceFixture();
+        Integer noteId = jdbc.queryForObject("SELECT id FROM note WHERE workspace_id = ? AND person_id = ?", Integer.class,
+                workspace.getId(), fixture.person().getId());
+        assertTrue(noteId != null);
+        var mapper = JsonMapper.builder().build();
+        var assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        for (boolean refused : List.of(true, false)) {
+            String label = refused ? "Stored `]` Member" : "Stored|Member";
+            String content = refused
+                    ? "| h |\n| - |\n|\nprefix `\n[" + label + "](user:" + fixture.actor().getId() + " \"title\")\nsuffix `"
+                    : "prefix `\n\nh|i\n--|--|--\n[" + label + "](user:" + fixture.actor().getId() + " \"title\")\n`";
+            jdbc.update("UPDATE note SET content = ? WHERE workspace_id = ? AND id = ?", content, workspace.getId(), noteId);
+            referenceService.syncReferences(workspace.getId(), noteId, content);
+            assertTrue(referenceService.referencesFor(workspace.getId(), "note", noteId).isEmpty());
+            var context = new MaskingContext();
+            var resources = new AiChatResourceRegistry(context);
+            resources.register("person", fixture.person().getId());
+            if (refused) {
+                var exception = assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                        () -> realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true));
+                assertEquals("Assistant member reference content is incomplete", exception.getMessage());
+                assertFalse(context.identifierDictionary().contains(label));
+            } else {
+                var result = realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+                assertTrue(context.identifierDictionary().contains(label));
+                assertFalse(mapper.writeValueAsString(result.data()).contains("Stored"));
+                var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
+                var prompt = nativeProtocol
+                        ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(), budget,
+                                AiAssistantToolCatalog.ALL)
+                        : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+                var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+                String payload = mapper.writeValueAsString(capture.request().messages());
+                assertFalse(payload.contains("Stored"));
+                assertTrue(payload.contains(MaskingEngine.REDACTED));
+                assertEquals(0, capture.warnings());
+            }
         }
     }
 

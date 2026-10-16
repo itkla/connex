@@ -527,8 +527,9 @@ public class ReferenceService {
     }
 
     /**
-     * Reads authored and entity-decoded member labels from reader-authorized prose. Incomplete content
-     * must already have been replaced at the reader-visibility boundary before AI projection.
+     * Reads conservative authored member labels from reader-authorized prose. This compatibility
+     * view does not establish AI admission; use {@link #memberReferenceReading} for completeness
+     * and additional rendered spellings before projecting prose to a provider.
      */
     public static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
         return memberReferencesInContent(readerVisibleContent).stream()
@@ -554,7 +555,7 @@ public class ReferenceService {
     public static MemberReferenceReading memberReferenceReading(String content) {
         var reading = ReferenceContentReader.read(content);
         return new MemberReferenceReading(reading.maskingReferences(),
-                reading.complete() && !reading.unparseableTypes().contains(TYPE_USER));
+                reading.complete() && reading.memberTargetsComplete());
     }
 
     /** Tests the shared code-point bound before storing member provenance. */
@@ -646,17 +647,21 @@ public class ReferenceService {
                 ? "a note"
                 : "@" + Matcher.quoteReplacement(match.group(1)));
         var targets = ReferenceContentReader.read(content);
-        if (!targets.complete()) {
-            return "(unavailable reference)";
+        if (!targets.complete() || !targets.unexplainedTargets().isEmpty() || !targets.unparseableTypes().isEmpty()) {
+            return targets.complete() && (targets.unparseableTypes().contains(TYPE_NOTE)
+                    || targets.targets().stream().anyMatch(target -> TYPE_NOTE.equals(target.type())))
+                    ? "a note" : "(unavailable reference)";
         }
         if (!redacted.equals(content)) {
             targets = ReferenceContentReader.read(redacted);
         }
-        if (!targets.complete()) {
-            return "(unavailable reference)";
+        if (!targets.complete() || !targets.unexplainedTargets().isEmpty() || !targets.unparseableTypes().isEmpty()) {
+            return targets.complete() && (targets.unparseableTypes().contains(TYPE_NOTE)
+                    || targets.targets().stream().anyMatch(target -> TYPE_NOTE.equals(target.type())))
+                    ? "a note" : "(unavailable reference)";
         }
         boolean containsNote = targets.targets().stream()
             .anyMatch(target -> TYPE_NOTE.equals(target.type()));
-        return containsNote || targets.unparseableTypes().contains(TYPE_NOTE) ? "a note" : redacted;
+        return containsNote ? "a note" : redacted;
     }
 }
