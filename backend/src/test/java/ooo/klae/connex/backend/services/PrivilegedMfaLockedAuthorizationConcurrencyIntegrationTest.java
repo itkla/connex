@@ -107,6 +107,7 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     private Organization organization;
     private Workspace workspace;
     private User actor;
+    private User secondActor;
     private WorkspaceRole customRole;
     private ReportDefinition report;
     private MockMvc mvc;
@@ -158,6 +159,9 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         }
         if (actor != null) {
             jdbc.update("DELETE FROM app_user WHERE id = ?", actor.getId());
+        }
+        if (secondActor != null) {
+            jdbc.update("DELETE FROM app_user WHERE id = ?", secondActor.getId());
         }
         if (organization != null) {
             jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
@@ -644,6 +648,72 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         }
     }
 
+    /** The workflow retry/dispatch helper sequence must not upgrade a shared custom-role fence. */
+    @Test
+    void enrolledActorsSharingARoleSerializeBeforeCombinedAdministratorAndPermissionAuthorization() throws Exception {
+        assignOrdinaryCustomRole();
+        roleMapper.insertPermissions(workspace.getId(), customRole.getId(), List.of(Permission.RULE_MANAGE.name()));
+        String suffix = UUID.randomUUID().toString();
+        secondActor = new User();
+        secondActor.setUsername("locked_mfa_second_" + suffix);
+        secondActor.setDisplayName("Second Locked MFA Actor");
+        secondActor.setEmail(suffix + "@locked-mfa.example.com");
+        secondActor.setTimezone("UTC");
+        secondActor.setPasswordHash("{noop}fixture-unused");
+        userMapper.insert(secondActor);
+        workspaceMapper.addMember(workspace.getId(), secondActor.getId(), "member");
+        workspaceMapper.setMemberCustomRole(workspace.getId(), secondActor.getId(), customRole.getId());
+        enroll(true);
+        enroll(secondActor, true);
+        transaction.setTimeout(30);
+        CountDownLatch firstAuthorized = new CountDownLatch(1);
+        CountDownLatch continueFirst = new CountDownLatch(1);
+        CountDownLatch secondAuthorized = new CountDownLatch(1);
+        AtomicLong firstConnection = new AtomicLong();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = executor.submit(() -> {
+                bindRequest();
+                try {
+                    transaction.executeWithoutResult(status -> {
+                        firstConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                        assertFalse(workspaceService.isLockedBuiltInAdministrator(workspace.getId(), actor.getId()));
+                        firstAuthorized.countDown();
+                        await(continueFirst);
+                        assertTrue(workspaceService.lockedMemberPermissionsFor(workspace.getId(), actor.getId())
+                            .contains(Permission.RULE_MANAGE));
+                    });
+                } finally {
+                    clearContext();
+                }
+            });
+            assertTrue(firstAuthorized.await(30, TimeUnit.SECONDS));
+            Future<?> second = executor.submit(() -> {
+                bindRequest(secondActor);
+                try {
+                    transaction.executeWithoutResult(status -> {
+                        assertFalse(workspaceService.isLockedBuiltInAdministrator(workspace.getId(), secondActor.getId()));
+                        secondAuthorized.countDown();
+                        assertTrue(workspaceService.lockedMemberPermissionsFor(workspace.getId(), secondActor.getId())
+                            .contains(Permission.RULE_MANAGE));
+                    });
+                } finally {
+                    clearContext();
+                }
+            });
+            awaitBlockedBy(firstConnection.get(), second, "workspace_role");
+            assertEquals(1L, secondAuthorized.getCount(), "The second administrator check must wait on the role");
+            continueFirst.countDown();
+            first.get(30, TimeUnit.SECONDS);
+            second.get(30, TimeUnit.SECONDS);
+            assertEquals(0L, secondAuthorized.getCount());
+        } finally {
+            continueFirst.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void ordinaryAndSufficientlyEnrolledPrivilegedActorsCanMutate(boolean privileged) throws Exception {
@@ -803,25 +873,37 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     }
 
     private void enroll(boolean approved) {
+        enroll(actor, approved);
+    }
+
+    private void enroll(User user, boolean approved) {
         jdbc.update("INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES (?, ?, ?, ?)",
-            actor.getUsername(), actor.getId(), actor.getUsername(), actor.getDisplayName());
+            user.getUsername(), user.getId(), user.getUsername(), user.getDisplayName());
         jdbc.update("INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key, privileged_assurance, privileged_assured_at) VALUES (?, ?, ?, ?, ?)",
-            UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), actor.getUsername(), new byte[] {1},
+            UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), user.getUsername(), new byte[] {1},
             approved ? "BREAK_GLASS" : null, approved ? LocalDateTime.now() : null);
     }
 
     private void bindRequest() {
-        authenticate();
+        bindRequest(actor);
+    }
+
+    private void bindRequest(User user) {
+        authenticate(user);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/locked-mfa-fixture");
         request.setRemoteAddr("192.0.2.91");
-        PrivilegedMfaRequestPolicy.bindBrowser(request, actor.getId(), request.getRequestURI());
+        PrivilegedMfaRequestPolicy.bindBrowser(request, user.getId(), request.getRequestURI());
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
     }
 
     private void authenticate() {
+        authenticate(actor);
+    }
+
+    private void authenticate(User user) {
         SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
-        tenantContext.set(workspace.getId(), organization.getId(), actor.getId(), "session", null);
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        tenantContext.set(workspace.getId(), organization.getId(), user.getId(), "session", null);
     }
 
     private void clearContext() {

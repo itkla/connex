@@ -58,8 +58,10 @@ custom-role overlay, or a locked custom role granting a permission from the clos
 above. The actor is also privileged here as an owner/admin of this workspace's active organization,
 read by a distinct cache-flushed, nonlocking statement on the same connection. This matches the
 standing predicate's organization branch; `org_member` admits exactly `owner` and `admin` roles.
-The administrator helpers retain local overlay permissions shared for confinement before returning
-false for built-in administrator qualification. An ordinary overlay remains admissible under its
+The ordinary administrator helper retains the local overlay role and permissions exclusively for
+confinement before returning false for built-in administrator qualification, preventing a later
+permission check from upgrading shared role locks. The report-specific assigned-role helper keeps
+its shared fence. An ordinary overlay remains admissible under its
 existing permissions. An empty permission requirement remains membership-only for custom-role
 members: it does not resolve or lock their role authority, so the recheck cannot infer privilege
 from those rows.

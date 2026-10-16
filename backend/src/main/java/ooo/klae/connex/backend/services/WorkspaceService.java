@@ -721,7 +721,8 @@ public class WorkspaceService {
      * snapshot. Must run inside a transaction and be acquired before any tenant record lock so it
      * keeps the repository's membership then record order. Custom overlays cannot qualify as built-in
      * administrators, but the request actor's current local permissions still determine confinement
-     * before this helper returns false.
+     * before this helper returns false. Their role root and permissions are retained exclusively so
+     * a later permission authorization in the same transaction never upgrades shared role locks.
      */
     public boolean isLockedBuiltInAdministrator(int workspaceId, int userId) {
         return isLockedBuiltInAdministrator(workspaceId, userId, null);
@@ -756,7 +757,12 @@ public class WorkspaceService {
         Integer confinementActor = confinementActor(Set.of(userId));
         Set<Permission> permissions = Set.of();
         if (confinementActor != null && membership.getRoleId() != null) {
-            permissions = parsePermissions(roleMapper.lockPermissionsForShare(workspaceId, membership.getRoleId()));
+            int roleId = membership.getRoleId();
+            if (assignedRoleUserId != null) {
+                permissions = parsePermissions(roleMapper.lockPermissionsForShare(workspaceId, roleId));
+            } else if (roleMapper.lockRole(workspaceId, roleId) != null) {
+                permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+            }
         }
         requireLockedMfa(confinementActor, workspaceId, membership, permissions);
         Role role = Role.of(membership.getRole());

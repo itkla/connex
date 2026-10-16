@@ -1679,10 +1679,13 @@ member permissions/memberships and wrappers, member authorization for credential
 administrator authorization, approval membership authorization, workspace identity, invite grants,
 and role mutations. It uses the retained active membership and custom-role permission rows for
 privilege **in this workspace**, not another account-wide membership scan. Built-in owner/admin
-without an overlay requires no custom-role lookup. Administrator helpers read the request actor's
-local custom-role permissions shared before returning false for built-in qualification; shared mode
-preserves the report deletion fence without upgrading its role roots. An empty permission requirement
-remains membership-only for custom-role targets; their authority is not resolved by that entry.
+without an overlay requires no custom-role lookup. Before returning false for built-in qualification,
+the ordinary administrator helper retains the request actor's local role root and permissions
+**exclusively**. Workflow retry and manual dispatch then call `lockedMemberPermissionsFor` in the same
+transaction; acquiring X initially prevents two enrolled actors sharing a custom role from deadlocking
+on an S-to-X upgrade. The report-specific assigned-role variant keeps its shared role and permission
+fence. An empty permission requirement remains membership-only for custom-role targets; their
+authority is not resolved by that entry.
 
 For a non-exempt HTTP actor with enforcement enabled the order is:
 
@@ -1709,6 +1712,11 @@ coverage-gap lock could invert against attestation redemption's role-then-covera
 ordinary administrator helper performs no assigned-role lookup. This moves ReportService's
 existing acquisition into the authorization helper without adding global membership locks or
 changing the step-up actor.
+
+For the ordinary administrator helper the full order is account → workspace → membership →
+local role X → permissions X → credential/coverage S NOWAIT → aggregate → writes → audit. Report
+deletion instead retains account → workspace → membership → assigned roles S → local permissions S
+→ credential/coverage S NOWAIT → definitions → writes → audit, without a later role upgrade.
 
 These control-plane statements run through control-catalog routing on the **same connection**.
 Both new statements are cache-flushed (`flushCache="true" useCache="false"`). The credential

@@ -31,7 +31,7 @@ public interface RoleMapper {
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
     /**
-     * Retains current local role/permission rows shared for administrator-helper confinement. Shared
+     * Retains current local role/permission rows shared for report administrator confinement. Shared
      * mode avoids upgrading the report-deletion fence that already retains all assigned roles shared.
      */
     List<String> lockPermissionsForShare(
