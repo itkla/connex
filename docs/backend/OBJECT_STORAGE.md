@@ -33,6 +33,26 @@ Tenant-owned keys use the tenant catalog's `object_deletion_queue`; control-plan
 
 The reconciler's bounded executor isolates provider latency from shared scheduling and keeps control/tenant retries separated. Overlapping sweeps coalesce rather than queueing indefinitely. Tenant cleanup preserves fair workspace rotation/slicing rather than allowing one workspace to monopolize capacity.
 
+Service tests keep the retry timer delayed and drain deterministically through the real deletion
+executor after each test transaction ends. `AbstractServiceTest` selects at most 10 tenant-queue
+rows from the shared `default` workspace under its resolved route and at most 10 control-plane
+user-profile tombstones under an unrouted scope. The user queue is drained even when no default
+workspace exists. A row becomes eligible only when its `next_attempt_at`
+is at least ten minutes overdue, with that cutoff rechecked under the row lock. Fixtures such as
+`ManagedObjectRollbackIntegrationTest` are therefore never raced within their tombstone delay
+plus this margin; tests stalled beyond that interval are accepted as out of scope. A later drain
+completes a two-pass tombstone after its rescheduled backoff and the same margin.
+
+The hook catches failures per task and continues, leaving failed rows for a later drain so another
+test's quota-lock contention cannot fail an unrelated teardown. Ten tasks per queue bound each
+call's lock exposure; drains per run far outnumber leaked rows, keeping growth bounded as tasks recover.
+Direct regression-test calls use an explicit cutoff and propagate failures. Tenant cases drive
+both passes in a test-owned workspace committed before the test transaction begins, preserving
+routing visibility and isolation from other forks. User cases use future-dated rows and restrict
+their future-cutoff selection to the fixture's own row while retaining real transactional deletion
+and storage. This avoids claiming other fixtures in the global user queue. Fixture cleanup never
+sleeps or sweeps other tenant workspaces.
+
 ## Tombstones and ambiguous writes
 
 Before provider I/O that participates in replacement/cleanup, preserve the established delayed two-pass cleanup tombstone protocol:
