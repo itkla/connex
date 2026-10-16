@@ -126,7 +126,7 @@ public class PrivilegedMfaLockedAuthorization {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
             String clientIp = clientIpResolver.resolveForDenialAudit(attrs.getRequest());
             String action = "auth.mfa.policy.denied";
-            denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp).ifPresent(admission -> {
+            denialAuditRateLimiter.acquire(user.getId(), action, reason, clientIp, attrs.getRequest()).ifPresent(admission -> {
                 PrivilegedMfaRequestPolicy.Decision decision = PrivilegedMfaRequestPolicy.decision(attrs.getRequest());
                 String prefix = decision.publicApi() ? "Public API privileged" : "Privileged";
                 String summary = prefix + ("enrollment_required".equals(reason)

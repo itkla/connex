@@ -395,7 +395,7 @@ public class AuditService {
                 summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
         entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
         if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
-            resolveDenialRequestMetadata(entry, attrs);
+            resolveDenialRequestMetadata(entry, attrs, request);
         }
         appendAndObserve(entry, true);
     }
@@ -442,7 +442,7 @@ public class AuditService {
             AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
                 summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
             entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
-            resolveDenialRequestMetadata(entry, new ServletRequestAttributes(request));
+            resolveDenialRequestMetadata(entry, new ServletRequestAttributes(request), request);
             deferIndependent(entry, appendFailed);
         } catch (RuntimeException failure) {
             appendFailed.run();
@@ -961,11 +961,13 @@ public class AuditService {
         }
     }
 
-    private void resolveDenialRequestMetadata(AuditLog entry, ServletRequestAttributes attrs) {
+    /** The explicit denied request retains firewall checks absent from raw thread-bound attributes. */
+    private void resolveDenialRequestMetadata(AuditLog entry, ServletRequestAttributes attrs,
+            HttpServletRequest deniedRequest) {
         HttpServletRequest req = attrs.getRequest();
         String userAgent;
         try {
-            userAgent = req.getHeader("User-Agent");
+            userAgent = deniedRequest.getHeader("User-Agent");
         } catch (RequestRejectedException rejected) {
             userAgent = null;
         }

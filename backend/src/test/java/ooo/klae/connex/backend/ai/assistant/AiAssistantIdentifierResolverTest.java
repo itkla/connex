@@ -262,7 +262,7 @@ class AiAssistantIdentifierResolverTest {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
         AiAssistantIdentifierResolver resolver = resolver(mapper);
         String name = "Johnathan " + "[".repeat(17) + "Sm" + "](person:1)".repeat(17) + "ith";
-        when(mapper.findMentionedRecords(7, "[7]", "ask johnathan smith", 200, "", 0))
+        when(mapper.findMentionedRecords(7, "[7]", "ask johnathan smith", "ask johnathan smith", 200, "", 0))
                 .thenReturn(List.of(mention("person", 11, name), mention("person", 12, "Johnathan Smith")));
 
         AiAssistantIdentifierResolver.Resolution resolution = resolver.resolve("Ask Johnathan Smith");
@@ -279,8 +279,8 @@ class AiAssistantIdentifierResolverTest {
         AiAssistantIdentifierResolver resolver = resolver(mapper);
         String name = "[".repeat(17) + "John O'Connor" + "](person:1)".repeat(17);
         String message = "[Visible](person:" + name + ")";
-        String lookup = MaskingEngine.mentionScanText(message).lookupText();
-        when(mapper.findMentionedRecords(7, "[7]", lookup, 200, "", 0))
+        MaskingEngine.MentionScanText scan = MaskingEngine.mentionScanText(message);
+        when(mapper.findMentionedRecords(7, "[7]", scan.literalText(), scan.labelText(), 200, "", 0))
                 .thenReturn(List.of(mention("person", 11, name)));
 
         AiAssistantIdentifierResolver.Resolution resolution = resolver.resolve(message);
@@ -298,15 +298,15 @@ class AiAssistantIdentifierResolverTest {
     void lookupAndAdmissionUseTheSameLinkedTurn(String spelling) {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
         AiAssistantIdentifierResolver resolver = resolver(mapper);
-        String prepared = MaskingEngine.mentionScanText("Ask " + spelling + " today.").lookupText();
-        when(mapper.findMentionedRecords(7, "[7]", prepared, 200, "", 0))
+        MaskingEngine.MentionScanText scan = MaskingEngine.mentionScanText("Ask " + spelling + " today.");
+        when(mapper.findMentionedRecords(7, "[7]", scan.literalText(), scan.labelText(), 200, "", 0))
                 .thenReturn(List.of(mention("person", 11, "John O'Connor")));
 
         AiAssistantIdentifierResolver.Resolution resolution = resolver.resolve("Ask " + spelling + " today.");
 
         assertEquals(1, resolution.identifiers().size());
         assertEquals(11, resolution.resources().getFirst().id());
-        verify(mapper).findMentionedRecords(7, "[7]", prepared, 200, "", 0);
+        verify(mapper).findMentionedRecords(7, "[7]", scan.literalText(), scan.labelText(), 200, "", 0);
     }
 
     @Test
@@ -314,7 +314,7 @@ class AiAssistantIdentifierResolverTest {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
         AiAssistantIdentifierResolver resolver = resolver(mapper);
         String sanitized = "what is happening with john o'connor?";
-        when(mapper.findMentionedRecords(7, "[7]", sanitized, 200, "", 0))
+        when(mapper.findMentionedRecords(7, "[7]", sanitized, sanitized, 200, "", 0))
                 .thenReturn(List.of(mention("person", 11, "John O'Connor")));
 
         AiAssistantIdentifierResolver.Resolution resolution =
@@ -322,14 +322,14 @@ class AiAssistantIdentifierResolverTest {
 
         assertEquals(1, resolution.identifiers().size());
         assertEquals("John O'Connor", resolution.identifiers().getFirst().value());
-        verify(mapper).findMentionedRecords(7, "[7]", sanitized, 200, "", 0);
+        verify(mapper).findMentionedRecords(7, "[7]", sanitized, sanitized, 200, "", 0);
     }
 
     @Test
     void resolveUsesOneBoundedPageAndSeedsEveryMatchedKind() {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
         AiAssistantIdentifierResolver resolver = resolver(mapper);
-        when(mapper.findMentionedRecords(7, "[7]", "ask ada about acme renewal", 200, "", 0))
+        when(mapper.findMentionedRecords(7, "[7]", "ask ada about acme renewal", "ask ada about acme renewal", 200, "", 0))
                 .thenReturn(List.of(
                         mention("person", 11, "Ada"),
                         mention("company", 12, "Acme"),
@@ -344,7 +344,7 @@ class AiAssistantIdentifierResolverTest {
         assertEquals(3, resolution.resources().size());
         assertFalse(masked.contains("Ada"));
         assertFalse(masked.contains("Acme"));
-        verify(mapper).findMentionedRecords(7, "[7]", "ask ada about acme renewal", 200, "", 0);
+        verify(mapper).findMentionedRecords(7, "[7]", "ask ada about acme renewal", "ask ada about acme renewal", 200, "", 0);
     }
 
     @Test
@@ -357,7 +357,7 @@ class AiAssistantIdentifierResolverTest {
         String message = "Ask about " + mentions.stream()
                 .map(AiAssistantIdentifierMention::getValue)
                 .collect(Collectors.joining(", "));
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), eq(""), eq(0)))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), eq(""), eq(0)))
                 .thenReturn(mentions);
 
         AiAssistantLoopException exception = assertThrows(
@@ -378,7 +378,7 @@ class AiAssistantIdentifierResolverTest {
                 .map(candidate -> "q" + candidate.getValue() + "q")
                 .collect(Collectors.joining(" "));
         candidates.add(mention("person", 251, "Acme Renewal"));
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), eq(""), eq(0)))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), eq(""), eq(0)))
                 .thenReturn(List.copyOf(candidates));
 
         AiAssistantIdentifierResolver.Resolution resolution = resolver.resolve(message);
@@ -402,9 +402,9 @@ class AiAssistantIdentifierResolverTest {
                 .mapToObj(id -> mention("person", id, "東京商事%03d".formatted(id)))
                 .toList());
         candidates.add(mention("person", 251, "Acme Renewal"));
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), eq(""), eq(0)))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), eq(""), eq(0)))
                 .thenReturn(List.copyOf(candidates.subList(0, 200)));
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), eq("person"), eq(200)))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), eq("person"), eq(200)))
                 .thenReturn(List.copyOf(candidates.subList(200, candidates.size())));
 
         for (String message : List.of("Ask about Acme Renewal", "今日のAcme Renewalの予定は？")) {
@@ -426,9 +426,9 @@ class AiAssistantIdentifierResolverTest {
         List<AiAssistantIdentifierMention> secondPage = IntStream.rangeClosed(1, 20)
                 .mapToObj(id -> mention("person", id + 1, "Renewal"))
                 .toList();
-        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", 200, "", 0))
+        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", "ask acme about renewal", 200, "", 0))
                 .thenReturn(firstPage);
-        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", 200, "person", 1))
+        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", "ask acme about renewal", 200, "person", 1))
                 .thenReturn(secondPage);
 
         AiAssistantLoopException exception = assertThrows(AiAssistantLoopException.class,
@@ -448,30 +448,40 @@ class AiAssistantIdentifierResolverTest {
         List<AiAssistantIdentifierMention> secondPage = IntStream.rangeClosed(1, 19)
                 .mapToObj(id -> mention("person", id + 1, "Renewal"))
                 .toList();
-        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", 200, "", 0))
+        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", "ask acme about renewal", 200, "", 0))
                 .thenReturn(firstPage);
-        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", 200, "person", 1))
+        when(mapper.findMentionedRecords(7, "[7]", "ask acme about renewal", "ask acme about renewal", 200, "person", 1))
                 .thenReturn(secondPage);
 
         assertEquals(20, resolver.resolve("Ask Acme about Renewal").identifiers().size());
     }
 
     @Test
-    void fullPagesWithNoAdmittedMentionsContinueUntilTheMapperIsExhausted() {
+    void legacyUnbackfilledFullPagesContinueUntilTheMapperIsExhausted() {
         AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
         AiAssistantIdentifierResolver resolver = resolver(mapper);
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), anyString(), anyInt()))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), anyString(), anyInt()))
                 .thenAnswer(call -> {
-                    int afterId = call.getArgument(5);
+                    int afterId = call.getArgument(6);
                     return afterId >= 50_200 ? List.of() : IntStream.rangeClosed(afterId + 1, afterId + 200)
                             .mapToObj(id -> mention("person", id, "東京商事%06d".formatted(id)))
                             .toList();
                 });
 
         assertEquals(List.of(), resolver.resolve("No matching records").identifiers());
-        verify(mapper).findMentionedRecords(7, "[7]", "no matching records", 200, "person", 50_200);
-        verify(mapper, times(252)).findMentionedRecords(
-                eq(7), eq("[7]"), eq("no matching records"), eq(200), anyString(), anyInt());
+        verify(mapper).findMentionedRecords(7, "[7]", "no matching records", "no matching records", 200, "person", 50_200);
+        verify(mapper, times(252)).findMentionedRecords(eq(7), eq("[7]"), eq("no matching records"), eq("no matching records"), eq(200), anyString(), anyInt());
+    }
+
+    @Test
+    void currentKeysWithNoMentionsReturnOneEmptyPageRegardlessOfCorpusVolume() {
+        AiAssistantIdentifierMapper mapper = mock(AiAssistantIdentifierMapper.class);
+        AiAssistantIdentifierResolver resolver = resolver(mapper);
+        when(mapper.findMentionedRecords(7, "[7]", "no matching records", "no matching records", 200, "", 0))
+                .thenReturn(List.of());
+
+        assertEquals(List.of(), resolver.resolve("No matching records").identifiers());
+        verify(mapper, times(1)).findMentionedRecords(7, "[7]", "no matching records", "no matching records", 200, "", 0);
     }
 
     @Test
@@ -483,7 +493,7 @@ class AiAssistantIdentifierResolverTest {
                 .toList());
         candidates.add(mention("deal", 99, "Acme\u0007Renewal"));
         String message = "Ask about Acme Renewal " + "filler ".repeat(2_000);
-        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), eq(200), eq(""), eq(0)))
+        when(mapper.findMentionedRecords(eq(7), eq("[7]"), anyString(), anyString(), eq(200), eq(""), eq(0)))
                 .thenReturn(List.copyOf(candidates));
 
         AiAssistantIdentifierResolver.Resolution resolution = assertTimeoutPreemptively(

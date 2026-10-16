@@ -6,10 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -349,6 +353,65 @@ class ApiCredentialAuthenticationFilterTest {
             "auth.mfa.policy.denied", "user", fixture.binding().userId(), null, null, null,
             "Public API privileged account confined pending MFA enrollment", "enrollment_required", request, "192.0.2.10");
         assertNull(SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PrivilegedMfaStanding.class, names = {"ENROLLMENT_REQUIRED", "ATTESTATION_REQUIRED"})
+    void userAgentDifferentiationAuditsTwiceAndPreservesEveryPublicRefusal(PrivilegedMfaStanding standing)
+            throws Exception {
+        AuditService auditService = mock(AuditService.class);
+        StandingFixture fixture = standingFixture("true", standing, RouteTransactionMode.READ, auditService);
+        String reason = standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED
+            ? "enrollment_required" : "attestation_required";
+        for (String agent : List.of("Browser A", "Browser B", "Browser A", "Browser B")) {
+            MockHttpServletRequest request = authenticatedRequest("GET");
+            request.addHeader(HttpHeaders.USER_AGENT, agent);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            fixture.filter().doFilter(request, response, chain);
+
+            assertEquals(401, response.getStatus());
+            assertEquals("privileged_mfa_" + reason,
+                new ObjectMapper().readTree(response.getContentAsByteArray())
+                    .path("error").path("code").textValue());
+            assertNull(chain.getRequest());
+            assertFalse(fixture.tenantContext().isResolved());
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
+        }
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+            eq("auth.mfa.policy.denied"), eq("user"), eq(fixture.binding().userId()), isNull(), isNull(), isNull(),
+            any(), eq(reason), any(), eq("192.0.2.10"));
+    }
+
+    @Test
+    void rejectedUserAgentsDoNotThrowOrOpenSeparatePublicDenialAdmissions() throws Exception {
+        AuditService auditService = mock(AuditService.class);
+        StandingFixture fixture = standingFixture("true", PrivilegedMfaStanding.ENROLLMENT_REQUIRED,
+            RouteTransactionMode.READ, auditService);
+        for (String agent : List.of("Browser A\u0085", "Browser B\u0085", "Browser A")) {
+            MockHttpServletRequest request = authenticatedRequest("GET");
+            request.addHeader(HttpHeaders.USER_AGENT, agent);
+            var firewalled = new StrictHttpFirewall().getFirewalledRequest(request);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            fixture.filter().doFilter(firewalled, response, chain);
+
+            assertEquals(401, response.getStatus());
+            assertEquals("privileged_mfa_enrollment_required",
+                new ObjectMapper().readTree(response.getContentAsByteArray())
+                    .path("error").path("code").textValue());
+            assertNull(chain.getRequest());
+            assertFalse(fixture.tenantContext().isResolved());
+        }
+        MockHttpServletResponse absent = new MockHttpServletResponse();
+        fixture.filter().doFilter(authenticatedRequest("GET"), absent, new MockFilterChain());
+        assertEquals(401, absent.getStatus());
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+            eq("auth.mfa.policy.denied"), eq("user"), eq(fixture.binding().userId()), isNull(), isNull(), isNull(),
+            any(), eq("enrollment_required"), any(), eq("192.0.2.10"));
     }
 
     @Test

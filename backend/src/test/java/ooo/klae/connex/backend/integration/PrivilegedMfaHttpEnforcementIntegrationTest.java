@@ -125,6 +125,24 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
                 eq("enrollment_required"), any(HttpServletRequest.class), any());
     }
 
+    @Test
+    void differentBrowsersAtOneAddressKeepSeparateDenialEvidenceThroughTheSecurityChain() throws Exception {
+        for (String agent : List.of("Browser A", "Browser B", "Browser A", "Browser B")) {
+            mockMvc.perform(get("/api/companies").session(stampedSession()).with(authentication(authentication))
+                            .header("User-Agent", agent).with(request -> {
+                                request.setRemoteAddr("192.0.2.64");
+                                return request;
+                            }))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
+        }
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.policy.denied"), eq("user"), eq(USER_ID), isNull(), isNull(),
+                eq("Unenrolled Privileged Integration"), eq("Privileged account confined pending MFA enrollment"),
+                eq("enrollment_required"), any(HttpServletRequest.class), eq("192.0.2.64"));
+    }
+
     /**
      * Through the real filter chain, a privileged account whose passkeys are not yet approved in
      * every organization where it is privileged is confined with the attestation code, and the
