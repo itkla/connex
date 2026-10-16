@@ -172,11 +172,18 @@ A census token must start at the beginning of text, after whitespace, or after o
 `(`, `<`, `[`, `]`, `:`, `"`, `'`, backtick or `|`. The first seven delimit Markdown destinations,
 autolinks, keys and quoted values; backticks and pipes retain conservative literal-code and
 table-cell coverage. Word-embedded and slash-prefixed substrings therefore do not become internal
-targets. External URL spans beginning with `scheme://`, `mailto:` or `www.` are excluded through
-the next whitespace or closing `)`, `>`, `]`, `"`, `'`, backtick or table pipe. URL discovery and
-census matching scan forward without rescanning scheme runs. An internal destination after a
-URL's closing delimiter still counts. Ordinary URL paths such as `https://example.com/user:42`
-and `/superuser:42` no longer invent member provenance or trigger whole-body redaction.
+targets. External URL spans beginning with `scheme://`, `mailto:` or `www.` end at whitespace,
+`<`, `>`, `]`, backtick, table pipe or an unmatched closing `)`. The `<` boundary follows
+[GFM autolink termination](https://github.github.com/gfm/#autolinks-extension-) and always applies,
+including inside quoted query text: `https://example.com/<note:42>` and `a://<user:42>` retain
+their adjacent internal destinations even when both ASTs miss them. All GFM whitespace terminates
+the span too. A forward-only counter keeps balanced parentheses inside the URL, and interior
+quotes/apostrophes remain URL characters. Thus `https://example.com/(docs)/:user:42`,
+`[Help](https://example.com/(docs)/:user:42)` and query/path apostrophes no longer invent member
+provenance or trigger whole-body redaction. URL discovery and census matching do not rescan scheme
+runs or punctuation tails. An internal destination after a URL's closing delimiter still counts.
+Ordinary URL paths such as `https://example.com/user:42` and `/superuser:42` remain external or
+word-embedded text.
 Only an actual link, image or definition destination from either parse explains a census hit, by the
 same type, integer ID and original source occurrence; compatibility scans cannot explain one.
 An unrelated definition with the same ID cannot establish coverage for a missed table link.
@@ -267,6 +274,9 @@ itself leaves literal), bounded/unrepresentable inputs refusing
 instead of rendering, and future parser/renderer version drift. Renew the differential fixtures
 when either dependency changes; census over-inclusion remains intentional even where neither
 parser renders a link.
+URL exclusion deliberately stops at every unmatched closing parenthesis and at `]`, backtick or
+table pipe, rather than reproducing every GFM trailing-punctuation/context rule. Those remaining
+conservative boundaries can still redact/refuse otherwise external URL text.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

@@ -96,8 +96,49 @@ class ReferenceContentReaderTest {
                 "/super%s:42", "super%s:42", "Visit https://example.com/:%s:42 today.",
                 "[Help](https://example.com/(%s:42))", "Visit www.example.com/:%s:42 today.",
                 "Email mailto:help@example.com?subject=:%s:42 today.",
-                "[Help](custom+scheme://example.com/:%s:42)")
+                "[Help](custom+scheme://example.com/:%s:42)",
+                "Visit https://example.com/(docs)/:%s:42 today.",
+                "[Help](https://example.com/(docs)/:%s:42)",
+                "Visit https://example.com/((docs))/:%s:42 today.",
+                "[Help](https://example.com/((docs))/:%s:42)",
+                "Visit https://example.com/?q='docs'/:%s:42 today.",
+                "[Help](https://example.com/?q='docs'/:%s:42)",
+                "Visit https://example.com/?q=\"docs\"/:%s:42 today.",
+                "[Help](https://example.com/?q=\"docs\"/:%s:42)")
                 .map(layout -> Arguments.of(type, layout.formatted(type))));
+    }
+
+    static Stream<Arguments> adjacentAutolinkDestinations() {
+        return TYPES.stream().flatMap(type -> Stream.of("https://example.com/", "a://", "www.example.com/",
+                "mailto:help@example.test?", "https://example.com/(docs)/", "https://example.com/?q='docs'")
+                .flatMap(prefix -> Stream.of(prefix + "<" + type + ":42>",
+                        "| h |\n| - |\n|\nprefix `\n" + prefix + "<" + type + ":42>\nsuffix `")
+                        .map(content -> Arguments.of(type, content))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("adjacentAutolinkDestinations")
+    void externalUrlEndsBeforeAnAdjacentInternalAutolink(String type, String content) {
+        var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete(), content);
+        assertTrue(reading.targets().contains(target), content);
+        if (content.startsWith("| h |")) {
+            assertTrue(reading.links().isEmpty(), content);
+            assertTrue(reading.unexplainedTargets().contains(target), content);
+            assertEquals(!type.equals("user"), ReferenceService.memberReferenceReading(content).complete(), content);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {" ", "\t", "\n", "\r", "\r\n", "\u00a0", "\u2003", "\u2028", "\u2029"})
+    void externalUrlsEndAtGfmWhitespaceBeforeLiteralDestinations(String whitespace) {
+        for (String type : TYPES) {
+            var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+            var reading = ReferenceContentReader.read("https://example.com/" + whitespace + type + ":42");
+            assertTrue(reading.targets().contains(target), type);
+            assertTrue(reading.unexplainedTargets().contains(target), type);
+        }
     }
 
     @ParameterizedTest

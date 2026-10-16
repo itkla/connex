@@ -133,6 +133,26 @@ describe("NoteContent Markdown rendering", () => {
         }
     });
 
+    it.each([
+        "https://example.com/", "a://", "www.example.com/", "mailto:help@example.test?",
+        "https://example.com/(docs)/", "https://example.com/?q='docs'",
+    ])("recognizes internal autolinks immediately after %s", (prefix) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            for (const content of [
+                `${prefix}<${type}:42>`,
+                `| h |\n| - |\n|\nprefix \`\n${prefix}<${type}:42>\nsuffix \``,
+            ]) {
+                const authorized = render(content, [{ type, id: 42, label: "Server label" }]);
+                const unresolved = render(content);
+
+                expect(authorized).toContain("Server label");
+                expect(unresolved).toContain("Unavailable reference");
+                expect(unresolved).not.toContain(`${type}:42`);
+            }
+        }
+    });
+
     const censusNormalizations: [string, (type: string) => string][] = [
         ["full-width digits", (type) => `${type}:４２`],
         ["Arabic digits", (type) => `${type}:٤٢`],
@@ -171,6 +191,14 @@ describe("NoteContent Markdown rendering", () => {
         ["parentheses in a URL", "[Help](https://example.com/(TYPE:42))"],
         ["www autolink", "Visit www.example.com/:TYPE:42 today."],
         ["mailto URL", "[Help](mailto:help@example.com?subject=:TYPE:42)"],
+        ["balanced parentheses in prose", "Visit https://example.com/(docs)/:TYPE:42 today."],
+        ["balanced parentheses in a link", "[Help](https://example.com/(docs)/:TYPE:42)"],
+        ["nested parentheses in prose", "Visit https://example.com/((docs))/:TYPE:42 today."],
+        ["nested parentheses in a link", "[Help](https://example.com/((docs))/:TYPE:42)"],
+        ["apostrophes in a prose URL", "Visit https://example.com/?q='docs'/:TYPE:42 today."],
+        ["apostrophes in a link URL", "[Help](https://example.com/?q='docs'/:TYPE:42)"],
+        ["quotes in a prose URL", "Visit https://example.com/?q=\"docs\"/:TYPE:42 today."],
+        ["quotes in a link URL", "[Help](https://example.com/?q=\"docs\"/:TYPE:42)"],
     ])("keeps external census exclusions ordinary in %s", (_name, fixture) => {
         const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
         for (const type of types) {

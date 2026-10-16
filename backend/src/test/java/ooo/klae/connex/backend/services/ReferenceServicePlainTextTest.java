@@ -14,10 +14,23 @@ import org.junit.jupiter.api.Test;
 
 class ReferenceServicePlainTextTest {
 
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> adjacentAutolinkDestinations() {
+        return ReferenceContentReaderTest.adjacentAutolinkDestinations()
+                .filter(arguments -> ((String) arguments.get()[1]).startsWith("| h |"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("adjacentAutolinkDestinations")
+    void toPlainText_redactsUnexplainedAutolinksFollowingExternalUrls(String type, String content) {
+        assertEquals(type.equals("note") ? "a note" : "(unavailable reference)", ReferenceService.toPlainText(content));
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {
             "Visit https://example.com/user:42 today.", "[Help](https://example.com/user:42)", "/superuser:42",
-            "Visit https://example.com/:note:42 today.", "[Help](https://example.com/(note:42))"
+            "Visit https://example.com/:note:42 today.", "[Help](https://example.com/(note:42))",
+            "Visit https://example.com/(docs)/:user:42 today.", "[Help](https://example.com/(docs)/:user:42)",
+            "Visit https://example.com/?q='docs'/:user:42 today.", "[Help](https://example.com/?q='docs'/:user:42)"
     })
     void toPlainText_preservesExternalUrlsAndEmbeddedWords(String content) {
         assertEquals(content, ReferenceService.toPlainText(content));

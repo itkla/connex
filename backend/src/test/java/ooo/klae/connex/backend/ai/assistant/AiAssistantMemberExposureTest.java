@@ -1552,7 +1552,34 @@ class AiAssistantMemberExposureTest {
                 Arguments.of(nativeProtocol, "[Help](https://example.com/user:42)", "[Help]([redacted]"),
                 Arguments.of(nativeProtocol, "/superuser:42", "/superuser:42"),
                 Arguments.of(nativeProtocol, "Visit https://example.com/:user:42 today.", "Visit [redacted] today."),
-                Arguments.of(nativeProtocol, "[Help](https://example.com/(user:42))", "[Help]([redacted]")));
+                Arguments.of(nativeProtocol, "[Help](https://example.com/(user:42))", "[Help]([redacted]"),
+                Arguments.of(nativeProtocol, "Visit https://example.com/(docs)/:user:42 today.", "Visit [redacted] today."),
+                Arguments.of(nativeProtocol, "[Help](https://example.com/(docs)/:user:42)", "[Help]([redacted]"),
+                Arguments.of(nativeProtocol, "Visit https://example.com/?q='docs'/:user:42 today.", "Visit [redacted] today."),
+                Arguments.of(nativeProtocol, "[Help](https://example.com/?q='docs'/:user:42)", "[Help]([redacted]")));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "user", "person", "deal", "company", "note", "file", "task", "activity"
+    })
+    void adjacentAutolinksCannotHideUnknownMemberProvenanceAtEitherAiEntryPoint(String type) {
+        for (String prefix : List.of("https://example.com/", "a://", "www.example.com/",
+                "mailto:help@example.test?", "https://example.com/(docs)/", "https://example.com/?q='docs'")) {
+            String content = "| h |\n| - |\n|\nprefix `\n" + prefix + "<" + type + ":42>\nsuffix `";
+            var context = new MaskingContext();
+            if (type.equals("user")) {
+                org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                        () -> AiAssistantMemberIdentifiers.seedReferenceText(content, context), content);
+                org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                        () -> AiAssistantMemberIdentifiers.referenceIdentifiers(content), content);
+            } else {
+                AiAssistantMemberIdentifiers.seedReferenceText(content, context);
+                assertTrue(AiAssistantMemberIdentifiers.referenceIdentifiers(content).isEmpty(), content);
+            }
+            assertTrue(context.identifierDictionary().isEmpty(), content);
+            assertTrue(context.tokenBindings().isEmpty(), content);
+        }
     }
 
     @ParameterizedTest

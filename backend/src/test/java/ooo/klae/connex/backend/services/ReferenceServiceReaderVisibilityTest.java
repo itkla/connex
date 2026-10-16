@@ -59,6 +59,16 @@ class ReferenceServiceReaderVisibilityTest {
         return ReferenceContentReaderTest.externalAndEmbeddedDestinations();
     }
 
+    static Stream<Arguments> adjacentAutolinkDestinations() {
+        return ReferenceContentReaderTest.adjacentAutolinkDestinations();
+    }
+
+    @ParameterizedTest
+    @MethodSource("adjacentAutolinkDestinations")
+    void adjacentAutolinksStillRequireScopedVisibility(String type, String content) {
+        tableDisagreementsStillRequireScopedVisibility(type, content);
+    }
+
     @ParameterizedTest
     @MethodSource("normalizedTableDestinations")
     void normalizedCensusStillRequiresScopedVisibility(String type, String content) {

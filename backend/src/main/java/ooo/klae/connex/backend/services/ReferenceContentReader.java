@@ -319,7 +319,10 @@ final class ReferenceContentReader {
                 || "(<[]:\"'`|".indexOf(previous) >= 0;
     }
 
-    /** Tracks scheme runs once; consuming each URL through its closing delimiter stays linear. */
+    /**
+     * Tracks scheme runs and balanced parentheses once. Interior quotes remain URL characters;
+     * GFM's hard less-than/whitespace boundaries always win, including inside quoted queries.
+     */
     private static List<ExternalUrlSpan> externalUrlSpans(String content) {
         List<ExternalUrlSpan> spans = new ArrayList<>();
         int schemeStart = -1;
@@ -339,7 +342,17 @@ final class ReferenceContentReader {
             }
             if (start >= 0) {
                 int end = offset + prefixLength;
+                int parentheses = 0;
                 while (end < content.length() && !externalUrlEnd(content.charAt(end))) {
+                    char character = content.charAt(end);
+                    if (character == '(') {
+                        parentheses++;
+                    } else if (character == ')') {
+                        if (parentheses == 0) {
+                            break;
+                        }
+                        parentheses--;
+                    }
                     end++;
                 }
                 spans.add(new ExternalUrlSpan(start, end));
@@ -361,7 +374,7 @@ final class ReferenceContentReader {
 
     private static boolean externalUrlEnd(char character) {
         return Character.isWhitespace(character) || Character.isSpaceChar(character)
-                || ")>]\"'`|".indexOf(character) >= 0;
+                || "<>]`|".indexOf(character) >= 0;
     }
 
     /** Entity-encoded type letters must not hide renderer-recognized destinations from the census. */
