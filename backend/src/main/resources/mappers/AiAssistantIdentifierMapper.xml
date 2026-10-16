@@ -62,16 +62,19 @@
 
   <!-- CASE keeps per-row SQL normalization and broad Unicode fallback off the current-key path. -->
   <sql id="candidatePredicate">
-    AND CASE WHEN <include refid="currentKeyBundle"/> THEN
+    AND CASE WHEN <include refid="currentKeyBundle"/>
+      AND CAST(${alias}.ai_identifier_literal_key AS BINARY) != CAST(CONVERT(#{unkeyed,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
+      AND CAST(${alias}.ai_identifier_label_key AS BINARY) != CAST(CONVERT(#{unkeyed,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY) THEN
       (OCTET_LENGTH(${alias}.ai_identifier_literal_key) &gt; 0
-        AND LOCATE(CAST(${alias}.ai_identifier_literal_key AS BINARY), CAST(#{literalText} AS BINARY)) &gt; 0)
+        AND LOCATE(CAST(${alias}.ai_identifier_literal_key AS BINARY), CAST(CONVERT(#{literalText,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)) &gt; 0)
       OR (OCTET_LENGTH(${alias}.ai_identifier_label_key) &gt; 0
-        AND LOCATE(CAST(${alias}.ai_identifier_label_key AS BINARY), CAST(#{labelText} AS BINARY)) &gt; 0)
+        AND LOCATE(CAST(${alias}.ai_identifier_label_key AS BINARY), CAST(CONVERT(#{labelText,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)) &gt; 0)
     ELSE <include refid="legacyCandidatePredicate"/> END
   </sql>
 
   <select id="findMentionedRecords" resultMap="IdentifierMention">
     <bind name="legacyText" value="literalText.equals(labelText) ? literalText : literalText + &quot; &quot; + labelText"/>
+    <bind name="unkeyed" value="@ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys@UNKEYED"/>
     <bind name="keyVersion" value="@ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys@VERSION"/>
     SELECT matched.kind, matched.id, matched.value
     FROM (
@@ -125,14 +128,14 @@
 
   <update id="updatePersonKeysIfNameCurrent">
     UPDATE person p
-    SET ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
         ai_identifier_key_version = #{keyVersion},
         updated_at = updated_at
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
       AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
-      AND CAST(p.name AS BINARY) = CAST(#{name} AS BINARY)
+      AND CAST(p.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
   </update>
 
@@ -149,14 +152,14 @@
 
   <update id="updateCompanyKeysIfNameCurrent">
     UPDATE company c
-    SET ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
         ai_identifier_key_version = #{keyVersion},
         updated_at = updated_at
     WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
       AND c.archived_at IS NULL
-      AND CAST(c.name AS BINARY) = CAST(#{name} AS BINARY)
+      AND CAST(c.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
   </update>
 
@@ -173,14 +176,14 @@
 
   <update id="updateDealKeysIfNameCurrent">
     UPDATE deal d
-    SET ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
         ai_identifier_key_version = #{keyVersion},
         updated_at = updated_at
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
 
-      AND CAST(d.name AS BINARY) = CAST(#{name} AS BINARY)
+      AND CAST(d.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="d"/></include>)
   </update>
 

@@ -193,8 +193,9 @@ class AiAssistantPromptInjectionGoldenTest {
         mentioned.setKind("person");
         mentioned.setId(31);
         mentioned.setValue("Kenji Sato");
+        var turn = MaskingEngine.mentionScanText("What is happening with " + spelling + "?");
         when(identifierMapper.findMentionedRecords(
-                7, "[7]", MaskingEngine.mentionScanText("What is happening with " + spelling + "?").lookupText(),
+                7, "[7]", turn.literalText(), turn.labelText(),
                 200, "", 0))
                 .thenReturn(List.of(mentioned));
         MaskingContext context = new MaskingContext();

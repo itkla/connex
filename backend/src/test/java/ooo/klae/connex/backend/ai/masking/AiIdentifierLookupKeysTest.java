@@ -64,7 +64,17 @@ class AiIdentifierLookupKeysTest {
         MaskingEngine.MentionScanText turn = MaskingEngine.mentionScanText("client");
         assertTrue(turn.literalText().contains(keys.literal()));
         assertFalse(MaskingEngine.containsIdentifierMention(turn, "Li"));
-        assertEquals(CanonicalText.canonical("ﷺ".repeat(255)),
-                AiIdentifierLookupKeys.fromName("ﷺ".repeat(255)).literal());
+    }
+
+    @Test
+    void oversizedAliasesUseAnExplicitFallbackMarkerWithoutChangingJavaAdmission() {
+        String name = "ﷺ".repeat(255);
+        assertEquals(new AiIdentifierLookupKeys(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.UNKEYED),
+                AiIdentifierLookupKeys.fromName(name));
+        assertTrue(MaskingEngine.containsIdentifierMention(MaskingEngine.mentionScanText(name), name));
+        assertEquals("a".repeat(512), AiIdentifierLookupKeys.fromName("A".repeat(512)).literal());
+        assertEquals(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.fromName("A".repeat(513)).literal());
+        assertEquals("𠀀".repeat(512), AiIdentifierLookupKeys.fromName("𠀀".repeat(512)).literal());
+        assertEquals(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.fromName("𠀀".repeat(513)).literal());
     }
 }

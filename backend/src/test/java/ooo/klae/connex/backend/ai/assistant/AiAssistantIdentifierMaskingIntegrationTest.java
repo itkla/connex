@@ -123,6 +123,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     @BeforeEach
     void setUpWorkspace(org.junit.jupiter.api.TestInfo info) {
         committedMemberFixture = info.getTestMethod().map(method -> Set.of(
+                "cp1252ConnectionKeepsAdmittedNameOutOfProviderPayload",
                 "realMemberDirectoryAndAuthoredReferenceLabelsStayMaskedAcrossRenameAndFreshReplay",
                 "storedTaskOutcomesMaskRenamedAndPendingReferencesOnBothProtocolsAndFreshReplay",
                 "queuedUserReferenceSpellingsRemainMaskedOnFirstDispatchAndFreshReplay")
@@ -931,6 +932,84 @@ class AiAssistantIdentifierMaskingIntegrationTest {
     private record ParityName(String kind, int id, String value) {
         String key() {
             return kind + ":" + id;
+        }
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void cp1252ConnectionKeepsAdmittedNameOutOfProviderPayload() throws Exception {
+        Person japanese = newPerson(newCompany("Japanese fixture"), "株式会社 Team");
+        Person supplementary = newPerson(newCompany("Supplementary fixture"), "𠀀 Team");
+        jdbc.update("UPDATE person SET ai_identifier_key_version = 0, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), japanese.getId());
+        String url = System.getenv("CONNEX_DB_URL")
+                .replaceAll("(?i)(characterEncoding|connectionCollation)=[^&]*&?", "");
+        url += (url.contains("?") ? "&" : "?") + "characterEncoding=Cp1252&connectionCollation=latin1_bin";
+        var dataSource = new org.apache.ibatis.datasource.unpooled.UnpooledDataSource(
+                "com.mysql.cj.jdbc.Driver", url, System.getenv("CONNEX_DB_USERNAME"), System.getenv("CONNEX_DB_PASSWORD"));
+        var configuration = new org.apache.ibatis.session.Configuration(new org.apache.ibatis.mapping.Environment(
+                "identifier-cp1252", new org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory(), dataSource));
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        configuration.addInterceptor(new ooo.klae.connex.backend.tenant.TenantScopeInterceptor(tenantContext, true, false));
+        for (String resource : List.of("mappers/PersonMapper.xml", "mappers/AiAssistantIdentifierMapper.xml")) {
+            try (var input = getClass().getClassLoader().getResourceAsStream(resource)) {
+                assertTrue(input != null);
+                new org.apache.ibatis.builder.xml.XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+            }
+        }
+        var sessions = new org.apache.ibatis.session.SqlSessionFactoryBuilder().build(configuration);
+        try (var session = sessions.openSession(true)) {
+            try (var statement = session.getConnection().createStatement();
+                    var rows = statement.executeQuery("SELECT @@character_set_client, @@character_set_connection")) {
+                assertTrue(rows.next());
+                assertEquals("latin1", rows.getString(1));
+                assertEquals("latin1", rows.getString(2));
+            }
+            Person person = new Person();
+            person.setWorkspaceId(workspace.getId());
+            person.setName("René Smith");
+            session.getMapper(PersonMapper.class).insert(person);
+            Person micro = new Person();
+            micro.setWorkspaceId(workspace.getId());
+            micro.setName("µ Team");
+            session.getMapper(PersonMapper.class).insert(micro);
+            Person unicodeWriter = new Person();
+            unicodeWriter.setWorkspaceId(workspace.getId());
+            unicodeWriter.setName("Ｃｐ Writer 𠀀");
+            session.getMapper(PersonMapper.class).insert(unicodeWriter);
+            var cpIdentifiers = session.getMapper(AiAssistantIdentifierMapper.class);
+            assertEquals(1, cpIdentifiers.updatePersonKeysIfNameCurrent(workspace.getId(), japanese.getId(),
+                    japanese.getName(), ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys.VERSION));
+            assertEquals(0, cpIdentifiers.countPendingKeys(workspace.getId(),
+                    ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys.VERSION));
+            for (Person saved : List.of(japanese, unicodeWriter)) {
+                assertEquals(saved.getName(), jdbc.queryForObject("SELECT ai_identifier_source_name FROM person WHERE workspace_id = ? AND id = ?",
+                        String.class, workspace.getId(), saved.getId()));
+                assertEquals(saved.getName(), jdbc.queryForObject("SELECT name FROM person WHERE workspace_id = ? AND id = ?",
+                        String.class, workspace.getId(), saved.getId()));
+            }
+            assertEquals("μ team", jdbc.queryForObject("SELECT ai_identifier_literal_key FROM person WHERE workspace_id = ? AND id = ?",
+                    String.class, workspace.getId(), micro.getId()));
+            WorkspaceService workspaceService = support.fixtureMock(WorkspaceService.class);
+            OrganizationWorkspaceScopeControlAccess scope = support.fixtureMock(OrganizationWorkspaceScopeControlAccess.class);
+            when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspace.getId());
+            when(scope.getForWorkspace(workspace.getId())).thenReturn(new WorkspaceScope(
+                    workspace.getOrgId(), List.of(workspace.getId()), "[" + workspace.getId() + "]"));
+            var resolver = new AiAssistantIdentifierResolver(session.getMapper(AiAssistantIdentifierMapper.class),
+                    workspaceService, scope, referenceService);
+            for (var sample : List.of(Map.entry(person, "Ask René Smith today."),
+                    Map.entry(japanese, "Ask ㍿ Team today."), Map.entry(supplementary, "Ask 𠀀 Team today."),
+                    Map.entry(micro, "Ask µ Team today."), Map.entry(unicodeWriter, "Ask Ｃｐ Writer 𠀀 today."))) {
+                var resolution = resolver.resolve(sample.getValue());
+                assertEquals(List.of(sample.getKey().getId()), resolution.resources().stream().map(resource -> resource.id()).toList());
+                MaskingContext context = new MaskingContext();
+                resolver.seed(resolution, context);
+                ObjectMapper mapper = JsonMapper.builder().build();
+                String payload = mapper.writeValueAsString(support.firstProviderRequest(
+                        support.invocation(sample.getValue(), context, mapper), mapper).messages());
+                assertFalse(payload.contains(sample.getKey().getName()));
+                OutboundLeakScan.assertNoLeakStrict(payload, context, mapper);
+            }
         }
     }
 

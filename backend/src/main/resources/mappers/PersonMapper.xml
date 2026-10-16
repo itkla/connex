@@ -952,10 +952,10 @@
       ai_identifier_source_name, ai_identifier_key_version, email, phone, company_id, title, image_url,
                         lead_source, lead_source_detail, referrer_person_id, created_at)
     VALUES (
-      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name},
-      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-      #{name,jdbcType=VARCHAR}, 1, #{email}, #{phone},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 2, #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
@@ -975,10 +975,10 @@
                         lead_source, lead_source_detail, referrer_person_id)
     VALUES
     <foreach collection="list" item="p" separator=",">
-      (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, #{p.name},
-      #{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-      #{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-      #{p.name,jdbcType=VARCHAR}, 1, #{p.email}, #{p.phone},
+      (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+      CONVERT(#{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{p.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{p.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 2, #{p.email}, #{p.phone},
        <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
        #{p.title}, #{p.imageUrl},
        #{p.leadSource,jdbcType=VARCHAR}, #{p.leadSourceDetail,jdbcType=VARCHAR},
@@ -990,11 +990,11 @@
     UPDATE person
     <set>
       <if test="name != null">
-        name = #{name},
-        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
-        ai_identifier_key_version = 1,
+        name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = 2,
       </if>
       <if test="email != null">email = #{email},</if>
       <if test="phone != null">phone = #{phone},</if>

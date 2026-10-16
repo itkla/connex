@@ -27,6 +27,7 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
     @Autowired private AiAssistantIdentifierMapper identifiers;
     @Autowired private AiIdentifierKeyBackfillTransaction backfill;
     @Autowired private TenantLifecycleMapper lifecycle;
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
 
     @BeforeEach
     void isolatedWorkspace() {
@@ -148,7 +149,7 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(0L, backfill.pendingCount(workspace.getId()));
         assertEquals(208, jdbc.queryForObject("SELECT COUNT(*) FROM person WHERE workspace_id = ? AND updated_at = '2020-01-02 03:04:05'",
                 Integer.class, workspace.getId()));
-        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId() + 1, people.getFirst().getId(), people.getFirst().getName(), 1));
+        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId() + 1, people.getFirst().getId(), people.getFirst().getName(), AiIdentifierLookupKeys.VERSION));
         assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM person WHERE workspace_id = ? AND ai_identifier_key_version IS NULL",
                 Integer.class, workspace.getId()));
     }
@@ -158,20 +159,20 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
         jdbc.update("UPDATE person SET ai_identifier_key_version = NULL, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), person.getId());
-        var selected = identifiers.findPersonKeysToBackfill(workspace.getId(), 0, 100, 1).getFirst();
+        var selected = identifiers.findPersonKeysToBackfill(workspace.getId(), 0, 100, AiIdentifierLookupKeys.VERSION).getFirst();
         jdbc.update("UPDATE person SET name = 'New Japanese 名前' WHERE workspace_id = ? AND id = ?", workspace.getId(), person.getId());
-        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), selected.getValue(), 1));
+        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), selected.getValue(), AiIdentifierLookupKeys.VERSION));
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
-        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), "New Japanese 名前", 1));
+        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), "New Japanese 名前", AiIdentifierLookupKeys.VERSION));
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), false, false);
         assertEquals(1, backfill.backfillPage(workspace.getId(), "person", 0).written());
         assertBundle("person", person.getId(), "New Japanese 名前");
         person.setName("Modern Writer 名前");
         personMapper.update(person);
-        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), "New Japanese 名前", 1));
+        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), "New Japanese 名前", AiIdentifierLookupKeys.VERSION));
         assertBundle("person", person.getId(), person.getName());
         jdbc.update("DELETE FROM person WHERE workspace_id = ? AND id = ?", workspace.getId(), person.getId());
-        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), person.getName(), 1));
+        assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), person.getName(), AiIdentifierLookupKeys.VERSION));
     }
 
     @Test
@@ -180,7 +181,9 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         company.setName("ﷺ".repeat(255));
         companyMapper.update(company);
         assertBundle("company", company.getId(), company.getName());
-        assertTrue(AiIdentifierLookupKeys.fromName(company.getName()).literal().length() > 255);
+        assertEquals(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.fromName(company.getName()).literal());
+        assertEquals(1, lookup(company.getName()).size());
+        assertEquals(0L, backfill.pendingCount(workspace.getId()));
         try (var rows = lifecycle.streamRows(workspace.getId(), TenantLifecycleRegistry.declarations().get("company"))) {
             var exported = rows.iterator().next();
             assertEquals(company.getName(), exported.get("ai_identifier_source_name"));
@@ -196,7 +199,9 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM company WHERE id = ?", Integer.class, company.getId()));
     }
 
+    /** Raw SQL models another binary, so observations must discard this test transaction's prior read cache. */
     private List<ooo.klae.connex.backend.beans.AiAssistantIdentifierMention> lookup(String text) {
+        sqlSession.clearCache();
         var turn = MaskingEngine.mentionScanText(text);
         return identifiers.findMentionedRecords(workspace.getId(), "[" + workspace.getId() + "]",
                 turn.literalText(), turn.labelText(), 200, "", 0);

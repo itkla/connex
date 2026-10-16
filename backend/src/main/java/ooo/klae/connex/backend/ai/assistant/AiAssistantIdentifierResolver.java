@@ -38,7 +38,7 @@ public class AiAssistantIdentifierResolver {
      * Resolves visible mentions in bounded pages for the supplied turn text.
      *
      * <p>Current canonical keys select a binary-containment superset of real mentions. Missing
-     * or stale bundles retain the legacy SQL prefilter and can return every non-ASCII name.
+     * or stale bundles and oversized unkeyed names retain the legacy SQL prefilter and can return every non-ASCII name.
      * Candidate volume therefore never refuses a turn: only the Java-gated mention count is
      * bounded against the turn budget. Java retains its original source-boundary checks.
      *

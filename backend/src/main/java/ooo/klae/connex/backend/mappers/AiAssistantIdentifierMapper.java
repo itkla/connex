@@ -17,7 +17,7 @@ public interface AiAssistantIdentifierMapper {
      *
      * <p>Current bundles use binary containment of shared Java literal and label keys. A bundle
      * is current only at the running format version with a byte-exact source-name snapshot and
-     * both keys present. Other rows retain the legacy SQL normalization and conservative
+     * both keys present and neither alias marked unkeyed. Other rows retain the legacy SQL normalization and conservative
      * non-ASCII/bracket fallback, preserving coverage during rollout and old-binary renames.
      *
      * <p>Because the page is a superset, its size is not evidence about the turn: callers must not

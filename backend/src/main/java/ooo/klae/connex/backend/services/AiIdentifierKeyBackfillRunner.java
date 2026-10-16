@@ -1,109 +1,110 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/** Rerunnable startup reconciliation on every normal profile, excluding maintenance/seeder modes. */
+/** Bounded reconciliation on scheduler threads; never participates in application startup readiness. */
 @Component
 @ConditionalOnProperty(prefix = "connex.maintenance", name = "mode", havingValue = "off", matchIfMissing = true)
 @RequiredArgsConstructor
-public class AiIdentifierKeyBackfillRunner implements ApplicationRunner {
+public class AiIdentifierKeyBackfillRunner {
     private static final Logger log = LoggerFactory.getLogger(AiIdentifierKeyBackfillRunner.class);
+    static final int BATCHES_PER_INVOCATION = 4;
+    private static final List<String> KINDS = List.of("person", "company", "deal");
 
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final WorkspaceMapper workspaceMapper;
     private final AiIdentifierKeyBackfillTransaction transaction;
+    private int workspaceAfterId;
+    private int workspaceId;
+    private int kindIndex;
+    private int afterId;
+    private Integer pinnedOrgId;
+    private String pinnedCatalog;
 
-    @Override
-    public void run(ApplicationArguments arguments) {
-        List<String> catalogs = tenantWorkScope.unroutedRead(placementRegistry::activeCatalogs);
-        List<Integer> workspaceIds = tenantWorkScope.unroutedRead(workspaceMapper::findWorkspaceIds);
-        Map<String, List<Integer>> byCatalog = new HashMap<>();
-        for (String catalog : catalogs) {
-            byCatalog.put(catalog, new ArrayList<>());
-        }
-        for (int workspaceId : workspaceIds) {
-            try {
-                tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) -> {
-                    List<Integer> group = byCatalog.get(catalog);
-                    if (group == null) {
-                        throw new IllegalStateException("Identifier backfill workspace is outside its active placement");
-                    }
-                    group.add(workspaceId);
-                    return null;
-                });
-            } catch (ServiceUnavailableException exception) {
-                warnSkipped(workspaceId);
-            }
-        }
-        for (String catalog : catalogs) {
-            List<Integer> group = byCatalog.get(catalog);
-            group.sort(Integer::compareTo);
-            for (int workspaceId : group) {
+    /** Resumes at most four pages; each placement is installed before its independent transaction. */
+    @Scheduled(fixedDelayString = "${connex.ai.identifier-backfill.delay-ms:30000}",
+            initialDelayString = "${connex.ai.identifier-backfill.initial-delay-ms:30000}")
+    public synchronized void reconcile() {
+        try {
+            List<String> catalogs = tenantWorkScope.unroutedRead(placementRegistry::activeCatalogs);
+            for (int batch = 0; batch < BATCHES_PER_INVOCATION; batch++) {
+                if (workspaceId == 0 && !nextWorkspace()) {
+                    break;
+                }
                 try {
-                    tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, resolvedCatalog) -> {
-                        if (!Objects.equals(catalog, resolvedCatalog)) {
-                            throw new IllegalStateException("Identifier backfill placement changed before sweep");
+                    tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) -> {
+                        if (!catalogs.contains(catalog) || (pinnedOrgId != null
+                                && (!pinnedOrgId.equals(orgId) || !Objects.equals(pinnedCatalog, catalog)))) {
+                            throw new IllegalStateException("Identifier backfill placement changed before page");
                         }
-                        sweepWorkspace(workspaceId);
+                        pinnedOrgId = orgId;
+                        pinnedCatalog = catalog;
+                        reconcilePage();
                         return null;
                     });
-                } catch (ServiceUnavailableException exception) {
-                    warnSkipped(workspaceId);
+                } catch (RuntimeException exception) {
+                    log.warn("AI identifier key backfill failed for workspace {} exceptionClass={}; fallback remains active",
+                            workspaceId, exception.getClass().getSimpleName());
+                    finishWorkspace();
                 }
             }
-        }
-    }
-
-    private void sweepWorkspace(int workspaceId) {
-        try {
-            long scanned = 0;
-            long written = 0;
-            long skipped = 0;
-            for (String kind : List.of("person", "company", "deal")) {
-                int afterId = 0;
-                while (true) {
-                    AiIdentifierKeyBackfillTransaction.Batch batch = transaction.backfillPage(workspaceId, kind, afterId);
-                    scanned = Math.addExact(scanned, batch.scanned());
-                    written = Math.addExact(written, batch.written());
-                    skipped = Math.addExact(skipped, batch.skipped());
-                    if (batch.scanned() == 0) {
-                        break;
-                    }
-                    if (batch.lastId() <= afterId) {
-                        throw new IllegalStateException("Identifier key backfill cursor did not advance");
-                    }
-                    afterId = batch.lastId();
-                    if (batch.scanned() < AiIdentifierKeyBackfillTransaction.PAGE_SIZE) {
-                        break;
-                    }
-                }
-            }
-            log.info("AI identifier key backfill workspace {}: scanned={}, written={}, skipped={}, pending={}",
-                    workspaceId, scanned, written, skipped, transaction.pendingCount(workspaceId));
         } catch (RuntimeException exception) {
-            log.error("AI identifier key backfill failed for workspace {}; legacy lookup remains active; restart to retry",
-                    workspaceId);
+            log.warn("AI identifier key backfill discovery failed exceptionClass={}; retry on next sweep",
+                    exception.getClass().getSimpleName());
         }
     }
 
-    private void warnSkipped(int workspaceId) {
-        log.warn("AI identifier key backfill skipped unservable workspace {}; restart to retry", workspaceId);
+    private boolean nextWorkspace() {
+        List<Integer> ids = tenantWorkScope.unroutedRead(() -> workspaceMapper.findWorkspaceIdsPage(workspaceAfterId, 1));
+        if (ids.isEmpty()) {
+            workspaceAfterId = 0;
+            return false;
+        }
+        int next = ids.getFirst();
+        if (next <= workspaceAfterId) {
+            throw new IllegalStateException("Identifier backfill workspace cursor did not advance");
+        }
+        workspaceId = next;
+        workspaceAfterId = next;
+        return true;
+    }
+
+    private void reconcilePage() {
+        String kind = KINDS.get(kindIndex);
+        AiIdentifierKeyBackfillTransaction.Batch batch = transaction.backfillPage(workspaceId, kind, afterId);
+        if (batch.scanned() > 0 && batch.lastId() <= afterId) {
+            throw new IllegalStateException("Identifier backfill row cursor did not advance");
+        }
+        log.info("AI identifier key backfill workspace {} kind={}: scanned={}, written={}, skipped={}, pending={}",
+                workspaceId, kind, batch.scanned(), batch.written(), batch.skipped(), transaction.pendingCount(workspaceId));
+        if (batch.scanned() < AiIdentifierKeyBackfillTransaction.PAGE_SIZE) {
+            afterId = 0;
+            kindIndex++;
+            if (kindIndex == KINDS.size()) {
+                finishWorkspace();
+            }
+        } else {
+            afterId = batch.lastId();
+        }
+    }
+
+    private void finishWorkspace() {
+        workspaceId = 0;
+        kindIndex = 0;
+        afterId = 0;
+        pinnedOrgId = null;
+        pinnedCatalog = null;
     }
 }

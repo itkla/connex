@@ -11,24 +11,35 @@ migration-discipline part of #87 §9 / #102).
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
 requires `ALGORITHM=INSTANT` and fails instead of falling back to a core-table rebuild. No index,
-generated-column or trigger DDL is added. TEXT keys hold NFKC expansion beyond a 255-character
-source name. DDL still needs metadata locks; deploy outside long-running transactions.
+generated-column or trigger DDL is added. Canonical key format 2 caps each alias at 512 Unicode code
+points; oversized aliases store an explicit unkeyed marker and retain legacy lookup. DDL still
+needs metadata locks; deploy outside long-running transactions.
 
-Flyway only adds columns. `AiIdentifierKeyBackfillRunner` runs after application startup migrations
-on every ordinary `dev`, `test`, SaaS, silo and on-prem backend start, regardless of the AI feature
-switch. It resolves active catalogs and owning workspaces through the control plane, pins each
-placement before transactions, and writes sorted 100-row pages per table. Maintenance modes other
-than `off` (including `seeder`) do not instantiate the runner. In single-database mode its null
-catalog is the default database; catalog-per-placement mode reconciles each active placement.
+Flyway only adds columns. `AiIdentifierKeyBackfillRunner` is a scheduled background worker on every
+ordinary `dev`, `test`, SaaS, silo and on-prem backend, regardless of the AI feature switch. It never
+blocks startup or readiness. Its fixed delay defaults to 30 seconds with a 30-second initial delay
+(`connex.ai.identifier-backfill.delay-ms` / `initial-delay-ms`). Each invocation processes at most
+four sorted 100-row pages. It keyset-pages workspace discovery through the control plane and pins
+each placement on the scheduler thread before starting a transaction. Maintenance modes other than
+`off` (including `seeder`) do not instantiate it. In single-database mode its null catalog is the
+default database; catalog-per-placement mode reconciles each active placement. Tests keep the bean
+and delay automatic ticks for one hour so explicit sweeps do not race other fixtures.
 
 The sweep is restartable and safe with multiple replicas: byte-exact compare-and-set skips changed,
 deleted, restricted or already-current rows, and preserves `updated_at`. Workspace data failures
-leave that workspace on compatibility lookup and log only its id; unservable placements are skipped,
-while unexpected placement mismatches fail closed. Startup logs report scanned/written/skipped and
-eligible pending counts. A normal restart reruns the sweep from zero. During a rolling deployment,
-old binaries can create new pending rows or rename previously current ones; after draining them,
-restart a current backend and confirm pending=0 in each servable workspace. Archived/restricted rows
-are excluded from that count and use fallback if restored before a later reconciliation.
+leave that workspace on compatibility lookup and log its id and exception class; unservable or
+changed placements fail closed and retry on a later traversal. Per-page logs report
+scanned/written/skipped and eligible pending counts. In-memory cursors resume between invocations
+and wrap after traversal; a restart safely begins from zero. During a rolling deployment, old
+binaries can create pending rows or rename current ones. After draining them, wait for reconciliation
+and confirm pending=0 in each servable workspace. Archived/restricted rows and processed unkeyed
+rows are excluded from that count. Restored rows retain fallback until reconciled; oversized names
+retain fallback permanently.
+
+CSV name-writing inserts and volume-seeder name flushes use ordered chunks of at most 100 rows and
+a conservative 1 MiB estimated payload. Chunking keeps the enclosing transaction and bean/id order;
+it does not split import atomicity. Bound lookup/CAS text is converted to UTF-8 before binary
+comparison, including on a Cp1252 JDBC connection. No connection-encoding setting is weakened.
 
 Current bundles use the Java canonical prefilter; stale/missing bundles retain legacy lookup with
 its possible corpus-sized pagination. No coverage or admission cap changes. The existing rollback

@@ -12,6 +12,7 @@ import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
@@ -48,7 +49,8 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 /**
  * Persists one workspace through application mapper SQL using a MyBatis batch executor.
  *
- * <p>Dependency boundaries and every 500 single-row statements are flushed explicitly.
+ * <p>Dependency boundaries and every 500 auxiliary statements are flushed explicitly.
+ * Name writes use at most 100 rows and a conservative 1 MiB payload per flush.
  * Mapper return values are deliberately ignored because the batch executor returns
  * sentinels until flush; the summary is derived from the deterministic generation plan.
  * Only single-row insert statements are issued: MyBatis cannot assign generated keys for
@@ -293,11 +295,12 @@ public class SeederBatchWriter {
         for (int index = 0; index < profile.companies(); index++) {
             Company company = generator.company(
                 workspaceId, workspaceSeed, workspaceIndex, index, users, anchorDate);
-            companyMapper.insert(company);
             companies.add(company);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.companies(companies)) {
+            batch.forEach(companyMapper::insert);
+            flush();
+        }
         companies.forEach(company -> requireGeneratedId("company", company.getId()));
         for (int index = 0; index < companies.size(); index++) {
             companyMapper.insertTags(
@@ -324,11 +327,12 @@ public class SeederBatchWriter {
         for (int index = 0; index < profile.persons(); index++) {
             Person person = generator.person(
                 workspaceId, workspaceSeed, workspaceIndex, index, users, companies, anchorDate);
-            personMapper.insert(person);
             persons.add(person);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.people(persons)) {
+            batch.forEach(personMapper::insert);
+            flush();
+        }
         persons.forEach(person -> requireGeneratedId("person", person.getId()));
 
         int employmentCount = 0;
@@ -369,11 +373,12 @@ public class SeederBatchWriter {
             int position = nextStagePositions.getOrDefault(deal.getStageId(), 0);
             deal.setPosition(position);
             nextStagePositions.put(deal.getStageId(), position + 1);
-            dealMapper.insert(deal);
             deals.add(deal);
-            flushEvery(index);
         }
-        flush();
+        for (var batch : RecordInsertBatches.deals(deals)) {
+            batch.forEach(dealMapper::insert);
+            flush();
+        }
         deals.forEach(deal -> requireGeneratedId("deal", deal.getId()));
 
         int personLinkCount = 0;

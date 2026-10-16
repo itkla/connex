@@ -644,8 +644,10 @@ critical section above. Current canonical keys reduce returned rows and round tr
 containment prefilter still examines the visible corpus. Stale rows deliberately keep legacy
 lookup cost until reconciliation finishes. No new queue locks or network work are introduced.
 
-`AiIdentifierKeyBackfillRunner` resolves placement before entering each workspace sweep and keeps
-that catalog pinned across the small transactions. Each `AiIdentifierKeyBackfillTransaction` page
+`AiIdentifierKeyBackfillRunner` runs on the scheduler thread with a fixed delay, outside startup
+readiness. An invocation resumes at most four pages and installs `TenantWorkScope` placement before
+each independent transaction. A changed organization/catalog invalidates the saved cursor instead
+of reusing it in a different data plane. Each `AiIdentifierKeyBackfillTransaction` page
 uses `READ_COMMITTED`, reads a non-locking keyset page, then CAS-updates at most 100 exact parent
 rows of **one table**, in ascending id order. It touches only derived aliases/snapshot/version and
 explicitly retains `updated_at`; it publishes no events and reads/writes no identity groups,
@@ -655,9 +657,16 @@ transaction or uses a range `FOR UPDATE` scan.
 
 The update rechecks owning workspace, original name byte-for-byte, archive/processing state
 and bundle freshness after contention. A rename, deletion, restriction or competing reconciliation
-wins safely; skipped rows remain stale and are reported in the final pending count. A later run
-restarts from zero to revisit races behind the cursor. Restored archived/restricted rows remain
-on compatibility lookup until written by a current name writer or reconciled on another start.
+wins safely; skipped rows remain stale and are reported in per-page pending counts. The traversal
+wraps to revisit races behind the cursor; restart also safely begins from zero. Restored
+archived/restricted rows retain compatibility lookup until a current writer or a later sweep repairs
+them. Oversized aliases have a processed unkeyed marker and remain on fallback without repeated
+backfill attempts. Committed two-connection tests observe a CAS waiting behind rename/restriction
+writes, and a separate connection reacquiring a previous page's locks before the next page starts.
+
+CSV/import and volume-seeder name inserts are split by row/payload budgets inside the same enclosing
+transaction, preserving the established aggregate lock order and generated-id ordering. Chunking
+adds no commit boundary, root acquisition, duplicate decision or event publication.
 
 ### Assistant write tools
 

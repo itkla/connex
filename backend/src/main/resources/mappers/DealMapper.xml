@@ -1129,10 +1129,10 @@
       expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES (
-      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name},
-      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-      #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-      #{name,jdbcType=VARCHAR}, 1, #{duplicateNormalizedName,jdbcType=VARCHAR}, #{value,jdbcType=DECIMAL},
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 2, #{duplicateNormalizedName,jdbcType=VARCHAR}, #{value,jdbcType=DECIMAL},
       #{actualValue,jdbcType=DECIMAL}, #{valueSource}, #{currency},
       #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
@@ -1147,10 +1147,10 @@
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
-      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name},
-      #{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-      #{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-      #{d.name,jdbcType=VARCHAR}, 1, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
+      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, CONVERT(#{d.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+      CONVERT(#{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{d.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+      CONVERT(#{d.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 2, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
        #{d.actualValue,jdbcType=DECIMAL}, #{d.valueSource}, #{d.currency},
        #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
        #{d.closedReason}, #{d.won})
@@ -1159,11 +1159,11 @@
 
   <update id="update">
     UPDATE deal
-    SET name = #{name},
-        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
-        ai_identifier_key_version = 1,
+    SET name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = 2,
         duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
         duplicate_name_revision = duplicate_name_revision + 1,
         currency = #{currency},
@@ -1190,11 +1190,11 @@
 
   <update id="updateName">
     UPDATE deal
-    SET name = #{name},
-        ai_identifier_literal_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler},
-        ai_identifier_label_key = #{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler},
-        ai_identifier_source_name = #{name,jdbcType=VARCHAR},
-        ai_identifier_key_version = 1,
+    SET name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = 2,
         duplicate_normalized_name = #{duplicateNormalizedName,jdbcType=VARCHAR},
         duplicate_name_revision = duplicate_name_revision + 1
     WHERE workspace_id = #{workspaceId} AND id = #{id}
