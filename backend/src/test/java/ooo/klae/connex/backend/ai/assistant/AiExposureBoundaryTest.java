@@ -40,6 +40,34 @@ class AiExposureBoundaryTest {
 
     @ParameterizedTest
     @EnumSource(EntityKind.class)
+    void completeValidationRefusesUnscreenedAnswersAndSuffixesAfterPublicationStops(EntityKind kind) {
+        for (boolean nativeProtocol : List.of(false, true)) {
+            for (boolean suffix : List.of(false, true)) {
+                var context = new MaskingContext();
+                String token = context.tokenFor(kind, "Unsent label");
+                var progress = new AiChatStreamingProgress(new AiChatQueuedTurn(7, 11, 13, 17, 19, 1, 23L,
+                        true, List.of(), List.of(), AiPrivacyMode.MASKED, true),
+                        mock(AiChatTurnPersistenceService.class), context);
+                var observer = progress.observer(nativeProtocol);
+                observer.onProviderField("reasoning", "safe ".repeat(4_000));
+                var prompt = PromptAssembly.builder(context).system("Use concise analysis")
+                        .userTurn("Describe the relationship").build();
+                String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, suffix ? "Safe answer" : token)
+                        + (suffix ? token : "");
+
+                var refused = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                        output, false, observer);
+
+                assertEquals(0, observer.screenedCharacters());
+                assertEquals(0, observer.activeScreens());
+                assertEquals("invented_placeholder", refused.refusalReason());
+                assertFalse(refused.repairPresent());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(EntityKind.class)
     void nativeFieldsCannotAdmitBoundOrUnissuedGuessesEvenWhenEscaped(EntityKind kind) {
         for (boolean bound : List.of(false, true)) {
             for (String field : List.of("id", "name", "signature", "arguments", "malformed_arguments", "array_arguments")) {
@@ -154,7 +182,7 @@ class AiExposureBoundaryTest {
 
     @ParameterizedTest
     @EnumSource(EntityKind.class)
-    void fragmentedGuessesWithdrawBeforeFinishEvenAfterStreamTruncation(EntityKind kind) {
+    void fragmentedGuessesWithdrawImmediatelyOrAtCompletionAfterTruncation(EntityKind kind) {
         for (boolean nativeProtocol : List.of(false, true)) {
             String token = "{{" + kind.tokenPrefix() + "1}}";
             for (String spelling : List.of(token, token.toLowerCase(Locale.ROOT),
@@ -172,15 +200,23 @@ class AiExposureBoundaryTest {
                     var observer = progress.observer(nativeProtocol);
                     String prefix = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
                     observer.onContentDelta(prefix + "Safe words. ".repeat(40));
-                    if (split == spelling.length() / 2) {
+                    boolean truncated = !nativeProtocol && split == spelling.length() / 2;
+                    if (truncated) {
                         observer.onContentDelta("x".repeat(17_000));
                     }
                     observer.onContentDelta(spelling.substring(0, split));
                     observer.onContentDelta(spelling.substring(split));
 
-                    verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
+                    if (truncated) {
+                        org.mockito.Mockito.verify(persistence, org.mockito.Mockito.never())
+                                .resetPartialContent(any(), anyInt());
+                        observer.onContentDelta(nativeProtocol ? "\"}" : "\"}}");
+                    } else {
+                        verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
+                    }
                     var refused = assertThrows(AiAssistantLoopException.class, () -> observer.finish("unused"));
                     assertEquals("invented_placeholder", refused.detailReason());
+                    verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
                     progress.reset();
                     var reconnected = progress.observer(nativeProtocol);
                     reconnected.onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"));

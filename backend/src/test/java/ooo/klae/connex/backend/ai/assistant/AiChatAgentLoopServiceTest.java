@@ -1926,9 +1926,11 @@ class AiChatAgentLoopServiceTest {
     /**
      * A trailing word character stays pending as task-handle boundary context. The other 299
      * characters must stream before the malformed attempt resets and repair starts at offset zero.
+     * A hidden-field screening bound must reset too, even without any projected answer text.
      */
-    @Test
-    void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero(boolean hiddenBound) {
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
@@ -1966,8 +1968,12 @@ class AiChatAgentLoopServiceTest {
                 .thenAnswer(invocation -> {
                     AiInvocation providerInvocation = invocation.getArgument(0);
                     if (attempts.getAndIncrement() == 0) {
-                        providerInvocation.streamObserver().onContentDelta(
-                                "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
+                        if (hiddenBound) {
+                            providerInvocation.streamObserver().onProviderField("reasoning", "x".repeat(16_001));
+                        } else {
+                            providerInvocation.streamObserver().onContentDelta(
+                                    "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
+                        }
                         return malformed;
                     }
                     providerInvocation.streamObserver().onContentDelta(
@@ -1985,16 +1991,19 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService).resetPartialContent(streamedTurn, 299);
+        verify(persistenceService).resetPartialContent(streamedTurn, hiddenBound ? 0 : 299);
         ArgumentCaptor<Integer> offsets = ArgumentCaptor.forClass(Integer.class);
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
-        verify(persistenceService, times(2)).appendPartialBatch(
+        verify(persistenceService, times(hiddenBound ? 1 : 2)).appendPartialBatch(
                 eq(streamedTurn), offsets.capture(), batches.capture());
-        assertEquals(List.of(0, 0), offsets.getAllValues());
-        assertEquals(List.of("x".repeat(299), "Repaired answer"), batches.getAllValues());
+        assertEquals(hiddenBound ? List.of(0) : List.of(0, 0), offsets.getAllValues());
+        assertEquals(hiddenBound ? List.of("Repaired answer") : List.of("x".repeat(299), "Repaired answer"),
+                batches.getAllValues());
         InOrder order = inOrder(persistenceService);
-        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
-        order.verify(persistenceService).resetPartialContent(streamedTurn, 299);
+        if (!hiddenBound) {
+            order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
+        }
+        order.verify(persistenceService).resetPartialContent(streamedTurn, hiddenBound ? 0 : 299);
         order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "Repaired answer");
         verify(persistenceService).resolve(
                 eq(streamedTurn), eq("Repaired answer"), any(), eq(5), eq(8));
@@ -5275,7 +5284,7 @@ class AiChatAgentLoopServiceTest {
                     : spelling.equals("tab") ? "{{" + kind.tokenPrefix() + "1\t}}" : reference;
             if (hiddenField) {
                 invocation.streamObserver().onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix));
-                invocation.streamObserver().onProviderField(guess);
+                invocation.streamObserver().onProviderField("reasoning", guess);
             } else {
                 String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + guess);
                 int token = output.indexOf("{{");

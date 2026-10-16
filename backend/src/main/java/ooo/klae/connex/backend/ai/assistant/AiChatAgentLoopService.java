@@ -1922,7 +1922,7 @@ public class AiChatAgentLoopService {
     private static void resetMalformedStream(
             AiChatStreamingProgress progress,
             AiChatStreamingProgress.Observer observer) {
-        if (progress != null && observer != null && observer.hasProjectedText()) {
+        if (progress != null && observer != null && observer.requiresReset()) {
             progress.reset();
         }
     }

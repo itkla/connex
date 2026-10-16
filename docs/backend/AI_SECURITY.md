@@ -199,12 +199,27 @@ NFKC-equivalent placeholders are refused with warnings; only the demasker's lite
 syntax (including its optional whitespace) can re-identify a value. Structured answers and native calls
 refuse invented references before repair or execution. Internally the demasker returns
 `[unknown reference]` and warnings; callers discard warned results. Streaming callbacks immediately
-withdraw durable partial content and send a reset on detection, including after publication has stopped
-at its length or screening bound. They defer the malformed-output exception until completion so a
+withdraw durable partial content and send a reset on detection. They defer the malformed-output
+exception until completion so a
 subsequent timeout or disconnect retains its provider classification with no partial to reconnect to.
 Terminal persistence also purges partials for `malformed_output`. Provider stream adapters deliver
-accumulated native-call fields and separate/flagged reasoning through a screening-only callback;
-these fields never enter the answer projection. Both raw and decoded content receive the same
+new native-call field and separate/flagged reasoning fragments through a screening-only callback
+with stable per-field identities; public content is delivered only once through its content callback.
+Incremental screening retains candidate and rollback state across fragments, including unbounded
+placeholder whitespace, nested Unicode escapes and the bounded record-link projection passes.
+It samples refusal after each complete callback, matching the complete-text screen even when a
+completed link removes a speculative target match. Screening stops and releases its state on refusal
+or when publication permanently stops at the length or screening bound. One aggregate 16,000-character
+screening budget covers public and hidden fields, bounding rollback history even during long private
+reasoning. A callback that would exceed it disables partial publication before allocating or screening
+any of that callback; screening a prefix separately could misclassify a subsequently completed link.
+Malformed-attempt reset clears this stopped state even when hidden reasoning prevented any answer
+text from being projected, allowing the repaired attempt to stream from offset zero.
+The answer projector then only retains subsequent content for one final validation; invocation still screens the complete
+provider result, including hidden fields and text beyond the publication bound, before parsing or
+settlement. A later timeout/disconnect retains only the previously screened prefix unless an earlier
+refusal withdrew it. Final invented-reference refusal withdraws that prefix before settlement.
+Hidden fields never enter the answer projection. Both raw and decoded content receive the same
 check, including JSON whitespace escapes within a placeholder. Incomplete lowercase and NFKC-equivalent token prefixes use the same
 normalization and source offsets as token validation, and are withheld across streaming flushes.
 Context-free invented-reference checks require braces for all kinds, so

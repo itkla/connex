@@ -247,7 +247,7 @@ public final class OpenAiSseAccumulator {
             }
             thoughtsOpen = true;
             reasoning.append(value);
-            observer.onProviderField(reasoning.toString());
+            observer.onProviderField("reasoning", value);
             return;
         }
         if (thoughtsOpen && content != null && content.isString()
@@ -259,7 +259,6 @@ public final class OpenAiSseAccumulator {
             }
             if (!value.isEmpty()) {
                 text.append(value);
-                observer.onProviderField(text.toString());
                 observer.onContentDelta(value);
             }
             return;
@@ -279,9 +278,10 @@ public final class OpenAiSseAccumulator {
             return;
         }
         target.append(value);
-        observer.onProviderField(target.toString());
         if (publish) {
             observer.onContentDelta(value);
+        } else {
+            observer.onProviderField("reasoning", value);
         }
     }
 
@@ -312,11 +312,21 @@ public final class OpenAiSseAccumulator {
                 throw invalidResponse();
             }
             ToolFragments fragments = tools.computeIfAbsent(index, ignored -> new ToolFragments());
+            int idStart = fragments.id.length();
+            int nameStart = fragments.name.length();
+            int argumentsStart = fragments.arguments.length();
+            int signatureStart = fragments.thoughtSignature.length();
             fragments.append(call, implied);
-            observer.onProviderField(fragments.id.toString());
-            observer.onProviderField(fragments.name.toString());
-            observer.onProviderField(fragments.arguments.toString());
-            observer.onProviderField(fragments.thoughtSignature.toString());
+            screenField(index, "id", fragments.id, idStart);
+            screenField(index, "name", fragments.name, nameStart);
+            screenField(index, "arguments", fragments.arguments, argumentsStart);
+            screenField(index, "signature", fragments.thoughtSignature, signatureStart);
+        }
+    }
+
+    private void screenField(int index, String field, StringBuilder value, int start) {
+        if (value.length() > start) {
+            observer.onProviderField("tool:" + index + ":" + field, value.substring(start));
         }
     }
 

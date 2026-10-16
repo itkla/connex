@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.masking.Demasker;
+import ooo.klae.connex.backend.ai.masking.IncrementalProviderTextScreen;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
@@ -20,6 +21,8 @@ final class AiChatStreamingProgress {
     private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
+    /** Bounds rollback history across public and hidden fields before disabling partial publication. */
+    private static final int MAX_SCREEN_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
 
     private final AiChatQueuedTurn turn;
@@ -76,8 +79,11 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        screenProviderText(text);
         if (excluded || streamTruncated || taskHandle || refusedReference) {
+            return;
+        }
+        screenProviderText(text);
+        if (refusedReference) {
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -110,11 +116,15 @@ final class AiChatStreamingProgress {
     /** Withdraws published output on detection while leaving transport failure classification deferred. */
     private void screenProviderText(String text) {
         if (!refusedReference && maskingContext.containsUnexposedTokenInProviderText(text)) {
-            refusedReference = true;
-            persistenceService.resetPartialContent(turn, durable.length());
-            durable.setLength(0);
-            pending.setLength(0);
+            refuseReference();
         }
+    }
+
+    private void refuseReference() {
+        refusedReference = true;
+        persistenceService.resetPartialContent(turn, durable.length());
+        durable.setLength(0);
+        pending.setLength(0);
     }
 
     /**
@@ -279,7 +289,9 @@ final class AiChatStreamingProgress {
 
     final class Observer implements AiProviderStreamObserver {
         private final AiAssistantTextDeltaProjector projector;
-        private final StringBuilder providerText = new StringBuilder();
+        private IncrementalProviderTextScreen providerText = new IncrementalProviderTextScreen(maskingContext);
+        private final java.util.Map<String, IncrementalProviderTextScreen> fields = new java.util.HashMap<>();
+        private long screenedCharacters;
         private AiChatCancellationHooks.Registration registration;
 
         private Observer(AiAssistantTextDeltaProjector.Shape shape) {
@@ -322,17 +334,63 @@ final class AiChatStreamingProgress {
             if (text == null || text.isEmpty() || refusedReference) {
                 return;
             }
-            providerText.append(text);
-            screenProviderText(providerText.toString());
+            if (!admitScreening(text)) {
+                stopScreening();
+                projector.retain(text);
+                return;
+            }
+            if (providerText.append(text)) {
+                refuseReference();
+            }
             if (refusedReference) {
+                stopScreening();
                 return;
             }
             projector.accept(text);
+            if (streamTruncated || excluded || taskHandle || refusedReference) {
+                stopScreening();
+            }
         }
 
         @Override
-        public void onProviderField(String text) {
-            screenProviderText(text);
+        public void onProviderField(String field, String delta) {
+            if (delta == null || delta.isEmpty() || refusedReference) {
+                return;
+            }
+            if (!admitScreening(delta)) {
+                stopScreening();
+                return;
+            }
+            if (fields.computeIfAbsent(field, ignored -> new IncrementalProviderTextScreen(maskingContext)).append(delta)) {
+                refuseReference();
+                stopScreening();
+            }
+        }
+
+        private void stopScreening() {
+            providerText = null;
+            fields.clear();
+        }
+
+        /** A whole callback is admitted atomically because its suffix may remove a target match. */
+        private boolean admitScreening(String delta) {
+            if (streamTruncated || excluded || taskHandle) {
+                return false;
+            }
+            if (delta.length() > MAX_SCREEN_CHARACTERS - screenedCharacters) {
+                streamTruncated = true;
+                return false;
+            }
+            screenedCharacters += delta.length();
+            return true;
+        }
+
+        int activeScreens() {
+            return (providerText == null ? 0 : 1) + fields.size();
+        }
+
+        long screenedCharacters() {
+            return screenedCharacters;
         }
 
         /**
@@ -350,7 +408,8 @@ final class AiChatStreamingProgress {
                 throw AiAssistantLoopException.malformed("invented_placeholder");
             }
             String projected = projector.finish();
-            if (maskingContext.containsUnexposedTokenInProviderText(projected)) {
+            screenProviderText(projected);
+            if (refusedReference) {
                 throw AiAssistantLoopException.malformed("invented_placeholder");
             }
             String comparable = demasking
@@ -372,13 +431,14 @@ final class AiChatStreamingProgress {
         }
 
         void requireNoTerminalText() {
+            projector.projectRetained();
             if (projector.hasProjectedText()) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
         }
 
-        boolean hasProjectedText() {
-            return projector.hasProjectedText();
+        boolean requiresReset() {
+            return projector.hasProjectedText() || streamTruncated || excluded || taskHandle || refusedReference;
         }
     }
 }

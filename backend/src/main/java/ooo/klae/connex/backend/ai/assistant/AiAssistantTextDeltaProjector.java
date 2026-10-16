@@ -57,6 +57,11 @@ final class AiAssistantTextDeltaProjector {
         project();
     }
 
+    /** Retains the complete answer for final validation after partial publication has stopped. */
+    void retain(String fragment) {
+        raw.append(fragment);
+    }
+
     String finish() {
         project();
         if (nonTerminal || !closed) {
@@ -67,6 +72,11 @@ final class AiAssistantTextDeltaProjector {
 
     boolean hasProjectedText() {
         return !projected.isEmpty();
+    }
+
+    /** Applies retained content once at the completed tool-response boundary. */
+    void projectRetained() {
+        project();
     }
 
     private void project() {
