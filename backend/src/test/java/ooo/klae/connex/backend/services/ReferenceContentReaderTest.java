@@ -72,6 +72,108 @@ class ReferenceContentReaderTest {
                 })));
     }
 
+    static Stream<Arguments> normalizedTableDestinations() {
+        return TYPES.stream().flatMap(type -> {
+            String wideType = type.chars().mapToObj(letter -> String.valueOf((char) (letter + 0xfee0)))
+                    .collect(java.util.stream.Collectors.joining());
+            var spellings = new java.util.ArrayList<>(List.of(type + ":４２", type + ":٤٢",
+                    type.toUpperCase(java.util.Locale.ROOT) + ":42", type + "\\&colon;42", type + "&#92;:42",
+                    type + "：42", wideType + ":42", wideType + "：４２"));
+            if (type.equals("task")) {
+                spellings.add("tasK:42");
+                spellings.add("tasK:42");
+            }
+            return spellings.stream().flatMap(destination -> Stream.of(
+                    "| h |\n| - |\n|\nprefix `\n[Former `]` Member](%s \"title\")\nsuffix `",
+                    "prefix `\n\nh|i\n--|--|--\n[Former|Member](%s \"title\")\n`")
+                    .map(layout -> Arguments.of(type, layout.formatted(destination))));
+        });
+    }
+
+    static Stream<Arguments> externalAndEmbeddedDestinations() {
+        return TYPES.stream().flatMap(type -> Stream.of(
+                "Visit https://example.com/%s:42 today.", "[Help](https://example.com/%s:42)",
+                "/super%s:42", "super%s:42", "Visit https://example.com/:%s:42 today.",
+                "[Help](https://example.com/(%s:42))", "Visit www.example.com/:%s:42 today.",
+                "Email mailto:help@example.com?subject=:%s:42 today.",
+                "[Help](custom+scheme://example.com/:%s:42)")
+                .map(layout -> Arguments.of(type, layout.formatted(type))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedTableDestinations")
+    void normalizedCensusRetainsMissedDestinationsAndTheirOriginalOffsets(String type, String content) {
+        var reading = ReferenceContentReader.read(content);
+        var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+        assertTrue(reading.complete(), content);
+        assertTrue(reading.targets().contains(target), content);
+        assertTrue(reading.links().stream().anyMatch(link -> link.target().filter(target::equals).isPresent())
+                || reading.unexplainedTargets().contains(target), content);
+        if (type.equals("user") && reading.unexplainedTargets().contains(target)) {
+            assertFalse(ReferenceService.memberReferenceReading(content).complete(), content);
+        }
+        if (type.equals("note")) {
+            assertEquals("a note", ReferenceService.toPlainText(content), content);
+        } else if (reading.unexplainedTargets().contains(target)) {
+            assertEquals("(unavailable reference)", ReferenceService.toPlainText(content), content);
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("externalAndEmbeddedDestinations")
+    void externalUrlsAndEmbeddedWordsAreNotInternalDestinations(String type, String content) {
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete(), content);
+        assertTrue(reading.targets().isEmpty(), type + ": " + content);
+        assertTrue(reading.unparseableTypes().isEmpty(), content);
+        assertTrue(reading.unexplainedTargets().isEmpty(), content);
+        assertTrue(ReferenceService.memberReferenceReading(content).complete(), content);
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "(", "<", "[", "]", ":", "\"", "'", "`", "|"})
+    void censusAcceptsDestinationBoundariesAndStopsExcludingAtTheExternalUrlEnd(String prefix) {
+        var target = new ReferenceContentReader.ReferenceTarget("user", 42);
+        assertTrue(ReferenceContentReader.read(prefix + "user:42").targets().contains(target));
+        assertEquals(Set.of(target), ReferenceContentReader.read(
+                "https://example.com/:user:7]" + prefix + "user:42").unexplainedTargets());
+    }
+
+    @Test
+    void normalizedCensusAndExternalUrlScanningStayBoundedNearTheInputCap() {
+        String content = "a".repeat(131_000) + " https://example.com/" + "a".repeat(130_000) + ":user:7] user:４２";
+        assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.complete());
+            assertEquals(Set.of(new ReferenceContentReader.ReferenceTarget("user", 42)), reading.unexplainedTargets());
+            assertEquals(1, reading.targets().size());
+        });
+    }
+
+    @Test
+    void normalizedCensusCoverageKeepsEntityAndUnicodeOffsetsSeparateFromUnrelatedDefinitions() {
+        for (String destination : List.of("user:４２", "user:٤٢", "USER:42", "user&colon;42", "u&#115;er&#58;42")) {
+            String resolved = "😀 &amp; [Former](" + destination + ")";
+            var reading = ReferenceContentReader.read(resolved);
+            assertTrue(reading.unexplainedTargets().isEmpty(), resolved);
+            assertTrue(ReferenceService.memberReferenceReading(resolved).complete(), resolved);
+            assertFalse(ReferenceService.memberReferenceReading(
+                    "`" + destination + "`\n\n[unused]: user:42").complete(), destination);
+        }
+    }
+
+    @Test
+    void backendEscapedEntitySpellingsRemainUnexplainedWhenTheOriginalAstHasNoInternalDestination() {
+        for (String destination : List.of("user\\&colon;42", "user&#92;:42")) {
+            String content = "😀 &amp; [Former](" + destination + ")";
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.links().isEmpty());
+            assertEquals(Set.of(new ReferenceContentReader.ReferenceTarget("user", 42)), reading.unexplainedTargets());
+            assertFalse(ReferenceService.memberReferenceReading(content).complete());
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("tableDisagreements")
     void tableDisagreementsNeverLoseAnInternalDestination(String type, String content) {
@@ -124,7 +226,7 @@ class ReferenceContentReaderTest {
         assertFalse(ReferenceService.memberReferenceReading(content + "\n\n[unused]: user:43").complete());
         assertTrue(ReferenceContentReader.read("[unused]: user:43").unexplainedTargets().isEmpty());
 
-        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1) + "note:42");
+        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1) + " note:42");
         assertEquals(ReferenceContentReader.Status.INPUT_LIMIT, oversized.status());
         assertTrue(oversized.targets().contains(new ReferenceContentReader.ReferenceTarget("note", 42)));
     }

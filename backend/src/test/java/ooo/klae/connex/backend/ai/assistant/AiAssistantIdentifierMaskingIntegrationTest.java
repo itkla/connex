@@ -1156,6 +1156,38 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         }
     }
 
+    @Test
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void normalizedStoredMemberDestinationsRefuseBeforeProviderProjectionAdmission() throws Exception {
+        var fixture = memberReferenceFixture();
+        Integer noteId = jdbc.queryForObject("SELECT id FROM note WHERE workspace_id = ? AND person_id = ?", Integer.class,
+                workspace.getId(), fixture.person().getId());
+        assertTrue(noteId != null);
+        String id = String.valueOf(fixture.actor().getId());
+        String wideId = id.chars().mapToObj(digit -> String.valueOf((char) ('０' + digit - '0')))
+                .collect(java.util.stream.Collectors.joining());
+        String arabicId = id.chars().mapToObj(digit -> String.valueOf((char) ('٠' + digit - '0')))
+                .collect(java.util.stream.Collectors.joining());
+        var mapper = JsonMapper.builder().build();
+        for (String destination : List.of("user:" + wideId, "user:" + arabicId, "UsEr:" + id,
+                "user\\&colon;" + id, "user&#92;:" + id, "user：" + id, "ｕｓｅｒ:" + id, "ｕｓｅｒ：" + wideId)) {
+            String content = "| h |\n| - |\n|\nprefix `\n[Stored `]` Member](" + destination + " \"title\")\nsuffix `";
+            jdbc.update("UPDATE note SET content = ? WHERE workspace_id = ? AND id = ?", content, workspace.getId(), noteId);
+            var context = new MaskingContext();
+            var resources = new AiChatResourceRegistry(context);
+            resources.register("person", fixture.person().getId());
+            var exception = assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
+                    () -> realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true),
+                    destination);
+            assertEquals("Assistant member reference content is incomplete", exception.getMessage());
+            assertFalse(context.identifierDictionary().contains("Stored `]` Member"));
+            assertEquals(java.util.Set.of(fixture.person().getName(), fixture.person().getCompany().getName()),
+                    context.tokenBindings().stream().map(java.util.Map.Entry::getValue)
+                            .collect(java.util.stream.Collectors.toSet()));
+            assertTrue(context.tokenBindings().stream().noneMatch(binding -> binding.getKey().startsWith("{{M")));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)

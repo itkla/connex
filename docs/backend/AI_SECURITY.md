@@ -159,11 +159,24 @@ footnotes have separate inline/container contexts; differential fixtures cover b
 and frontend rendering.
 The pinned table extension disagrees with GFM on lone-pipe body rows and unequal header/delimiter
 column counts. The reader therefore unions links and definitions from a second bounded parse
-with footnotes but without tables. A destination census independently scans the **full original
-body**, including source rejected by parser admission. It recognizes the eight internal types
-case-insensitively, literal/escaped colons and named/decimal/hex colon entities followed by digits.
-Numeric entity spellings of type letters and digits also count, without decoding the whole body:
-for example, `u&#115;er:42` cannot hide the same missed link from the census.
+with footnotes but without tables. A destination census independently covers the **full original
+body**, including source rejected by parser admission. Only the census uses backend HTML-entity
+decoding followed by the AI screen's shared `CanonicalText` literal projection; both AST parses
+still receive unchanged original source. Composed UTF-16 source maps retain each hit's original
+occurrence through entity decoding, NFKC, case folding and default-ignorable/delimiter removal.
+The census recognizes all eight internal types, backend Unicode decimal digits, literal/escaped
+colons and named/decimal/hex entity spellings. Thus `user:４２`, `user:٤٢`, `tasK:42`, full-width
+type/colon spellings, `user\&colon;42`, `user&#92;:42` and `u&#115;er:42` cannot hide missed links.
+
+A census token must start at the beginning of text, after whitespace, or after one of
+`(`, `<`, `[`, `]`, `:`, `"`, `'`, backtick or `|`. The first seven delimit Markdown destinations,
+autolinks, keys and quoted values; backticks and pipes retain conservative literal-code and
+table-cell coverage. Word-embedded and slash-prefixed substrings therefore do not become internal
+targets. External URL spans beginning with `scheme://`, `mailto:` or `www.` are excluded through
+the next whitespace or closing `)`, `>`, `]`, `"`, `'`, backtick or table pipe. URL discovery and
+census matching scan forward without rescanning scheme runs. An internal destination after a
+URL's closing delimiter still counts. Ordinary URL paths such as `https://example.com/user:42`
+and `/superuser:42` no longer invent member provenance or trigger whole-body redaction.
 Only an actual link, image or definition destination from either parse explains a census hit, by the
 same type, integer ID and original source occurrence; compatibility scans cannot explain one.
 An unrelated definition with the same ID cannot establish coverage for a missed table link.
@@ -249,7 +262,8 @@ recipients still use only
 the existing canonical write grammar and its 100-reference cap.
 
 Residuals are intentional conservative over-inclusion, the explicit footnote refusals above,
-the census refusing or redacting literal code examples, bounded/unrepresentable inputs refusing
+the census refusing or redacting literal code examples (including normalized spellings the renderer
+itself leaves literal), bounded/unrepresentable inputs refusing
 instead of rendering, and future parser/renderer version drift. Renew the differential fixtures
 when either dependency changes; census over-inclusion remains intentional even where neither
 parser renders a link.

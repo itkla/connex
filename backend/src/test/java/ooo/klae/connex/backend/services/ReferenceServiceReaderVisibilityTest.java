@@ -51,6 +51,28 @@ class ReferenceServiceReaderVisibilityTest {
         return ReferenceContentReaderTest.tableDisagreements();
     }
 
+    static Stream<Arguments> normalizedTableDestinations() {
+        return ReferenceContentReaderTest.normalizedTableDestinations();
+    }
+
+    static Stream<Arguments> externalAndEmbeddedDestinations() {
+        return ReferenceContentReaderTest.externalAndEmbeddedDestinations();
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedTableDestinations")
+    void normalizedCensusStillRequiresScopedVisibility(String type, String content) {
+        tableDisagreementsStillRequireScopedVisibility(type, content);
+    }
+
+    @ParameterizedTest
+    @MethodSource("externalAndEmbeddedDestinations")
+    void externalUrlsAndEmbeddedWordsRemainVisibleWithoutInternalLookups(String type, String content) {
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content(), type);
+        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+    }
+
     @ParameterizedTest
     @MethodSource("tableDisagreements")
     void tableDisagreementsStillRequireScopedVisibility(String type, String content) {

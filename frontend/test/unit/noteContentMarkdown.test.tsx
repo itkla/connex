@@ -133,6 +133,54 @@ describe("NoteContent Markdown rendering", () => {
         }
     });
 
+    const censusNormalizations: [string, (type: string) => string][] = [
+        ["full-width digits", (type) => `${type}:４２`],
+        ["Arabic digits", (type) => `${type}:٤٢`],
+        ["mixed case", (type) => `${type.slice(0, -1)}${type.at(-1)?.toUpperCase()}:42`],
+        ["escaped named colon", (type) => `${type}\\&colon;42`],
+        ["entity-encoded backslash", (type) => `${type}&#92;:42`],
+        ["full-width colon", (type) => `${type}：42`],
+        ["full-width type", (type) => `${Array.from(type, (letter) => String.fromCharCode(letter.charCodeAt(0) + 0xfee0)).join("")}:42`],
+        ["full-width type, colon and digits", (type) => `${Array.from(type, (letter) => String.fromCharCode(letter.charCodeAt(0) + 0xfee0)).join("")}：４２`],
+        ["Unicode case fold", (type) => `${type === "task" ? "tasK" : type.toUpperCase()}:42`],
+    ];
+
+    it.each(censusNormalizations)("pins the renderer differential for census %s", (_name, destination) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            for (const fixture of sharedReaderFixtures.slice(3, 5)) {
+                const content = fixture[1].replace("TYPE:42", destination(type));
+                const html = render(content, [{ type, id: 42, label: "Server label" }]);
+
+                expect(html).toContain("Former");
+                expect(html).not.toContain("Server label");
+                expect(html).not.toContain("Unavailable reference");
+
+                const canonical = render(fixture[1].replace("TYPE:42", `${type}:42`));
+                expect(canonical).toContain("Unavailable reference");
+                expect(canonical).not.toContain("Former");
+            }
+        }
+    });
+
+    it.each([
+        ["prose URL", "Visit https://example.com/TYPE:42 today."],
+        ["external link", "[Help](https://example.com/TYPE:42)"],
+        ["embedded word", "/superTYPE:42"],
+        ["colon in a URL", "Visit https://example.com/:TYPE:42 today."],
+        ["parentheses in a URL", "[Help](https://example.com/(TYPE:42))"],
+        ["www autolink", "Visit www.example.com/:TYPE:42 today."],
+        ["mailto URL", "[Help](mailto:help@example.com?subject=:TYPE:42)"],
+    ])("keeps external census exclusions ordinary in %s", (_name, fixture) => {
+        const types: NoteReference["type"][] = ["user", "person", "deal", "company", "note", "file", "task", "activity"];
+        for (const type of types) {
+            const html = render(fixture.replace("TYPE", type), [{ type, id: 42, label: "Server label" }]);
+            expect(html).not.toContain("Server label");
+            expect(html).not.toContain("Unavailable reference");
+            expect(html).toContain(fixture.startsWith("[Help]") ? "Help" : `${type}:42`);
+        }
+    });
+
     it("rejects executable links and unsafe images", () => {
         const html = render([
             "[Unsafe](javascript:alert(1))",

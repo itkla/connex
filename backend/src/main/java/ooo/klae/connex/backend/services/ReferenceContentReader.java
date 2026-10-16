@@ -48,6 +48,7 @@ import org.commonmark.parser.Parser;
 import org.springframework.web.util.HtmlUtils;
 
 import io.micrometer.core.instrument.Metrics;
+import ooo.klae.connex.backend.ai.masking.CanonicalText;
 import ooo.klae.connex.backend.services.ReferenceService.MemberReference;
 
 /** Reads internal Markdown destinations and member provenance without granting authorization. */
@@ -65,7 +66,10 @@ final class ReferenceContentReader {
             TYPE_NOTE, TYPE_FILE, TYPE_TASK, TYPE_ACTIVITY);
     private static final Pattern DESTINATION_CENSUS = Pattern.compile(
         "(?i)" + censusTypePattern()
-            + "(?::|\\\\:|&colon;|&#0*+58;|&#x0*+3a;)(?<id>(?:[0-9]++|&#[0-9]++;|&#x[0-9a-f]++;)++)");
+            + "(?:\\\\)?+(?::|&colon;|&#0*+58;|&#x0*+3a;)"
+            + "(?<id>(?:\\p{javaDigit}++|&#[0-9]++;|&#x[0-9a-f]++;)++)");
+    private static final Pattern CENSUS_ENTITY = Pattern.compile(
+        "&(?:#(?:[0-9]++|[xX][0-9a-fA-F]++)|[A-Za-z][A-Za-z0-9]*+);");
     private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
         "(?im)^[ \\t]{0,3}+\\[((?:\\\\.|[^\\]\\\\])++)\\]:[ \\t]*+"
             + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
@@ -166,6 +170,9 @@ final class ReferenceContentReader {
     private record DestinationCensus(List<CensusHit> hits, Set<ReferenceTarget> targets, Set<String> unparseableTypes) {
     }
 
+    private record ExternalUrlSpan(int start, int end) {
+    }
+
     /**
      * Parses bounded original source with and without tables, without global entity decoding or
      * truncation. The census and fixed-number compatibility scans still cover the entire source
@@ -222,23 +229,37 @@ final class ReferenceContentReader {
     }
 
     /**
-     * Inventories literal destinations independently of Markdown, including code and malformed
-     * tables. Fixed type/separator alternatives and disjoint possessive digit runs keep the scan
-     * linear. Only destinations resolved by either AST can explain a hit; compatibility readings
-     * never turn an otherwise unreadable member destination into permission for AI admission.
+     * Inventories destinations in the AI screen's literal projection, retaining original offsets
+     * across backend entity decoding. Destination boundaries exclude embedded words; external
+     * URL spans exclude path/query fragments. Code and malformed tables remain conservative.
+     * Fixed alternatives and disjoint possessive runs keep scanning linear. Only an AST destination
+     * at the same original offset can explain a hit and admit its member label to AI masking.
      */
     private static DestinationCensus destinationCensus(String content) {
         List<CensusHit> hits = new ArrayList<>();
         Set<ReferenceTarget> targets = new LinkedHashSet<>();
         Set<String> unparseable = new HashSet<>();
-        Matcher destinations = DESTINATION_CENSUS.matcher(content);
+        CanonicalText.Projection projection = censusProjection(content);
+        List<ExternalUrlSpan> externalUrls = externalUrlSpans(projection.value());
+        Matcher destinations = DESTINATION_CENSUS.matcher(projection.value());
+        int externalIndex = 0;
         while (destinations.find()) {
+            while (externalIndex < externalUrls.size()
+                    && externalUrls.get(externalIndex).end() <= destinations.start()) {
+                externalIndex++;
+            }
+            if (!destinationStart(projection.value(), destinations.start())
+                    || externalIndex < externalUrls.size()
+                    && externalUrls.get(externalIndex).start() <= destinations.start()) {
+                continue;
+            }
             for (String type : CENSUS_TYPES) {
                 if (destinations.start(type) >= 0) {
                     var target = parseReferenceTarget(type, normalizeReferenceSyntax(destinations.group("id")));
                     if (target.isPresent()) {
                         targets.add(target.get());
-                        hits.add(new CensusHit(target.get(), destinations.start(), destinations.end()));
+                        hits.add(new CensusHit(target.get(), projection.sourceStart(destinations.start()),
+                                projection.sourceEnd(destinations.end())));
                     } else {
                         unparseable.add(type);
                     }
@@ -247,6 +268,100 @@ final class ReferenceContentReader {
             }
         }
         return new DestinationCensus(hits, targets, unparseable);
+    }
+
+    /** Backend entity decoding composes with the exact source-mapped fold used by AI screening. */
+    private static CanonicalText.Projection censusProjection(String content) {
+        Matcher entities = CENSUS_ENTITY.matcher(content);
+        if (!entities.find()) {
+            return CanonicalText.project(content);
+        }
+        StringBuilder decoded = new StringBuilder(content.length());
+        int[] starts = new int[content.length()];
+        int[] ends = new int[content.length()];
+        int source = 0;
+        do {
+            while (source < entities.start()) {
+                starts[decoded.length()] = source;
+                ends[decoded.length()] = source + 1;
+                decoded.append(content.charAt(source++));
+            }
+            String entity = entities.group();
+            String value = entity.equalsIgnoreCase("&colon;") ? ":" : HtmlUtils.htmlUnescape(entity);
+            int start = decoded.length();
+            decoded.append(value);
+            Arrays.fill(starts, start, decoded.length(), entities.start());
+            Arrays.fill(ends, start, decoded.length(), entities.end());
+            source = entities.end();
+        } while (entities.find());
+        while (source < content.length()) {
+            starts[decoded.length()] = source;
+            ends[decoded.length()] = source + 1;
+            decoded.append(content.charAt(source++));
+        }
+        CanonicalText.Projection normalized = CanonicalText.project(decoded.toString());
+        int[] projectedStarts = new int[normalized.value().length()];
+        int[] projectedEnds = new int[normalized.value().length()];
+        for (int offset = 0; offset < normalized.value().length(); offset++) {
+            projectedStarts[offset] = starts[normalized.sourceStart(offset)];
+            projectedEnds[offset] = ends[normalized.sourceEnd(offset + 1) - 1];
+        }
+        return new CanonicalText.Projection(normalized.value(), projectedStarts, projectedEnds);
+    }
+
+    /** Markdown delimiters plus code/table boundaries admit conservative literal examples. */
+    private static boolean destinationStart(String content, int start) {
+        if (start == 0) {
+            return true;
+        }
+        char previous = content.charAt(start - 1);
+        return Character.isWhitespace(previous) || Character.isSpaceChar(previous)
+                || "(<[]:\"'`|".indexOf(previous) >= 0;
+    }
+
+    /** Tracks scheme runs once; consuming each URL through its closing delimiter stays linear. */
+    private static List<ExternalUrlSpan> externalUrlSpans(String content) {
+        List<ExternalUrlSpan> spans = new ArrayList<>();
+        int schemeStart = -1;
+        for (int offset = 0; offset < content.length();) {
+            char current = content.charAt(offset);
+            int start = -1;
+            int prefixLength = 0;
+            if (content.startsWith("mailto:", offset)) {
+                start = offset;
+                prefixLength = 7;
+            } else if (content.startsWith("www.", offset)) {
+                start = offset;
+                prefixLength = 4;
+            } else if (current == ':' && schemeStart >= 0 && content.startsWith("://", offset)) {
+                start = schemeStart;
+                prefixLength = 3;
+            }
+            if (start >= 0) {
+                int end = offset + prefixLength;
+                while (end < content.length() && !externalUrlEnd(content.charAt(end))) {
+                    end++;
+                }
+                spans.add(new ExternalUrlSpan(start, end));
+                offset = end;
+                schemeStart = -1;
+            } else {
+                if (current >= 'a' && current <= 'z') {
+                    if (schemeStart < 0) {
+                        schemeStart = offset;
+                    }
+                } else if (!(current >= '0' && current <= '9' || current == '+' || current == '.' || current == '-')) {
+                    schemeStart = -1;
+                }
+                offset++;
+            }
+        }
+        return spans;
+    }
+
+    private static boolean externalUrlEnd(char character) {
+        return Character.isWhitespace(character) || Character.isSpaceChar(character)
+                || ")>]\"'`|".indexOf(character) >= 0;
     }
 
     /** Entity-encoded type letters must not hide renderer-recognized destinations from the census. */

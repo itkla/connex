@@ -1528,7 +1528,7 @@ class AiAssistantMemberExposureTest {
     }
 
     static Stream<Arguments> tableDisagreementReadings() {
-        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.concat(Stream.of(
                 Arguments.of(nativeProtocol, true,
                         "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `", "Former `]` Member"),
                 Arguments.of(nativeProtocol, true,
@@ -1538,7 +1538,45 @@ class AiAssistantMemberExposureTest {
                         "| h |\n| - |\n|\nprefix `\n[Former `]` Member](u&#115;er:42 \"title\")\nsuffix `",
                         "Former `]` Member"),
                 Arguments.of(nativeProtocol, false,
-                        "prefix `\n\nh|i\n--|--|--\n[Former|Member](user:42 \"title\")\n`", "Former|Member")));
+                        "prefix `\n\nh|i\n--|--|--\n[Former|Member](user:42 \"title\")\n`", "Former|Member")),
+                Stream.of("user:４２", "user:٤٢", "UsEr:42", "user\\&colon;42", "user&#92;:42", "user：42",
+                        "ｕｓｅｒ:42", "ｕｓｅｒ：４２")
+                        .map(destination -> Arguments.of(nativeProtocol, true,
+                                "| h |\n| - |\n|\nprefix `\n[Former `]` Member](" + destination
+                                        + " \"title\")\nsuffix `", "Former `]` Member"))));
+    }
+
+    static Stream<Arguments> externalUrlReadings() {
+        return Stream.of(false, true).flatMap(nativeProtocol -> Stream.of(
+                Arguments.of(nativeProtocol, "Visit https://example.com/user:42 today.", "Visit [redacted] today."),
+                Arguments.of(nativeProtocol, "[Help](https://example.com/user:42)", "[Help]([redacted]"),
+                Arguments.of(nativeProtocol, "/superuser:42", "/superuser:42"),
+                Arguments.of(nativeProtocol, "Visit https://example.com/:user:42 today.", "Visit [redacted] today."),
+                Arguments.of(nativeProtocol, "[Help](https://example.com/(user:42))", "[Help]([redacted]")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("externalUrlReadings")
+    void externalUrlsDoNotInventMembersOrRefuseProviderAdmission(boolean nativeProtocol, String content, String expected)
+            throws Exception {
+        var context = new MaskingContext();
+        AiAssistantMemberIdentifiers.seedReferenceText(content, context);
+        var identifiers = AiAssistantMemberIdentifiers.referenceIdentifiers(content);
+        assertTrue(identifiers.isEmpty());
+        assertTrue(context.identifierDictionary().isEmpty());
+        var result = new AiAssistantToolResult(Map.of("description", content), identifiers);
+        var resources = new AiChatResourceRegistry(context);
+        var prompt = nativeProtocol
+                ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                        new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+        var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+        String payload = mapper.writeValueAsString(capture.request().messages());
+        assertTrue(payload.contains(expected));
+        assertFalse(payload.contains("example.com"));
+        assertTrue(context.tokenBindings().isEmpty());
+        assertEquals(0, capture.warnings());
     }
 
     @ParameterizedTest

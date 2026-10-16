@@ -16,6 +16,15 @@ class ReferenceServicePlainTextTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Visit https://example.com/user:42 today.", "[Help](https://example.com/user:42)", "/superuser:42",
+            "Visit https://example.com/:note:42 today.", "[Help](https://example.com/(note:42))"
+    })
+    void toPlainText_preservesExternalUrlsAndEmbeddedWords(String content) {
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
             "[Secret][m]\n\n[m]:\nnote:42", "[Secret][m]\r\r[m]:\rnote:42",
             "[Secret][m]\n\n> [m]: note:42", "[Secret][m]\n\n- [m]: note:42",
             "[Secret][m]\n\n1. [m]:\n   note:42",
