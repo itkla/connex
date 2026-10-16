@@ -97,7 +97,7 @@ refused**, rather than stored uninspected.
 | `XML` | `*.xml`, `*.rels`, `*.vml`, `META-INF/manifest.xml`, `manifest.rdf` | Parsed with DTDs, external entities, and processing instructions disabled, against the namespace/element allowlists in §6 |
 | `SIGNATURE` | `META-INF/documentsignatures.xml`, `_xmlsignatures/*.xml` | Parsed against the closed signature vocabulary (§6) |
 | `SIGNATURE_ORIGIN` | `_xmlsignatures/origin.sigs` | Must be empty and bound by the origin relationship |
-| `SIGNATURE_CERTIFICATE` | OOXML `_xmlsignatures/` subtree, `.cer` only (extension case-insensitive), outside every `_rels/` directory | Exactly one complete DER X.509 certificate, with minimal outer SEQUENCE length, full parser consumption, and encoded-byte agreement; bound to its declared type and a signature-owned certificate relationship |
+| `SIGNATURE_CERTIFICATE` | OOXML `_xmlsignatures/` subtree, `.cer` only (extension case-insensitive), outside every `_rels/` directory | One parsed X.509 certificate with bounded DER tag/length framing throughout constructed values (§6); full parser consumption and encoded-byte agreement as defence in depth; bound to its declared type and a signature-owned certificate relationship |
 | `SIGNATURE_RELATIONSHIPS` | OOXML signature part's own `_rels/<signature-name>.rels` | Closed OPC `Relationships`/`Relationship` shape, certificate relationships only, with an admitted signature owner and the OPC relationships media type |
 | `MIMETYPE` | ODF `mimetype` | STORED at offset 0 and equal to the format's media type |
 | `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded. A GIF member may be animated (several image frames, each walked); a direct GIF upload must be a single frame because it is canonicalised to a still image |
@@ -146,6 +146,7 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
 | Compression ratio | 100:1 (per entry and overall) |
 | XML or signature part | 4 MiB |
 | Signer certificate part | 64 KiB, checked before allocation |
+| Certificate ASN.1 depth / nodes | 32 / 4096, including the root |
 | Raster, EMF/WMF/TIFF/BMP member | 16 MiB |
 | Embedded font member | 16 MiB |
 | Printer settings, ODF layout cache | 1 MiB |
@@ -212,12 +213,25 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
   `application/vnd.openxmlformats-package.relationships+xml`, without parameters, and admit
   only the standard unqualified relationship attributes and whitespace text.
 
-  Certificate parsing accepts one DER Certificate SEQUENCE with a definite, minimally encoded
-  outer length and no prefix, suffix, or second object. The X.509 `CertificateFactory` must
-  consume the whole input and return identical encoded bytes, within the shared deadline.
-  PKCS#7 bundles, CRLs, CSRs, private keys, and other payloads refuse. This proves certificate
-  structure; it does not verify the document signature, certificate trust, validity, or revocation.
-  Document bytes remain unchanged.
+  Before X.509 parsing, a bounded framing walk requires one universal constructed SEQUENCE with
+  no prefix, suffix, or second object. Every constructed value must contain exactly its complete
+  child values. At every visited value, tag numbers and definite lengths must use their minimal
+  encodings; indefinite lengths, reserved universal tags, tag numbers beyond a signed integer,
+  and constructed encodings of universal primitive types (including BIT STRING, OCTET STRING,
+  and restricted strings) refuse. The walk checks the shared deadline at each node and caps depth
+  at 32 and nodes at 4096, including the root. These framing rules follow
+  [X.690](https://www.itu.int/rec/T-REC-X.690-202102-I/en). Primitive contents, including extension
+  OCTET STRINGs and public-key BIT STRINGs, remain opaque to the walk; the X.509 parser interprets
+  the certificate schema and primitive values. This is not a complete ASN.1 semantic
+  canonicalization check.
+
+  The X.509 `CertificateFactory` must then parse a certificate, consume the whole input, and
+  return identical encoded bytes, with deadline checks around parsing. Consumption and byte
+  agreement are overlapping defence in depth: the JDK parser accepts some BER encodings and
+  may retain input bytes verbatim, so those checks alone do not establish DER framing. PKCS#7
+  bundles, CRLs, CSRs, private keys, and other payloads refuse. These checks establish the
+  admitted framing and parsed certificate structure; they do not verify the document signature,
+  certificate trust, validity, or revocation. Document bytes remain unchanged.
 
 ## 7. What #1122 and every later pipeline MUST do
 

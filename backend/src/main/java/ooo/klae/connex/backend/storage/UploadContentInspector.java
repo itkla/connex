@@ -279,6 +279,8 @@ public class UploadContentInspector implements AutoCloseable {
         "application/vnd.openxmlformats-package.relationships+xml";
     private static final String OOXML_SIGNATURE_CERTIFICATE_RELATIONSHIP =
         "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/certificate";
+    private static final Set<String> OOXML_SIGNATURE_RELATIONSHIP_ATTRIBUTES =
+        Set.of("Id", "Type", "Target", "TargetMode");
     private static final Set<String> OOXML_SIGNATURE_NAMESPACES = Set.of(
         "http://www.w3.org/2000/09/xmldsig#",
         "http://www.w3.org/2009/xmldsig11#",
@@ -1455,38 +1457,18 @@ public class UploadContentInspector implements AutoCloseable {
     }
 
     /**
-     * Proves exactly one DER X.509 certificate without trusting its identity or signature.
+     * Requires DER framing and a parsed X.509 certificate without trusting its identity or signature.
      *
-     * <p>The factory may consume only one object, so exact minimal outer framing and full-input
-     * consumption are independent requirements. The package pass bounds bytes before allocation;
-     * this parser never unwraps PEM or accepts another ASN.1 object around the certificate.
+     * <p>The bounded framing walk checks minimal tags and definite lengths throughout constructed
+     * values before the BER-tolerant factory parses the certificate. Primitive contents and the
+     * certificate schema are left to the factory. Full-input consumption and encoded-byte agreement
+     * are overlapping defence in depth: a parser may retain BER input verbatim, so those checks
+     * alone cannot establish DER framing. The package pass bounds bytes before allocation; this
+     * parser never unwraps PEM or accepts another ASN.1 object around the certificate.
      */
     private static void requireSignatureCertificate(byte[] content, Deadline deadline) {
         deadline.check();
-        if (content.length < 2 || content[0] != 0x30) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
-        int firstLength = Byte.toUnsignedInt(content[1]);
-        int headerLength = 2;
-        long bodyLength = firstLength;
-        if (firstLength >= 0x80) {
-            int lengthOctets = firstLength & 0x7f;
-            if (lengthOctets == 0 || lengthOctets > 4
-                    || content.length < 2 + lengthOctets || content[2] == 0) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            bodyLength = 0;
-            for (int index = 0; index < lengthOctets; index++) {
-                bodyLength = (bodyLength << 8) | Byte.toUnsignedInt(content[2 + index]);
-            }
-            if (bodyLength < 0x80) {
-                throw UnsupportedUploadMediaTypeException.unsupported();
-            }
-            headerLength += lengthOctets;
-        }
-        if (bodyLength != content.length - headerLength) {
-            throw UnsupportedUploadMediaTypeException.unsupported();
-        }
+        SignatureCertificateDerFraming.requireValid(content, deadline::check);
         try {
             CertificateFactory factory = CertificateFactory.getInstance("X.509");
             ByteArrayInputStream input = new ByteArrayInputStream(content);
@@ -2947,7 +2929,7 @@ public class UploadContentInspector implements AutoCloseable {
             }
             for (int index = 0; index < attributes.getLength(); index++) {
                 if (!attributes.getURI(index).isEmpty()
-                        || !Set.of("Id", "Type", "Target", "TargetMode")
+                        || !OOXML_SIGNATURE_RELATIONSHIP_ATTRIBUTES
                             .contains(attributes.getLocalName(index))) {
                     throw new SAXException("Package signature relationship attribute is invalid");
                 }

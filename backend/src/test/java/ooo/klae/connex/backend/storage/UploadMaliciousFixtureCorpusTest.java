@@ -694,6 +694,18 @@ class UploadMaliciousFixtureCorpusTest {
             PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX, certificate));
     }
 
+    @Test
+    void rejectsCertificateWithNonMinimalInnerLength() throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxmlWithCertificate(
+            UploadFormat.DOCX, PackageFixtures.signerCertificateWithBerValidity(false)));
+    }
+
+    @Test
+    void rejectsCertificateWithIndefiniteInnerLength() throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxmlWithCertificate(
+            UploadFormat.DOCX, PackageFixtures.signerCertificateWithBerValidity(true)));
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("nonCertificatePayloads")
     void rejectsNonCertificatePayloadsInCertificateParts(String name, byte[] payload) throws Exception {
@@ -800,6 +812,19 @@ class UploadMaliciousFixtureCorpusTest {
         }
     }
 
+    @Test
+    void rejectsCertificateDefaultTypeOnXmlMember() throws Exception {
+        Map<String, byte[]> parts = PackageFixtures.members(
+            "word/metadata.xml", PackageFixtures.ascii("<metadata/>"));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX, PackageFixtures.defaultMainXml(UploadFormat.DOCX), "", "", parts,
+            true, "application/xml")));
+
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX, PackageFixtures.defaultMainXml(UploadFormat.DOCX), "", "", parts,
+            true, PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE));
+    }
+
     @ParameterizedTest
     @MethodSource("refusedCertificatePaths")
     void rejectsCertificatePathsOutsideNarrowAdmission(String path) throws Exception {
@@ -822,6 +847,24 @@ class UploadMaliciousFixtureCorpusTest {
         Map<String, byte[]> parts = certificateParts();
         parts.remove("_xmlsignatures/_rels/sig1.xml.rels");
         refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    @Test
+    void rejectsCertificateInUnsignedPackage() throws Exception {
+        Map<String, byte[]> parts = PackageFixtures.members(
+            "_xmlsignatures/cert1.cer", PackageFixtures.signerCertificate());
+        refused(UploadFormat.DOCX,
+            PackageFixtures.ooxml(UploadFormat.DOCX, certificateDefaultType(), "", parts));
+
+        parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships(certificateRelationship("cert1.cer"))));
+        refused(UploadFormat.DOCX,
+            PackageFixtures.ooxml(UploadFormat.DOCX, certificateDefaultType(), "", parts));
+
+        parts.clear();
+        parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships("")));
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(UploadFormat.DOCX, "", "", parts));
     }
 
     @Test
@@ -895,7 +938,7 @@ class UploadMaliciousFixtureCorpusTest {
     }
 
     @Test
-    void rejectsCertificateSourceOutsideOriginSignatureGraph() throws Exception {
+    void rejectsCertificatePackageWithSignatureNotBoundFromOrigin() throws Exception {
         Map<String, byte[]> parts = certificateParts();
         parts.put("_xmlsignatures/sig2.xml", parts.get("_xmlsignatures/sig1.xml"));
         parts.put("_xmlsignatures/_rels/sig2.xml.rels",

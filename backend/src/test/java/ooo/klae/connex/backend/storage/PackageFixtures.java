@@ -21,6 +21,7 @@ import javax.imageio.ImageIO;
 
 import org.bouncycastle.asn1.ASN1Encoding;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.ASN1Sequence;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v2CRLBuilder;
@@ -174,6 +175,22 @@ final class PackageFixtures {
             String extraRootRelationships,
             Map<String, byte[]> extraParts,
             boolean storeExtraParts) throws IOException {
+        return ooxml(format, mainXml, extraContentTypes, extraRootRelationships,
+            extraParts, storeExtraParts, "application/xml");
+    }
+
+    /**
+     * Selects the XML Default declaration without emitting a duplicate Default, so a refusal
+     * exercises effective member-type binding rather than declaration ambiguity.
+     */
+    static byte[] ooxml(
+            UploadFormat format,
+            String mainXml,
+            String extraContentTypes,
+            String extraRootRelationships,
+            Map<String, byte[]> extraParts,
+            boolean storeExtraParts,
+            String defaultXmlContentType) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
             put(zip, "_rels/.rels", ascii("<Relationships xmlns=\"" + RELATIONSHIPS_NAMESPACE
@@ -190,7 +207,7 @@ final class PackageFixtures {
             }
             put(zip, "[Content_Types].xml", ascii("<Types xmlns=\"http://schemas.openxmlformats"
                 + ".org/package/2006/content-types\">"
-                + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                + defaultType("xml", defaultXmlContentType)
                 + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-"
                 + "package.relationships+xml\"/>"
                 + "<Override PartName=\"/" + mainPart(format) + "\" ContentType=\""
@@ -368,6 +385,60 @@ final class PackageFixtures {
             }
         }
         throw new IllegalArgumentException("Cannot construct certificate at requested size");
+    }
+
+    /**
+     * Retains a complete X.509 shape while replacing the inner Validity length with a BER form.
+     * All enclosing lengths remain definite and minimal, so outer framing cannot detect it.
+     */
+    static byte[] signerCertificateWithBerValidity(boolean indefinite) throws Exception {
+        ASN1Sequence certificate = ASN1Sequence.getInstance(signerCertificate());
+        ASN1Sequence tbs = ASN1Sequence.getInstance(certificate.getObjectAt(0));
+        ByteArrayOutputStream tbsBody = new ByteArrayOutputStream();
+        for (int index = 0; index < tbs.size(); index++) {
+            byte[] field = tbs.getObjectAt(index).toASN1Primitive().getEncoded(ASN1Encoding.DER);
+            if (index == 4) {
+                if (field[0] != 0x30 || Byte.toUnsignedInt(field[1]) >= 0x80) {
+                    throw new IllegalStateException("Validity fixture requires a short SEQUENCE");
+                }
+                tbsBody.write(0x30);
+                tbsBody.write(indefinite ? 0x80 : 0x81);
+                if (!indefinite) {
+                    tbsBody.write(field[1]);
+                }
+                tbsBody.write(field, 2, field.length - 2);
+                if (indefinite) {
+                    tbsBody.write(0);
+                    tbsBody.write(0);
+                }
+            } else {
+                tbsBody.write(field);
+            }
+        }
+        ByteArrayOutputStream certificateBody = new ByteArrayOutputStream();
+        certificateBody.write(derValue(0x30, tbsBody.toByteArray()));
+        for (int index = 1; index < certificate.size(); index++) {
+            certificateBody.write(certificate.getObjectAt(index).toASN1Primitive()
+                .getEncoded(ASN1Encoding.DER));
+        }
+        return derValue(0x30, certificateBody.toByteArray());
+    }
+
+    /** @return supplied bytes framed with a minimal definite length, without validating contents */
+    static byte[] derValue(int identifier, byte[] body) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(identifier);
+        if (body.length < 0x80) {
+            output.write(body.length);
+        } else {
+            int lengthOctets = (Integer.SIZE - Integer.numberOfLeadingZeros(body.length) + 7) / 8;
+            output.write(0x80 | lengthOctets);
+            for (int index = lengthOctets - 1; index >= 0; index--) {
+                output.write(body.length >>> (index * 8));
+            }
+        }
+        output.writeBytes(body);
+        return output.toByteArray();
     }
 
     private static byte[] signerCertificateWithPadding(int padding) throws Exception {
