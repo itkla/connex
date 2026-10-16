@@ -1622,9 +1622,10 @@ account root.
   re-check with its refusal audited after completion → existing schedule mutation and transactional
   success audit.
 - `ReportService.delete` runs at `READ COMMITTED` (#1897): unlocked schedule/privilege pre-check
-  and audited step-up → actor `app_user FOR SHARE` → `isLockedBuiltInAdministrator` (account
-  shared, active workspace shared, authorization membership exclusive) → assigned custom-role rows
-  shared with cache flush (`lockAssignedCustomRoleRowsForShare`) → `lockDefinitions` (workspace
+  and audited step-up → actor `app_user FOR SHARE` →
+  `isLockedBuiltInAdministratorWithAssignedRoles` (account shared, active workspace shared,
+  authorization membership exclusive, then the existing assigned custom-role rows shared with
+  cache flush, then HTTP actor confinement) → `lockDefinitions` (workspace
   report definitions exclusive) → `getDefinition` and not-found check → schedule/privilege
   re-check and step-up, its refusal audited after completion → existing deletion policy, snapshot
   checks, cascade and transactional success audit. The definition locks block schedule inserts
@@ -1669,6 +1670,74 @@ are harmless here: nothing that authorizes the gated writes reads `org_member` o
 write does not already hold (`permissionsFor`, `lockAndRequirePermissions`,
 `isLockedBuiltInAdministrator`, `DeletionPolicy`), so a write that escapes the re-check is one the
 account could have made without the step-up a moment earlier.
+
+### Servlet-filter confinement recheck (G1/G5)
+
+`PrivilegedMfaLockedAuthorization` reasserts confinement at the completed request-actor
+authorization boundaries in `WorkspaceService`: all four permission-lock variants, combined
+member permissions/memberships and wrappers, member authorization for credentials, built-in
+administrator authorization, approval membership authorization, workspace identity, invite grants,
+and role mutations. It uses the retained active membership and custom-role permission rows for
+privilege **in this workspace**, not another account-wide membership scan. Built-in owner/admin
+without an overlay requires no custom-role lookup. An empty permission requirement remains
+membership-only for custom-role targets; their authority is not resolved by that entry.
+
+For a non-exempt HTTP actor with enforcement enabled the order is:
+
+1. The helper's existing account roots and reservation checks, ascending as before.
+2. Existing workspace root, memberships, role roots and permission rows, in their existing order.
+3. If those rows show local privilege, retain the workspace's organization shared with
+   `lockWorkspaceMfaOrganizationForShare`, NOWAIT, before any new credential/coverage lock. The
+   workspace root is already retained. The organization parent prevents an organization grant from
+   holding it exclusively while waiting on a coverage gap and blocking the mutation's later audit.
+   This new parent acquisition never waits while membership/role locks are held.
+4. `lockedWorkspaceMfaPasskeySufficiency` reads owned
+   credentials and, only with attestation enforced, coverage in that workspace's organization,
+   shared and NOWAIT. Handle, credential and coverage locks follow authority, matching the
+   role-before-credential order of registration/deletion and attestation redemption. The query's
+   workspace lock is already retained by step 2. Ordinary actors acquire neither of these added
+   parent/credential locks.
+5. Existing aggregate locks and business writes, only if confinement is satisfied.
+
+Report deletion uses the assigned-role administrator variant to retain its existing account-wide
+role fence before the new credential/coverage locks. Acquiring those shared role roots after a
+coverage-gap lock could invert against attestation redemption's role-then-coverage order. The
+ordinary administrator helper performs no assigned-role lookup. This moves ReportService's
+existing acquisition into the authorization helper without adding global membership locks or
+changing the step-up actor.
+
+These control-plane statements run through control-catalog routing on the **same connection**.
+Both new statements are cache-flushed (`flushCache="true" useCache="false"`) and use
+current locking reads, so an old REPEATABLE READ snapshot or MyBatis answer cannot hide a promotion or
+resurrect a deleted passkey. A nonlocking credential read would be unsafe: a transaction can open
+its snapshot while the actor is ordinary, then observe a promotion under locks after that account
+deleted its last passkey. The query avoids opening a consistent-read snapshot before a campaign
+or other aggregate mutex. No nested transaction or second pooled connection is added to admission.
+
+NOWAIT is necessary because assertion updates can already hold a credential row before their
+trailing audit requests the account root shared. Waiting for that credential while retaining a
+shared account root can cycle through an exclusive account writer queued ahead of the audit.
+The existing exact MySQL 3572/HY000 translation returns the workspace-conflict retry response;
+other SQL failures propagate. No exclusive organization root, cross-workspace membership lock,
+assigned-role scan or new account-root mode is introduced. Disabled enforcement, filter exemptions,
+non-HTTP/system execution and automation skip this credential check entirely.
+
+The refusal audit uses `AuditService.deferStrictFailureIndependentScoped` from the **outer
+mutation transaction**, after returning from all reads. The entry and limiter admission are
+captured there; only append and admission release run after completion. Immediate independent
+auditing can wait on the holder's own exclusive root or queue behind an account writer waiting
+on its shared root. Delivery is best-effort under `deferFailure`'s existing contract; a failed
+capture/append releases the limiter admission and never changes the refusal.
+
+This is a local authority fence, not a global account-wide barrier. Remote workspace promotions
+after the filter check (including custom-role permission grants outside this workspace),
+organization grants taking a shared grantee root, and self-service workspace founding remain
+outside it. Direct-lock ordinary record writes, mutations without a locked-authorization helper
+(including existing `TagService` administration), and reads receive no new recheck. Several operations
+can already be in flight, and a bulk request can contain several writes; their existing workspace
+authorization still governs them. See
+[the confinement contract](../PRIVILEGED_MFA.md#confinement-recheck-during-locked-workspace-authorization)
+for exact scope, response shapes, exemptions, audit limits and residuals.
 
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:

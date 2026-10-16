@@ -62,6 +62,7 @@ class WorkspaceIdentityLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
 
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
@@ -69,6 +70,25 @@ class WorkspaceIdentityLockOrderTest {
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void reportAuthorizationRetainsAssignedRolesBeforeConfinement() {
+        WorkspaceMember membership = membership("admin", null, "active");
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID)).thenReturn(membership);
+        when(privilegedMfaLockedAuthorization.requestActor(Set.of(ACTOR_ID))).thenReturn(ACTOR_ID);
+
+        assertTrue(service.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, privilegedMfaLockedAuthorization);
+        order.verify(userMapper).isAccountDeletionReservedForShare(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(WORKSPACE_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        order.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+        order.verify(privilegedMfaLockedAuthorization).requestActor(Set.of(ACTOR_ID));
+        order.verify(privilegedMfaLockedAuthorization).requireAllowed(ACTOR_ID, WORKSPACE_ID, membership, Set.of());
     }
 
     @Test

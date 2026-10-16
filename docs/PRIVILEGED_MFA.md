@@ -42,6 +42,91 @@ session is newly established and bound to the same account. It does not satisfy 
 operation. Only a verified WebAuthn assertion, a passkey login, or the just-completed passkey
 registration ceremony creates the recent-MFA stamp.
 
+### Confinement recheck during locked workspace authorization
+
+The servlet filters' decision precedes a mutation's transaction. When enforcement is enabled,
+`WorkspaceService` also reasserts confinement when locked authorization completes for the
+authenticated HTTP actor: all four `lockAndRequirePermissions*` variants,
+`lockedMemberPermissionsAndMemberships` (including its wrappers), `lockedMemberAuthorization`,
+`isLockedBuiltInAdministrator` (including its assigned-role variant for report deletion),
+approval membership authorization, workspace identity authorization,
+invite-grant authorization, and role-mutation authorization. This is additional confinement; the
+existing permission and tenant checks still authorize the operation.
+
+Privilege here comes from the exact locked active membership: built-in owner/admin without a
+custom-role overlay, or a locked custom role granting a permission from the closed privileged list
+above. An empty permission requirement remains membership-only for custom-role members: it does
+not resolve or lock their role authority, so the recheck cannot infer privilege from those rows.
+It does not authorize privileged actions. Target users,
+assignees and recipients are never confined in place of the request actor. Background/system work
+and attributed automation retain their existing behavior. With enforcement disabled the recheck
+and its credential locks are skipped.
+
+The recheck asks whether the actor owns a passkey and, when attestation is enforced, whether an
+owned passkey carries `BREAK_GLASS` assurance or covers **this workspace's organization**. The
+filters retain their account-wide rule that one credential must cover every privileged
+organization. With attestation enforcement off, the recheck neither reads nor locks coverage.
+The recheck uses current shared credential/coverage reads on the mutation's own
+connection, with explicit MyBatis cache flushing; it neither suspends the transaction nor borrows
+a second pooled connection. Account and workspace authorization roots precede credential/coverage
+locks, matching registration and deletion's role-before-credential order. The shared organization
+parent is acquired NOWAIT before coverage, so an organization grant cannot block a later audit
+while waiting on the mutation's coverage gap. Ordinary actors perform
+no credential read. Browser credential/coverage
+contention uses NOWAIT and the existing retryable workspace-conflict response, avoiding a wait
+cycle against assertion updates and their trailing audits. See the exact
+[locking contract](backend/LOCKING.md#servlet-filter-confinement-recheck-g1g5).
+
+Browser refusals are the same 403 code/message bodies as the filter:
+`PRIVILEGED_MFA_ENROLLMENT_REQUIRED` / “A passkey must be enrolled before this privileged account
+can continue”, or `PRIVILEGED_MFA_ATTESTATION_REQUIRED` / “A passkey must be approved before this
+privileged account can continue”. Public-API advice and filter propagation preserve the PAT 401
+`error` envelope, lower-case code, message and `request_id`. No production PAT write route is
+introduced; the production registry still denies unregistered writes.
+
+The browser filter records its normalized enrollment, safe-exit and grant-cookie-recipient
+exemption decision in server-owned request context, which the recheck consumes without matching
+paths again. Existing method rules, including HEAD behavior, remain unchanged. PAT requests have
+no browser enrollment exemption.
+
+Under-lock refusals share `DenialAuditRateLimiter` admission with filter refusals and retain
+account-scoped `auth.mfa.policy.denied` evidence. The actor, null workspace/org scope, reason,
+resolved client address and sanitized metadata are captured when the refusal is registered.
+`AuditService` appends only after the outer mutation transaction completes, whether it commits or
+rolls back; it never appends independently while that transaction holds the account root. Failed
+capture or delivery releases admission. Refusal is unconditional regardless of audit suppression
+or failure. Deferred delivery is best-effort: a crash or append failure can lose the row, and its
+timestamp is the append time. Completion does not read request/thread context lazily.
+
+This closes promotion in the authorizing workspace that commits before its locked authorization
+is acquired. It is not an account-wide serialization barrier. Residuals are:
+
+- Privilege granted in another workspace, especially a permission addition to another custom
+  role, is outside this workspace's retained authority. Even a remote promotion committed after
+  the filter check and before this local check is not inferred from unrelated local authority.
+  Existing account locks serialize remote built-in membership changes, but do not make the local
+  predicate account-wide.
+- Organization grants take the grantee account shared and need not wait for this transaction.
+  They confer no workspace permission. Self-service workspace founding also takes the creator
+  account shared and is not fenced here.
+- Direct-lock ordinary record writes, such as `PersonService.replaceTags`, do not use these
+  authorization helpers and receive no new recheck. They require their existing ordinary record
+  authority; a just-promoted, not-yet-enrolled account can complete in-flight ordinary writes
+  that passed the filter before the promotion committed.
+- Mutations that never use locked authorization are also outside this fence. For example,
+  `TagService.create`, `update` and `delete` retain their preliminary `TAG_MANAGE` checks and
+  filter-only confinement. Those are administrative writes, not the ordinary direct-lock writes
+  above; this change does not close their existing filter-to-write window. No domain-service
+  inventory or migration to the helpers is part of this change.
+- Reads receive no new locked recheck. Existing filter confinement, public identity-read snapshot
+  semantics and export step-up controls remain in force.
+
+There is no universal numeric or millisecond bound: several requests or transactions can already
+be in flight, and a bulk request can contain several writes. The residual consists of the
+already-admitted operations whose last applicable check preceded the promotion; their existing
+workspace authorization still governs their writes. Subsequent fresh filter checks confine the
+account.
+
 ## High-risk operations
 
 The existing service boundaries require recent WebAuthn verification for role and membership

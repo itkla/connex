@@ -90,7 +90,8 @@ class ApiCredentialManagementLockOrderTest {
             mock(PrivilegedAccountService.class),
             mock(AccountDeletionReservationRead.class),
             mock(RegistrationVerificationService.class),
-            mock(ooo.klae.connex.backend.services.OwnershipOfferWriter.class));
+            mock(ooo.klae.connex.backend.services.OwnershipOfferWriter.class),
+            mock(ooo.klae.connex.backend.services.PrivilegedMfaLockedAuthorization.class));
         service = new ApiCredentialService(
             apiCredentialMapper,
             userMapper,

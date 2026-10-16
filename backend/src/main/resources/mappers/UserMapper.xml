@@ -351,6 +351,37 @@
       ) AS hasSufficientPasskey
   </select>
 
+  <select id="lockWorkspaceMfaOrganizationForShare" resultType="int" flushCache="true" useCache="false">
+    SELECT o.id
+    FROM workspace w
+    JOIN organization o ON o.id = w.org_id
+    WHERE w.id = #{workspaceId}
+    FOR SHARE OF w, o NOWAIT
+  </select>
+
+  <select id="lockedWorkspaceMfaPasskeySufficiency" resultType="boolean" flushCache="true" useCache="false">
+    SELECT
+    <choose>
+      <when test="attestationEnforced">
+        (COALESCE(c.privileged_assurance = 'BREAK_GLASS', FALSE)
+          OR pca.credential_row_id IS NOT NULL)
+      </when>
+      <otherwise>TRUE</otherwise>
+    </choose>
+    FROM webauthn_user_entity e
+    JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+    JOIN workspace w ON w.id = #{workspaceId}
+    <if test="attestationEnforced">
+      LEFT JOIN privileged_credential_attestation pca
+        ON pca.credential_row_id = c.id AND pca.org_id = w.org_id
+    </if>
+    WHERE e.user_id = #{id}
+    ORDER BY c.id
+    FOR SHARE OF e, c, w
+    <if test="attestationEnforced">, pca</if>
+    NOWAIT
+  </select>
+
   <select id="isSufficientPasskey" resultType="boolean">
     SELECT EXISTS (
       SELECT 1

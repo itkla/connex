@@ -411,6 +411,42 @@ public class AuditService {
         return context.isEmpty() ? null : context;
     }
 
+    /**
+     * Captures a rate-admitted denial now and appends it after the current outer transaction ends.
+     * Follows {@link #deferFailure}: never call from an inner transaction while an outer holder is
+     * suspended. Actor, explicit scope, resolved address and all request metadata are captured at
+     * registration; completion never consults thread/request context. The failure callback returns
+     * the limiter admission on either capture or append failure. Delivery remains best-effort and
+     * never changes the refusal; no independent append runs while the authorization roots are held.
+     *
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed refusal reason
+     * @param request refused request
+     * @param resolvedClientIp address used for limiter admission
+     * @param appendFailed callback releasing the captured admission
+     */
+    public void deferStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason,
+            HttpServletRequest request, String resolvedClientIp, Runnable appendFailed) {
+        try {
+            AuditLog entry = buildEntry(action, entityType, entityId, targetLabel, OUTCOME_FAILURE,
+                summary, null, refusalContext(reason, request), true, workspaceId, orgId, false);
+            entry.setIpAddress(truncate(resolvedClientIp, IP_MAX));
+            resolveDenialRequestMetadata(entry, new ServletRequestAttributes(request));
+            deferIndependent(entry, appendFailed);
+        } catch (RuntimeException failure) {
+            appendFailed.run();
+            log.error("Failed to defer audit event action={} entityType={} entityId={}",
+                action, entityType, entityId, failure);
+        }
+    }
+
     private static void copyFetchMetadata(HttpServletRequest request, Map<String, Object> context,
             String header, String key) {
         String value;
@@ -588,6 +624,10 @@ public class AuditService {
      * operation, not of whatever runs later.
      */
     private void deferIndependent(AuditLog entry) {
+        deferIndependent(entry, () -> { });
+    }
+
+    private void deferIndependent(AuditLog entry, Runnable appendFailed) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             appendAndObserve(entry, true);
             return;
@@ -598,6 +638,7 @@ public class AuditService {
                 try {
                     appendAndObserve(entry, true);
                 } catch (Exception e) {
+                    appendFailed.run();
                     log.error("Failed to record deferred audit event action={} entityType={} entityId={}",
                             entry.getAction(), entry.getEntityType(), entry.getEntityId(), e);
                 }

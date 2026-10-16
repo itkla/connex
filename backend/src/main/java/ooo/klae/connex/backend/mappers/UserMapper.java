@@ -105,6 +105,16 @@ public interface UserMapper {
      * @return the three facts; never null
      */
     PrivilegedMfaStandingRow privilegedMfaStanding(int id);
+    /** Retains the locked workspace's organization before credential/coverage children, without waiting. */
+    Integer lockWorkspaceMfaOrganizationForShare(int workspaceId);
+    /**
+     * Current per-passkey sufficiency, including organization coverage only when enforced. The caller
+     * retains account, workspace authorization and organization roots; credential/coverage locks follow authority.
+     * The distinct statement flushes MyBatis caches and takes no consistent-read snapshot.
+     */
+    List<Boolean> lockedWorkspaceMfaPasskeySufficiency(
+        @Param("id") int id, @Param("workspaceId") int workspaceId,
+        @Param("attestationEnforced") boolean attestationEnforced);
     /**
      * Whether the passkey belongs to the account and is sufficient for its privileged MFA (#1534).
      *
