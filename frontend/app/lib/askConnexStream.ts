@@ -189,6 +189,21 @@ export function settleAskConnexStreamHydration(
 }
 
 /**
+ * Whether a durable turn's partial is the final word on its streamed answer, to be adopted exactly
+ * by {@link adoptSettledAskConnexStreamPartial}: the turn has settled, and its tail is not owned by
+ * transcript reconciliation. A resolved answer's partial is withheld by the server because its text
+ * arrives as the transcript message, and an authorization withdrawal is dropped by that same
+ * reconciliation, so adopting either here would blank or keep the wrong text.
+ *
+ * @param status the durable turn's status
+ * @param reason the durable turn's terminal reason
+ * @param active whether that status is still active
+ */
+export function adoptsSettledAskConnexPartial(status: string, reason: string | null, active: boolean): boolean {
+    return !active && !shouldDropAskConnexStream(status, reason);
+}
+
+/**
  * Adopts a settled turn's durable partial as the whole streamed answer, even when it is shorter or
  * empty. The server publishes every delta only after its durable append commits, and a settled
  * turn's partial is read in the same row as its status, so it is final: text this client holds

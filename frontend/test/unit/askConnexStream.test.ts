@@ -4,6 +4,7 @@ import {
     ASK_CONNEX_STREAM_HYDRATION_LIMIT,
     absorbAskConnexStreamPartial,
     adoptSettledAskConnexStreamPartial,
+    adoptsSettledAskConnexPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -400,6 +401,25 @@ describe('a settled turn\'s durable partial is authoritative', () => {
         const streamed = applyAll(createAskConnexStream(9), [delta(0, 'live text ahead')]);
 
         expect(absorbAskConnexStreamPartial(streamed, 'live').state.text).toBe('live text ahead');
+    });
+});
+
+describe('which settled turns adopt their durable partial exactly', () => {
+    it('leaves a resolved answer to transcript reconciliation, since its durable partial is withheld', () => {
+        expect(adoptsSettledAskConnexPartial('resolved', null, false)).toBe(false);
+        const streamed = applyAll(createAskConnexStream(9), [delta(0, 'The finished answer')]);
+        expect(settleAskConnexStreamHydration(streamed, '').state.text).toBe('The finished answer');
+    });
+
+    it('leaves an authorization withdrawal to the reconciliation that drops it', () => {
+        expect(adoptsSettledAskConnexPartial('failed', 'access_revoked', false)).toBe(false);
+        expect(adoptsSettledAskConnexPartial('failed', 'restrictions_changed', false)).toBe(false);
+    });
+
+    it('adopts every other settled turn exactly, and never an active one', () => {
+        expect(adoptsSettledAskConnexPartial('failed', 'malformed_output', false)).toBe(true);
+        expect(adoptsSettledAskConnexPartial('timed_out', null, false)).toBe(true);
+        expect(adoptsSettledAskConnexPartial('running', null, true)).toBe(false);
     });
 });
 

@@ -11,7 +11,7 @@ describe("the provider adopts a settled turn's durable partial exactly", () => {
             provider.indexOf('const absorbTurnPartial = useCallback'),
             provider.indexOf('const canPersist = useAccountStorageGeneration'));
 
-        expect(absorb).toMatch(/if \(!isActiveTurnStatus\(durable\.status\)\) \{[\s\S]*adoptSettledAskConnexStreamPartial\(/);
+        expect(absorb).toMatch(/if \(adoptsSettledAskConnexPartial\(durable\.status, durable\.terminalReason, isActiveTurnStatus\(durable\.status\)\)\) \{[\s\S]*adoptSettledAskConnexStreamPartial\(/);
         expect(absorb.indexOf('adoptSettledAskConnexStreamPartial('))
             .toBeLessThan(absorb.indexOf('if (partial.length === 0) return;'));
     });
@@ -21,7 +21,7 @@ describe("the provider adopts a settled turn's durable partial exactly", () => {
             provider.indexOf('const hydrateStream = useCallback'),
             provider.indexOf('const absorbTurnPartial = useCallback'));
 
-        expect(hydrate).toContain('settledTurn = !isActiveTurnStatus(durable.status);');
+        expect(hydrate).toMatch(/settledTurn = adoptsSettledAskConnexPartial\(\s*durable\.status, durable\.terminalReason, isActiveTurnStatus\(durable\.status\)\);/);
         expect(hydrate).toMatch(/if \(settledTurn\) \{\s*streamRef\.current = adoptSettledAskConnexStreamPartial\(current, partial\);/);
     });
 });

@@ -148,6 +148,7 @@ import {
 import {
     absorbAskConnexStreamPartial,
     adoptSettledAskConnexStreamPartial,
+    adoptsSettledAskConnexPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -870,7 +871,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             try {
                 const durable = await getAiChatTurn(sessionId, turnId, { signal });
                 partial = durable.partialContent ?? '';
-                settledTurn = !isActiveTurnStatus(durable.status);
+                settledTurn = adoptsSettledAskConnexPartial(
+                    durable.status, durable.terminalReason, isActiveTurnStatus(durable.status));
             } catch {
                 const current = streamRef.current;
                 if (!signal.aborted
@@ -1023,7 +1025,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (streamEpoch !== streamEpochRef.current) return;
         if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) return;
         const partial = durable.partialContent ?? '';
-        if (!isActiveTurnStatus(durable.status)) {
+        if (adoptsSettledAskConnexPartial(durable.status, durable.terminalReason, isActiveTurnStatus(durable.status))) {
             const held = streamRef.current?.turnId === durable.turnId ? streamRef.current : null;
             if (held === null && partial.length === 0) return;
             streamRef.current = adoptSettledAskConnexStreamPartial(
