@@ -49,9 +49,15 @@ deployed by logic loaded from the older commit. The candidate
    `.staging/releases/<sha>/` with `backend.jar`, a complete Next standalone `frontend/` runtime
    (traced dependencies, server, static output, and `public`), and `manifest.tsv`. Verification
    requires the manifest sha, both SHA-256 digests, the JAR's embedded `build.gitSha`, and the
-   frontend's release identity to agree. A partial or corrupt directory is never overwritten or
-   activated. The first transactional run rebuilds the marker commit's frontend from Git into the
-   same standalone format; it does not label the unversioned legacy `.next` tree as proven. It
+   frontend's release identity to agree. The frontend digest skips the cache roots Next.js writes
+   beneath its dist directory while it serves: `server/route-cache` and `cache` under `.next` or
+   `.next-new`. The launcher keeps the sealed runtime as the server's working directory, and
+   Next 16.3 promotes build seeds into `server/route-cache` on the first request for a static
+   route, so hashing them would invalidate the live release the first time it served `favicon.ico`.
+   Sealing refuses a runtime that already contains one of those paths, so build output is never
+   left unhashed. A partial or corrupt directory is never overwritten or activated. The first
+   transactional run rebuilds the marker commit's frontend from Git into the same standalone
+   format; it does not label the unversioned legacy `.next` tree as proven. It
    never removes legacy `.next`, `.next-new`, or `.next-old` directories: it builds elsewhere,
    stops the legacy frontend before switching the checkout, and leaves those ignored trees on disk
    for deliberate operator cleanup after the sealed runtime is verified live. This also makes a
