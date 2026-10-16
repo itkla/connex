@@ -20,7 +20,10 @@ import AskConnexDrawer, {
     type AskConnexJobOffer,
     type AskConnexScopeSurface,
 } from '@/app/components/ask-connex/AskConnexDrawer';
+import AskConnexMissionCreate from '@/app/components/ask-connex/AskConnexMissionCreate';
+import AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
+import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
@@ -116,6 +119,7 @@ import {
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
+import { reconcileAskConnexDurableMessages } from '@/app/lib/askConnexMissions';
 import { askConnexJobContext, askConnexJobs } from '@/app/lib/askConnexEntryPoints';
 import {
     ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS,
@@ -521,6 +525,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
+    const [missionRefreshVersion, setMissionRefreshVersion] = useState(0);
     const [promptRequest, setPromptRequest] = useState(0);
     const [scopeDraft, setScopeDraft] = useState<AskConnexScopeDraft>(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
     const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
@@ -1251,16 +1256,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             },
         );
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
-        const known = new Set(messagesRef.current.map(
-            (message) => `${message.seq}:${message.authorKind}:${message.content}`,
-        ));
-        messagesRef.current = nextMessages;
-        setMessages(nextMessages);
-        setFreshMessageIds(animateNew
-            ? new Set(nextMessages
-                .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
-                .map((message) => message.id))
-            : new Set());
+        const reconciled = reconcileAskConnexDurableMessages(messagesRef.current, nextMessages, animateNew);
+        messagesRef.current = reconciled.messages;
+        setMessages(reconciled.messages);
+        setFreshMessageIds(reconciled.freshMessageIds);
+        setMissionRefreshVersion((version) => version + 1);
         dispatchToolCalls({
             type: 'replace',
             toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
@@ -1737,6 +1737,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         clearActiveSession();
                     }
                 }
+                enqueueRealtimeRefresh(frame.sessionId, signal);
+            },
+            onMissionFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId || frame.sessionId !== activeSessionRef.current?.id) return;
+                const signal = identityControllerRef.current?.signal;
+                if (!signal || signal.aborted) return;
+                setMissionRefreshVersion((version) => version + 1);
                 enqueueRealtimeRefresh(frame.sessionId, signal);
             },
             onDelta: handleStreamDelta,
@@ -2953,6 +2960,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [scopeBlocked, scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, scopeProblem, settleScopeRouting, skills, t],
     );
 
+    const missionChanged = useCallback((sessionId: number) => {
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        setMissionRefreshVersion((version) => version + 1);
+        enqueueRealtimeRefresh(sessionId, signal);
+    }, [enqueueRealtimeRefresh]);
+    const missions = useAskConnexMissions({
+        identity,
+        sessionId: scoped ? activeSession?.id ?? null : null,
+        enabled: scoped && permission === 'granted',
+        visible: surfaceVisible,
+        refreshVersion: missionRefreshVersion,
+        onChanged: missionChanged,
+    });
+    const missionRecord = contextResult.pageContext.length === 1 ? contextResult.pageContext[0] : undefined;
+    const missionRecordLabel = missionRecord
+        ? contextResult.attachments.find((item) => item.kind === missionRecord.kind && item.id === missionRecord.id)?.label
+            ?? implicitContext?.label ?? t('missions.selectedRecord')
+        : null;
+
     return (
         <AskConnexContext.Provider value={value}>
             <AskConnexMountContext.Provider value={mountValue}>
@@ -2978,6 +3005,33 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 loadState={scoped ? loadState : 'loading'}
                 loadError={scoped ? loadError : null}
                 composer={scoped ? composer : ''}
+                missionProgress={scoped ? (
+                    <AskConnexMissionProgress runs={missions.runs} loading={missions.loading}
+                        problem={missions.problem} pendingId={missions.pendingId} output={missions.output}
+                        hasMore={missions.hasMore} onControl={(run, action) => void missions.control(run, action)}
+                        onOutput={(run) => void missions.viewOutput(run)} onCloseOutput={missions.closeOutput}
+                        onRetry={missions.retry} onMore={() => void missions.loadMore()} />
+                ) : null}
+                missionComposerAction={scoped && missionRecord && missionRecordLabel !== null
+                    && fileAttachments.length === 0 && selectionContext === null ? (
+                    <AskConnexMissionCreate key={`${identity}:${missionRecord.kind}:${missionRecord.id}`}
+                        recordLabel={missionRecordLabel} initialGoal={askConnexMessageContent(composer)}
+                        disabled={working || loadState !== 'ready' || unavailable !== null || missions.pendingId !== null}
+                        problem={missions.problem} onCreate={async (goal) => {
+                            const signal = identityControllerRef.current?.signal;
+                            if (!signal || signal.aborted) return false;
+                            try {
+                                const session = await ensureSession(signal);
+                                if (signal.aborted) return false;
+                                return await missions.create(session.id, goal, {
+                                    kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,
+                                }, signal);
+                            } catch (error) {
+                                if (!signal.aborted) showApiError(error, 'missions.problems.failed');
+                                return false;
+                            }
+                        }} />
+                ) : null}
                 implicitContext={implicitContext}
                 selectionContext={selectionContext}
                 unsupportedPageContext={unsupportedPageContext}

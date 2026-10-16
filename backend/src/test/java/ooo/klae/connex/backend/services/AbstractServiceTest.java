@@ -110,6 +110,8 @@ public abstract class AbstractServiceTest {
     @Autowired protected TenantContext tenantContext;
     @Autowired private PlatformTransactionManager fixtureTransactionManager;
     @Autowired private JdbcTemplate approvalFixtureJdbc;
+    @Autowired private ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService fixturePrivacy;
+    @Autowired private ooo.klae.connex.backend.tenant.TenantWorkScope fixtureTenantScope;
 
     protected Workspace workspace;
     protected User currentUser;
@@ -117,6 +119,7 @@ public abstract class AbstractServiceTest {
     @BeforeEach
     protected void setUpWorkspaceAndAuthentication() {
         workspace = resolveDefaultWorkspace();
+        fixtureTenantScope.inWorkspace(workspace.getId(), () -> fixturePrivacy.initialize(workspace.getId()));
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());

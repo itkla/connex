@@ -117,6 +117,11 @@ public class AiChatMemoryService {
                 capabilities,
                 aiProperties.getAssistantMaxOutputTokens(),
                 fixedEnvelopeBytes);
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.forTurn(turn);
+        if (mission != null) {
+            persistenceService.requirePrivacyCurrent(turn);
+            return new AiChatMemory(List.of(mission.goal()), budget, 0, 0, nativeTools, 1);
+        }
         List<AiChatMessage> recent = persistenceService.loadHistory(
                 turn, MAX_RECENT_MESSAGES);
         AiChatMessage initiatingMessage = recent.stream()
@@ -196,7 +201,7 @@ public class AiChatMemoryService {
                                     throw new AiAssistantLoopException(
                                             "workspace_disabled", "workspace_disabled");
                                 }
-                                persistenceService.requireRunning(turn);
+                                persistenceService.requireExecutionCurrentNonlocking(turn);
                                 requireBeforeDeadline(deadline);
                             }).outcome();
                 }

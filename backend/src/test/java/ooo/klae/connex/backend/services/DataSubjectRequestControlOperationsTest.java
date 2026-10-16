@@ -58,7 +58,9 @@ class DataSubjectRequestControlOperationsTest {
             userMapper,
             orgMemberService,
             auditService,
-            sessionSecurityService);
+            sessionSecurityService,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper.class),
+            new tools.jackson.databind.ObjectMapper());
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
     }
 
@@ -236,6 +238,28 @@ class DataSubjectRequestControlOperationsTest {
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(11);
         order.verify(tenantLifecycleControlMapper).lockActiveOrganizationForShare(ORG_ID);
+    }
+
+    @Test
+    void missionAcceptanceBindsLockedSnapshotToTheExactProvenPerson() {
+        DataSubjectRequest locked = request(WORKSPACE_ID);
+        locked.setId(14);
+        locked.setSubjectPersonId(29);
+        locked.setIdentityVerifiedAt(java.time.LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE);
+        when(tenantLifecycleControlMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(tenantLifecycleControlMapper.lockOrgAdminMembershipForUpdate(ORG_ID, ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(dataSubjectRequestMapper.findByIdForUpdate(ORG_ID, 14)).thenReturn(locked);
+        var command = new ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest(
+                java.util.UUID.randomUUID().toString(), DataSubjectRequestSnapshot.token(locked),
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.SCOPE,
+                ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.CUTOFF_POLICY);
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> operations.acceptMissionPurge(
+                ORG_ID, 14, ACTOR_ID, command, java.util.List.of(WORKSPACE_ID), WORKSPACE_ID, 30));
+
+        assertEquals("dsr_snapshot_conflict", failure.getMessage());
+        verifyNoInteractions(auditService);
     }
 
     private static DataSubjectRequest request(Integer workspaceId) {

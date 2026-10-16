@@ -391,6 +391,29 @@
         "toastCreated": "Request logged.",
         "toastUpdated": "Request updated.",
         "toastSaveFailed": "Couldn't save the request",
-        "loadMoreFailed": "Couldn't load more requests"
+        "loadMoreFailed": "Couldn't load more requests",
+        "missionPurge": {
+            "action": "Erase mission and related chat data",
+            "title": "Erase mission and related chat data?",
+            "description": "This request affects mission data across the organization’s accepted workspaces.",
+            "scope": "I understand this erases all missions and related chat data across the accepted workspaces. In chats used for missions, unrelated generated content and later user messages may also be erased. Earlier ordinary user messages are preserved. Contacts, companies, deals, and other saved records are not erased.",
+            "cutoff": "I understand the workspace list is fixed when this request is accepted. The content cutoff is set when this request first makes affected content unavailable in each workspace; retries keep the same cutoff.",
+            "irreversible": "This can’t be undone.",
+            "confirm": "Erase data",
+            "starting": "Starting…",
+            "close": "Close",
+            "retry": "Refresh status",
+            "accepted": "The erasure request has been accepted. It continues if you close this dialog.",
+            "progress": "{completed} of {total} workspaces completed.",
+            "workflowUnchanged": "Update the data-subject request status separately after reviewing the result.",
+            "states": {
+                "invalidation_pending": "Preparing the erasure.",
+                "purging": "Erasing mission and related chat data.",
+                "retrying": "Erasure will retry. Affected content remains unavailable.",
+                "complete": "Erasure completed and verified."
+            },
+            "stale": "This data-subject request changed. Close this dialog and review the updated request before trying again.",
+            "failed": "Couldn’t retrieve the erasure status. Refresh to try again."
+        }
     }
 }

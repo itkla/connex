@@ -8,10 +8,10 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
@@ -62,18 +62,9 @@ public class AiChatTurnOrphanSettlementService {
      * genuinely dead owners. Retiring it is safe without a token because this transaction holds
      * the turn's row lock, so no other settler can be mid-settlement on it.
      *
-     * <p><strong>The bound on the retained partial answer, stated rather than inferred.</strong>
-     * The settled turn keeps whatever partial answer the vanished owner had already committed,
-     * subject to the special-care screen — but <em>only</em> that screen. The
-     * authorization-withdrawal branch the same screen applies for {@code restrictions_changed} and
-     * {@code access_revoked} cannot fire here, because {@code owner_lost} is deliberately not an
-     * authorization withdrawal and because a withdrawal that landed after the owner stopped is not
-     * observable to a settler at all: {@code AiRestrictionEpoch} is in-JVM with no durable per-turn
-     * epoch, so nothing in the database records the epoch the turn was prepared at. A turn whose
-     * requester's authority was withdrawn mid-run therefore retains text a live owner's terminal
-     * write would have purged. That is strictly better than today's reader-triggered expiry, which
-     * purges nothing at all, and it is a real residual rather than a closed case; the durable
-     * cross-instance restriction epoch it needs is #941.
+     * <p>V231 retains partial content only when the stored immutable privacy token still matches
+     * the current unblocked generation and taint identity. The barrier share lock remains held
+     * through commit; stale or legacy null-token content is cleared before lease takeover.
      *
      * @param key the turn's lease key
      * @param expectedEpoch the epoch the sweeper observed on the expired lease
@@ -97,16 +88,16 @@ public class AiChatTurnOrphanSettlementService {
             leaseService.releaseHeldInCurrentTransaction(key);
             return false;
         }
-        Optional<AiRunLease> takeover = leaseService.takeOverForSettlement(key, expectedEpoch);
-        if (takeover.isEmpty()) {
-            return false;
-        }
         Optional<AiChatDurableTerminal> settled = persistenceService.settleOrphanedTurn(
                 stored, FAILED, AiAssistantTerminalReasons.OWNER_LOST);
         if (settled.isEmpty()) {
             return false;
         }
         AiChatDurableTerminal terminal = settled.get();
+        if (leaseService.takeOverForSettlement(key, expectedEpoch).isEmpty()) {
+            throw new ConflictException("Assistant lease changed during orphan settlement");
+        }
+        leaseService.releaseHeldInCurrentTransaction(key);
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId,
                 sessionId,

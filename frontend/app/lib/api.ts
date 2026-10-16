@@ -5187,6 +5187,25 @@ export function createDataSubjectRequest(orgId: number, body: Types.DataSubjectR
     return postJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests`, body);
 }
 
+/** Explicit erasure acceptance; editing a request never initiates this operation. */
+export function purgeAiAgentHoldings(
+    orgId: number,
+    requestId: number,
+    payload: Types.AiAgentHoldingsPurgeRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purge`, payload, init,
+    );
+}
+
+export function getAiAgentHoldingsPurge(orgId: number, requestId: number, operationId: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purges/${encodeURIComponent(operationId)}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
 export function updateDataSubjectRequest(orgId: number, requestId: number, body: Types.DataSubjectRequestBody) {
     return putJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests/${requestId}`, body);
 }
@@ -6456,6 +6475,35 @@ export function cancelAiChatTurn(
         {},
         init,
     );
+}
+
+/** Creates one bounded, read-only mission with a caller-stable idempotency key. */
+export function createAiAgentRun(sessionId: number, payload: Types.AiAgentRunCreateRequest, init: RequestInit = {}) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/sessions/${sessionId}/missions`, payload, init);
+}
+
+export function getAiAgentRuns(
+    params: { limit?: number; sessionId?: number; state?: Types.AiAgentRunState; cursor?: string } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.AiAgentRunPage>(`/api/ai/assistant/missions${buildQuery(params)}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentRun(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentOutput(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentOutput>(`/api/ai/assistant/missions/${id}/output`, { cache: 'no-store', ...init });
+}
+
+export function controlAiAgentRun(
+    id: number,
+    action: Types.AiAgentRunControl,
+    expectedStateVersion: string,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}/${action}`, { expectedStateVersion }, init);
 }
 
 export function getAiAssistantToolCalls(

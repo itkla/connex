@@ -101,7 +101,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiChatAgentLoopServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
     private static final Instant NOW = Instant.parse("2026-08-11T00:00:00Z");
     private static final AiRunLease LEASE = new AiRunLease(
             new AiRunLeaseKey(TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, TURN.turnId()),
@@ -147,6 +147,10 @@ class AiChatAgentLoopServiceTest {
         memoryService = mock(AiChatMemoryService.class);
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.withPrivacyToken(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(1);
+            return work.get();
+        });
         runLeaseHeartbeat = mock(AiRunLeaseHeartbeat.class);
         runLeaseService = mock(AiRunLeaseService.class);
         heartbeatStops = new AtomicInteger();
@@ -1933,7 +1937,7 @@ class AiChatAgentLoopServiceTest {
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
                 TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(streamedTurn.userMessageId());
         userMessage.setAuthorKind("user");
@@ -5161,7 +5165,7 @@ class AiChatAgentLoopServiceTest {
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
                 TURN.includePrivateNotes(), TURN.pageContext(), TURN.attachmentIds(),
-                AiPrivacyMode.MASKED, true);
+                AiPrivacyMode.MASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         AiChatMessage userMessage = new AiChatMessage();
         userMessage.setId(streamedTurn.userMessageId());
         userMessage.setAuthorKind("user");
@@ -5379,7 +5383,7 @@ class AiChatAgentLoopServiceTest {
     void unmaskedUnknownPlaceholderWarningsNeverPersistOrExecute(boolean nativeProtocol, boolean tool) throws Exception {
         var turn = new AiChatQueuedTurn(TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(), TURN.includePrivateNotes(),
-                TURN.pageContext(), TURN.attachmentIds(), AiPrivacyMode.UNMASKED, false);
+                TURN.pageContext(), TURN.attachmentIds(), AiPrivacyMode.UNMASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         var user = new AiChatMessage();
         user.setId(turn.userMessageId());
         user.setAuthorKind("user");

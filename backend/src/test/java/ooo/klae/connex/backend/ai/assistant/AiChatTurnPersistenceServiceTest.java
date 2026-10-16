@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Attachment;
@@ -61,7 +62,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiChatTurnPersistenceServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
     private static final AiRunLeaseKey LEASE_KEY = new AiRunLeaseKey(
             TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, TURN.turnId());
@@ -108,6 +109,7 @@ class AiChatTurnPersistenceServiceTest {
         AiChatSession session = new AiChatSession();
         auditedSession = session;
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
@@ -117,12 +119,27 @@ class AiChatTurnPersistenceServiceTest {
         storedTurn.setSessionId(TURN.sessionId());
         storedTurn.setRequestedByUserId(TURN.userId());
         storedTurn.setStatus("running");
+        storedTurn.setPrivacyGeneration(1L);
+        AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setId(29);
+        toolCall.setMessageId(TURN.userMessageId());
+        toolCall.setArtifactOrigin("reactive");
+        toolCall.setPrivacyGeneration(1L);
+        when(chatMapper.getToolCallBySessionForUpdate(TURN.workspaceId(), TURN.sessionId(), 29))
+                .thenReturn(toolCall);
+        AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(storedTurn);
+        when(chatMapper.getTurnById(TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(storedTurn);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
@@ -163,11 +180,39 @@ class AiChatTurnPersistenceServiceTest {
         InOrder toolOrder = inOrder(chatMapper);
         toolOrder.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        toolOrder.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
         toolOrder.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         toolOrder.verify(chatMapper).updateToolCall(
                 TURN.workspaceId(), TURN.userMessageId(), 29,
                 "failed", "{\"reason\":\"internal_error\"}", TURN.userId());
+    }
+
+    @Test
+    void reactiveToolCallbacksRefuseMissingMissionAndWrongMessageSourcesBeforeTurnLock() {
+        when(chatMapper.getToolCallBySessionForUpdate(TURN.workspaceId(), TURN.sessionId(), 29))
+                .thenReturn(null);
+        assertThrows(ConflictException.class, () -> service.finishTool(TURN, 29, "executed", "{}"));
+        assertThrows(ConflictException.class, () -> service.failTool(TURN, 29, "{}"));
+        AiChatToolCall call = new AiChatToolCall();
+        call.setMessageId(TURN.userMessageId());
+        call.setMissionRunId(41);
+        when(chatMapper.getToolCallBySessionForUpdate(TURN.workspaceId(), TURN.sessionId(), 29))
+                .thenReturn(call);
+        assertThrows(ConflictException.class, () -> service.finishTool(TURN, 29, "executed", "{}"));
+        assertThrows(ConflictException.class, () -> service.failTool(TURN, 29, "{}"));
+        call.setMissionRunId(null);
+        call.setArtifactOrigin("mission");
+        assertThrows(ConflictException.class, () -> service.finishTool(TURN, 29, "executed", "{}"));
+        assertThrows(ConflictException.class, () -> service.failTool(TURN, 29, "{}"));
+        call.setArtifactOrigin("reactive");
+        call.setMessageId(TURN.userMessageId() + 1);
+        assertThrows(ConflictException.class, () -> service.finishTool(TURN, 29, "executed", "{}"));
+        assertThrows(ConflictException.class, () -> service.failTool(TURN, 29, "{}"));
+
+        verify(chatMapper, never()).getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        verify(chatMapper, never()).updateToolCall(anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
 
     @Test
@@ -185,7 +230,7 @@ class AiChatTurnPersistenceServiceTest {
     void appendPartialBatchPersistsAndPublishesTheSameUtf16BatchOnlyToRequester() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
         storedTurn.setStreamed(true);
         storedTurn.setPartialContentUtf16Offset(0);
         when(chatMapper.appendTurnPartialContent(7, 13, 17, 0, "A😀", 3)).thenReturn(1);
@@ -203,7 +248,7 @@ class AiChatTurnPersistenceServiceTest {
     void revokedParticipantCannotPersistOrReceiveAnotherStreamBatch() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
         AiChatSession shared = new AiChatSession();
         shared.setId(TURN.sessionId());
         shared.setCreatedByUserId(99);
@@ -228,7 +273,7 @@ class AiChatTurnPersistenceServiceTest {
     void changedRestrictionEpochRejectsAStreamBatchBeforePersistence() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
         storedTurn.setStreamed(true);
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
@@ -372,7 +417,7 @@ class AiChatTurnPersistenceServiceTest {
     void resetPartialContentClearsTheExactOffsetAndPublishesStateInvalidation() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
-                AiPrivacyMode.UNMASKED, true);
+                AiPrivacyMode.UNMASKED, true, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 1, null));
         storedTurn.setStreamed(true);
         storedTurn.setPartialContentUtf16Offset(3);
         when(chatMapper.resetTurnPartialContent(7, 13, 17, 3)).thenReturn(1);
@@ -462,7 +507,7 @@ class AiChatTurnPersistenceServiceTest {
                 chatMapper,
                 attachmentMapper,
                 workspaceService,
-                mock(AiRestrictionEpoch.class),
+                restrictionEpoch,
                 governanceService,
                 identifierResolver,
                 toolExecutor,
@@ -596,9 +641,10 @@ class AiChatTurnPersistenceServiceTest {
 
     @Test
     void firstResolvedAssistantTitleRequiresOwnershipAndAutoTitleProvenance() {
+        storedTurn.setStatus("resolved");
         AiChatQueuedTurn retryTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
-                TURN.userMessageId(), 3, TURN.restrictionEpoch(), false, List.of(), List.of());
+                TURN.userMessageId(), 3, TURN.restrictionEpoch(), false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
@@ -666,6 +712,8 @@ class AiChatTurnPersistenceServiceTest {
             InOrder toolOrder = inOrder(chatMapper, restrictionEpoch);
             toolOrder.verify(chatMapper).getSessionByIdForUpdate(
                     TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+            toolOrder.verify(chatMapper).getToolCallBySessionForUpdate(
+                    TURN.workspaceId(), TURN.sessionId(), 29);
             toolOrder.verify(chatMapper).getTurnByIdForUpdate(
                     TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
             toolOrder.verify(restrictionEpoch)
@@ -775,7 +823,7 @@ class AiChatTurnPersistenceServiceTest {
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
-                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of());
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(TURN.workspaceId(), TURN.sessionId(), 1, null));
         AiChatTurn secondStoredTurn = new AiChatTurn();
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());

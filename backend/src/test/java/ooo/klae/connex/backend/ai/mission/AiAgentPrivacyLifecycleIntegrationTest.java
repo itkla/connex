@@ -1,0 +1,206 @@
+package ooo.klae.connex.backend.ai.mission;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
+import ooo.klae.connex.backend.beans.AiAgentRun;
+import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
+import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import tools.jackson.databind.ObjectMapper;
+
+/** Database constraints and lifecycle maintenance are exercised independently of execution gates. */
+class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private AiAgentRunPersistenceService persistence;
+    @Autowired private AiAgentRunMapper runs;
+    @Autowired private AiAgentCapabilityGate capability;
+    @Autowired private AiProperties properties;
+    @Autowired private AiRestrictionEpoch epoch;
+    @Autowired private AiAgentDepartureMaintenanceService departures;
+    @Autowired private TenantLifecycleMapper lifecycle;
+    @Autowired private TenantWorkScope scope;
+    @Autowired private ObjectMapper json;
+    @Autowired private ooo.klae.connex.backend.services.PersonService people;
+
+    @Test
+    void restrictionAndInvalidationCommitTogether() {
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+        jdbc.update("INSERT INTO person (workspace_id, name) VALUES (?, 'Restriction transaction subject')", workspace.getId());
+        int personId = java.util.Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT id FROM person WHERE workspace_id=?", Integer.class, workspace.getId()));
+        try {
+            assertThrows(IllegalStateException.class, () -> transaction().executeWithoutResult(status -> {
+                people.updateProcessingRestrictions(personId, true, false);
+                throw new IllegalStateException("Injected crash before restriction commit");
+            }));
+            assertNull(jdbc.queryForObject("SELECT suspended_at FROM person WHERE id=?", java.sql.Timestamp.class, personId));
+            assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+            assertEquals(0, privacyMapper.countIncompleteWork(workspace.getId()));
+            people.updateProcessingRestrictions(personId, true, false);
+            assertNotNull(jdbc.queryForObject("SELECT suspended_at FROM person WHERE id=?", java.sql.Timestamp.class, personId));
+            assertEquals(2, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+            assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+            assertEquals(1, privacyMapper.countIncompleteWork(workspace.getId()));
+            privacyService.initialize(workspace.getId());
+            assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        } finally {
+            jdbc.update("DELETE FROM person WHERE id=?", personId);
+        }
+    }
+
+    @Test
+    void privacyCleanupRunsWithAiDisabledAndOwnerGone() {
+        AiAgentRun run = create();
+        var attempt = persistence.claim(run, AiAgentCapabilityGate.hash("lifecycle fixture"),
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        persistence.reserveDispatch(attempt, 100);
+        String operation = invalidate();
+        jdbc.update("DELETE FROM workspace_member WHERE workspace_id=? AND user_id=?", workspace.getId(), currentUser.getId());
+        jdbc.update("DELETE FROM app_user WHERE id=?", currentUser.getId());
+        boolean previousAi = properties.isEnabled();
+        boolean previousMissions = properties.isMissionsEnabled();
+        try {
+            properties.setEnabled(false);
+            properties.setMissionsEnabled(false);
+            finish(operation);
+            privacyService.reconcileErasedOwners(workspace.getId());
+        } finally {
+            properties.setEnabled(previousAi);
+            properties.setMissionsEnabled(previousMissions);
+        }
+        AiAgentRun purged = runs.getRun(workspace.getId(), run.getId());
+        assertEquals("cancelled", purged.getStatus());
+        assertNotNull(purged.getPurgedAt());
+        assertNull(purged.getOwnerUserId());
+        assertNull(purged.getGoal());
+        assertTrue(runs.listSegments(workspace.getId(), run.getId()).isEmpty());
+        assertEquals(0, privacyMapper.residualCount(workspace.getId(), 1));
+        assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        assertEquals(Integer.valueOf(0), jdbc.queryForObject("SELECT COUNT(*) FROM ai_run_lease"
+                + " WHERE workspace_id=? AND subject_kind='agent_run' AND subject_id=? AND released_at IS NULL",
+                Integer.class, workspace.getId(), run.getId()));
+    }
+
+    @Test
+    void departureCrashCannotReviveAnUnsettledMissionOnRejoin() {
+        AiAgentRun run = create();
+        persistence.claim(run, AiAgentCapabilityGate.hash("departure fixture"),
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        jdbc.update("DELETE FROM workspace_member WHERE workspace_id=? AND user_id=?", workspace.getId(), currentUser.getId());
+        assertThrows(ConflictException.class, () -> transaction().executeWithoutResult(status -> {
+            workspaceMapper.lockAuthorizationMembership(workspace.getId(), currentUser.getId());
+            departures.requireSettledBeforeFreshMembership(workspace.getId(), currentUser.getId());
+        }));
+        scope.inLifecycleWorkspace(workspace.getId(), () -> departures.reconcile(workspace.getId()));
+        assertEquals("cancelled", runs.getRun(workspace.getId(), run.getId()).getStatus());
+        assertNull(runs.getRun(workspace.getId(), run.getId()).getPurgedAt());
+        assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+        transaction().executeWithoutResult(status -> {
+            workspaceMapper.lockAuthorizationMembership(workspace.getId(), currentUser.getId());
+            departures.requireSettledBeforeFreshMembership(workspace.getId(), currentUser.getId());
+            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
+        });
+        AiAgentRun cancelled = runs.getRun(workspace.getId(), run.getId());
+        assertThrows(ConflictException.class, () -> persistence.control(cancelled, cancelled.getStateVersion(), "resume"));
+    }
+
+    @Test
+    void delayedDepartureEventCannotCancelANewMembershipMission() {
+        AiAgentRun old = create();
+        persistence.cancelForDeparture(old);
+        jdbc.update("DELETE FROM workspace_member WHERE workspace_id=? AND user_id=?", workspace.getId(), currentUser.getId());
+        transaction().executeWithoutResult(status -> {
+            workspaceMapper.lockAuthorizationMembership(workspace.getId(), currentUser.getId());
+            departures.requireSettledBeforeFreshMembership(workspace.getId(), currentUser.getId());
+            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
+        });
+        AiAgentRun current = create();
+
+        departures.departed(new AiAgentDepartureMaintenanceService.Departure(workspace.getId(), currentUser.getId()));
+
+        assertEquals("cancelled", runs.getRun(workspace.getId(), old.getId()).getStatus());
+        assertEquals("queued", runs.getRun(workspace.getId(), current.getId()).getStatus());
+        assertEquals(current.getExecutionGeneration(), runs.getRun(workspace.getId(), current.getId()).getExecutionGeneration());
+        assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+    }
+
+    @Test
+    void v231CompositeConstraintsRejectCrossWorkspaceMissionChildren() {
+        AiAgentRun run = create();
+        var attempt = persistence.claim(run, AiAgentCapabilityGate.hash("constraint fixture"),
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        int unrelatedWorkspace = Integer.MAX_VALUE;
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "UPDATE ai_agent_segment SET workspace_id=? WHERE workspace_id=? AND id=?",
+                unrelatedWorkspace, workspace.getId(), attempt.segmentId()));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "UPDATE ai_chat_turn SET mission_segment_id=? WHERE workspace_id=? AND id=?",
+                Integer.MAX_VALUE, workspace.getId(), attempt.turn().turnId()));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "UPDATE ai_chat_message SET mission_run_id=? WHERE workspace_id=? AND mission_run_id=?",
+                Integer.MAX_VALUE, workspace.getId(), run.getId()));
+        assertEquals(workspace.getId(), runs.getSegment(workspace.getId(), attempt.segmentId()).getWorkspaceId());
+        assertEquals(attempt.segmentId(), runs.getRun(workspace.getId(), run.getId()).getActiveSegmentId());
+    }
+
+    @Test
+    void cyclicMissionLinksAreSettledBeforeRegistryTeardown() {
+        AiAgentRun run = create();
+        persistence.claim(run, AiAgentCapabilityGate.hash("teardown fixture"),
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        privacyService.prepareWorkspaceTeardown(workspace.getId());
+        var declarations = List.of("ai_chat_tool_call", "ai_chat_message", "ai_chat_turn", "ai_agent_segment",
+                "ai_agent_run", "ai_agent_privacy_work", "ai_agent_privacy_barrier", "ai_chat_session").stream()
+                .map(TenantLifecycleRegistry::require)
+                .sorted(Comparator.comparingInt(TenantLifecycleRegistry.TableLifecycle::deleteOrder)).toList();
+        transaction().executeWithoutResult(status -> {
+            for (var declaration : declarations) {
+                for (var preparation : declaration.preparations()) {
+                    if (preparation instanceof TenantLifecycleRegistry.NullifyReference reference) {
+                        lifecycle.nullifyReference(workspace.getId(), declaration, reference);
+                    }
+                }
+            }
+            for (var declaration : declarations) {
+                lifecycle.deleteDirectBatch(workspace.getId(), declaration, 100);
+            }
+        });
+        for (var declaration : declarations) {
+            assertEquals(0, lifecycle.countRows(workspace.getId(), declaration), declaration.table());
+        }
+    }
+
+    private AiAgentRun create() {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(currentUser.getId());
+        session.setTitle("Lifecycle mission");
+        session.setVisibility("private");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        var request = new AiAgentRunCreateRequest(UUID.randomUUID().toString(), "record_review_v1", "Review this record",
+                new AiAgentRunCreateRequest.Scope("record", "company", 1), null);
+        return persistence.create(session.getId(), request, "en", AiAgentCapabilityGate.hash(json.writeValueAsString(request)),
+                json.writeValueAsString(request.scope()), epoch.current(workspace.getId()));
+    }
+}

@@ -86,6 +86,7 @@ public class TenantTeardownService {
     private final AuditService auditService;
     private final TenantLifecycleProperties properties;
     private final Clock clock;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
 
     /** Tears down one exact workspace after owner authorization and slug confirmation. */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -292,6 +293,7 @@ public class TenantTeardownService {
     }
 
     private void sweepTenant(int workspaceId) {
+        missionPrivacy.prepareWorkspaceTeardown(workspaceId);
         for (TableLifecycle declaration : TenantLifecycleRegistry.declarations().values()) {
             for (TenantLifecycleRegistry.Preparation preparation : declaration.preparations()) {
                 tenantTransaction.prepare(

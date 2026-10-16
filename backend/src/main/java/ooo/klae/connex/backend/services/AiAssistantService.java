@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.ai.assistant.AiChatPresenceRegistry;
@@ -216,6 +218,18 @@ public class AiAssistantService {
             })
             .toList();
         var activeTurn = chatMapper.getLatestActiveTurnBySession(workspaceId, id);
+        if (activeTurn != null && (activeTurn.getMissionRunId() != null
+                || activeTurn.getPrivacyGeneration() == null)) {
+            activeTurn = null;
+        }
+        if (activeTurn != null) {
+            try {
+                AiChatPrivacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(workspaceId, id,
+                        activeTurn.getPrivacyGeneration(), activeTurn.getPrivacyTaintSeq()));
+            } catch (ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException stale) {
+                activeTurn = null;
+            }
+        }
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),
             new PageResponse<>(messages, chatMapper.countMessages(workspaceId, id)),
@@ -242,6 +256,9 @@ public class AiAssistantService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         requireOwnedLocked(workspaceId, userId, id);
+        if (status != null && chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (chatMapper.updateSession(workspaceId, id, title, status, null) != 1) {
             throw inaccessible();
         }
@@ -259,6 +276,9 @@ public class AiAssistantService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
+        if (chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (!ARCHIVED.equals(session.getStatus())
                 && chatMapper.updateSession(workspaceId, id, null, ARCHIVED, null) != 1) {
             throw inaccessible();
@@ -277,6 +297,9 @@ public class AiAssistantService {
                 workspaceId,
                 Map.of(userId, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE)));
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
+        if (chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (shared && !ACTIVE.equals(session.getStatus())) {
             throw new ConflictException("Archived sessions cannot be shared");
         }
@@ -496,6 +519,8 @@ public class AiAssistantService {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspaceId);
         message.setSessionId(id);
+        var privacyToken = ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.capture(chatMapper, session);
+        message.setPrivacyGeneration(privacyToken.privacyGeneration());
         message.setSeq(chatMapper.nextMessageSequence(workspaceId, id));
         message.setAuthorKind(USER);
         message.setAuthorUserId(userId);
@@ -508,6 +533,7 @@ public class AiAssistantService {
         }
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId, id, sessionFrame(workspaceId, id, "message_created"));
+        ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.retain(chatMapper, privacyToken);
         return AiChatMessageDto.from(stored, List.of(), authService.getCurrentUser().getDisplayName());
     }
 

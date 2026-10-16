@@ -84,6 +84,11 @@ public class GlobalExceptionHandler {
             .body(body);
     }
 
+    @ExceptionHandler(AiAgentGoneException.class)
+    public ResponseEntity<Map<String, String>> handleAiAgentGone(AiAgentGoneException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("code", ex.getMessage(), "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(BusinessCardImportResultGoneException.class)
     public ResponseEntity<Map<String, String>> businessCardImportResultGone(
             BusinessCardImportResultGoneException ex) {
@@ -246,6 +251,11 @@ public class GlobalExceptionHandler {
         log.warn("Encrypted secret unavailable: exception={} detail={}",
                 ex.getClass().getName(), stackDetail(ex));
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Encrypted secret is unavailable");
+    }
+
+    @ExceptionHandler(AiAgentUnavailableException.class)
+    public ResponseEntity<Map<String, String>> missionUnavailable(AiAgentUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("code", "mission_unavailable", "message", "mission_unavailable"));
     }
 
     @ExceptionHandler(ServiceUnavailableException.class)

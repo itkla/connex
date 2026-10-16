@@ -1306,6 +1306,56 @@
       "applied": "{count}件を適用しました",
       "discarded": "{count}件を破棄しました",
       "failed": "{count}件は適用できませんでした"
+    },
+    "missions": {
+      "title": "レコードの確認",
+      "create": "レコードを確認",
+      "createTitle": "レコードの確認を開始",
+      "selectedRecord": "選択したレコード",
+      "scope": "{record}と、そのレコードに直接紐づく活動・タスク・メモだけを確認します。",
+      "goal": "どのような点を確認しますか？",
+      "defaultGoal": "このレコードを確認し、根拠と今後の検討事項をまとめてください。",
+      "bounds": "このレコードの情報を読み取り、要約を作成します。画面を離れても最長15分間続けられます。レコードは変更しません。",
+      "start": "確認を開始",
+      "creating": "開始しています…",
+      "close": "キャンセル",
+      "retry": "再試行",
+      "more": "以前の確認",
+      "states": {
+        "queued": "待機中",
+        "running": "確認中",
+        "paused": "一時停止中",
+        "done": "完了",
+        "failed": "停止",
+        "cancelled": "キャンセル済み",
+        "waiting_approval": "確認待ち"
+      },
+      "phases": {
+        "queued": "開始を待っています。",
+        "reading": "レコードと根拠を確認しています。",
+        "writing_report": "要約を作成しています。"
+      },
+      "controls": {
+        "pause": "一時停止",
+        "resume": "再開",
+        "cancel": "確認をキャンセル"
+      },
+      "pausedHelp": "確認を一時停止しています。再開できる場合は、当初の制限時間内で続けられます。",
+      "withheld": "この確認の内容は表示できなくなりました。",
+      "viewOutput": "要約を見る",
+      "reportTitle": "レコードの確認結果",
+      "reportDescription": "確認時に参照できた情報に基づく要約です。",
+      "coverage": "確認済み：{processed}・対象外：{skipped}・失敗：{failed}・未確認：{unprocessed}",
+      "problems": {
+        "busy": "この会話は処理中です。終了後に確認を開始してください。",
+        "conflict": "確認の状態が変わったため、最新の状態に更新しました。",
+        "expired": "この確認の制限時間が終了しました。続けるには新しく確認を開始してください。",
+        "allowance": "この確認で実行できる量に達しました。続けるには新しく確認を開始してください。",
+        "withheld": "この確認の内容は表示できなくなりました。",
+        "unavailable": "現在、レコードの確認を利用できません。しばらくしてから再試行してください。",
+        "forbidden": "この確認を表示・操作する権限がありません。",
+        "failed": "確認を読み込めませんでした。再試行してください。"
+      }
     }
   },
   "SearchLayout": {

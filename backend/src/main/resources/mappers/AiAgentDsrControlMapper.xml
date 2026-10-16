@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper">
+  <resultMap id="receipt" type="ooo.klae.connex.backend.beans.AuditLog">
+    <id column="id" property="id" />
+    <result column="org_id" property="orgId" />
+    <result column="action" property="action" />
+    <result column="changes" property="changes" />
+    <result column="created_at" property="createdAt" />
+  </resultMap>
+  <sql id="requestBinding">
+    org_id = #{orgId} AND entity_type = 'organization' AND entity_id = #{orgId}
+    AND CAST(JSON_UNQUOTE(JSON_EXTRACT(changes, '$.requestId')) AS UNSIGNED) = #{requestId}
+  </sql>
+  <select id="findAcceptanceByKey" resultMap="receipt" useCache="false" flushCache="true">
+    SELECT id, org_id, action, changes, created_at FROM audit_log
+    WHERE <include refid="requestBinding" />
+      AND action = 'appi.subject_request.mission_purge.accepted'
+      AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.idempotencyKey')) = #{idempotencyKey}
+    ORDER BY id LIMIT 1
+  </select>
+  <select id="findAcceptance" resultMap="receipt" useCache="false" flushCache="true">
+    SELECT id, org_id, action, changes, created_at FROM audit_log
+    WHERE <include refid="requestBinding" />
+      AND action = 'appi.subject_request.mission_purge.accepted'
+      AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.operationId')) = #{operationId}
+    ORDER BY id LIMIT 1
+  </select>
+  <select id="findCompletion" resultMap="receipt" useCache="false" flushCache="true">
+    SELECT id, org_id, action, changes, created_at FROM audit_log
+    WHERE <include refid="requestBinding" />
+      AND action = 'appi.subject_request.mission_purge.completed'
+      AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.operationId')) = #{operationId}
+    ORDER BY id LIMIT 1
+  </select>
+  <select id="pendingAcceptances" resultMap="receipt" useCache="false" flushCache="true">
+    SELECT a.id, a.org_id, a.action, a.changes, a.created_at FROM audit_log a
+    WHERE a.id &gt; #{afterId} AND a.action = 'appi.subject_request.mission_purge.accepted'
+      AND a.org_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM audit_log c WHERE c.org_id = a.org_id
+        AND c.entity_type = a.entity_type AND c.entity_id = a.entity_id
+        AND c.action = 'appi.subject_request.mission_purge.completed'
+        AND JSON_EXTRACT(c.changes, '$.operationId') = JSON_EXTRACT(a.changes, '$.operationId'))
+    ORDER BY a.id LIMIT #{limit}
+  </select>
+</mapper>

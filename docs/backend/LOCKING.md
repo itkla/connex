@@ -635,7 +635,15 @@ Ordinary turn/join/leave/sharing/presence-authorizing mutations:
 
 Invitation/participant-removal paths lock caller/target active memberships ascending by user id before the session root; never acquire another membership after the session root.
 
-The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
+The session row is the per-session mutex. V231 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; privacy deletion retains the counter and immutable first-mission taint boundary. Summary updates and request replays do not allocate a sequence.
+
+### Durable record-review missions (V231)
+
+The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction read fence, privacy barrier S, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
+
+Restriction invalidation has the opposite **authority direction**, not an inverted lock sequence: under its domain roots it retains sorted local write fences, takes barrier X, then work X, advances generation and records bounded cleanup work in the restriction transaction. It never takes mission/session roots. Cleanup discovers IDs without locks, then locks session/run/tool/turn/segment roots, barrier X and work X. Deletion and expected work-revision advancement commit together. Final verification takes barrier X then work X, counts all enrolled residuals without discovery-watermark limits, and unblocks only after all incomplete work and all current-cutoff residuals are gone. Privacy cleanup never requires the departed owner's AI permission or an available provider.
+
+Ordinary derived writers carry the admission token `(workspace, session, privacy generation, nullable original taint sequence)` and retain barrier S through commit. Do not replace its generation when persisting an old result. Null-to-nonnull taint changes invalidate pre-mission derived jobs. Terminal maintenance may clear stale content without execution authority; retaining content requires current provenance. Ordinary expiry and orphan settlement now finish their content writes before releasing/taking over leases. No content root may be acquired afterward.
 
 ### AI identifier key reconciliation
 

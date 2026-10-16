@@ -68,7 +68,7 @@
     "prelaunch": {
       "closingHeading": "Your next chapter starts here.",
       "metaTitle": "Connex — coming soon",
-      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we\u2019ll write to you the day it opens.",
+      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we’ll write to you the day it opens.",
       "formLabel": "Get notified when Connex launches",
       "emailLabel": "Email address",
       "emailPlaceholder": "Your email address",
@@ -1306,6 +1306,56 @@
       "applied": "{count, plural, one {# applied} other {# applied}}",
       "discarded": "{count, plural, one {# discarded} other {# discarded}}",
       "failed": "{count, plural, one {# could not be applied} other {# could not be applied}}"
+    },
+    "missions": {
+      "title": "Record review",
+      "create": "Review record",
+      "createTitle": "Start a record review",
+      "selectedRecord": "Selected record",
+      "scope": "Review only {record} and its directly linked activities, tasks, and notes.",
+      "goal": "What should Connex look into?",
+      "defaultGoal": "Review this record and summarize the evidence and next considerations.",
+      "bounds": "Connex will prepare a read-only summary for this record. It can keep working while you are away, for up to 15 minutes. No records are changed.",
+      "start": "Start review",
+      "creating": "Starting…",
+      "close": "Cancel",
+      "retry": "Try again",
+      "more": "Earlier reviews",
+      "states": {
+        "queued": "Queued",
+        "running": "In progress",
+        "paused": "Paused",
+        "done": "Complete",
+        "failed": "Stopped",
+        "cancelled": "Cancelled",
+        "waiting_approval": "Awaiting review"
+      },
+      "phases": {
+        "queued": "Waiting to begin.",
+        "reading": "Reading the record and its evidence.",
+        "writing_report": "Writing the summary."
+      },
+      "controls": {
+        "pause": "Pause",
+        "resume": "Resume",
+        "cancel": "Cancel review"
+      },
+      "pausedHelp": "Work has paused. Resume when available to continue within the original time limit.",
+      "withheld": "This review’s content is no longer available.",
+      "viewOutput": "View summary",
+      "reportTitle": "Record review summary",
+      "reportDescription": "Prepared from the evidence available during this review.",
+      "coverage": "Reviewed: {processed} · Skipped: {skipped} · Failed: {failed} · Remaining: {unprocessed}",
+      "problems": {
+        "busy": "This conversation is still working. Wait for it to finish, then start the review.",
+        "conflict": "This review changed. Its current status has been refreshed.",
+        "expired": "This review’s time limit has ended. Start a new review to continue.",
+        "allowance": "This review has reached its work limit. Start a new review to continue.",
+        "withheld": "This review’s content is no longer available.",
+        "unavailable": "Record reviews are unavailable right now. Try again later.",
+        "forbidden": "You don’t have permission to view or control this review.",
+        "failed": "Couldn’t load the review. Try again."
+      }
     }
   },
   "SearchLayout": {

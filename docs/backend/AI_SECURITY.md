@@ -566,6 +566,14 @@ Streaming remains inside `AiInvocationService`:
 - keep cancellation authorization and terminal state database-backed;
 - treat JVM transport-abort hooks as an optimization, not the source of truth.
 
+## Read-only missions and durable chat privacy
+
+V231 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks.
+
+Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Their server policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles in this slice. Shared prompt serialization and envelope constants are unchanged. One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
+
+Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
+
 ## Assistant tools and collaboration
 
 Native assistant tools are capability-declared transport choices, not a second authorization model.
