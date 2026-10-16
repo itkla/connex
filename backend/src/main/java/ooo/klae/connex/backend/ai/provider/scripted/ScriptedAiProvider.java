@@ -9,6 +9,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody;
+import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
@@ -38,8 +41,8 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
  * that runs the restriction epoch, the feature gate, the provider guard and the admission
  * commitment — and calls {@code beforeSend()} inside the deferred supplier at the point the real
  * adapter would write bytes. {@code beforeSend()} is the only route to the budget lease's
- * dispatched mark; {@code execute} never touches the lease. A declared failure still dispatches
- * because a transport failure in production happens after the bytes leave.
+ * dispatched mark; {@code execute} never touches the lease. A declared failure still consumes
+ * dispatch accounting, but only a simulated response promotes exposure evidence.
  *
  * <p><b>The call order mirrors the real transport, not a convenient one.</b> On the streamed path
  * {@code OpenAiCompatibleClient.sendStream} opens the transport, re-checks cancellation and the
@@ -54,6 +57,7 @@ public class ScriptedAiProvider implements AiProvider {
     private static final String STOP_REASON_STOP = "stop";
     private static final String STOP_REASON_TOOL_CALLS = "tool_calls";
     private static final int SCRIPTED_TOKENS = 1;
+    private static final ObjectMapper BODY_MAPPER = new ObjectMapper();
 
     private final ScriptedAiScriptLoader scripts;
     private final ScriptedAiRequestJournal journal;
@@ -126,13 +130,16 @@ public class ScriptedAiProvider implements AiProvider {
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         Resolution resolution = resolve(request);
+        AiProviderDispatch dispatch = OpenAiRequestBody.prepare(
+                request, enforcement(request, resolution), false, BODY_MAPPER);
         AiRequestDeadline deadline = request.providerAttemptExecutor()
                 .deadline(aiProperties.getRequestTimeoutMs());
         AtomicReference<AiCompletionResult> result = new AtomicReference<>();
         request.providerAttemptExecutor().execute(() -> {
             requireAttemptLive(deadline, null);
-            request.providerAttemptExecutor().beforeSend();
+            dispatch.run();
             resolution.entry().markDispatched();
+            promoteResponse(dispatch, resolution);
             result.set(emit(request, resolution));
             return "";
         });
@@ -147,6 +154,8 @@ public class ScriptedAiProvider implements AiProvider {
             throw new AiProviderException("AI streaming completion request is required");
         }
         Resolution resolution = resolve(request);
+        AiProviderDispatch dispatch = OpenAiRequestBody.prepare(
+                request, enforcement(request, resolution), true, BODY_MAPPER);
         if (!resolution.capabilityClass().streaming()) {
             throw new AiProviderException("AI provider does not support streaming");
         }
@@ -157,8 +166,9 @@ public class ScriptedAiProvider implements AiProvider {
             observer.onTransportOpen(() -> cancelled.set(true));
             try {
                 requireAttemptLive(deadline, cancelled);
-                request.providerAttemptExecutor().beforeSend();
+                dispatch.run();
                 resolution.entry().markDispatched();
+                promoteResponse(dispatch, resolution);
                 AiCompletionResult result = emit(request, resolution);
                 for (String delta : streamedDeltas(resolution.step(), result.text())) {
                     requireAttemptLive(deadline, cancelled);
@@ -216,6 +226,14 @@ public class ScriptedAiProvider implements AiProvider {
             interceptor.beforeEmit(script.id(), cursor.completedToolCalls());
         }
         return new Resolution(script, step, cursor, capabilityClass, entry);
+    }
+
+    private static void promoteResponse(AiProviderDispatch dispatch, Resolution resolution) {
+        ScriptedAiStep.Emission emission = resolution.step().emit();
+        if (emission.kind() != ScriptedAiStep.Kind.FAILURE
+                || emission.failureKind() == ScriptedAiStep.FailureKind.REJECTED) {
+            AiProviderDispatch.responded(dispatch);
+        }
     }
 
     private static AiCompletionResult emit(AiCompletionRequest request, Resolution resolution) {

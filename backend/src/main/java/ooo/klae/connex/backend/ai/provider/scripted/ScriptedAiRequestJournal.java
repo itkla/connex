@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Objects;
 
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
 
@@ -25,7 +27,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderAttemptExecutor;
  * {@link #record(AiCompletionRequest)} stores a copy whose credentials are empty, whose images are
  * dropped and whose executor is the inert direct one. Target, system prompt, messages, schema,
  * native tools and reasoning mode — the prompt material the assertions are about — are retained
- * verbatim.
+ * verbatim; message provenance retains origins without raw-member scan contexts.
  *
  * <p><b>Every request is recorded; only some are dispatched.</b> The provider records before the
  * attempt executor's egress seam runs, because the restriction epoch, the feature gate, the
@@ -82,7 +84,10 @@ public class ScriptedAiRequestJournal {
                 request.target(),
                 AiCredentials.of(Map.of()),
                 request.systemPrompt(),
-                request.messages(),
+                request.messages().stream().map(message -> new AiMessage(
+                        message.role(), message.content(), message.segments().stream()
+                                .map(segment -> new OutboundSegment(
+                                        segment.text(), segment.origin())).toList())).toList(),
                 List.of(),
                 request.outputMode(),
                 request.responseSchema(),

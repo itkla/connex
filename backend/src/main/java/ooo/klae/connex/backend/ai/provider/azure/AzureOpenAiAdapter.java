@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.provider.azure;
 
+import static ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.SERVER_STATIC;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +16,7 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
@@ -124,11 +127,11 @@ public class AzureOpenAiAdapter implements AiProvider {
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
             while (true) {
                 try {
-                    String requestBody = buildRequestBody(request, enforcement);
+                    AiProviderDispatch requestBody = buildRequestBody(request, enforcement);
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             azureOpenAiClient.complete(
-                                    endpoint, request.credentials(), requestBody, deadline,
-                                    request.providerAttemptExecutor()::beforeSend));
+                                    endpoint, request.credentials(), requestBody.body(), deadline,
+                                    requestBody));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -164,13 +167,13 @@ public class AzureOpenAiAdapter implements AiProvider {
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(request);
             while (true) {
                 try {
-                    String requestBody = buildRequestBody(request, enforcement, true);
+                    AiProviderDispatch requestBody = buildRequestBody(request, enforcement, true);
                     AiStructuredOutputEnforcement appliedEnforcement = enforcement;
                     return request.providerAttemptExecutor().executeStream(() ->
                             azureOpenAiClient.stream(
                                     endpoint,
                                     request.credentials(),
-                                    requestBody,
+                                    requestBody.body(),
                                     deadline,
                                     new OpenAiSseAccumulator(
                                             objectMapper,
@@ -178,7 +181,7 @@ public class AzureOpenAiAdapter implements AiProvider {
                                             appliedEnforcement,
                                             request.reasoningMode()),
                                     observer,
-                                    request.providerAttemptExecutor()::beforeSend));
+                                    requestBody));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -210,40 +213,43 @@ public class AzureOpenAiAdapter implements AiProvider {
                 + "/chat/completions?api-version=" + encodedApiVersion);
     }
 
-    private String buildRequestBody(
+    private AiProviderDispatch buildRequestBody(
             AiCompletionRequest request,
             AiStructuredOutputEnforcement enforcement) throws Exception {
         return buildRequestBody(request, enforcement, false);
     }
 
-    private String buildRequestBody(
+    private AiProviderDispatch buildRequestBody(
             AiCompletionRequest request,
             AiStructuredOutputEnforcement enforcement,
             boolean streamed) throws Exception {
+        AiProviderDispatch.Builder evidence = new AiProviderDispatch.Builder(objectMapper);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode messages = root.putArray("messages");
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
             ObjectNode system = messages.addObject();
-            system.put("role", "system");
-            system.put("content", request.systemPrompt());
+            evidence.text(system, "role", "system", SERVER_STATIC);
+            evidence.text(system, "content", request.systemPrompt(), SERVER_STATIC);
         }
         boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode node = messages.addObject();
-            node.put("role", message.role());
+            evidence.text(node, "role", message.role(), SERVER_STATIC);
             if (imagesPending && "user".equals(message.role())) {
                 ArrayNode content = node.putArray("content");
-                content.addObject().put("type", "text").put("text", message.content());
+                ObjectNode text = content.addObject();
+                evidence.text(text, "type", "text", SERVER_STATIC);
+                evidence.text(text, "text", message.content(), message.segments());
                 for (AiInputImage image : request.images()) {
-                    ObjectNode imageUrl = content.addObject()
-                            .put("type", "image_url")
-                            .putObject("image_url");
-                    imageUrl.put("url", dataUrl(image));
-                    imageUrl.put("detail", "high");
+                    ObjectNode imagePart = content.addObject();
+                    evidence.text(imagePart, "type", "image_url", SERVER_STATIC);
+                    ObjectNode imageUrl = imagePart.putObject("image_url");
+                    evidence.text(imageUrl, "url", dataUrl(image), SERVER_STATIC);
+                    evidence.text(imageUrl, "detail", "high", SERVER_STATIC);
                 }
                 imagesPending = false;
             } else {
-                node.put("content", message.content());
+                evidence.text(node, "content", message.content(), message.segments());
             }
         }
         if (imagesPending) {
@@ -253,12 +259,12 @@ public class AzureOpenAiAdapter implements AiProvider {
         if (!OpenAiChatParameters.usesReasoningDialect(request.target().modelId())) {
             root.put("temperature", request.temperature());
         }
-        addResponseFormat(root, request, enforcement);
+        addResponseFormat(root, request, enforcement, evidence);
         if (streamed) {
             root.put("stream", true);
             root.putObject("stream_options").put("include_usage", true);
         }
-        return objectMapper.writeValueAsString(root);
+        return evidence.build(root, request.providerAttemptExecutor());
     }
 
     private static AiStructuredOutputEnforcement requestedEnforcement(
@@ -277,22 +283,22 @@ public class AzureOpenAiAdapter implements AiProvider {
     private static void addResponseFormat(
             ObjectNode root,
             AiCompletionRequest request,
-            AiStructuredOutputEnforcement enforcement) {
+            AiStructuredOutputEnforcement enforcement, AiProviderDispatch.Builder evidence) {
         switch (enforcement) {
             case PROMPT_ONLY -> {
                 return;
             }
-            case JSON_OBJECT -> root.putObject("response_format").put("type", "json_object");
+            case JSON_OBJECT -> evidence.text(root.putObject("response_format"), "type", "json_object", SERVER_STATIC);
             case JSON_SCHEMA -> {
                 if (request.responseSchema() == null) {
                     throw new AiProviderException("AI response schema is required");
                 }
                 ObjectNode responseFormat = root.putObject("response_format");
-                responseFormat.put("type", "json_schema");
+                evidence.text(responseFormat, "type", "json_schema", SERVER_STATIC);
                 ObjectNode jsonSchema = responseFormat.putObject("json_schema");
-                jsonSchema.put("name", request.responseSchema().name());
+                evidence.text(jsonSchema, "name", request.responseSchema().name(), SERVER_STATIC);
                 jsonSchema.put("strict", true);
-                jsonSchema.set("schema", request.responseSchema().schema());
+                evidence.schema(jsonSchema, "schema", request.responseSchema().schema());
             }
         }
     }

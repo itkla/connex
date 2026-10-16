@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.provider.vertex;
 
+import static ooo.klae.connex.backend.ai.masking.OutboundSegment.Origin.SERVER_STATIC;
+
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -12,6 +14,7 @@ import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiProviderDispatch;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -125,7 +128,7 @@ public class VertexAdapter implements AiProvider {
             URI endpoint = endpoint(projectId, region, modelId, family);
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(
                     request, family, structuredOutputCapability(target));
-            String requestBody = switch (family) {
+            AiProviderDispatch requestBody = switch (family) {
                 case GEMINI -> buildGeminiRequest(request, enforcement);
                 case CLAUDE -> buildClaudeRequest(request);
             };
@@ -133,8 +136,8 @@ public class VertexAdapter implements AiProvider {
                 String accessToken = googleAccessTokenClient.accessToken(
                         request.credentials(), deadline);
                 request.providerAttemptExecutor().checkpoint();
-                return vertexClient.complete(endpoint, accessToken, requestBody, deadline,
-                        request.providerAttemptExecutor()::beforeSend);
+                return vertexClient.complete(endpoint, accessToken, requestBody.body(), deadline,
+                        requestBody);
             });
             return switch (family) {
                 case GEMINI -> parseGeminiResponse(
@@ -175,7 +178,7 @@ public class VertexAdapter implements AiProvider {
             }
             AiStructuredOutputEnforcement enforcement = requestedEnforcement(
                     request, ModelFamily.GEMINI, structuredOutputCapability(target));
-            String requestBody = buildGeminiRequest(request, enforcement);
+            AiProviderDispatch requestBody = buildGeminiRequest(request, enforcement);
             URI endpoint = streamingEndpoint(projectId, region, modelId);
             return request.providerAttemptExecutor().executeStream(() -> {
                 String accessToken = googleAccessTokenClient.accessToken(
@@ -184,12 +187,12 @@ public class VertexAdapter implements AiProvider {
                 return vertexClient.stream(
                         endpoint,
                         accessToken,
-                        requestBody,
+                        requestBody.body(),
                         deadline,
                         new VertexSseAccumulator(
                                 objectMapper, observer, enforcement, request.reasoningMode()),
                         observer,
-                        request.providerAttemptExecutor()::beforeSend);
+                        requestBody);
             });
         } catch (AiProviderException exception) {
             throw exception;
@@ -220,34 +223,33 @@ public class VertexAdapter implements AiProvider {
                 + ":streamGenerateContent?alt=sse");
     }
 
-    private String buildGeminiRequest(
+    private AiProviderDispatch buildGeminiRequest(
             AiCompletionRequest request,
             AiStructuredOutputEnforcement enforcement) throws Exception {
+        AiProviderDispatch.Builder evidence = new AiProviderDispatch.Builder(objectMapper);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode contents = root.putArray("contents");
         boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode content = contents.addObject();
-            content.put("role", geminiRole(message.role()));
+            evidence.text(content, "role", geminiRole(message.role()), SERVER_STATIC);
             ArrayNode parts = content.putArray("parts");
             if (imagesPending && "user".equals(message.role())) {
                 for (AiInputImage image : request.images()) {
                     ObjectNode inlineData = parts.addObject().putObject("inlineData");
-                    inlineData.put("mimeType", image.contentType());
-                    inlineData.put("data", Base64.getEncoder().encodeToString(image.content()));
+                    evidence.text(inlineData, "mimeType", image.contentType(), SERVER_STATIC);
+                    evidence.text(inlineData, "data", Base64.getEncoder().encodeToString(image.content()), SERVER_STATIC);
                 }
                 imagesPending = false;
             }
-            parts.addObject().put("text", message.content());
+            evidence.text(parts.addObject(), "text", message.content(), message.segments());
         }
         if (imagesPending) {
             throw new AiProviderException("AI images require a user message");
         }
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
-            root.putObject("systemInstruction")
-                    .putArray("parts")
-                    .addObject()
-                    .put("text", request.systemPrompt());
+            evidence.text(root.putObject("systemInstruction").putArray("parts").addObject(),
+                    "text", request.systemPrompt(), SERVER_STATIC);
         }
         ObjectNode generationConfig = root.putObject("generationConfig");
         generationConfig.put("maxOutputTokens", request.maxTokens());
@@ -256,42 +258,45 @@ public class VertexAdapter implements AiProvider {
             generationConfig.putObject("thinkingConfig").put("includeThoughts", true);
         }
         if (enforcement != AiStructuredOutputEnforcement.PROMPT_ONLY) {
-            generationConfig.put("responseMimeType", "application/json");
+            evidence.text(generationConfig, "responseMimeType", "application/json", SERVER_STATIC);
         }
         if (enforcement == AiStructuredOutputEnforcement.JSON_SCHEMA) {
             if (request.responseSchema() == null) {
                 throw new AiProviderException("AI response schema is required");
             }
-            generationConfig.set("responseJsonSchema", request.responseSchema().schema());
+            evidence.schema(generationConfig, "responseJsonSchema", request.responseSchema().schema());
         }
-        return objectMapper.writeValueAsString(root);
+        return evidence.build(root, request.providerAttemptExecutor());
     }
 
-    private String buildClaudeRequest(AiCompletionRequest request) throws Exception {
+    private AiProviderDispatch buildClaudeRequest(AiCompletionRequest request) throws Exception {
+        AiProviderDispatch.Builder evidence = new AiProviderDispatch.Builder(objectMapper);
         ObjectNode root = objectMapper.createObjectNode();
-        root.put("anthropic_version", ANTHROPIC_VERSION);
+        evidence.text(root, "anthropic_version", ANTHROPIC_VERSION, SERVER_STATIC);
         if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
-            root.put("system", request.systemPrompt());
+            evidence.text(root, "system", request.systemPrompt(), SERVER_STATIC);
         }
         ArrayNode messages = root.putArray("messages");
         boolean imagesPending = !request.images().isEmpty();
         for (AiMessage message : request.messages()) {
             ObjectNode node = messages.addObject();
-            node.put("role", claudeRole(message.role()));
+            evidence.text(node, "role", claudeRole(message.role()), SERVER_STATIC);
             if (imagesPending && "user".equals(message.role())) {
                 ArrayNode content = node.putArray("content");
                 for (AiInputImage image : request.images()) {
-                    ObjectNode source = content.addObject()
-                            .put("type", "image")
-                            .putObject("source");
-                    source.put("type", "base64");
-                    source.put("media_type", image.contentType());
-                    source.put("data", Base64.getEncoder().encodeToString(image.content()));
+                    ObjectNode imagePart = content.addObject();
+                    evidence.text(imagePart, "type", "image", SERVER_STATIC);
+                    ObjectNode source = imagePart.putObject("source");
+                    evidence.text(source, "type", "base64", SERVER_STATIC);
+                    evidence.text(source, "media_type", image.contentType(), SERVER_STATIC);
+                    evidence.text(source, "data", Base64.getEncoder().encodeToString(image.content()), SERVER_STATIC);
                 }
-                content.addObject().put("type", "text").put("text", message.content());
+                ObjectNode text = content.addObject();
+                evidence.text(text, "type", "text", SERVER_STATIC);
+                evidence.text(text, "text", message.content(), message.segments());
                 imagesPending = false;
             } else {
-                node.put("content", message.content());
+                evidence.text(node, "content", message.content(), message.segments());
             }
         }
         if (imagesPending) {
@@ -299,11 +304,11 @@ public class VertexAdapter implements AiProvider {
         }
         root.put("max_tokens", request.maxTokens());
         if (request.reasoningMode() == AiReasoningMode.NATIVE) {
-            addClaudeNativeReasoning(root, request.target().modelId(), request.maxTokens());
+            addClaudeNativeReasoning(root, request.target().modelId(), request.maxTokens(), evidence);
         } else {
             root.put("temperature", request.temperature());
         }
-        return objectMapper.writeValueAsString(root);
+        return evidence.build(root, request.providerAttemptExecutor());
     }
 
     private AiCompletionResult parseGeminiResponse(
@@ -514,7 +519,7 @@ public class VertexAdapter implements AiProvider {
     }
 
     private static void addClaudeNativeReasoning(
-            ObjectNode root, String modelId, int maxTokens) {
+            ObjectNode root, String modelId, int maxTokens, AiProviderDispatch.Builder evidence) {
         if (maxTokens <= 1_024) {
             throw new AiProviderException("Vertex Claude reasoning requires more than 1024 output tokens");
         }
@@ -525,10 +530,10 @@ public class VertexAdapter implements AiProvider {
                 || normalized.contains("claude-opus-4-7")
                 || normalized.contains("claude-opus-4-6")
                 || normalized.contains("claude-sonnet-4-6")) {
-            thinking.put("type", "adaptive");
+            evidence.text(thinking, "type", "adaptive", SERVER_STATIC);
             return;
         }
-        thinking.put("type", "enabled");
+        evidence.text(thinking, "type", "enabled", SERVER_STATIC);
         thinking.put("budget_tokens", 1_024);
     }
 

@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
+import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -2439,12 +2440,68 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"connection", "timeout"})
+    void failedAttemptCannotExposeMemberOmittedFromRebuiltBody(String failure) {
+        var context = new MaskingContext();
+        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
+        context.tokenFor(EntityKind.COMPANY, "Existing Company");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            var first = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                    request, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
+            assertTrue(first.dispatchedTokens().contains("{{M1}}"));
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    first.run();
+                    assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+                    throw new AiProviderException(failure);
+                });
+            } catch (AiProviderException expected) {
+                assertEquals(failure, expected.getMessage());
+            }
+            var rebuilt = new AiCompletionRequest(request.target(), request.credentials(), request.systemPrompt(),
+                    List.of(new AiMessage("user", "Discuss the relationship")), request.images(),
+                    request.outputMode(), request.responseSchema(), request.nativeTools(), request.reasoningMode(),
+                    request.providerAttemptExecutor(), request.maxTokens(), request.temperature());
+            var second = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                    rebuilt, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
+            assertFalse(second.dispatchedTokens().contains("{{M1}}"));
+            request.providerAttemptExecutor().execute(() -> {
+                second.run();
+                ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(second);
+                return "response";
+            });
+            return new AiCompletionResult("{{M1}}", 1, 1, "stop");
+        });
+        var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                .system("Use concise analysis").userTurn("Discuss {{M1}}").build(), 64, 0.1);
+
+        var result = service.complete(invocation);
+
+        assertEquals("[unknown reference]", result.text());
+        assertEquals(1, result.demaskWarnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+        assertEquals("Existing Company", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{C1}}", context).text());
+        verify(budgetLease).markDispatched();
+        verify(fallbackBudgetLease).markDispatched();
+    }
+
+    private void respondWithDispatchEvidence(AiCompletionRequest request) {
+        var dispatch = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
+                request, ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement.PROMPT_ONLY,
+                false, new ObjectMapper());
+        ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(dispatch);
+    }
+
     private void providerReturns(AiCompletionResult result) {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
                 request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
+                respondWithDispatchEvidence(request);
                 return "provider response";
             });
             return result;
