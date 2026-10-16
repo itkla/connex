@@ -56,11 +56,23 @@ const EMPTY_CONTACTS: Contact[] = [];
 const EMPTY_DEALS: Deal[] = [];
 const EMPTY_USERS: User[] = [];
 
+/**
+ * The deal detail page's action bar. Each mutation shows only when the member's effective
+ * permissions allow it, the same gates the deal cards apply, so a read-only member sees no
+ * affordance the server would refuse; the server still decides, and its refusals reach the shared
+ * error toast.
+ * @param props.canUpdate whether the member holds `DEAL_UPDATE`: edit, team and won/lost/open
+ * @param props.canDelete whether the member holds `DEAL_DELETE`
+ * @param props.canAttach whether the member holds `ATTACHMENT_CREATE`
+ */
 export default function DealActionsMenu({
     deal,
     pipelines,
     stagesByPipeline,
     currentUserId,
+    canUpdate,
+    canDelete,
+    canAttach,
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
@@ -69,6 +81,9 @@ export default function DealActionsMenu({
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    canUpdate: boolean;
+    canDelete: boolean;
+    canAttach: boolean;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
@@ -127,10 +142,12 @@ export default function DealActionsMenu({
     return (
         <div className="flex flex-row gap-2">
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
-                    <PencilSquareIcon className="size-4" />
-                    {t('edit')}
-                </Button>
+                {canUpdate && (
+                    <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
+                        <PencilSquareIcon className="size-4" />
+                        {t('edit')}
+                    </Button>
+                )}
                 <Button
                     variant="outline"
                     size="toolbar"
@@ -142,19 +159,21 @@ export default function DealActionsMenu({
                 </Button>
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    onClick={openAttachmentPicker}
-                    disabled={attachmentsUploading}
-                >
-                    {attachmentsUploading ? (
-                        <LoaderCircle className="size-4 animate-spin" />
-                    ) : (
-                        <PaperClipIcon className="size-4" />
-                    )}
-                    {t('add')}
-                </Button>
+                {canAttach && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={openAttachmentPicker}
+                        disabled={attachmentsUploading}
+                    >
+                        {attachmentsUploading ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                            <PaperClipIcon className="size-4" />
+                        )}
+                        {t('add')}
+                    </Button>
+                )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="brand" size="toolbar" menu>
@@ -183,70 +202,78 @@ export default function DealActionsMenu({
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
-                            <EllipsisVerticalIcon className="size-4" />
-                        </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setTeamOpen(true);
-                            }}
-                        >
-                            <UsersIcon className="size-4" />
-                            <span>{t('manageTeam')}</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {closed ? (
-                            <DropdownMenuItem
-                                disabled={isUpdatingStatus}
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    toggleDealStatus(null);
-                                }}
-                            >
-                                <ArrowUturnLeftIcon className="size-4" />
-                                <span>{t('markOpen')}</span>
-                            </DropdownMenuItem>
-                        ) : (
-                            <>
+                {(canUpdate || canDelete) && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
+                                <EllipsisVerticalIcon className="size-4" />
+                            </IconButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                            {canUpdate && (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            setTeamOpen(true);
+                                        }}
+                                    >
+                                        <UsersIcon className="size-4" />
+                                        <span>{t('manageTeam')}</span>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    {closed ? (
+                                        <DropdownMenuItem
+                                            disabled={isUpdatingStatus}
+                                            onSelect={(e) => {
+                                                e.preventDefault();
+                                                toggleDealStatus(null);
+                                            }}
+                                        >
+                                            <ArrowUturnLeftIcon className="size-4" />
+                                            <span>{t('markOpen')}</span>
+                                        </DropdownMenuItem>
+                                    ) : (
+                                        <>
+                                            <DropdownMenuItem
+                                                disabled={isUpdatingStatus}
+                                                onSelect={(e) => {
+                                                    e.preventDefault();
+                                                    toggleDealStatus(true);
+                                                }}
+                                            >
+                                                <CheckCircleIcon className="size-4" />
+                                                <span>{t('markWon')}</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                                disabled={isUpdatingStatus}
+                                                onSelect={(e) => {
+                                                    e.preventDefault();
+                                                    toggleDealStatus(false);
+                                                }}
+                                            >
+                                                <XCircleIcon className="size-4" />
+                                                <span>{t('markLost')}</span>
+                                            </DropdownMenuItem>
+                                        </>
+                                    )}
+                                </>
+                            )}
+                            {canDelete && (
                                 <DropdownMenuItem
-                                    disabled={isUpdatingStatus}
+                                    variant="destructive"
                                     onSelect={(e) => {
                                         e.preventDefault();
-                                        toggleDealStatus(true);
+                                        setDeleteOpen(true);
                                     }}
                                 >
-                                    <CheckCircleIcon className="size-4" />
-                                    <span>{t('markWon')}</span>
+                                    <TrashIcon className="size-4" />
+                                    <span>{t('delete')}</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    disabled={isUpdatingStatus}
-                                    onSelect={(e) => {
-                                        e.preventDefault();
-                                        toggleDealStatus(false);
-                                    }}
-                                >
-                                    <XCircleIcon className="size-4" />
-                                    <span>{t('markLost')}</span>
-                                </DropdownMenuItem>
-                            </>
-                        )}
-                        <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setDeleteOpen(true);
-                            }}
-                        >
-                            <TrashIcon className="size-4" />
-                            <span>{t('delete')}</span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
             </ButtonGroup>
 
             <input
