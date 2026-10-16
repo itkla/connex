@@ -345,16 +345,16 @@ class ReferenceContentReaderTest {
 
     @Test
     void incompleteReadingsIncrementOnlyTheBoundedReasonMetric() {
-        try (var registry = new SimpleMeterRegistry()) {
-            Metrics.addRegistry(registry);
-            try {
-                double before = registry.counter("connex.reference.content.incomplete", "reason", "input_limit").count();
-                ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1));
-                assertEquals(before + 1, registry.counter(
-                        "connex.reference.content.incomplete", "reason", "input_limit").count());
-            } finally {
-                Metrics.removeRegistry(registry);
-            }
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            double before = registry.counter("connex.reference.content.incomplete", "reason", "input_limit").count();
+            ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1));
+            assertEquals(before + 1, registry.counter(
+                    "connex.reference.content.incomplete", "reason", "input_limit").count());
+        } finally {
+            Metrics.removeRegistry(registry);
+            registry.close();
         }
     }
 
