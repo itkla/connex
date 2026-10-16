@@ -89,11 +89,25 @@ public error envelope. Both refusals record `auth.mfa.policy.denied`, with reaso
 runs after the authentication read transaction ends and the tenant binding is cleared: it is an
 independent, account-scoped audit in the control catalog, with no workspace or organization scope.
 The denied account is both the actor and the user entity. The shared `DenialAuditRateLimiter`
-admits one row per user, action, reason and resolved client address per window (one hour by default),
-subject to its address and replica-local capacity bounds. The address uses the same trusted-proxy
+keeps eight resolved-address slots per user/action/reason, each admitting up to four distinct
+User-Agent fingerprints inside the address's original window (one hour by default): at most 32 rows
+per replica across retained address windows, or one row for a stable address and browser. Fingerprints
+never consume another address slot, extend its window or refresh eviction order. Without releases,
+admission is a strict superset of the address-only rule while windows are retained. The full
+UTF-8 header is hashed with unkeyed SHA-256 in memory only; the digest is never stored, logged or used
+as a metric tag. Absent and firewall-rejected headers share a sentinel and never prevent admission;
+rejected user agents remain null in the audit row. The address uses the same trusted-proxy
 resolver as browser denials. Browser and public denials share admission windows. An append failure
-is logged and releases the admission so the next refusal can retry; every request keeps its 401
-response. See [Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for the bounds.
+is logged and releases only its address/fingerprint/identity admission so it can retry without
+removing other fingerprints' suppression. Releasing the last fingerprint or reaching the original
+expiry removes its address slot; otherwise the slot, original start and expiry remain. This preserves
+evidence for surviving fingerprints, including retries the old rule would admit. Retained slots still
+occupy capacity and can block a new address that the old limiter would admit after a release, so this
+does not guarantee evidence for every old-rule admission after releases. Every request keeps its 401
+response. Suppression counts every
+duplicate or capacity refusal, while eviction counts only live keys dropped at the 4,096-key bound.
+Saturation and restarts re-arm windows. See
+[Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for proxy and SSR qualifications.
 
 Revoking browser sessions (the session-epoch control) does not revoke personal access tokens. Containment for a compromised account is credential revocation, a role change below the credential's mapped permissions, or an account-deletion reservation — each of which blocks the credential on its next request.
 

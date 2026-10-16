@@ -196,6 +196,64 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         expect(replaceState.mock.calls[0][0]).toEqual({ connexRecordReturn: "5f0c" });
     });
 
+    it("writeOwnedParamsToUrl hands Next's installed patch a state it does not short-circuit on", () => {
+        stubLocation("?q=foo", {
+            __NA: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
+            connexRecordReturn: "5f0c",
+        });
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+
+        expect(
+            replaceState.mock.calls[0][0],
+            "a state carrying __NA or _N skips the ACTION_RESTORE that keeps canonicalUrl in step with the address bar",
+        ).toEqual({
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
+            connexRecordReturn: "5f0c",
+        });
+    });
+
+    it("writeOwnedParamsToUrl carries the state through untouched before Next's patch is installed", () => {
+        const routerState = {
+            __NA: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
+            connexRecordReturn: "5f0c",
+        };
+        class NativeHistory {
+            state: unknown = routerState;
+
+            replaceState(data: unknown, unused: string, url: string) {
+                replaceState(data, unused, url);
+            }
+        }
+        const history = new NativeHistory();
+        vi.stubGlobal("window", { location: { search: "?q=foo", hash: "" }, history });
+
+        expect(Object.hasOwn(history, "replaceState")).toBe(false);
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+
+        expect(
+            replaceState.mock.calls[0][0],
+            "the native method writes whatever it is given, so dropping __NA here leaves an entry back cannot restore",
+        ).toBe(routerState);
+    });
+
+    it("pins the two facts about Next's history patch the owned-params writer relies on", () => {
+        const patch = readFileSync(
+            path.join(process.cwd(), "node_modules/next/dist/client/components/app-router.js"),
+            "utf8",
+        );
+
+        expect(
+            patch,
+            "Next changed the state keys its history patch short-circuits on; re-derive what the owned-params writer may pass",
+        ).toContain("if (data?.__NA || data?._N) {");
+        expect(
+            patch,
+            "Next no longer installs its patch as an own property of window.history; re-derive how the writer detects it",
+        ).toContain("window.history.replaceState = function replaceState(");
+    });
+
     it("writeSavedViewToUrl sets and clears only sv", () => {
         stubLocation("?q=acme");
         writeSavedViewToUrl("/records/contacts", "5:9");

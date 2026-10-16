@@ -932,6 +932,16 @@ public final class MaskingEngine {
             labels = CanonicalText.projectLabels(projection);
         }
 
+        /** Returns the literal canonical projection for a binary SQL containment prefilter. */
+        public String literalText() {
+            return projection.value();
+        }
+
+        /** Returns the label canonical projection for a binary SQL containment prefilter. */
+        public String labelText() {
+            return labels.value();
+        }
+
         /** Returns both source-derived forms as a SQL superset; Java gates each projection separately. */
         public String lookupText() {
             return projection.value().equals(labels.value())

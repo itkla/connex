@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
     @Autowired private AiAssistantIdentifierMapper identifierMapper;
     @Autowired private ShareMapper shareMapper;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired private OrganizationMapper organizationMapper;
 
     /**
@@ -61,7 +62,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         deal.setName("Renewal Plan");
         dealMapper.update(deal);
 
-        var matches = identifierMapper.findMentionedRecords(
+        var matches = lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 "Ask Kenji Sato about Acme Corp and Renewal Plan",
@@ -71,18 +72,18 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
                 .map(match -> match.getKind())
                 .sorted()
                 .toList());
-        assertEquals(3, identifierMapper.findMentionedRecords(
+        assertEquals(3, lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 "Kenji Satomi at Acme Corporation discussed Renewal Planning",
                 201, "", 0).size());
-        assertEquals(2, identifierMapper.findMentionedRecords(
+        assertEquals(2, lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 "Ask Kenji Sato about Acme Corp and Renewal Plan",
                 2, "", 0).size());
         assertEquals(1, companyMapper.archive(workspace.getId(), company.getId()));
-        var lastPage = identifierMapper.findMentionedRecords(
+        var lastPage = lookup(
                 workspace.getId(), "[" + workspace.getId() + "]",
                 "Ask Kenji Sato about Acme Corp and Renewal Plan", 2, "deal", deal.getId());
         assertEquals(List.of(matches.getLast().getId()), lastPage.stream()
@@ -106,10 +107,10 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
                 "What about John  O'Connor at Acme\tCorp?",
                 "What about John \n O'Connor at Acme \t Corp?",
                 "What about John\u0007O'Connor at Acme\u0001Corp?")) {
-            assertEquals(2, identifierMapper.findMentionedRecords(
+            assertEquals(2, lookup(
                     workspace.getId(), "[" + workspace.getId() + "]", text, 201, "", 0).size(), text);
         }
-        assertEquals(1, identifierMapper.findMentionedRecords(
+        assertEquals(1, lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 "Ask Anne-Marie Smith about it",
@@ -131,7 +132,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         dealMapper.update(deal);
         MaskingEngine.MentionScanText scan = MaskingEngine.mentionScanText("Ask John O'Connor today.");
 
-        var matches = identifierMapper.findMentionedRecords(
+        var matches = lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", scan.normalizedText(), 200, "", 0);
 
         assertEquals(List.of("company", "deal", "person"), matches.stream()
@@ -149,9 +150,13 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
             "i\u0307pek Smith|\u0130pek Smith",
             "Ipek Smith|i\u0307pek Smith",
             "i\u0307pek Smith|Ipek Smith",
-            "NIKO\u03c2 Team|NIKO\u03c3 Team"
+            "NIKO\u03c2 Team|NIKO\u03c3 Team",
+            "㍿ Team|株式会社 Team",
+            "株式会社 Team|㍿ Team",
+            "ＡＣＭＥ ｶﾞ|acme ガ",
+            "𠀀𐐀 Team|𠀀𐐨 team"
     })
-    void lookupAdmitsSimpleUnicodeCaseVariantsAcrossVisibleKinds(String name, String spelling) {
+    void lookupAdmitsCanonicalUnicodeVariantsAcrossVisibleKinds(String name, String spelling) {
         Company company = newCompany();
         company.setName(name);
         companyMapper.update(company);
@@ -165,7 +170,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         dealMapper.update(deal);
         String canonicalTurn = MaskingEngine.mentionScanText("Ask " + spelling + " today.").normalizedText();
 
-        var matches = identifierMapper.findMentionedRecords(
+        var matches = lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", canonicalTurn, 201, "", 0);
 
         assertEquals(List.of("company", "deal", "person"), matches.stream()
@@ -191,7 +196,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
 
         for (String text : List.of("What is happening with John O'Connor?",
                 "What is happening with John O'" + delimiters + "Connor?")) {
-            var matches = identifierMapper.findMentionedRecords(
+            var matches = lookup(
                     workspace.getId(), "[" + workspace.getId() + "]", text, 201, "", 0);
             assertEquals(List.of("company", "deal", "person"), matches.stream()
                     .map(match -> match.getKind()).sorted().toList());
@@ -199,16 +204,21 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void lookupWidensUnicodeCandidatesForJavaAdmission() {
+    void legacyLookupWidensUnicodeCandidatesAndCurrentKeysAreSelective() {
         Person person = newPerson(newCompany());
         person.setName("\u0307 \u0307 \u0307 \u0307");
         personMapper.update(person);
+        jdbc.update("UPDATE person SET ai_identifier_key_version = NULL, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), person.getId());
 
-        assertEquals(1, identifierMapper.findMentionedRecords(
+        assertEquals(1, lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", "An unrelated note", 201, "", 0).size());
-        assertTrue(identifierMapper.findMentionedRecords(
+        assertTrue(lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", "Ask " + person.getName() + " today.", 201, "", 0)
                 .stream().map(match -> match.getId()).toList().contains(person.getId()));
+        personMapper.update(person);
+        assertTrue(lookup(workspace.getId(), "[" + workspace.getId() + "]",
+                "An unrelated note", 201, "", 0).isEmpty());
     }
 
     /**
@@ -228,10 +238,10 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
 
         for (String text : List.of("今日の予定は？", "what’s happening with the pipeline",
                 "café deal", "日本語のメモ")) {
-            assertTrue(identifierMapper.findMentionedRecords(
+            assertTrue(lookup(
                     workspace.getId(), "[" + workspace.getId() + "]", text, 201, "", 0).isEmpty(), text);
         }
-        assertEquals(1, identifierMapper.findMentionedRecords(
+        assertEquals(1, lookup(
                 workspace.getId(), "[" + workspace.getId() + "]",
                 "今日はkenji satoと会う", 201, "", 0).size());
     }
@@ -242,9 +252,9 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         person.setName("{}}{}{}{}");
         personMapper.update(person);
 
-        assertTrue(identifierMapper.findMentionedRecords(
+        assertTrue(lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", "Ask }{}{} today.", 201, "", 0).isEmpty());
-        assertTrue(identifierMapper.findMentionedRecords(
+        assertTrue(lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", "An unrelated turn", 201, "", 0).isEmpty());
     }
 
@@ -253,14 +263,16 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         company.setName("A.*[B](C)");
         companyMapper.update(company);
+        jdbc.update("UPDATE company SET ai_identifier_key_version = NULL, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), company.getId());
 
-        assertEquals(1, identifierMapper.findMentionedRecords(
+        assertEquals(1, lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 "Ask A.*[B](C) about renewal",
                 201, "", 0).size());
         String unrelated = "Ask AxxxxBC about renewal";
-        var candidates = identifierMapper.findMentionedRecords(
+        var candidates = lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "]",
                 unrelated,
@@ -268,6 +280,8 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         assertEquals(1, candidates.size());
         assertTrue(candidates.stream().noneMatch(candidate ->
                 MaskingEngine.containsIdentifierMention(unrelated, candidate.getValue())));
+        companyMapper.update(company);
+        assertTrue(lookup(workspace.getId(), "[" + workspace.getId() + "]", unrelated, 201, "", 0).isEmpty());
     }
 
     @Test
@@ -293,7 +307,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
 
         String text = hiddenPerson.getName() + " at " + hiddenCompany.getName();
 
-        assertTrue(identifierMapper.findMentionedRecords(
+        assertTrue(lookup(
                 workspace.getId(),
                 "[" + workspace.getId() + "," + sibling.getId() + "]",
                 text,
@@ -330,9 +344,15 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         String text = sharedPerson.getName() + " at " + sharedCompany.getName();
         String completeScope = "[" + workspace.getId() + "," + sibling.getId() + "]";
 
-        assertEquals(2, identifierMapper.findMentionedRecords(
+        assertEquals(2, lookup(
                 workspace.getId(), completeScope, text, 201, "", 0).size());
-        assertTrue(identifierMapper.findMentionedRecords(
+        assertTrue(lookup(
                 workspace.getId(), "[" + workspace.getId() + "]", text, 201, "", 0).isEmpty());
+    }
+    private List<ooo.klae.connex.backend.beans.AiAssistantIdentifierMention> lookup(
+            int workspaceId, String orgWorkspaceIdsJson, String text, int limit, String afterKind, int afterId) {
+        var turn = MaskingEngine.mentionScanText(text);
+        return identifierMapper.findMentionedRecords(workspaceId, orgWorkspaceIdsJson,
+                turn.literalText(), turn.labelText(), limit, afterKind, afterId);
     }
 }

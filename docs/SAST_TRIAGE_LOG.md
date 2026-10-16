@@ -478,7 +478,12 @@ requirements meet in these handlers and the conflict is resolved by acceptance, 
   cross-site subresource shapes via a Fetch-Metadata allowlist (`Sec-Fetch-Dest: empty` only,
   `no-cors` refused, cross-site origins refused outside the CORS allowlist); a forged row can
   only ever name a session the caller already had access to, carries no caller-supplied text,
-  and the write is rate-limited per workspace.
+  and the write is rate-limited per workspace. Chromium exercises the refusal end to end through
+  the Next.js `/api` rewrite (`frontend/test/e2e/assistant-admission-filter.spec.ts`, #1520) on
+  every push to `main` and on every pull request that changes `frontend/` or `backend/`; a
+  pull request touching only `docs/` or `deploy/` does not run it. The browser, staging and Caddy
+  evidence is in
+  [AI_SECURITY.md](backend/AI_SECURITY.md#cross-site-admission-of-audited-assistant-reads).
 - Residual: clients that omit Fetch Metadata (documented in the filter's Javadoc) and
   `SameSite=None` SAML deployments retain a narrowed forgery vector for these metadata-only rows.
 
@@ -1034,9 +1039,22 @@ The filter and interceptor layer reaches at least the following durable writes o
    use, so does any cross-site subresource load. Content is fixed and derived from the victim's
    identity. Repetition was unbounded, which was tracked as a finding in its own right on
    [#1850](https://github.com/itkla/connex/issues/1850) rather than folded into this false-positive
-   rationale; since that fix, `DenialAuditRateLimiter` admits at most one row per hour for each user,
-   action, and client address, for at most eight addresses per user and action, per replica, while
-   the 403 itself is unchanged;
+   rationale; with #1936's User-Agent differentiation, `DenialAuditRateLimiter` keeps eight address
+   slots per user/action/reason, each admitting four fingerprints inside its original hour: at most
+   32 rows per replica across retained address windows, and one for a stable browser/address.
+   Fingerprints never consume other address slots, extend expiry or refresh eviction order. Without
+   releases, every address-only admission remains admitted while windows are retained. Release removes
+   only its fingerprint; other fingerprints' evidence keeps its original address slot and expiry.
+   A retry with surviving evidence stays suppressed. Retaining occupied capacity can also block a new
+   address the old rule would admit after release, so there is no universal per-request evidence
+   guarantee after releases. The last fingerprint's release or expiry frees the address slot.
+   The full UTF-8 header's unkeyed SHA-256 fingerprint stays in memory only; absent and
+   firewall-rejected headers share one sentinel. Suppression counts every omitted row; eviction
+   counts only live keys dropped at the 4,096-key bound. Saturation and restarts can re-arm windows.
+   Proxy-collapsed addresses have only four fingerprint slots; cookie-only SSR cannot identify the
+   originating browser. The 403 itself is unchanged; see
+   [Privileged MFA](PRIVILEGED_MFA.md#auditing-the-filters-own-refusals) for the admission and release
+   contract;
 3. Spring Session JDBC — `UPDATE SPRING_SESSION SET LAST_ACCESS_TIME` on every authenticated
    request (verified in spring-session-jdbc 4.1.0 bytecode);
 4. gated session-attribute writes — when an authenticated session lacks the legacy

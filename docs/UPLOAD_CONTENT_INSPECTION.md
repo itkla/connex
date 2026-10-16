@@ -97,6 +97,8 @@ refused**, rather than stored uninspected.
 | `XML` | `*.xml`, `*.rels`, `*.vml`, `META-INF/manifest.xml`, `manifest.rdf` | Parsed with DTDs, external entities, and processing instructions disabled, against the namespace/element allowlists in §6 |
 | `SIGNATURE` | `META-INF/documentsignatures.xml`, `_xmlsignatures/*.xml` | Parsed against the closed signature vocabulary (§6) |
 | `SIGNATURE_ORIGIN` | `_xmlsignatures/origin.sigs` | Must be empty and bound by the origin relationship |
+| `SIGNATURE_CERTIFICATE` | OOXML `_xmlsignatures/` subtree, `.cer` only (extension case-insensitive), outside every `_rels/` directory | One parsed X.509 certificate with bounded DER tag/length framing throughout constructed values (§6); full parser consumption and encoded-byte agreement as defence in depth; bound to its declared type and a signature-owned certificate relationship |
+| `SIGNATURE_RELATIONSHIPS` | OOXML signature part's own `_rels/<signature-name>.rels` | Closed OPC `Relationships`/`Relationship` shape, certificate relationships only, with an admitted signature owner and the OPC relationships media type |
 | `MIMETYPE` | ODF `mimetype` | STORED at offset 0 and equal to the format's media type |
 | `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded. A GIF member may be animated (several image frames, each walked); a direct GIF upload must be a single frame because it is canonicalised to a still image |
 | `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp`; ODF `Fonts/*.ttf\|*.otf\|*.ttc` | Magic plus an internal length that agrees with the member length: the EMF header byte count, the WMF header word count (after the placeable header when present), the TIFF first-directory offset, and the BMP file size. ODF embedded fonts must carry an sfnt tag (`00 01 00 00`, `OTTO`, `true`, `ttcf`) whose table or font directory fits the member, and be declared `application/x-font-ttf`, `application/x-font-otf`, `font/ttf`, `font/otf`, or `application/vnd.ms-opentype` |
@@ -143,6 +145,8 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
 | Expanded package | 64 MiB |
 | Compression ratio | 100:1 (per entry and overall) |
 | XML or signature part | 4 MiB |
+| Signer certificate part | 64 KiB, checked before allocation |
+| Certificate ASN.1 depth / nodes | 32 / 4096, including the root |
 | Raster, EMF/WMF/TIFF/BMP member | 16 MiB |
 | Embedded font member | 16 MiB |
 | Printer settings, ODF layout cache | 1 MiB |
@@ -193,6 +197,42 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
   `tel` hyperlink. `<Object>` remains refused everywhere outside a signature part, and macro
   signatures stay refused. **A signed macro is still a macro.**
 
+  OOXML may store a signer certificate in a separate `.cer` member under `_xmlsignatures/`
+  (including subdirectories, excluding `_rels/`). Its effective `Override`-before-`Default`
+  declaration must exactly match
+  `application/vnd.openxmlformats-package.digital-signature-certificate`, ignoring case and
+  surrounding whitespace but refusing parameters. Certificate declarations on other members
+  refuse. The signature's own relationship part (for example,
+  `_xmlsignatures/_rels/sig1.xml.rels`) must declare an internal relationship of the exact type
+  `http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/certificate`.
+  Each source must be an admitted signature bound through the existing origin/signature graph;
+  each target must resolve to an admitted certificate member, and every certificate must be
+  referenced at least once. Multiple signatures may share one certificate. Root, origin, or
+  document relationships, generic relationships, and XML references cannot substitute for this
+  provenance. Companion relationship parts require
+  `application/vnd.openxmlformats-package.relationships+xml`, without parameters, and admit
+  only the standard unqualified relationship attributes and whitespace text.
+
+  Before X.509 parsing, a bounded framing walk requires one universal constructed SEQUENCE with
+  no prefix, suffix, or second object. Every constructed value must contain exactly its complete
+  child values. At every visited value, tag numbers and definite lengths must use their minimal
+  encodings; indefinite lengths, reserved universal tags, tag numbers beyond a signed integer,
+  and constructed encodings of universal primitive types (including BIT STRING, OCTET STRING,
+  and restricted strings) refuse. The walk checks the shared deadline at each node and caps depth
+  at 32 and nodes at 4096, including the root. These framing rules follow
+  [X.690](https://www.itu.int/rec/T-REC-X.690-202102-I/en). Primitive contents, including extension
+  OCTET STRINGs and public-key BIT STRINGs, remain opaque to the walk; the X.509 parser interprets
+  the certificate schema and primitive values. This is not a complete ASN.1 semantic
+  canonicalization check.
+
+  The X.509 `CertificateFactory` must then parse a certificate, consume the whole input, and
+  return identical encoded bytes, with deadline checks around parsing. Consumption and byte
+  agreement are overlapping defence in depth: the JDK parser accepts some BER encodings and
+  may retain input bytes verbatim, so those checks alone do not establish DER framing. PKCS#7
+  bundles, CRLs, CSRs, private keys, and other payloads refuse. These checks establish the
+  admitted framing and parsed certificate structure; they do not verify the document signature,
+  certificate trust, validity, or revocation. Document bytes remain unchanged.
+
 ## 7. What #1122 and every later pipeline MUST do
 
 **MUST**
@@ -226,8 +266,10 @@ accident:
 - Office documents containing **SVG icons** (Office 2016+ writes `image/svg+xml` alongside a PNG
   fallback) are refused. SVG is scriptable and there is no in-repository SVG sanitiser.
 - ODF documents with **embedded charts or OLE objects** (`Object N/`) are refused.
-- OOXML **certificate parts** (`_xmlsignatures/*.cer`) are refused, so a package that stores the
-  signer certificate outside `KeyInfo` is refused.
+- OOXML signer certificates encoded as **PEM**, or named `.crt`, `.der`, `.pem`, or any extension
+  other than `.cer`, are refused. Certificate parts outside `_xmlsignatures/`, including the
+  **System.IO.Packaging** `/package/services/digital-signature/certificate/...` path, remain
+  refused, as do certificates inside `_rels/` and certificates larger than 64 KiB.
 - **Audio and video** package members are refused.
 - A **JPEG member with bytes after `FFD9`**, more than 1 MiB of APPn/ICC metadata, or a PNG with
   an unknown critical chunk refuses the whole document.

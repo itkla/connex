@@ -12,6 +12,9 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -115,7 +118,11 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>OOXML signature parts under {@code _xmlsignatures/} are admitted through their own closed
  * XMLDSig, OPC, Microsoft Office, and XAdES vocabulary, bound by the signature-origin and
- * signature relationships and the OPC signature content types. That widening is narrow on purpose:
+ * signature relationships and the OPC signature content types. Separate signer certificates are
+ * restricted to DER {@code .cer} parts below {@code _xmlsignatures/}, outside {@code _rels/},
+ * bounded at 64 KiB before allocation, and bound to certificate-only relationships owned by an
+ * admitted signature. Certificate parsing proves structure without verifying trust or signatures.
+ * That widening is narrow on purpose:
  * {@code <Object>} stays refused everywhere else, and macro signature parts and macro-enabled
  * packages stay refused.
  *
@@ -132,6 +139,7 @@ public class UploadContentInspector implements AutoCloseable {
     private static final long MAX_ARCHIVE_EXPANDED_BYTES = 64L * 1024L * 1024L;
     private static final long MAX_COMPRESSION_RATIO = 100;
     private static final int MAX_XML_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_SIGNATURE_CERTIFICATE_BYTES = 64 * 1024;
     private static final int MAX_XML_DEPTH = 128;
     private static final int MAX_XML_ATTRIBUTES = 256;
     private static final int MAX_IMAGE_METADATA_BYTES = 1024 * 1024;
@@ -252,6 +260,8 @@ public class UploadContentInspector implements AutoCloseable {
     private static final String OOXML_CONTENT_TYPES_PART = "[Content_Types].xml";
     private static final String OOXML_ROOT_RELATIONSHIPS_PART = "_rels/.rels";
     private static final String OOXML_SIGNATURE_DIRECTORY = "_xmlsignatures/";
+    private static final Pattern OOXML_SIGNATURE_CERTIFICATE_MEMBER =
+        Pattern.compile("_xmlsignatures/(?:[^/]+/)*[^/]+\\.(?i:cer)");
     private static final String OOXML_SIGNATURE_ORIGIN_PART = "_xmlsignatures/origin.sigs";
     private static final String OOXML_SIGNATURE_ORIGIN_RELATIONSHIPS_PART =
         "_xmlsignatures/_rels/origin.sigs.rels";
@@ -263,6 +273,14 @@ public class UploadContentInspector implements AutoCloseable {
         "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin";
     private static final String OOXML_SIGNATURE_RELATIONSHIP =
         "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature";
+    private static final String OOXML_SIGNATURE_CERTIFICATE_CONTENT_TYPE =
+        "application/vnd.openxmlformats-package.digital-signature-certificate";
+    private static final String OOXML_RELATIONSHIPS_CONTENT_TYPE =
+        "application/vnd.openxmlformats-package.relationships+xml";
+    private static final String OOXML_SIGNATURE_CERTIFICATE_RELATIONSHIP =
+        "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/certificate";
+    private static final Set<String> OOXML_SIGNATURE_RELATIONSHIP_ATTRIBUTES =
+        Set.of("Id", "Type", "Target", "TargetMode");
     private static final Set<String> OOXML_SIGNATURE_NAMESPACES = Set.of(
         "http://www.w3.org/2000/09/xmldsig#",
         "http://www.w3.org/2009/xmldsig11#",
@@ -1210,6 +1228,7 @@ public class UploadContentInspector implements AutoCloseable {
         Set<String> relationshipTargets = new HashSet<>();
         Set<String> signatureOriginTargets = new HashSet<>();
         Set<String> signatureTargets = new HashSet<>();
+        Set<SignatureCertificateRelationship> signatureCertificateRelationships = new HashSet<>();
         String packageMimeType = null;
         long expanded = 0;
         try (ZipInputStream zip = new ZipInputStream(
@@ -1236,13 +1255,15 @@ public class UploadContentInspector implements AutoCloseable {
                 expanded = Math.addExact(expanded, entry.length());
                 String sniffedType = null;
                 switch (memberClass) {
-                    case XML, SIGNATURE -> {
+                    case XML, SIGNATURE, SIGNATURE_RELATIONSHIPS -> {
                         XmlEvidence xml = inspectXml(name, entry.content(), deadline, odfPackage);
                         xmlRoots.put(name, xml.root());
                         officeDocumentTargets.addAll(xml.officeDocumentTargets());
                         relationshipTargets.addAll(xml.relationshipTargets());
                         signatureOriginTargets.addAll(xml.signatureOriginTargets());
                         signatureTargets.addAll(xml.signatureTargets());
+                        signatureCertificateRelationships.addAll(
+                            xml.signatureCertificateRelationships());
                         mergeDeclaredTypes(contentTypeOverrides, xml.contentTypeOverrides());
                         mergeDeclaredTypes(contentTypeDefaults, xml.contentTypeDefaults());
                         mergeDeclaredTypes(manifestMediaTypes, xml.manifestMediaTypes());
@@ -1254,6 +1275,8 @@ public class UploadContentInspector implements AutoCloseable {
                         ? sniffFontMember(entry.content(), entry.length())
                         : sniffOpaqueMember(entry.content(), entry.length());
                     case DECLARED_OPAQUE -> requireInertOpaqueMember(entry.content());
+                    case SIGNATURE_CERTIFICATE ->
+                        requireSignatureCertificate(entry.content(), deadline);
                     case SIGNATURE_ORIGIN, DIRECTORY, REFUSED ->
                         requireEmptyMember(entry.length());
                 }
@@ -1281,6 +1304,7 @@ public class UploadContentInspector implements AutoCloseable {
             Set.copyOf(relationshipTargets),
             Set.copyOf(signatureOriginTargets),
             Set.copyOf(signatureTargets),
+            Set.copyOf(signatureCertificateRelationships),
             packageMimeType);
     }
 
@@ -1358,6 +1382,14 @@ public class UploadContentInspector implements AutoCloseable {
             return PackageMemberClass.XML;
         }
         if (normalized.startsWith(OOXML_SIGNATURE_DIRECTORY)) {
+            if (OOXML_SIGNATURE_CERTIFICATE_MEMBER.matcher(name).matches()
+                    && !normalized.contains("/_rels/")) {
+                return PackageMemberClass.SIGNATURE_CERTIFICATE;
+            }
+            String source = signatureRelationshipSource(name);
+            if (source != null && source.toLowerCase(Locale.ROOT).endsWith(".xml")) {
+                return PackageMemberClass.SIGNATURE_RELATIONSHIPS;
+            }
             return normalized.endsWith(".xml")
                 ? PackageMemberClass.SIGNATURE
                 : PackageMemberClass.REFUSED;
@@ -1395,7 +1427,8 @@ public class UploadContentInspector implements AutoCloseable {
 
     private static long memberBound(PackageMemberClass memberClass, String name) {
         return switch (memberClass) {
-            case XML, SIGNATURE, MIMETYPE -> MAX_XML_BYTES;
+            case XML, SIGNATURE, SIGNATURE_RELATIONSHIPS, MIMETYPE -> MAX_XML_BYTES;
+            case SIGNATURE_CERTIFICATE -> MAX_SIGNATURE_CERTIFICATE_BYTES;
             case RASTER -> MAX_PACKAGE_MEMBER_BYTES;
             case SNIFFED_OPAQUE -> ODF_FONT_MEMBER.matcher(name).matches()
                 ? MAX_OPAQUE_FONT_BYTES
@@ -1409,7 +1442,8 @@ public class UploadContentInspector implements AutoCloseable {
 
     private static long memberCapturePrefix(PackageMemberClass memberClass) {
         return switch (memberClass) {
-            case XML, SIGNATURE, MIMETYPE -> MAX_XML_BYTES;
+            case XML, SIGNATURE, SIGNATURE_RELATIONSHIPS, MIMETYPE -> MAX_XML_BYTES;
+            case SIGNATURE_CERTIFICATE -> MAX_SIGNATURE_CERTIFICATE_BYTES;
             case RASTER -> MAX_PACKAGE_MEMBER_BYTES;
             case SNIFFED_OPAQUE, DECLARED_OPAQUE -> OPAQUE_SNIFF_BYTES;
             case SIGNATURE_ORIGIN, DIRECTORY, REFUSED -> 0;
@@ -1420,6 +1454,52 @@ public class UploadContentInspector implements AutoCloseable {
         if (length != 0) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
+    }
+
+    /**
+     * Requires DER framing and a parsed X.509 certificate without trusting its identity or signature.
+     *
+     * <p>The bounded framing walk checks minimal tags and definite lengths throughout constructed
+     * values before the BER-tolerant factory parses the certificate. Primitive contents and the
+     * certificate schema are left to the factory. Full-input consumption and encoded-byte agreement
+     * are overlapping defence in depth: a parser may retain BER input verbatim, so those checks
+     * alone cannot establish DER framing. The package pass bounds bytes before allocation; this
+     * parser never unwraps PEM or accepts another ASN.1 object around the certificate.
+     */
+    private static void requireSignatureCertificate(byte[] content, Deadline deadline) {
+        deadline.check();
+        SignatureCertificateDerFraming.requireValid(content, deadline::check);
+        try {
+            CertificateFactory factory = CertificateFactory.getInstance("X.509");
+            ByteArrayInputStream input = new ByteArrayInputStream(content);
+            deadline.check();
+            java.security.cert.Certificate parsed = factory.generateCertificate(input);
+            deadline.check();
+            if (!(parsed instanceof X509Certificate certificate)
+                    || input.available() != 0
+                    || !Arrays.equals(content, certificate.getEncoded())) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+            deadline.check();
+        } catch (CertificateException exception) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    /** @return the signature owner of a conventional companion part, or null for another layout */
+    private static String signatureRelationshipSource(String name) {
+        if (!name.startsWith(OOXML_SIGNATURE_DIRECTORY) || !name.endsWith(".rels")) {
+            return null;
+        }
+        int directory = name.lastIndexOf("/_rels/");
+        if (directory < 0) {
+            return null;
+        }
+        String fileName = name.substring(directory + "/_rels/".length(), name.length() - 5);
+        if (fileName.isEmpty() || fileName.contains("/")) {
+            return null;
+        }
+        return name.substring(0, directory + 1) + fileName;
     }
 
     /**
@@ -1847,13 +1927,18 @@ public class UploadContentInspector implements AutoCloseable {
      */
     private static void bindOoxmlMembers(PackageEvidence evidence) {
         for (MemberEvidence member : evidence.members().values()) {
-            if (boundExemptMember(member.memberClass())) {
-                continue;
-            }
             String declared = evidence.contentTypeOverrides().get("/" + member.name());
             if (declared == null) {
                 declared = evidence.contentTypeDefaults()
                     .get(memberExtension(member.name().toLowerCase(Locale.ROOT)));
+            }
+            if (declared != null
+                    && OOXML_SIGNATURE_CERTIFICATE_CONTENT_TYPE.equals(canonicalDeclaredType(declared))
+                    && member.memberClass() != PackageMemberClass.SIGNATURE_CERTIFICATE) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+            if (boundExemptMember(member.memberClass())) {
+                continue;
             }
             requireDeclaredType(member, declared, EMBEDDED_FONT_MEMBER
                 .matcher(member.name()).matches()
@@ -1877,9 +1962,13 @@ public class UploadContentInspector implements AutoCloseable {
      */
     private static void requireOoxmlSignatures(PackageEvidence evidence) {
         Set<String> signatureParts = new HashSet<>();
+        Set<String> certificateParts = new HashSet<>();
         for (MemberEvidence member : evidence.members().values()) {
             if (member.memberClass() == PackageMemberClass.SIGNATURE) {
                 signatureParts.add(member.name());
+            }
+            if (member.memberClass() == PackageMemberClass.SIGNATURE_CERTIFICATE) {
+                certificateParts.add(member.name());
             }
         }
         for (Map.Entry<String, String> override : evidence.contentTypeOverrides().entrySet()) {
@@ -1887,7 +1976,13 @@ public class UploadContentInspector implements AutoCloseable {
                     && !signatureParts.contains(override.getKey().substring(1))) {
                 throw UnsupportedUploadMediaTypeException.unsupported();
             }
+            if (OOXML_SIGNATURE_CERTIFICATE_CONTENT_TYPE.equals(
+                        canonicalDeclaredType(override.getValue()))
+                    && !certificateParts.contains(override.getKey().substring(1))) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
         }
+        requireOoxmlSignatureCertificates(evidence, signatureParts, certificateParts);
         if (!signatureParts.containsAll(evidence.signatureTargets())) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
@@ -1899,6 +1994,35 @@ public class UploadContentInspector implements AutoCloseable {
                 || !Set.of(OOXML_SIGNATURE_ORIGIN_PART).equals(evidence.signatureOriginTargets())
                 || origin == null
                 || origin.memberClass() != PackageMemberClass.SIGNATURE_ORIGIN) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    /**
+     * Binds certificate targets and companion relationship owners to the admitted signature graph.
+     * Every certificate needs a qualifying reference; a generic relationship or XML URI is not
+     * certificate provenance, and an orphan companion part cannot borrow another signature's edge.
+     */
+    private static void requireOoxmlSignatureCertificates(
+            PackageEvidence evidence,
+            Set<String> signatureParts,
+            Set<String> certificateParts) {
+        for (MemberEvidence member : evidence.members().values()) {
+            if (member.memberClass() == PackageMemberClass.SIGNATURE_RELATIONSHIPS
+                    && !signatureParts.contains(signatureRelationshipSource(member.name()))) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
+        Set<String> referencedCertificates = new HashSet<>();
+        for (SignatureCertificateRelationship relationship
+                : evidence.signatureCertificateRelationships()) {
+            if (!signatureParts.contains(relationship.source())
+                    || !certificateParts.contains(relationship.target())) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+            referencedCertificates.add(relationship.target());
+        }
+        if (!certificateParts.equals(referencedCertificates)) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
     }
@@ -1922,6 +2046,10 @@ public class UploadContentInspector implements AutoCloseable {
             case DECLARED_OPAQUE -> opaqueContentTypes.contains(normalized);
             case SIGNATURE -> OOXML_SIGNATURE_CONTENT_TYPE.equals(normalized);
             case SIGNATURE_ORIGIN -> OOXML_SIGNATURE_ORIGIN_CONTENT_TYPE.equals(normalized);
+            case SIGNATURE_CERTIFICATE ->
+                OOXML_SIGNATURE_CERTIFICATE_CONTENT_TYPE.equals(declared.trim().toLowerCase(Locale.ROOT));
+            case SIGNATURE_RELATIONSHIPS ->
+                OOXML_RELATIONSHIPS_CONTENT_TYPE.equals(declared.trim().toLowerCase(Locale.ROOT));
             case XML -> XML_MEMBER_CONTENT_TYPES.contains(normalized);
             case MIMETYPE, DIRECTORY, REFUSED -> false;
         };
@@ -2417,6 +2545,8 @@ public class UploadContentInspector implements AutoCloseable {
         XML,
         SIGNATURE,
         SIGNATURE_ORIGIN,
+        SIGNATURE_CERTIFICATE,
+        SIGNATURE_RELATIONSHIPS,
         MIMETYPE,
         RASTER,
         SNIFFED_OPAQUE,
@@ -2442,6 +2572,7 @@ public class UploadContentInspector implements AutoCloseable {
             Set<String> relationshipTargets,
             Set<String> signatureOriginTargets,
             Set<String> signatureTargets,
+            Set<SignatureCertificateRelationship> signatureCertificateRelationships,
             String packageMimeType) {}
 
     private record XmlEvidence(
@@ -2452,7 +2583,10 @@ public class UploadContentInspector implements AutoCloseable {
             Set<String> relationshipTargets,
             Set<String> signatureOriginTargets,
             Set<String> signatureTargets,
+            Set<SignatureCertificateRelationship> signatureCertificateRelationships,
             XmlRoot root) {}
+
+    private record SignatureCertificateRelationship(String source, String target) {}
 
     private record XmlRoot(String namespaceUri, String localName) {}
 
@@ -2480,6 +2614,7 @@ public class UploadContentInspector implements AutoCloseable {
         private final boolean odfManifestPart;
         private final boolean odfMetadataPart;
         private final boolean ooxmlSignaturePart;
+        private final boolean ooxmlSignatureRelationshipsPart;
         private final boolean signaturePart;
         private final boolean contentTypesDocument;
         private final boolean rootRelationshipsDocument;
@@ -2491,6 +2626,8 @@ public class UploadContentInspector implements AutoCloseable {
         private final Set<String> relationshipTargets = new HashSet<>();
         private final Set<String> signatureOriginTargets = new HashSet<>();
         private final Set<String> signatureTargets = new HashSet<>();
+        private final Set<SignatureCertificateRelationship> signatureCertificateRelationships =
+            new HashSet<>();
         private final Set<String> relationshipIds = new HashSet<>();
         private final List<WordFieldState> wordFields = new ArrayList<>();
         private final StringBuilder signatureUriText = new StringBuilder();
@@ -2513,6 +2650,8 @@ public class UploadContentInspector implements AutoCloseable {
             ooxmlSignaturePart = !odfPackage
                 && entryName.startsWith(OOXML_SIGNATURE_DIRECTORY)
                 && entryName.toLowerCase(Locale.ROOT).endsWith(".xml");
+            ooxmlSignatureRelationshipsPart = !odfPackage
+                && classifyMember(entryName, false) == PackageMemberClass.SIGNATURE_RELATIONSHIPS;
             signaturePart = odfSignaturePart || ooxmlSignaturePart;
             contentTypesDocument = OOXML_CONTENT_TYPES_PART.equals(entryName);
             rootRelationshipsDocument = OOXML_ROOT_RELATIONSHIPS_PART.equals(entryName);
@@ -2545,6 +2684,8 @@ public class UploadContentInspector implements AutoCloseable {
                         || !OOXML_SIGNATURE_ELEMENTS.contains(normalizedElement)) {
                     throw new SAXException("Package signature content is not allowed");
                 }
+            } else if (ooxmlSignatureRelationshipsPart) {
+                inspectSignatureRelationshipsElement(uri, element, attributes);
             } else if (odfMetadataPart) {
                 if (!ODF_METADATA_NAMESPACES.contains(uri)
                         || !ODF_METADATA_ELEMENTS.contains(normalizedElement)) {
@@ -2708,6 +2849,14 @@ public class UploadContentInspector implements AutoCloseable {
         @Override
         public void characters(char[] characters, int start, int length) throws SAXException {
             deadline.check();
+            if (ooxmlSignatureRelationshipsPart) {
+                for (int index = start; index < start + length; index++) {
+                    char value = characters[index];
+                    if (value != ' ' && value != '\t' && value != '\r' && value != '\n') {
+                        throw new SAXException("Package signature relationships content is invalid");
+                    }
+                }
+            }
             if (signatureUriTextDepth > 0) {
                 if (signatureUriText.length() + length > MAX_SIGNATURE_URI_CHARACTERS) {
                     throw new SAXException("Package signature reference exceeds safe bounds");
@@ -2765,7 +2914,26 @@ public class UploadContentInspector implements AutoCloseable {
                 Set.copyOf(relationshipTargets),
                 Set.copyOf(signatureOriginTargets),
                 Set.copyOf(signatureTargets),
+                Set.copyOf(signatureCertificateRelationships),
                 root);
+        }
+
+        private void inspectSignatureRelationshipsElement(
+                String uri, String element, Attributes attributes) throws SAXException {
+            boolean rootElement = depth == 1 && "Relationships".equals(element);
+            boolean relationshipElement = depth == 2 && "Relationship".equals(element);
+            if (!OOXML_RELATIONSHIPS_NAMESPACE.equals(uri)
+                    || (!rootElement && !relationshipElement)
+                    || (rootElement && attributes.getLength() != 0)) {
+                throw new SAXException("Package signature relationships content is invalid");
+            }
+            for (int index = 0; index < attributes.getLength(); index++) {
+                if (!attributes.getURI(index).isEmpty()
+                        || !OOXML_SIGNATURE_RELATIONSHIP_ATTRIBUTES
+                            .contains(attributes.getLocalName(index))) {
+                    throw new SAXException("Package signature relationship attribute is invalid");
+                }
+            }
         }
 
         private void inspectRelationship(String uri, Attributes attributes)
@@ -2788,6 +2956,11 @@ public class UploadContentInspector implements AutoCloseable {
             if (activeOoxmlRelationship(relationshipType)) {
                 throw new SAXException("Active package relationship is not allowed");
             }
+            boolean certificateRelationship =
+                OOXML_SIGNATURE_CERTIFICATE_RELATIONSHIP.equals(relationshipType);
+            if (ooxmlSignatureRelationshipsPart != certificateRelationship) {
+                throw new SAXException("Package certificate relationship is misplaced");
+            }
             if (targetMode != null && "External".equalsIgnoreCase(targetMode.trim())) {
                 if (!OOXML_HYPERLINK_RELATIONSHIPS.contains(relationshipType)
                         || !safeExternalHyperlink(target)) {
@@ -2800,6 +2973,10 @@ public class UploadContentInspector implements AutoCloseable {
             }
             String normalizedTarget = normalizeRelationshipTarget(entryName, target);
             relationshipTargets.add(normalizedTarget);
+            if (certificateRelationship) {
+                signatureCertificateRelationships.add(new SignatureCertificateRelationship(
+                    Objects.requireNonNull(signatureRelationshipSource(entryName)), normalizedTarget));
+            }
             if (OOXML_SIGNATURE_ORIGIN_RELATIONSHIP.equals(relationshipType)) {
                 if (!rootRelationshipsDocument) {
                     throw new SAXException("Package signature origin relationship is misplaced");

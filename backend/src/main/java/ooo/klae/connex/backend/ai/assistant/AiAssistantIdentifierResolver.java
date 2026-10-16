@@ -37,12 +37,10 @@ public class AiAssistantIdentifierResolver {
     /**
      * Resolves visible mentions in bounded pages for the supplied turn text.
      *
-     * <p>The mapper returns a superset of the mentions this turn can have: a row whose canonical
-     * name is non-ASCII is admitted with no containment test at all, because MySQL cannot reproduce
-     * the Java canonical form for it. Candidate volume is therefore a property of the workspace,
-     * not of the turn, and must never refuse it — in a workspace whose records are named in a
-     * non-ASCII script every visible row is a candidate. Only the gated mention count, measured
-     * after the masking gate has decided, is bounded against the turn budget.
+     * <p>Current canonical keys select a binary-containment superset of real mentions. Missing
+     * or stale bundles and oversized unkeyed names retain the legacy SQL prefilter and can return every non-ASCII name.
+     * Candidate volume therefore never refuses a turn: only the Java-gated mention count is
+     * bounded against the turn budget. Java retains its original source-boundary checks.
      *
      * <p>Each page bounds materialization, not admission. A full page continues the search instead
      * of refusing or silently dropping later matches. An immutable kind/id cursor prevents a
@@ -78,7 +76,8 @@ public class AiAssistantIdentifierResolver {
         int afterId = 0;
         while (true) {
             List<AiAssistantIdentifierMention> candidates = identifierMapper.findMentionedRecords(
-                    workspaceId, orgWorkspaceIdsJson, scanText.lookupText(), CANDIDATE_PAGE_SIZE, afterKind, afterId);
+                    workspaceId, orgWorkspaceIdsJson, scanText.literalText(), scanText.labelText(),
+                    CANDIDATE_PAGE_SIZE, afterKind, afterId);
             for (AiAssistantIdentifierMention candidate : candidates) {
                 if (MaskingEngine.containsIdentifierMention(scanText, identifierValue(candidate))) {
                     mentions.add(candidate);
