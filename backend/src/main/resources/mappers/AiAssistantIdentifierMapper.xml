@@ -9,6 +9,13 @@
     <result property="value" column="value"/>
   </resultMap>
 
+  <resultMap id="KeyBackfillRow" type="AiIdentifierKeyBackfillRow">
+    <id property="kind" column="kind"/>
+    <id property="id" column="id"/>
+    <result property="value" column="value"/>
+    <result property="needsBackfill" column="needs_backfill"/>
+  </resultMap>
+
   <sql id="canonicalOperand">
     LOWER(TRIM(REGEXP_REPLACE(
         REGEXP_REPLACE(${operand}, '[{}｛｝﹛﹜︷︸]', ''), '[[:space:][:cntrl:]]+', ' ')))
@@ -19,11 +26,11 @@
   </sql>
 
   <sql id="canonicalTurn">
-    <include refid="canonicalOperand"><property name="operand" value="#{text}"/></include>
+    <include refid="canonicalOperand"><property name="operand" value="#{legacyText}"/></include>
   </sql>
 
   <!--
-    SQL is only a visibility-scoped superset prefilter, never the admission decision. Both operands
+    For stale bundles, SQL is a visibility-scoped superset prefilter, never admission. Both operands
     delete every compatibility brace before collapsing separators and lowercasing. MySQL has no
     NFKC operation and cannot delete Java's default-ignorable set, so a stored name that leaves
     printable ASCII may canonicalize differently here than in Java; those rows are admitted without
@@ -43,8 +50,8 @@
     Length, rather than collation equality with an empty string, retains combining-only names.
     Includes substitute only fixed column identifiers; tenant values remain bound parameters.
   -->
-  <sql id="candidatePredicate">
-    AND CHAR_LENGTH(<include refid="canonicalCandidate"/>) &gt; 0
+  <sql id="legacyCandidatePredicate">
+    CHAR_LENGTH(<include refid="canonicalCandidate"/>) &gt; 0
     AND (
       LOCATE(<include refid="canonicalCandidate"/>, <include refid="canonicalTurn"/>) &gt; 0
       OR REGEXP_LIKE(<include refid="canonicalCandidate"/>, '[^ -~]', 'c')
@@ -53,7 +60,29 @@
     )
   </sql>
 
+  <sql id="currentKeyBundle">
+    COALESCE(${alias}.ai_identifier_key_version = #{keyVersion}
+      AND CAST(${alias}.ai_identifier_source_name AS BINARY) = CAST(${alias}.name AS BINARY)
+      AND ${alias}.ai_identifier_literal_key IS NOT NULL
+      AND ${alias}.ai_identifier_label_key IS NOT NULL, FALSE)
+  </sql>
+
+  <!-- CASE keeps per-row SQL normalization and broad Unicode fallback off the current-key path. -->
+  <sql id="candidatePredicate">
+    AND CASE WHEN <include refid="currentKeyBundle"/>
+      AND CAST(${alias}.ai_identifier_literal_key AS BINARY) != CAST(CONVERT(#{unkeyed,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
+      AND CAST(${alias}.ai_identifier_label_key AS BINARY) != CAST(CONVERT(#{unkeyed,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY) THEN
+      (OCTET_LENGTH(${alias}.ai_identifier_literal_key) &gt; 0
+        AND LOCATE(CAST(${alias}.ai_identifier_literal_key AS BINARY), CAST(CONVERT(#{literalText,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)) &gt; 0)
+      OR (OCTET_LENGTH(${alias}.ai_identifier_label_key) &gt; 0
+        AND LOCATE(CAST(${alias}.ai_identifier_label_key AS BINARY), CAST(CONVERT(#{labelText,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)) &gt; 0)
+    ELSE <include refid="legacyCandidatePredicate"/> END
+  </sql>
+
   <select id="findMentionedRecords" resultMap="IdentifierMention">
+    <bind name="legacyText" value="literalText.equals(labelText) ? literalText : literalText + &quot; &quot; + labelText"/>
+    <bind name="unkeyed" value="@ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys@UNKEYED"/>
+    <bind name="keyVersion" value="@ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys@VERSION"/>
     SELECT matched.kind, matched.id, matched.value
     FROM (
       SELECT 'person' AS kind, p.id, p.name AS value
@@ -67,7 +96,7 @@
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
         AND p.name IS NOT NULL
-        <include refid="candidatePredicate"><property name="nameColumn" value="p.name"/></include>
+        <include refid="candidatePredicate"><property name="nameColumn" value="p.name"/><property name="alias" value="p"/></include>
       UNION ALL
       SELECT 'company' AS kind, c.id, c.name AS value
       FROM company c
@@ -78,18 +107,127 @@
           WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
         AND c.archived_at IS NULL
         AND c.name IS NOT NULL
-        <include refid="candidatePredicate"><property name="nameColumn" value="c.name"/></include>
+        <include refid="candidatePredicate"><property name="nameColumn" value="c.name"/><property name="alias" value="c"/></include>
       UNION ALL
       SELECT 'deal' AS kind, d.id, d.name AS value
       FROM deal d
       WHERE d.workspace_id = #{workspaceId}
         AND d.name IS NOT NULL
-        <include refid="candidatePredicate"><property name="nameColumn" value="d.name"/></include>
+        <include refid="candidatePredicate"><property name="nameColumn" value="d.name"/><property name="alias" value="d"/></include>
     ) matched
     WHERE matched.kind &gt; #{afterKind}
       OR (matched.kind = #{afterKind} AND matched.id &gt; #{afterId})
     ORDER BY matched.kind, matched.id
     LIMIT #{limit}
+  </select>
+
+
+  <select id="findPersonKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'person' AS kind, owned_window.id, p.name AS value, (p.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM person owned FORCE INDEX (idx_person_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN person p ON p.id = owned_window.id AND p.workspace_id = #{workspaceId}
+      AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+      AND p.name IS NOT NULL
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
+    ORDER BY owned_window.id
+  </select>
+
+  <update id="updatePersonKeysIfNameCurrent" timeout="5">
+    UPDATE person p
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = #{keyVersion},
+        updated_at = updated_at
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+      AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+      AND CAST(p.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
+  </update>
+
+  <select id="findCompanyKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'company' AS kind, owned_window.id, c.name AS value, (c.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM company owned FORCE INDEX (idx_company_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN company c ON c.id = owned_window.id AND c.workspace_id = #{workspaceId}
+      AND c.archived_at IS NULL
+      AND c.name IS NOT NULL
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
+    ORDER BY owned_window.id
+  </select>
+
+  <update id="updateCompanyKeysIfNameCurrent" timeout="5">
+    UPDATE company c
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = #{keyVersion},
+        updated_at = updated_at
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+      AND c.archived_at IS NULL
+      AND CAST(c.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
+  </update>
+
+  <select id="findDealKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'deal' AS kind, owned_window.id, d.name AS value, (d.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM deal owned FORCE INDEX (idx_deal_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN deal d ON d.id = owned_window.id AND d.workspace_id = #{workspaceId}
+      AND d.name IS NOT NULL
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="d"/></include>)
+    ORDER BY owned_window.id
+  </select>
+
+  <update id="updateDealKeysIfNameCurrent" timeout="5">
+    UPDATE deal d
+    SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+        ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+        ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        ai_identifier_key_version = #{keyVersion},
+        updated_at = updated_at
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
+
+      AND CAST(d.name AS BINARY) = CAST(CONVERT(#{name,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4) AS BINARY)
+      AND NOT (<include refid="currentKeyBundle"><property name="alias" value="d"/></include>)
+  </update>
+
+  <select id="countPendingKeys" resultType="long">
+    SELECT SUM(pending) FROM (
+      SELECT COUNT(*) AS pending FROM person p
+      WHERE p.workspace_id = #{workspaceId}
+        AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+        AND p.name IS NOT NULL
+        AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
+      UNION ALL
+      SELECT COUNT(*) AS pending FROM company c
+      WHERE c.workspace_id = #{workspaceId}
+        AND c.archived_at IS NULL
+        AND c.name IS NOT NULL
+        AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
+      UNION ALL
+      SELECT COUNT(*) AS pending FROM deal d
+      WHERE d.workspace_id = #{workspaceId}
+
+        AND d.name IS NOT NULL
+        AND NOT (<include refid="currentKeyBundle"><property name="alias" value="d"/></include>)
+    ) counts
   </select>
 
 </mapper>

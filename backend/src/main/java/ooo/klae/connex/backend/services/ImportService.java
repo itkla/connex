@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
@@ -306,7 +307,7 @@ public class ImportService {
         }
 
         if (!beans.isEmpty()) {
-            personMapper.insertBatch(beans);
+            RecordInsertBatches.people(beans).forEach(personMapper::insertBatch);
             for (int i = 0; i < beans.size(); i++) {
                 Person bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
@@ -656,7 +657,7 @@ public class ImportService {
         }
 
         if (!beans.isEmpty()) {
-            companyMapper.insertBatch(beans);
+            RecordInsertBatches.companies(beans).forEach(companyMapper::insertBatch);
             for (int i = 0; i < beans.size(); i++) {
                 Company bean = beans.get(i);
                 PlanRow row = toCreate.get(i);

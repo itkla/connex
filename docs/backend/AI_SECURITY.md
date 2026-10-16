@@ -52,6 +52,119 @@ Features do not build raw prompts.
 
 Any new feature must preserve the same masking and leak-scan boundary for every provider/protocol path.
 
+### Ask Connex record-identifier prefilter (tenant V230)
+
+`AiIdentifierLookupKeys.fromName` derives literal and conversation-label aliases from
+`CanonicalText` and the existing dictionary eligibility rules. Every person/company/deal name
+writer binds both aliases through explicit MyBatis parameter handlers receiving the same raw name
+parameter as `name`, alongside its exact source snapshot and format version. Ineligible aliases
+are empty strings; a missing bundle remains null. Canonical text and snapshots are sensitive
+CRM data: they stay in the owning parent row, its tenant export and physical erasure, never logs,
+provider metadata or a new authority source.
+
+A bundle is processed only when its version equals `AiIdentifierLookupKeys.VERSION` (version 3),
+both keys are non-null, and the snapshot equals the current name byte-for-byte (`CAST(... AS BINARY)`).
+Each alias is capped at 512 Unicode code points. Before canonicalization, any unpaired UTF-16
+surrogate marks both aliases `UNKEYED`; brace deletion must never join malformed surrogate halves
+into a key that differs from the UTF-8-persisted name. Version 3 invalidates all earlier bundles,
+including ones derived from malformed source strings. If either alias exceeds the cap, both also
+store the explicit NUL `UNKEYED` marker: controls cannot survive as a canonical alias. Such rows use
+legacy SQL fallback; aliases are never truncated and coverage is never omitted. Processed markers
+are excluded from pending-backfill counts; retries do not reinterpret malformed input or truncate
+oversized aliases.
+
+Current keyed rows use binary `LOCATE` against separately bound Java literal/label turn projections.
+Authoritative names, snapshots, canonical keys, turn projections and CAS-name operands use explicit UTF-8 byte parameter handlers
+and `CONVERT(... USING utf8mb4)` before any binary cast. This avoids both connection-byte mismatch
+and lossy client conversion of Japanese/supplementary projections on a Cp1252 JDBC connection.
+The Cp1252 regression asserts admission and absence of the raw name in the first provider payload,
+including UTF-8-written Japanese/supplementary rows and a representable name whose fold is Greek.
+There is no
+per-row SQL normalization or blanket Unicode admission in that branch. Every Java-admitted
+mention contains its corresponding stored alias, so SQL remains a superset. The existing Java
+ASCII-word and original-source boundary checks remain the admission authority. SQL substring
+matches such as `Li` in `client` can over-include and are rejected by Java. Many such canonical
+substring matches can still require multiple pages even when Java admits none.
+
+Missing bundles, older versions and old-binary renames take the existing SQL normalization and
+non-ASCII/bracket fallback. No trigger is needed, and rollback-compatible writers keep working.
+The 200-row keyset page is a materialization bound, never a corpus/admission cap: full pages
+continue until exhaustion or the existing combined 20 admitted-identifier limit is exceeded.
+Visibility stays owned-or-shared within the control-derived organization ceiling; archived and
+processing-restricted people and archived companies remain excluded.
+
+`AiIdentifierKeyBackfillRunner` is a fixed-delay background worker, never an application runner or
+readiness dependency. A dedicated single-thread scheduler waits 30 seconds initially and between
+invocations, then resumes at most four 100-row windows across active workspaces. Each window uses
+the owning-workspace/id index and applies its limit before evaluating freshness or processing
+eligibility. Every examined row advances the cursor, including current, archived, restricted and
+nameless rows. A mostly-current corpus therefore cannot turn one window into a full-table scan.
+Workspace discovery is keyset-paged, and the dedicated thread installs each workspace's real
+placement before opening its transaction. It rejects placement changes before reusing a cursor.
+CAS statements have a five-second query timeout, and each transaction has a ten-second deadline;
+contention rolls back the page and retries on a later traversal without delaying other scheduled
+maintenance. There are no session-wide timeout changes, domain events or timestamp changes.
+
+Per-page logs report examined, written, skipped and observed pending rows. Workspace completion
+logs accumulate those bounded observations; they are not a point-in-time pending count under
+concurrent writes. No page performs a full pending count. The optional exact `pendingCount`
+diagnostic remains a separate full-corpus query. Failures log only workspace id and exception
+class. Restarts safely begin from zero; traversal wraps to revisit races while fallback keeps
+coverage. Drain old writers, allow reconciliation to complete and check an exact pending=0
+before claiming steady-state retrieval cost. A canonicalization, eligibility or JDK Unicode change
+requires a version bump and reconciliation; do not silently reinterpret current stored keys.
+
+The real-MySQL mostly-current regression (2026-10-16) populated 50,200 people with only the last
+bundle stale. Two consecutive invocations each examined 400 owned ids in four windows, with 1,204
+handler reads and no CAS or full pending-count calls. `EXPLAIN ANALYZE` used the existing
+`idx_person_workspace` range before `LIMIT 100`, followed by at most 100 primary-key lookups per
+window. The cursor advanced to 400 then 800. These are deterministic row/call bounds; full-sweep
+duration still grows with the owned population.
+
+Name-writing CSV inserts and seeder flushes retain their enclosing transactions and generated-id
+ordering while using at most 100 rows and a conservative 1 MiB estimated payload per chunk.
+`RecordInsertBatches` covers every variable-width insert binding, both capped aliases and the source
+snapshot, with UTF-8/escaping/statement headroom. The bulk regression previews and commits 5,000
+255-character U+FDFA-heavy names; the long keys use fallback instead of expanding a single packet.
+
+This design bounds rows **returned** and identifier SQL round trips by canonical matches, not
+rows examined: containment still scans the visible corpus. Stale and explicitly unkeyed rows retain the legacy
+pagination cost (the 50,200-row unbackfilled regression requires 252 mapper calls). The cost
+integration fixture exercises 200, 5,000 and 50,200 Japanese names, ASCII/Japanese and maximum-size
+turns, real NFKC mentions, production `EXPLAIN ANALYZE`, and resolver plus durable queue duration
+inside the established membership/session lock order. A second connection proves contention and release. Timing is
+reported, never asserted against shared-host thresholds; deterministic page/row counts are asserted.
+Membership and session acquire/hold intervals are reported separately through commit, alongside the
+complete queue transaction (real authorization, message/turn writes and scope reads; audit and
+realtime delivery use fixture mocks). Acquire timings include lock-query/round-trip latency; queue
+and hold timings include the two-connection contention probes.
+
+Measured locally on 2026-10-16 UTC with MySQL 8.4, Java 26 and format 2 on the shared four-CPU,
+approximately 9 GB development host. Every observation used one identifier SQL call. Unrelated
+turns returned zero rows; one real NFKC mention returned one row, and two records sharing a
+canonical name returned two rows. These are fixture observations, not latency targets.
+
+| Japanese-name population | ASCII unrelated resolver ms | Japanese unrelated resolver ms | 16,000-UTF-16-unit Japanese turn resolver ms |
+| --- | ---: | ---: | ---: |
+| 200 | 10.501 | 6.102 | 24.197 |
+| 5,000 | 10.685 | 10.623 | 259.125 |
+| 50,200 | 67.280 | 64.655 | 2,511.569 |
+
+At 50,200 names the complete queue transaction and membership/session hold intervals were:
+
+| Unrelated turn | Membership acquire ms | Session acquire ms | Membership hold ms | Session hold ms | Queue ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ASCII | 0.492 | 0.651 | 195.713 | 192.794 | 199.482 |
+| Japanese | 0.370 | 0.593 | 764.525 | 761.902 | 766.992 |
+| 16,000 UTF-16 units | 0.514 | 0.578 | 3,324.382 | 3,321.911 | 3,327.455 |
+
+After adding two canonical-equivalent names (50,202 rows), `EXPLAIN ANALYZE` examined all 50,202
+person rows in one scan loop and materialized zero unrelated candidates or two mention candidates.
+The complete explain executions took 110 ms and 62.6 ms respectively. The two-row resolver took
+62.987 ms; queue time was 254.795 ms, with membership/session holds of 252.036/249.547 ms. This
+confirms bounded retrieval for this corpus while exposing the remaining linear scan and long-turn
+cost. Other distributions, especially many substring matches or unkeyed names, can still paginate.
+
 ### Ask Connex member identifiers
 
 The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, company, deal,

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.mappers.DealMapper;
 
@@ -114,7 +115,7 @@ public class DealOutcomeWriter {
     }
 
     /**
-     * Applies the outcome each new deal is created with and inserts them in one batch.
+     * Applies the outcome each new deal is created with and inserts them in bounded batches.
      * @param deals the deals to insert, each with the realized value and stage outcome it carries
      */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -122,7 +123,8 @@ public class DealOutcomeWriter {
         for (NewDeal item : deals) {
             prepareForInsert(item.deal(), item.requestedActualValue(), item.stageOutcome());
         }
-        dealMapper.insertBatch(deals.stream().map(NewDeal::deal).toList());
+        RecordInsertBatches.deals(deals.stream().map(NewDeal::deal).toList())
+                .forEach(dealMapper::insertBatch);
     }
 
     /**
