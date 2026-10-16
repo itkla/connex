@@ -232,7 +232,7 @@ class AiAssistantToolCallReadServiceTest {
                 AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant()))).thenReturn(List.of());
         when(chatMapper.getToolCallBySession(WORKSPACE_ID, SESSION_ID, call.getId())).thenReturn(call);
         when(chatMapper.getRetainedSessionById(WORKSPACE_ID, USER_ID, SESSION_ID, List.of(USER_ID)))
-                .thenReturn(retainedSession(USER_ID, "active"));
+                .thenReturn(retainedSession(44, "active"));
         for (AiAssistantToolCallReadDto card : List.of(
                 service.get(SESSION_ID, call.getId()), service.list(SESSION_ID, false).getFirst(),
                 service.getRetained(SESSION_ID, call.getId()), service.listRetained(SESSION_ID, false).getFirst())) {
