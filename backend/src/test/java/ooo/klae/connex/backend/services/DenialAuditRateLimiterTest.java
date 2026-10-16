@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
@@ -10,7 +12,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,6 +27,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 
 class DenialAuditRateLimiterTest {
     private static final Instant FIXED = Instant.parse("2026-10-01T00:00:00Z");
@@ -31,6 +41,205 @@ class DenialAuditRateLimiterTest {
     private static final String REASON = "enrollment_required";
 
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Test
+    void fingerprintsShareTheOriginalAddressWindowWithoutExtendingIt() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+
+        clock.advance(Duration.ofMinutes(30).minusMillis(1));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        clock.advance(Duration.ofMillis(1));
+
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+    }
+
+    @Test
+    void oneThousandRotatingUserAgentsAdmitFourAndCountEverySuppression() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+        int admitted = 0;
+        for (int agent = 0; agent < 1_000; agent++) {
+            if (admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser " + agent)) {
+                admitted++;
+            }
+        }
+
+        assertEquals(4, admitted);
+        assertEquals(996.0, suppressed(CONFINED));
+        assertEquals(1, limiter.trackedDenials());
+        assertEquals(0.0, evictions());
+        assertTrue(admits(limiter, 7, CONFINED, OTHER_ADDRESS, "Browser 0"));
+    }
+
+    @Test
+    void eightAddressesEachKeepFourFingerprintSlotsEvenWhenAllAddressesAreOccupied() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+        for (int address = 0; address < 8; address++) {
+            assertTrue(admits(limiter, 7, CONFINED, "2001:db8::" + address, "Browser 0"));
+        }
+        for (int address = 0; address < 8; address++) {
+            for (int agent = 1; agent < 4; agent++) {
+                assertTrue(admits(limiter, 7, CONFINED, "2001:db8::" + address, "Browser " + agent));
+            }
+            assertFalse(admits(limiter, 7, CONFINED, "2001:db8::" + address, "Browser 4"));
+            assertFalse(admits(limiter, 7, CONFINED, "2001:db8::" + address, "Browser 0"));
+        }
+        assertFalse(admits(limiter, 7, CONFINED, "2001:db8::ff", "Browser 0"));
+        assertEquals(17.0, suppressed(CONFINED));
+        assertEquals(0.0, evictions());
+    }
+
+    @Test
+    void hashesTheFullUtf8HeaderAndDistinguishesAcceptedEmptyHeadersFromAbsence() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+        DenialAuditRateLimiter.Admission unicode = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("é🚀")).orElseThrow();
+        assertEquals("5db4d7b036b83313f6bf71b894e20df431c6641a66b76a9a34f09025568468d2",
+                unicode.userAgentFingerprint());
+        String prefix = "Browser/" + "x".repeat(2_000);
+        DenialAuditRateLimiter.Admission first = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request(prefix + "A")).orElseThrow();
+        DenialAuditRateLimiter.Admission second = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request(prefix + "B")).orElseThrow();
+        assertEquals(64, first.userAgentFingerprint().length());
+        assertNotEquals(first.userAgentFingerprint(), second.userAgentFingerprint());
+
+        DenialAuditRateLimiter.Admission absent = limiter.acquire(7, CONFINED, REASON, OTHER_ADDRESS,
+                request(null)).orElseThrow();
+        DenialAuditRateLimiter.Admission empty = limiter.acquire(7, CONFINED, REASON, OTHER_ADDRESS,
+                request("")).orElseThrow();
+        assertEquals("", absent.userAgentFingerprint());
+        assertEquals("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                empty.userAgentFingerprint());
+    }
+
+    @Test
+    void absentAndFirewallRejectedUserAgentsShareOneSentinelWithoutThrowing() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(0));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+        for (String agent : List.of("Browser A\u0085", "Browser B\u0085")) {
+            var firewalled = new StrictHttpFirewall().getFirewalledRequest(request(agent));
+            assertThrows(RequestRejectedException.class, () -> firewalled.getHeader("User-Agent"));
+            assertTrue(limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS, firewalled).isEmpty());
+        }
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertEquals(3.0, suppressed(CONFINED));
+    }
+
+    /** Replays the old address-only rule independently across dense traffic and staggered expiry. */
+    @Test
+    void everyAddressOnlyAdmissionIsAlsoAdmittedWithoutReleasesForASeededRequestSequence() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        AddressOnlyLimiter reference = new AddressOnlyLimiter();
+        Random random = new Random(1936);
+        int oldAdmissions = 0;
+        int additionalAdmissions = 0;
+        for (int attempt = 0; attempt < 20_000; attempt++) {
+            clock.advance(Duration.ofMillis(random.nextInt(5_000)));
+            if (attempt % 257 == 0) {
+                clock.advance(Duration.ofMinutes(10));
+            }
+            int userId = random.nextInt(4);
+            String action = random.nextBoolean() ? CONFINED : STEP_UP;
+            String reason = random.nextBoolean() ? REASON : "attestation_required";
+            String address = random.nextInt(12) == 0 ? null : "2001:db8::" + random.nextInt(12);
+            String agent = random.nextInt(8) == 0 ? null : "Browser " + random.nextInt(16);
+            boolean oldAdmission = reference.admits(userId, action, reason, address, clock.millis());
+            boolean newAdmission = limiter.acquire(userId, action, reason, address, request(agent)).isPresent();
+            assertTrue(!oldAdmission || newAdmission, "Lost address-only admission at request " + attempt);
+            if (oldAdmission) {
+                oldAdmissions++;
+            } else if (newAdmission) {
+                additionalAdmissions++;
+            }
+        }
+
+        assertTrue(oldAdmissions > 100);
+        assertTrue(additionalAdmissions > 100);
+        assertTrue(suppressed(CONFINED) > 0);
+        assertEquals(0.0, evictions());
+    }
+
+    @Test
+    void seededOpeningAdmissionFailuresPreserveEvidenceForRecordedFingerprintRetries() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        AddressOnlyLimiter reference = new AddressOnlyLimiter();
+        Random random = new Random(1936);
+        int preservedRetries = 0;
+        for (int attempt = 0; attempt < 1_000; attempt++) {
+            String action = random.nextBoolean() ? CONFINED : STEP_UP;
+            String reason = random.nextBoolean() ? REASON : "attestation_required";
+            String address = "2001:db8::" + random.nextInt(12);
+            String firstAgent = "Opening browser " + random.nextInt(16);
+            String recordedAgent = "Recorded browser " + random.nextInt(16);
+            Set<String> recordedAgents = new HashSet<>();
+            assertTrue(reference.admits(attempt, action, reason, address, clock.millis()));
+            DenialAuditRateLimiter.Admission opening = limiter.acquire(attempt, action, reason,
+                    address, request(firstAgent)).orElseThrow();
+            recordedAgents.add(firstAgent);
+            clock.advance(Duration.ofMillis(random.nextInt(1_000) + 1));
+            assertFalse(reference.admits(attempt, action, reason, address, clock.millis()));
+            assertTrue(limiter.acquire(attempt, action, reason, address, request(recordedAgent)).isPresent());
+            recordedAgents.add(recordedAgent);
+
+            reference.release(attempt, action, reason, address, opening.admittedAtMillis());
+            limiter.release(opening);
+            recordedAgents.remove(firstAgent);
+            boolean oldAdmission = reference.admits(attempt, action, reason, address, clock.millis());
+            boolean newAdmission = limiter.acquire(attempt, action, reason, address,
+                    request(recordedAgent)).isPresent();
+
+            assertTrue(oldAdmission);
+            assertFalse(newAdmission);
+            assertTrue(newAdmission || recordedAgents.contains(recordedAgent),
+                    "Lost recorded fingerprint evidence at retry " + attempt);
+            preservedRetries++;
+            assertFalse(reference.admits(attempt, action, reason, address, clock.millis()));
+            assertTrue(limiter.acquire(attempt, action, reason, address, request(firstAgent)).isPresent());
+            clock.advance(Duration.ofSeconds(WINDOW_SECONDS));
+        }
+
+        assertEquals(1_000, preservedRetries);
+        assertEquals(0.0, evictions());
+    }
+
+    /** Retaining surviving rows also retains their address capacity until release or expiry. */
+    @Test
+    void retainingAReleasedOpeningSlotCanDenyANewAddressThatTheOldRuleWouldAdmit() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        AddressOnlyLimiter reference = new AddressOnlyLimiter();
+        assertTrue(reference.admits(7, CONFINED, REASON, VICTIM_ADDRESS, clock.millis()));
+        DenialAuditRateLimiter.Admission opening = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser A")).orElseThrow();
+        for (int address = 1; address < 8; address++) {
+            String peer = "2001:db8::" + address;
+            assertTrue(reference.admits(7, CONFINED, REASON, peer, clock.millis()));
+            assertTrue(admits(limiter, 7, CONFINED, peer, "Browser A"));
+        }
+        assertFalse(reference.admits(7, CONFINED, REASON, VICTIM_ADDRESS, clock.millis()));
+        DenialAuditRateLimiter.Admission surviving = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser B")).orElseThrow();
+
+        reference.release(7, CONFINED, REASON, VICTIM_ADDRESS, opening.admittedAtMillis());
+        limiter.release(opening);
+
+        assertTrue(reference.admits(7, CONFINED, REASON, OTHER_ADDRESS, clock.millis()));
+        assertFalse(admits(limiter, 7, CONFINED, OTHER_ADDRESS, "Browser A"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        limiter.release(surviving);
+        assertTrue(admits(limiter, 7, CONFINED, OTHER_ADDRESS, "Browser A"));
+    }
 
     @Test
     void admitsOneRowPerUserActionAndAddressPerWindow() {
@@ -50,10 +259,10 @@ class DenialAuditRateLimiterTest {
     void aNewReasonForTheSameActionIsAdmittedWithinTheWindow() {
         DenialAuditRateLimiter limiter = limiter(new TestClock(0));
 
-        assertTrue(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS).isPresent());
-        assertTrue(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS).isPresent());
-        assertFalse(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS).isPresent());
-        assertFalse(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS).isPresent());
+        assertTrue(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS, request(null)).isPresent());
+        assertTrue(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS, request(null)).isPresent());
+        assertFalse(limiter.acquire(7, CONFINED, "attestation_required", VICTIM_ADDRESS, request(null)).isPresent());
+        assertFalse(limiter.acquire(7, CONFINED, "enrollment_required", VICTIM_ADDRESS, request(null)).isPresent());
         assertEquals(2.0, suppressed(CONFINED));
     }
 
@@ -153,7 +362,7 @@ class DenialAuditRateLimiterTest {
     void releasingAnUnwrittenRowReadmitsTheNextDenial() {
         DenialAuditRateLimiter limiter = limiter(new TestClock(0));
         DenialAuditRateLimiter.Admission admission =
-                limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS).orElseThrow();
+                limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS, request(null)).orElseThrow();
 
         limiter.release(admission);
 
@@ -164,13 +373,81 @@ class DenialAuditRateLimiterTest {
     @Test
     void releasingOneAddressLeavesTheOtherAddressesWindowsInPlace() {
         DenialAuditRateLimiter limiter = limiter(new TestClock(1));
-        DenialAuditRateLimiter.Admission victim = limiter.acquire(7, STEP_UP, REASON, VICTIM_ADDRESS).orElseThrow();
+        DenialAuditRateLimiter.Admission victim = limiter.acquire(7, STEP_UP, REASON, VICTIM_ADDRESS, request(null)).orElseThrow();
         assertTrue(admits(limiter, 7, STEP_UP, OTHER_ADDRESS));
 
         limiter.release(victim);
 
         assertTrue(admits(limiter, 7, STEP_UP, VICTIM_ADDRESS));
         assertFalse(admits(limiter, 7, STEP_UP, OTHER_ADDRESS));
+    }
+
+    @Test
+    void sameTimeFingerprintsReleaseIndependentlyAndTheFirstCanRetry() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        DenialAuditRateLimiter.Admission first = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser A")).orElseThrow();
+        DenialAuditRateLimiter.Admission second = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser B")).orElseThrow();
+        assertEquals(first.admittedAtMillis(), second.admittedAtMillis());
+
+        limiter.release(second);
+
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        limiter.release(first);
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+
+        clock.advance(Duration.ofSeconds(WINDOW_SECONDS));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+    }
+
+    @Test
+    void releasingTheFirstFingerprintPreservesLaterRowsAndTheOriginalExpiry() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        DenialAuditRateLimiter.Admission first = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser A")).orElseThrow();
+        clock.advance(Duration.ofMinutes(30));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+
+        limiter.release(first);
+
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        limiter.release(first);
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30).minusMillis(1));
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        clock.advance(Duration.ofMillis(1));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+    }
+
+    @Test
+    void releasingTheOnlyFingerprintRestoresAddressCapacityAndStartsARetryWindow() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        DenialAuditRateLimiter.Admission first = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser A")).orElseThrow();
+        for (int address = 1; address < 8; address++) {
+            assertTrue(admits(limiter, 7, CONFINED, "2001:db8::" + address));
+        }
+        limiter.release(first);
+        assertTrue(admits(limiter, 7, CONFINED, OTHER_ADDRESS));
+
+        DenialAuditRateLimiter.Admission failed = limiter.acquire(8, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser A")).orElseThrow();
+        clock.advance(Duration.ofMinutes(30));
+        limiter.release(failed);
+        assertTrue(admits(limiter, 8, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30));
+        assertFalse(admits(limiter, 8, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30));
+        assertTrue(admits(limiter, 8, CONFINED, VICTIM_ADDRESS, "Browser A"));
     }
 
     /**
@@ -188,7 +465,7 @@ class DenialAuditRateLimiterTest {
             for (int thread = 0; thread < threads; thread++) {
                 results.add(pool.submit(() -> {
                     start.await();
-                    return admits(limiter, 7, CONFINED, VICTIM_ADDRESS);
+                    return admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A");
                 }));
             }
             start.countDown();
@@ -200,6 +477,39 @@ class DenialAuditRateLimiterTest {
             }
 
             assertEquals(1, admitted);
+            assertEquals(15.0, suppressed(CONFINED));
+            assertEquals(0.0, evictions());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentDistinctFingerprintsAdmitExactlyFour() throws Exception {
+        DenialAuditRateLimiter limiter = limiter(Clock.systemUTC());
+        int threads = 16;
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (int thread = 0; thread < threads; thread++) {
+                String agent = "Browser " + thread;
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return admits(limiter, 7, CONFINED, VICTIM_ADDRESS, agent);
+                }));
+            }
+            start.countDown();
+            int admitted = 0;
+            for (Future<Boolean> result : results) {
+                if (result.get(10, TimeUnit.SECONDS)) {
+                    admitted++;
+                }
+            }
+
+            assertEquals(4, admitted);
+            assertEquals(12.0, suppressed(CONFINED));
+            assertEquals(0.0, evictions());
         } finally {
             pool.shutdownNow();
         }
@@ -213,13 +523,29 @@ class DenialAuditRateLimiterTest {
     void aLateReleaseDropsOnlyTheWindowItOpened() {
         TestClock clock = new TestClock(0);
         DenialAuditRateLimiter limiter = limiter(clock);
-        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS).orElseThrow();
+        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS, request(null)).orElseThrow();
         clock.advance(Duration.ofSeconds(WINDOW_SECONDS));
         assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
 
         limiter.release(stale);
 
         assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS));
+    }
+
+    @Test
+    void aLateFingerprintReleasePreservesTheNextAddressWindow() {
+        TestClock clock = new TestClock(0);
+        DenialAuditRateLimiter limiter = limiter(clock);
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30));
+        DenialAuditRateLimiter.Admission stale = limiter.acquire(7, CONFINED, REASON, VICTIM_ADDRESS,
+                request("Browser B")).orElseThrow();
+        clock.advance(Duration.ofMinutes(30));
+        assertTrue(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
+
+        limiter.release(stale);
+
+        assertFalse(admits(limiter, 7, CONFINED, VICTIM_ADDRESS, "Browser B"));
     }
 
     /**
@@ -270,7 +596,9 @@ class DenialAuditRateLimiterTest {
         for (int user = 0; user < 10; user++) {
             assertTrue(admits(limiter, user, CONFINED, VICTIM_ADDRESS));
         }
-        clock.advance(Duration.ofSeconds(WINDOW_SECONDS));
+        clock.advance(Duration.ofMinutes(30));
+        assertTrue(admits(limiter, 9, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        clock.advance(Duration.ofMinutes(30));
         for (int user = 10; user < 4_102; user++) {
             assertTrue(admits(limiter, user, CONFINED, VICTIM_ADDRESS));
         }
@@ -278,6 +606,21 @@ class DenialAuditRateLimiterTest {
         assertEquals(4_092, limiter.trackedDenials());
         assertEquals(0.0, evictions());
         assertFalse(admits(limiter, 10, CONFINED, VICTIM_ADDRESS));
+    }
+
+    @Test
+    void fingerprintSubAdmissionsNeverRefreshAddressEvictionOrder() {
+        DenialAuditRateLimiter limiter = limiter(new TestClock(1));
+        assertTrue(admits(limiter, 0, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 1, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 0, CONFINED, VICTIM_ADDRESS, "Browser B"));
+        for (int user = 2; user <= DenialAuditRateLimiter.MAX_TRACKED_DENIALS; user++) {
+            assertTrue(admits(limiter, user, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        }
+
+        assertEquals(1.0, evictions());
+        assertFalse(admits(limiter, 1, CONFINED, VICTIM_ADDRESS, "Browser A"));
+        assertTrue(admits(limiter, 0, CONFINED, VICTIM_ADDRESS, "Browser A"));
     }
 
     /**
@@ -329,7 +672,57 @@ class DenialAuditRateLimiterTest {
     }
 
     private static boolean admits(DenialAuditRateLimiter limiter, int userId, String action, String address) {
-        return limiter.acquire(userId, action, REASON, address).isPresent();
+        return admits(limiter, userId, action, address, null);
+    }
+
+    private static boolean admits(DenialAuditRateLimiter limiter, int userId, String action, String address,
+            String userAgent) {
+        return limiter.acquire(userId, action, REASON, address, request(userAgent)).isPresent();
+    }
+
+    private static MockHttpServletRequest request(String userAgent) {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/companies");
+        if (userAgent != null) {
+            request.addHeader("User-Agent", userAgent);
+        }
+        return request;
+    }
+
+    private record ReferenceKey(int userId, String action, String reason) {
+    }
+
+    private record AddressOnlySlot(String address, long admittedAtMillis) {
+    }
+
+    private static final class AddressOnlyLimiter {
+        private final Map<ReferenceKey, List<AddressOnlySlot>> windows = new HashMap<>();
+
+        private boolean admits(int userId, String action, String reason, String address, long now) {
+            ReferenceKey key = new ReferenceKey(userId, action, reason);
+            List<AddressOnlySlot> live = new ArrayList<>(windows.getOrDefault(key, List.of()));
+            live.removeIf(slot -> now - slot.admittedAtMillis() >= 3_600_000L);
+            String resolvedAddress = address == null ? "" : address;
+            boolean admitted = live.size() < 8
+                    && live.stream().noneMatch(slot -> slot.address().equals(resolvedAddress));
+            if (admitted) {
+                live.add(new AddressOnlySlot(resolvedAddress, now));
+            }
+            windows.put(key, live);
+            return admitted;
+        }
+
+        private void release(int userId, String action, String reason, String address, long admittedAtMillis) {
+            ReferenceKey key = new ReferenceKey(userId, action, reason);
+            List<AddressOnlySlot> live = windows.getOrDefault(key, List.of()).stream()
+                    .filter(slot -> !slot.address().equals(address == null ? "" : address)
+                            || slot.admittedAtMillis() != admittedAtMillis)
+                    .toList();
+            if (live.isEmpty()) {
+                windows.remove(key);
+            } else {
+                windows.put(key, live);
+            }
+        }
     }
 
     /** Settable clock that also steps by a fixed amount per reading, so every window can start apart. */

@@ -59,8 +59,14 @@ fails closed.
 `PrivilegedMfaEnforcementFilter` audits its two refusals, `auth.mfa.policy.denied` (reason
 `enrollment_required`, or `attestation_required` for an account awaiting passkey approval) for a
 confined account and `auth.mfa.step_up.required` (reason
-`step_up_required`) for an export without recent verification, **at most once per hour for each user,
-action, reason and client address**, and for at most eight addresses per user, action and reason.
+`step_up_required`) for an export without recent verification, **at most once per address window for
+each user, action, reason, client address and User-Agent fingerprint**. Each user/action/reason keeps
+eight address slots, each with up to four fingerprints: at most **32 rows per replica across retained
+address windows** (one hour by default). Each address window starts with its first admission; adding
+fingerprints never extends it or refreshes its eviction timestamp. Without releases, admission is a
+strict superset of the address-only rule while windows are retained: every request the old rule
+admits is also admitted. Rotating user agents at one address admits at most four rows; a stable
+browser admits one row per address window.
 Keying on the reason means an account that moves from awaiting enrollment to awaiting approval
 records the new reason at once. Every request is
 still refused; only the audit row is admitted. A `GET` can trigger either refusal. The `SameSite=Lax`
@@ -68,8 +74,29 @@ session cookie rides a cross-site top-level navigation, and where SAML sets it t
 cross-site subresource load (an image, a no-cors fetch) carries it silently. Without the bound another
 site could append rows attributed to the victim at will
 ([#1850](https://github.com/itkla/connex/issues/1850)). Keying on the client address keeps a stolen
-session visible through the requests its own browser makes from elsewhere, and a row that fails to
-write is retried by the next refusal rather than suppressing the hour.
+session visible through the requests its own browser makes from elsewhere. The two policy-denial
+reasons keep independent windows, so together they can admit 64 rows per replica for that action.
+
+The advisory fingerprint is unkeyed SHA-256 over the full UTF-8 `User-Agent` header, held only in
+memory and never persisted, logged or used as a metric tag. An absent header and any header rejected
+on read by the request firewall share one fixed sentinel; neither skips audit admission or throws
+from the limiter. An accepted empty header has its own digest. Matching or copied user agents remain
+indistinguishable, and valid header rotation can exhaust an address's four fingerprints without
+consuming other address slots. This is differentiation, not authenticated browser identity.
+
+An append failure releases only the matching address, fingerprint and admission timestamp so that
+fingerprint can retry. Other admitted fingerprints keep their suppression and the original address
+slot, window start and expiry, even when the failed row opened the address window. Releasing the last
+fingerprint removes the address slot, restoring address capacity and letting the next admission
+start a fresh window. Expiry also frees the slot.
+
+This preserves evidence already admitted for surviving fingerprints: a retry can remain suppressed
+where the old address-only rule would admit it, because that fingerprint's row was admitted and not
+released inside the current address window. Slot retention also retains capacity. If all eight
+addresses are occupied, releasing one address's opening fingerprint while another fingerprint remains
+does not make room for a ninth address, although the old limiter would have freed that slot. There is
+therefore no universal per-request evidence-preservation guarantee after releases; the no-release
+superset and preservation of surviving fingerprints are separate guarantees.
 
 The denial row's context keeps the reason in `error` and, when the request supplies them, records
 `Sec-Fetch-Site`, `Sec-Fetch-Mode` and `Sec-Fetch-Dest` as `secFetchSite`, `secFetchMode` and
@@ -88,18 +115,19 @@ the row with a null user agent. Other audit writers keep their existing strict h
 
 Anyone reading or alerting on this trail should expect:
 
-- **one row per window, not one per request**, for a user who keeps hitting the same wall from the
-  same address;
-- **a bound per backend replica**: N replicas can record up to N rows per window and key, and a
-  restart re-arms every window;
-- **a bounded key set**: the limiter tracks at most 4,096 user-and-action keys. Above that, the
+- **one row per address window** for a stable browser hitting the same denial from the same address;
+- **a bound per backend replica**: N replicas can record up to N rows for a stable address/fingerprint
+  and up to 32N rows across the eight retained address windows per user/action/reason. A restart
+  re-arms every window;
+- **a bounded key set**: the limiter tracks at most 4,096 user/action/reason keys. Above that, the
   least recently admitted keys are evicted and their addresses may record again early, so under
   sustained saturation the per-key bound does not hold; and
 - **addresses as `ClientIpResolver` resolves them.** Behind a reverse proxy that is not listed in
-  `CONNEX_SECURITY_TRUSTED_PROXIES`, every request resolves to the proxy, the key narrows to user and
-  action, and a second address inside the hour is not recorded separately. Requests the frontend
+  `CONNEX_SECURITY_TRUSTED_PROXIES`, every request resolves to the proxy, and only four fingerprints
+  can distinguish clients behind it inside a user/action/reason address window. Requests the frontend
   server makes for a user while rendering a page forward only the session cookie, so all of a user's
-  server-rendered refusals share the frontend service's single address, whichever session made them.
+  server-rendered refusals share the frontend service's single address and User-Agent fingerprint,
+  whichever session made them; they cannot identify the originating browser.
   Once a refusal is decided, the two filters use `ClientIpResolver.resolveForDenialAudit`: a
   forwarding-header read rejected by the firewall falls back to the direct peer for the denial
   limiter key and audit row. The audit writer receives that resolved address without reading the
@@ -108,6 +136,10 @@ Anyone reading or alerting on this trail should expect:
   authentication throttling. The denial-only method must never be used for those decisions.
 
 The window defaults to one hour and is set by `connex.security.denial-audit-window-seconds`.
+Every suppressed row, whether a repeated fingerprint, an address's fifth fingerprint or a ninth
+address, increments `connex.security.denial.audit.suppressed` tagged only by action.
+`connex.security.denial.audit.evictions` counts only live windows dropped at the 4,096-key bound;
+expired-window cleanup does not increment it.
 
 The public API's `ApiCredentialAuthenticationFilter` also records `auth.mfa.policy.denied` for
 `enrollment_required` and `attestation_required`, with a summary beginning `Public API`. It shares

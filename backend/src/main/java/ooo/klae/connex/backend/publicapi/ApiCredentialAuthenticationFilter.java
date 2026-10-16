@@ -325,12 +325,15 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
      * Appends only after the authentication transaction ends and its tenant binding is cleared,
      * so the independent account-scoped audit uses the control catalog. A failed append returns
      * its admission just as the browser filter does, while the request remains refused.
+     * The shared limiter admits four fingerprints in each of eight address slots without extending
+     * address windows. Without releases, it admits every address-only admission while windows are
+     * retained. Releases preserve other fingerprints' evidence and their occupied address slot.
      */
     private void recordDenial(HttpServletRequest request, PrivilegedMfaDenialException denial) {
         User user = denial.user;
         String clientIp = clientIpResolver.resolveForDenialAudit(request);
         Optional<DenialAuditRateLimiter.Admission> admission = denialAuditRateLimiter.acquire(
-            user.getId(), MFA_DENIED_ACTION, denial.reason, clientIp);
+            user.getId(), MFA_DENIED_ACTION, denial.reason, clientIp, request);
         if (admission.isEmpty()) {
             return;
         }

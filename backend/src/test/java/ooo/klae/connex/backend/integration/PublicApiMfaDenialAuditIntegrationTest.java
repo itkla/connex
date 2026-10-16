@@ -181,6 +181,40 @@ class PublicApiMfaDenialAuditIntegrationTest {
         assertAccountAudits(fixture, "enrollment_required", List.of(ADDRESS, "192.0.2.43"));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = PrivilegedMfaStanding.class, names = {"ENROLLMENT_REQUIRED", "ATTESTATION_REQUIRED"})
+    void twoUserAgentsAtOneAddressWriteSeparateControlCatalogRows(PrivilegedMfaStanding standing)
+            throws Exception {
+        Confined fixture = confined(standing);
+        for (String agent : List.of("Browser A", "Browser B", "Browser A", "Browser B")) {
+            refuse(fixture, standing, ADDRESS, null, agent);
+        }
+
+        List<Map<String, Object>> rows = assertAccountAudits(fixture, reason(standing), List.of(ADDRESS, ADDRESS));
+        assertEquals(List.of("Browser A", "Browser B"),
+            rows.stream().map(row -> (String) row.get("user_agent")).sorted().toList());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = PrivilegedMfaStanding.class, names = {"ENROLLMENT_REQUIRED", "ATTESTATION_REQUIRED"})
+    void rejectedUserAgentsWriteOneNullAgentRowAndAnAcceptedAgentStillAddsEvidence(
+            PrivilegedMfaStanding standing) throws Exception {
+        Confined fixture = confined(standing);
+        refuse(fixture, standing, ADDRESS, null, "Browser A\u0085");
+        refuse(fixture, standing, ADDRESS, null, "Browser B\u0085");
+        refuse(fixture, standing, ADDRESS, null);
+
+        List<Map<String, Object>> rejected = assertAccountAudits(fixture, reason(standing), List.of(ADDRESS));
+        assertNull(rejected.getFirst().get("user_agent"));
+
+        refuse(fixture, standing, ADDRESS, null, "Browser A");
+        refuse(fixture, standing, ADDRESS, null, "Browser A");
+
+        List<Map<String, Object>> rows = assertAccountAudits(fixture, reason(standing), List.of(ADDRESS, ADDRESS));
+        assertEquals(1, rows.stream().filter(row -> row.get("user_agent") == null).count());
+        assertEquals(1, rows.stream().filter(row -> "Browser A".equals(row.get("user_agent"))).count());
+    }
+
     /**
      * Isolates the already-decided denial by allowing its earlier pre-authentication resolution.
      * Subsequent resolution uses the real firewall-wrapped request and rejection. The separate
@@ -268,6 +302,11 @@ class PublicApiMfaDenialAuditIntegrationTest {
 
     private void refuse(Confined fixture, PrivilegedMfaStanding standing, String peer, String forwarded)
             throws Exception {
+        refuse(fixture, standing, peer, forwarded, null);
+    }
+
+    private void refuse(Confined fixture, PrivilegedMfaStanding standing, String peer, String forwarded,
+            String userAgent) throws Exception {
         var request = get("/api/v1/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + fixture.token())
             .with(servletRequest -> {
                 servletRequest.setRemoteAddr(peer);
@@ -275,6 +314,9 @@ class PublicApiMfaDenialAuditIntegrationTest {
             });
         if (forwarded != null) {
             request.header("X-Forwarded-For", forwarded);
+        }
+        if (userAgent != null) {
+            request.header(HttpHeaders.USER_AGENT, userAgent);
         }
         MvcResult result = mockMvc.perform(request).andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))
@@ -294,7 +336,7 @@ class PublicApiMfaDenialAuditIntegrationTest {
         assertNull(SecurityContextHolder.getContext().getAuthentication());
     }
 
-    private void assertAccountAudits(Confined fixture, String reason, List<String> addresses) {
+    private List<Map<String, Object>> assertAccountAudits(Confined fixture, String reason, List<String> addresses) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("SELECT * FROM `" + controlCatalog()
             + "`.audit_log WHERE action = ? AND entity_type = 'user' AND entity_id = ?"
             + " AND JSON_UNQUOTE(JSON_EXTRACT(context, '$.error')) = ? ORDER BY ip_address",
@@ -313,6 +355,7 @@ class PublicApiMfaDenialAuditIntegrationTest {
         assertEquals(0, auditCount(fixture.catalog(), fixture));
         assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM `" + fixture.catalog()
             + "`.audit_log_integrity_head", Integer.class));
+        return rows;
     }
 
     private int auditCount(String catalog, Confined fixture) {
