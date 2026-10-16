@@ -20,10 +20,12 @@ const FILES_PATH = "/library/files";
 const ATTACHMENTS_PAGE_PATH = "/api/attachments/page";
 
 /**
- * The most non-prefetch RSC requests one "Try again" may cause: the refresh's own re-fetch, plus
- * one for an unrelated router action that lands in the same window. A retry that loops exceeds it.
+ * The most non-prefetch RSC requests one "Try again" may cause: the refresh's own re-fetch. Next's
+ * `retry` runs a single `router.refresh()` in the same transition as the boundary's reset, a refresh
+ * fetches the canonical URL once, and nothing else refreshes the router while the segment recovers
+ * (see `MAX_ROUTER_FETCHES_PER_WRITE`). A retry that fetched twice, or looped, exceeds it.
  */
-const MAX_RECOVERY_REFETCHES = 2;
+const MAX_RECOVERY_REFETCHES = 1;
 
 /** Matches the Files library's page request for the given search and sort. */
 function isAttachmentsPage(response: Response, q: string, sort: string | null): boolean {

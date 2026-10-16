@@ -128,8 +128,14 @@ async function deleteTask(api: APIRequestContext, fixture: RunFixture, taskId: n
  * behind an app-shell boundary's "Try again", in step with the address bar. Each test drives one of
  * the seven browsers through a deep link with an owned param, its owned-param writes, its peek drawer
  * where it has one, a router refresh, a reload and Back/Forward, and holds every step to three
- * things: the owned params survive, no write drives more than a bounded number of RSC requests or
- * leaves the router fetching, and no segment falls back to its error boundary.
+ * things: the owned params survive, no write drives a router fetch or leaves the router fetching,
+ * and no segment falls back to its error boundary.
+ *
+ * Every router refresh starts from an address the router could only know by hearing a write: one
+ * whose owned params differ from the deep link the document loaded at, which is where Next seeded
+ * the router's canonical URL. A router that missed the write would re-fetch the deep link and put it
+ * back in the address bar, so the refresh fails exactly when a browser's writes go unheard again;
+ * `expectStateSurvivesRouterRefresh` refuses to run from the loaded address.
  */
 test.describe("owned URL params (#1781)", () => {
     test("analytics keeps its range and grain through writes, refresh, reload and history", async ({ page }) => {
@@ -140,23 +146,26 @@ test.describe("owned URL params (#1781)", () => {
         const range = page.getByRole("group", { name: label("rangeLabel"), exact: true });
         const grain = page.getByRole("group", { name: label("granularityLabel"), exact: true });
         const daily = at(path, { range: "30d", granularity: "day" });
-        const verifyDaily = async () => {
+        const weekly = at(path, { range: "30d", granularity: null });
+        const verifyGrain = (grainKey: "granularityDay" | "granularityWeek") => async () => {
             await expect(range.getByRole("button", { name: label("range30d"), exact: true }))
                 .toHaveAttribute("aria-pressed", "true");
-            await expect(grain.getByRole("button", { name: label("granularityDay"), exact: true }))
+            await expect(grain.getByRole("button", { name: label(grainKey), exact: true }))
                 .toHaveAttribute("aria-pressed", "true");
         };
+        const verifyDaily = verifyGrain("granularityDay");
+        const verifyWeekly = verifyGrain("granularityWeek");
 
         await page.goto(`${path}?range=30d&granularity=day`);
         await expectUrlState(page, daily, "the deep link");
         await verifyDaily();
 
-        await expectBoundedWrite(page, rsc, "choosing the range's default grain", at(path, { range: "30d", granularity: null }), () =>
+        await expectBoundedWrite(page, rsc, "choosing the range's default grain", weekly, () =>
             grain.getByRole("button", { name: label("granularityWeek"), exact: true }).click());
+        await expectStateSurvivesRouterRefresh(page, rsc, weekly, verifyWeekly);
+
         await expectBoundedWrite(page, rsc, "choosing the day grain", daily, () =>
             grain.getByRole("button", { name: label("granularityDay"), exact: true }).click());
-
-        await expectStateSurvivesRouterRefresh(page, rsc, daily, verifyDaily);
         await expectStateSurvivesReload(page, daily, verifyDaily);
         await expectStateSurvivesHistoryTraversal(page, daily, verifyDaily);
         await expectNoSegmentError(page, uncaught);
@@ -170,21 +179,24 @@ test.describe("owned URL params (#1781)", () => {
         const path = "/intelligence/radar";
         const families = page.getByRole("group", { name: label("filters.familyLabel"), exact: true });
         const dealRisk = at(path, { family: "deal_risk", state: "all" });
-        const verifyDealRisk = async () => {
-            await expect(families.getByRole("button", { name: label("family.deal_risk"), exact: true }))
+        const everyFamily = at(path, { family: null, state: "all" });
+        const verifyFamily = (familyKey: "family.deal_risk" | "filters.allFamilies") => async () => {
+            await expect(families.getByRole("button", { name: label(familyKey), exact: true }))
                 .toHaveAttribute("aria-pressed", "true");
         };
+        const verifyDealRisk = verifyFamily("family.deal_risk");
+        const verifyEveryFamily = verifyFamily("filters.allFamilies");
 
         await page.goto(`${path}?family=deal_risk&state=all`);
         await expectUrlState(page, dealRisk, "the deep link");
         await verifyDealRisk();
 
-        await expectBoundedWrite(page, rsc, "showing every family", at(path, { family: null, state: "all" }), () =>
+        await expectBoundedWrite(page, rsc, "showing every family", everyFamily, () =>
             families.getByRole("button", { name: label("filters.allFamilies"), exact: true }).click());
+        await expectStateSurvivesRouterRefresh(page, rsc, everyFamily, verifyEveryFamily);
+
         await expectBoundedWrite(page, rsc, "showing deal risk", dealRisk, () =>
             families.getByRole("button", { name: label("family.deal_risk"), exact: true }).click());
-
-        await expectStateSurvivesRouterRefresh(page, rsc, dealRisk, verifyDealRisk);
         await expectStateSurvivesReload(page, dealRisk, verifyDealRisk);
         await expectStateSurvivesHistoryTraversal(page, dealRisk, verifyDealRisk);
         await expectNoSegmentError(page, uncaught);
@@ -197,21 +209,24 @@ test.describe("owned URL params (#1781)", () => {
         const path = "/library/documents";
         const view = page.getByRole("group", { name: label("viewSwitchAria"), exact: true });
         const templates = at(path, { list: "templates" });
-        const verifyTemplates = async () => {
-            await expect(view.getByRole("button", { name: label("viewTemplates"), exact: true }))
+        const generated = at(path, { list: null });
+        const verifyView = (viewKey: "viewDocuments" | "viewTemplates") => async () => {
+            await expect(view.getByRole("button", { name: label(viewKey), exact: true }))
                 .toHaveAttribute("aria-pressed", "true");
         };
+        const verifyTemplates = verifyView("viewTemplates");
+        const verifyGenerated = verifyView("viewDocuments");
 
         await page.goto(`${path}?list=templates`);
         await expectUrlState(page, templates, "the deep link");
         await verifyTemplates();
 
-        await expectBoundedWrite(page, rsc, "switching to generated documents", at(path, { list: null }), () =>
+        await expectBoundedWrite(page, rsc, "switching to generated documents", generated, () =>
             view.getByRole("button", { name: label("viewDocuments"), exact: true }).click());
+        await expectStateSurvivesRouterRefresh(page, rsc, generated, verifyGenerated);
+
         await expectBoundedWrite(page, rsc, "switching to templates", templates, () =>
             view.getByRole("button", { name: label("viewTemplates"), exact: true }).click());
-
-        await expectStateSurvivesRouterRefresh(page, rsc, templates, verifyTemplates);
         await expectStateSurvivesReload(page, templates, verifyTemplates);
         await expectStateSurvivesHistoryTraversal(page, templates, verifyTemplates);
         await expectNoSegmentError(page, uncaught);
@@ -280,17 +295,21 @@ test.describe("owned URL params (#1781)", () => {
         const verifyOpened = async () => {
             await expect(sheet).toBeVisible();
         };
+        const verifyClosed = async () => {
+            await expect(row).toBeVisible();
+            await expect(sheet, "the cleared activity deep link reopened the sheet").toBeHidden();
+        };
 
         await page.goto(`${path}?activity=${activity.id}`);
         await expectUrlState(page, opened, "the deep link");
         await verifyOpened();
 
         await expectBoundedWrite(page, rsc, "closing the deep-linked activity", closed, closeSheet);
-        await expect(sheet).toBeHidden();
+        await verifyClosed();
+        await expectStateSurvivesRouterRefresh(page, rsc, closed, verifyClosed);
+
         await expectBoundedWrite(page, rsc, "opening the activity from the timeline", opened, () => row.click());
         await verifyOpened();
-
-        await expectStateSurvivesRouterRefresh(page, rsc, opened, verifyOpened);
         await expectStateSurvivesReload(page, opened, verifyOpened);
         await expectStateSurvivesHistoryTraversal(page, opened, verifyOpened);
         await expectBoundedWrite(page, rsc, "closing the restored activity", closed, closeSheet);
@@ -318,17 +337,21 @@ test.describe("owned URL params (#1781)", () => {
         const verifyOpened = async () => {
             await expect(sheet).toBeVisible();
         };
+        const verifyClosed = async () => {
+            await expect(row).toBeVisible();
+            await expect(sheet, "the cleared task deep link reopened the sheet").toBeHidden();
+        };
 
         await page.goto(`${path}?task=${taskId}`);
         await expectUrlState(page, opened, "the deep link");
         await verifyOpened();
 
         await expectBoundedWrite(page, rsc, "closing the deep-linked task", closed, closeSheet);
-        await expect(sheet).toBeHidden();
+        await verifyClosed();
+        await expectStateSurvivesRouterRefresh(page, rsc, closed, verifyClosed);
+
         await expectBoundedWrite(page, rsc, "opening the task from its row", opened, () => row.click());
         await verifyOpened();
-
-        await expectStateSurvivesRouterRefresh(page, rsc, opened, verifyOpened);
         await expectStateSurvivesReload(page, opened, verifyOpened);
         await expectStateSurvivesHistoryTraversal(page, opened, verifyOpened);
         await expectBoundedWrite(page, rsc, "closing the restored task", closed, closeSheet);

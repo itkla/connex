@@ -24,8 +24,12 @@ export type RscRequest = {
     settled: boolean;
 };
 
-/** Every RSC request a page has started since {@link recordRscRequests} attached, oldest first. */
-export type RscLog = { readonly requests: RscRequest[] };
+/**
+ * What {@link recordRscRequests} has seen since it attached: every RSC request the page started,
+ * oldest first, and the address of the document the page last loaded, which is the address Next
+ * seeded the router's canonical URL from.
+ */
+export type RscLog = { readonly requests: RscRequest[]; documentUrl: string | null };
 
 /** The part of an address an owned-param browser is responsible for: its path and the keys it owns. */
 export type UrlState = {
@@ -34,15 +38,18 @@ export type UrlState = {
 };
 
 /**
- * The most non-prefetch RSC requests one owned-param write may cause.
+ * The most non-prefetch RSC requests one owned-param write may cause: none.
  *
  * The writer hands Next's history patch a state it does not short-circuit on, so every write
  * dispatches an `ACTION_RESTORE` (#1781). The restore replays the tree the current entry already
- * holds, which the router serves from its cache, so the expected count is zero. One is tolerated so
- * an unrelated router action that happens to land inside the window cannot fail the run; a restore
- * that re-fetched on every write, or one that loops, exceeds it.
+ * holds under the history-traversal freshness policy, so the router renders it from the cache it
+ * has and fetches nothing; a CI trace of the analytics test recorded no router fetch across its
+ * writes. Nothing else can fetch inside a write's window: {@link expectBoundedWrite} lets the page
+ * settle first, the app refreshes the router only after a mutation, a retry or a locale change,
+ * none of which a write step performs, and it has no server actions. So a restore that re-fetched
+ * once per write fails the gate, as one that loops does.
  */
-export const MAX_ROUTER_FETCHES_PER_WRITE = 1;
+export const MAX_ROUTER_FETCHES_PER_WRITE = 0;
 
 /** How long the page must start no RSC request, with none still in flight, to count as settled. */
 const RSC_QUIET_MS = 750;
@@ -72,13 +79,21 @@ export function isRscPrefetch(request: Request): boolean {
 
 /**
  * Starts recording every RSC request the page issues, so a test can bound what one step caused and
- * tell a settled router from a looping one.
+ * tell a settled router from a looping one, along with the address of the document it last loaded.
+ *
+ * A request still pending when a new document finishes parsing counts as settled. A reload cuts off
+ * whatever the previous document still had in flight, and a cut-off request is not guaranteed to
+ * report finishing or failing; one that never did would read as in flight for good and fail the
+ * next settle wait. Its document is gone, so it can no longer drive the router. Anything the new
+ * document started before it finished parsing stops counting as in flight too; no bound counts
+ * those requests, because each bound counts only what its own step started.
  *
  * @param page the page to watch
  * @returns the live log, appended to as requests start and marked as they finish or fail
  */
 export function recordRscRequests(page: Page): RscLog {
-    const requests: RscRequest[] = [];
+    const log: RscLog = { requests: [], documentUrl: null };
+    const { requests } = log;
     const pending = new Map<Request, RscRequest>();
     const settle = (request: Request) => {
         const entry = pending.get(request);
@@ -86,6 +101,15 @@ export function recordRscRequests(page: Page): RscLog {
         entry.settled = true;
         pending.delete(request);
     };
+    page.on("response", (response) => {
+        const request = response.request();
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+            log.documentUrl = response.url();
+        }
+    });
+    page.on("domcontentloaded", () => {
+        for (const request of [...pending.keys()]) settle(request);
+    });
     page.on("request", (request) => {
         if (!isRscRequest(request)) return;
         const entry: RscRequest = {
@@ -99,7 +123,7 @@ export function recordRscRequests(page: Page): RscLog {
     });
     page.on("requestfinished", settle);
     page.on("requestfailed", settle);
-    return { requests };
+    return log;
 }
 
 /**
@@ -151,6 +175,8 @@ export async function expectUrlState(page: Page, expected: UrlState, context: st
 /**
  * Waits until the page has started no RSC request for {@link RSC_QUIET_MS} and has none in flight.
  * A router that keeps fetching never gets there, which is how a restore or refresh loop shows up.
+ * Until then each poll reads as the requests still in flight or the latest ones started, so a
+ * timeout names what kept the page busy.
  *
  * @param rsc the page's RSC log
  * @param context what the test just did, for the failure message
@@ -160,16 +186,19 @@ export async function waitForRscQuiet(rsc: RscLog, context: string) {
     await expect
         .poll(
             () => {
+                const inFlight = rsc.requests.filter((request) => !request.settled);
+                if (inFlight.length > 0) {
+                    return `in flight: ${inFlight.map((request) => request.url).join(", ")}`;
+                }
                 const last = rsc.requests.at(-1);
-                const quietSince = Math.max(last?.startedAt ?? 0, armedAt);
-                return {
-                    quiet: Date.now() - quietSince >= RSC_QUIET_MS
-                        && rsc.requests.every((request) => request.settled),
-                    recent: rsc.requests
+                if (Date.now() - Math.max(last?.startedAt ?? 0, armedAt) < RSC_QUIET_MS) {
+                    const recent = rsc.requests
                         .filter((request) => request.startedAt >= armedAt)
                         .slice(-5)
-                        .map((request) => request.url),
-                };
+                        .map((request) => request.url);
+                    return `still starting: ${recent.join(", ") || "nothing yet"}`;
+                }
+                return "quiet";
             },
             {
                 message: `${context}: RSC requests did not settle within ${RSC_SETTLE_TIMEOUT_MS} ms, so the router may be looping`,
@@ -177,7 +206,7 @@ export async function waitForRscQuiet(rsc: RscLog, context: string) {
                 intervals: [100],
             },
         )
-        .toMatchObject({ quiet: true });
+        .toBe("quiet");
 }
 
 /**
@@ -193,9 +222,8 @@ async function entryIsRouterOwned(page: Page): Promise<boolean> {
 
 /**
  * Performs one owned-param write and holds it to the #1781 contract: the address bar reaches the
- * expected params, the router settles, the write drives at most
- * {@link MAX_ROUTER_FETCHES_PER_WRITE} non-prefetch RSC requests, and the entry stays one the
- * router can restore.
+ * expected params, the router settles, the write drives no non-prefetch RSC request
+ * ({@link MAX_ROUTER_FETCHES_PER_WRITE}), and the entry stays one the router can restore.
  *
  * @param page the page under test
  * @param rsc the page's RSC log
@@ -235,6 +263,12 @@ export async function expectBoundedWrite(
  * heard an owned-param write still holds the address from before it, re-fetches that one, and writes
  * it back over the address bar.
  *
+ * That only tells a heard write from an unheard one when the page holds an address the router could
+ * have reached no other way. Next seeds the router's canonical URL from the address the document
+ * loaded at, so a refresh from that address passes whether or not any write was heard. The check
+ * therefore refuses to run when `expected` matches the loaded document's owned params: refresh after
+ * a write that moved the page away from them.
+ *
  * @param page the page under test
  * @param rsc the page's RSC log
  * @param expected the address the page holds and must keep
@@ -246,6 +280,15 @@ export async function expectStateSurvivesRouterRefresh(
     expected: UrlState,
     verify: () => Promise<void>,
 ) {
+    const keys = Object.keys(expected.params);
+    const loaded = rsc.documentUrl;
+    expect(loaded, "no document load was recorded before the router refresh").not.toBeNull();
+    if (loaded !== null) {
+        expect(
+            urlStateOf(loaded, keys),
+            "the router refresh starts from the address the document loaded at, which the router holds without hearing any write, so it cannot catch an unheard one",
+        ).not.toEqual(expected);
+    }
     await waitForRscQuiet(rsc, "before the router refresh");
     const first = rsc.requests.length;
     await refreshThroughRouter(page);
@@ -254,7 +297,7 @@ export async function expectStateSurvivesRouterRefresh(
     expect(refetch, "the router refresh issued no RSC request").toBeDefined();
     if (refetch !== undefined) {
         expect(
-            urlStateOf(refetch.url, Object.keys(expected.params)),
+            urlStateOf(refetch.url, keys),
             "the router refresh re-fetched an address other than the one the owned-param write produced",
         ).toEqual(expected);
     }
